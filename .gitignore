@@ -1,0 +1,26 @@
+# 实施阶段会用到的常见 ignore — 当前设计阶段先放好
+node_modules/
+dist/
+build/
+*.log
+.DS_Store
+Thumbs.db
+
+# pnpm / npm
+.pnpm-store/
+.npm/
+
+# editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# eval / forge runtime cache(实施后会用)
+forge/.cache/
+.forge-staging-*/
+.forge-backup-*/
+
+# env
+.env
+.env.local

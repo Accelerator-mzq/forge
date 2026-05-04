@@ -1,2 +1,2 @@
-// 占位 — 内容由后续 task 填充
-export {};
+// src/core/schema/index.ts
+export * from './types.js';

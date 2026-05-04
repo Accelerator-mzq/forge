@@ -467,20 +467,26 @@ This project (forge) borrows design ideas and skill text from the following proj
 
 - Source: https://github.com/obra/superpowers
 - License: MIT
-- Author: Jesse / @obra
-- Use in forge: Skill text (12 skills under `core/templates/skills/`) is copied from superpowers under MIT license, with renaming (`superpowers:` → `forge:`) and path adjustments (e.g., `docs/superpowers/specs/` → `forge/drafts/`). The original MIT license and attribution are preserved here.
+- Author: Jesse Vincent / @obra
+- Use in forge: Skill text (12 skills, to be placed under `core/templates/skills/` in Phase 1+) is copied from superpowers under MIT license, with renaming (`superpowers:` → `forge:`) and path adjustments. The original MIT license and copyright notice are reproduced in full below, satisfying the "shall be included" clause for substantial portions.
+
+### superpowers MIT License (full text)
+
+(Copyright (c) 2025 Jesse Vincent — full MIT license text follows;复制 superpowers/LICENSE 全文。)
 
 ## OpenSpec
 
 - Source: https://github.com/Fission-AI/OpenSpec
 - License: MIT
-- Author: Fission AI
-- Use in forge: forge does not copy OpenSpec source code, but heavily borrows its design — artifact directory structure (`forge/changes/<id>/{proposal, specs, design, tasks}.md`), `archive/<date>-<id>/` history, `config.yaml` context injection mechanism, `spec-driven` schema concept. Architectural credit and gratitude noted here.
+- Author: OpenSpec Contributors / Fission AI
+- Use in forge: forge does not copy OpenSpec source code, but heavily borrows its design — artifact directory structure (`forge/changes/<id>/{proposal, specs, design, tasks}.md`), `archive/<date>-<id>/` history, `config.yaml` context injection mechanism, `spec-driven` schema concept.
 
----
+### OpenSpec MIT License (full text)
 
-The full MIT license text for both projects can be retrieved from their GitHub repositories.
+(Copyright (c) 2024 OpenSpec Contributors — full MIT license text follows;复制 OpenSpec/LICENSE 全文。)
 ```
+
+**MIT 合规要点**:由于 forge **复制了 superpowers 12 个 skill 文本**(属于 "substantial portions"),MIT 强制要求 "shall be included" 的原始 LICENSE 与版权声明必须**带在 forge 仓库内**,不能只链回 GitHub。Implementer 需要从本地 `D:/ClaudeProject/opsp/superpowers/LICENSE` 和 `D:/ClaudeProject/opsp/OpenSpec/LICENSE` 读取实际全文嵌入。
 
 - [ ] **Step 6.2:Commit**
 

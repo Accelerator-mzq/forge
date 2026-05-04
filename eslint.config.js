@@ -30,4 +30,26 @@ export default [
       'no-console': 'off',
     },
   },
+  // src 专用 type-aware block — 追加在文件末尾(在 export default [...] 数组里)
+  // 注意:tests/ 不开 type-aware(避免 vitest 全局 globals 报错噪音)
+  {
+    files: ['src/**/*.ts'],
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: {
+        ecmaVersion: 2022,
+        sourceType: 'module',
+        project: ['./tsconfig.json'], // src 走 tsconfig.json,有 type info
+      },
+    },
+    plugins: {
+      '@typescript-eslint': tsPlugin,
+    },
+    rules: {
+      // type-aware rules — 只对 src 生效
+      '@typescript-eslint/no-floating-promises': 'error',
+      '@typescript-eslint/no-misused-promises': 'error',
+      '@typescript-eslint/await-thenable': 'error',
+    },
+  },
 ];

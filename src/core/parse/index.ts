@@ -4,3 +4,4 @@ export * from './yaml.js';
 export * from './proposal.js';
 export * from './design.js';
 export * from './specs.js';
+export * from './tasks.js';

@@ -20,16 +20,16 @@
 
 约 8 周(单人全职估算):
 
-| Phase | 内容 | 时长 |
-|---|---|---|
-| 0 | 仓库脚手架 | 0.5 周 |
-| 0.5 | 多 harness Bootstrap Spike(gating) | 0.5 周 |
-| 1 | Core Engine 骨架 | 1.5 周 |
-| 2 | CLI 命令 + Adapter 接口 | 1 周 |
-| 3 | 三个 Adapter 实现 | 1.5 周 |
-| 4 | 模板内容(12 skill + 6 命令) | 1 周 |
-| 5 | Skill Eval 框架 | 1.5 周 |
-| 6 | harness 集成 smoke + recover 命令 + 文档 | 0.5 周 |
+| Phase | 内容                                     | 时长   |
+| ----- | ---------------------------------------- | ------ |
+| 0     | 仓库脚手架                               | 0.5 周 |
+| 0.5   | 多 harness Bootstrap Spike(gating)       | 0.5 周 |
+| 1     | Core Engine 骨架                         | 1.5 周 |
+| 2     | CLI 命令 + Adapter 接口                  | 1 周   |
+| 3     | 三个 Adapter 实现                        | 1.5 周 |
+| 4     | 模板内容(12 skill + 6 命令)              | 1 周   |
+| 5     | Skill Eval 框架                          | 1.5 周 |
+| 6     | harness 集成 smoke + recover 命令 + 文档 | 0.5 周 |
 
 ## 许可
 

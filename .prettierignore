@@ -1,0 +1,6 @@
+dist/
+node_modules/
+pnpm-lock.yaml
+spike/**/SKILL.md
+spike/**/*.md
+docs/

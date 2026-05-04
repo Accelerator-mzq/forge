@@ -1,0 +1,33 @@
+// eslint.config.js — Phase 0 不开 type-aware rules,避免 tsconfig exclude tests 与 ESLint files 冲突
+import tsParser from '@typescript-eslint/parser';
+import tsPlugin from '@typescript-eslint/eslint-plugin';
+
+export default [
+  {
+    // 忽略构建产物、依赖、spike 目录和配置文件本身
+    ignores: ['dist/**', 'node_modules/**', 'spike/**', '**/*.config.js', '**/*.config.ts'],
+  },
+  {
+    files: ['src/**/*.ts', 'tests/**/*.ts'],
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: {
+        ecmaVersion: 2022,
+        sourceType: 'module',
+        // 注意:这里【不写】 project 字段,Phase 0 不开 type-aware rules
+        // Phase 1+ 真需要时再加 tsconfig.test.json 让 lint 能跨 src + tests
+      },
+    },
+    plugins: {
+      '@typescript-eslint': tsPlugin,
+    },
+    rules: {
+      // 禁止未使用变量,但允许以 _ 开头的参数名(占位参数常见写法)
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+      // any 类型给出警告而非报错,CLI 工具初期有时难以避免
+      '@typescript-eslint/no-explicit-any': 'warn',
+      // CLI 工具需要 console 输出,不限制
+      'no-console': 'off',
+    },
+  },
+];

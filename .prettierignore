@@ -4,3 +4,5 @@ pnpm-lock.yaml
 spike/**/SKILL.md
 spike/**/*.md
 docs/
+# malformed fixture 故意不合法，不能被 prettier 解析
+tests/fixtures/configs/malformed.yaml

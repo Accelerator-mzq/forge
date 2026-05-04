@@ -1,0 +1,8 @@
+schema: forge-verify-failed/v1
+failed_at: 2026-05-04T15:30:00Z
+reasons:
+  - 'tasks.md#3 声称完成但无 evidence'
+fake_completions:
+  - tasks.md#3
+appended_tasks:
+  - tasks.md#verify-fix-1

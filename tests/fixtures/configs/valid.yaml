@@ -1,0 +1,12 @@
+schema: forge-spec-driven/v1
+context: |
+  Tech stack: TypeScript, React, Node.js
+rules:
+  proposal:
+    - Include rollback plan
+  specs:
+    - Use Given/When/Then format
+code_paths:
+  include:
+    - 'src/**'
+    - 'tests/**'

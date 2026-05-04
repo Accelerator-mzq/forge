@@ -1,0 +1,50 @@
+{
+  "name": "@accelerator-mzq/forge",
+  "version": "0.0.1",
+  "description": "OpenSpec × superpowers fusion: spec-driven workflow + behavior-shaping skills, packaged as multi-harness CLI",
+  "type": "module",
+  "engines": {
+    "node": ">=20.19.0",
+    "pnpm": ">=9"
+  },
+  "bin": {
+    "forge": "./dist/cli/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "LICENSE-THIRD-PARTY.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^9.0.0",
+    "prettier": "^3.3.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Accelerator-mzq/forge.git"
+  },
+  "homepage": "https://github.com/Accelerator-mzq/forge",
+  "bugs": {
+    "url": "https://github.com/Accelerator-mzq/forge/issues"
+  }
+}

@@ -37,6 +37,21 @@
 
 **v0.1 实际范围**:Claude Code + Codex 2 harness(OpenCode 推 v0.2,需开发 plugin 实现自动注入)。
 
+## Plan 2 进度
+
+Phase 1(Core Engine)完成 — `src/core/` 下 8 个模块全部实现 + 单元测试覆盖:
+
+- `schema/` — spec-driven schema 类型
+- `parse/` — markdown / yaml / proposal / specs / design / tasks 解析器
+- `validate/` — 各 artifact + marker schema 校验
+- `hash/` — tasks / content / log / diff 4 种 hash 计算
+- `artifact-graph/` — 依赖图(proposal → specs → design → tasks)
+- `markers/` — verify/review marker YAML 类型 + 解析
+- `specs-sync/` — deltas 应用(internal-only)
+- `templates/` + `bootstrap/` — 占位,Plan 4 填实
+
+Plan 3 接手:Phase 2(CLI 命令)+ Phase 3 cut(claude.ts + codex.ts adapter)。
+
 ## 许可
 
 MIT License

@@ -257,6 +257,24 @@ function checkGitInfo(v: unknown, file?: string): ValidationResult {
         file,
       });
     }
+    // git.diff_pathspec.include / exclude 必须是 string array(spec §3.4.1)
+    const ps = g.diff_pathspec as Record<string, unknown>;
+    if (!Array.isArray(ps.include) || !ps.include.every((x) => typeof x === 'string')) {
+      return failed({
+        artifact: 'marker',
+        field: 'git.diff_pathspec.include',
+        message: 'must be array of strings',
+        file,
+      });
+    }
+    if (!Array.isArray(ps.exclude) || !ps.exclude.every((x) => typeof x === 'string')) {
+      return failed({
+        artifact: 'marker',
+        field: 'git.diff_pathspec.exclude',
+        message: 'must be array of strings',
+        file,
+      });
+    }
   }
   return ok();
 }

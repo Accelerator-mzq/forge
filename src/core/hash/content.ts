@@ -2,12 +2,12 @@
 
 import { createHash } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
-import { join, posix } from 'node:path';
+import { join, posix, relative, sep } from 'node:path';
 
 /**
  * 计算 content_hash(spec §3.4)。
  * 规则:
- * 1. 收集 [proposal.md, design.md, specs/**\/*.md, tasks.md]
+ * 1. 收集 [proposal.md, design.md, specs/**\/*.md(递归), tasks.md]
  * 2. 用 POSIX 风格 path 排序(无论 OS,跨平台一致)
  * 3. 每个文件用同款规范化(LF + 去尾空白)
  * 4. 拼接 `<path>\0<normalized_content>\0` 各文件 → SHA256
@@ -16,17 +16,26 @@ export async function computeContentHash(changeDir: string): Promise<string> {
   // 收集顶层固定文件(POSIX 路径)
   const files: string[] = ['proposal.md', 'design.md', 'tasks.md'];
 
-  // specs/ 下的所有 .md 文件(用 posix.join 保证跨平台路径一致)
+  // specs/ 下的所有 .md 文件(递归扫描子目录,用 posix 路径保证跨平台一致)
+  const specsDir = join(changeDir, 'specs');
   try {
-    const specsDir = join(changeDir, 'specs');
-    const entries = await readdir(specsDir);
-    for (const name of entries) {
-      if (name.endsWith('.md')) {
-        files.push(posix.join('specs', name)); // 用 posix 路径分隔符
+    const entries = await readdir(specsDir, { recursive: true, withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isFile() && entry.name.endsWith('.md')) {
+        // Node 20.12+ 提供 parentPath;旧版本 fallback 到 path
+        const parent =
+          (entry as unknown as { parentPath?: string; path: string }).parentPath ??
+          (entry as unknown as { path: string }).path;
+        const absPath = join(parent, entry.name);
+        const relFromSpecs = relative(specsDir, absPath);
+        const posixRel = relFromSpecs.split(sep).join('/');
+        files.push(posix.join('specs', posixRel));
       }
     }
-  } catch {
-    // specs/ 目录不存在时跳过(允许)
+  } catch (err) {
+    // 仅 ENOENT(specs/ 不存在)允许跳过,其他 IO 错误抛出
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== 'ENOENT') throw err;
   }
 
   // 字典序排序确保顺序一致

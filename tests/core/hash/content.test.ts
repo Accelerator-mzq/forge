@@ -51,4 +51,33 @@ describe('computeContentHash', () => {
       rmSync(d, { recursive: true, force: true });
     }
   });
+
+  // P1 回归:嵌套 specs 必须进 hash(spec §3.4 文档要求 specs/**\/*.md)
+  it('changes when adding a nested spec file (specs/auth/login.md)', async () => {
+    const d = makeChangeDir();
+    try {
+      const a = await computeContentHash(d);
+      mkdirSync(join(d, 'specs', 'auth'));
+      writeFileSync(join(d, 'specs', 'auth', 'login.md'), '# Auth/Login\n');
+      const b = await computeContentHash(d);
+      expect(a).not.toBe(b);
+    } finally {
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  // P1 回归:修改嵌套 spec 内容也必须改 hash(确保不只是路径进了 hash)
+  it('changes when modifying a nested spec file', async () => {
+    const d = makeChangeDir();
+    try {
+      mkdirSync(join(d, 'specs', 'auth'));
+      writeFileSync(join(d, 'specs', 'auth', 'login.md'), '# initial\n');
+      const a = await computeContentHash(d);
+      writeFileSync(join(d, 'specs', 'auth', 'login.md'), '# modified\n');
+      const b = await computeContentHash(d);
+      expect(a).not.toBe(b);
+    } finally {
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
 });

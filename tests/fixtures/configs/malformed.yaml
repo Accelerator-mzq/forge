@@ -1,0 +1,6 @@
+schema: forge-spec-driven/v1
+rules:
+  proposal:
+    - missing colon and dash structure
+context
+  bad indentation

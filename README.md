@@ -31,6 +31,12 @@
 | 5     | Skill Eval 框架                          | 1.5 周 |
 | 6     | harness 集成 smoke + recover 命令 + 文档 | 0.5 周 |
 
+## Phase 0.5 Spike 结果
+
+[查看 spike 结果与 v0.1 范围决策](spike/RESULTS.md)
+
+**v0.1 实际范围**:Claude Code + Codex 2 harness(OpenCode 推 v0.2,需开发 plugin 实现自动注入)。
+
 ## 许可
 
 MIT License

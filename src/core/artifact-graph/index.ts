@@ -1,2 +1,3 @@
-// 占位 — 内容由后续 task 填充
-export {};
+// artifact-graph 模块导出
+export * from './types.js';
+export * from './builder.js';

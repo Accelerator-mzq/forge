@@ -1,2 +1,2 @@
-// 占位 — 内容由后续 task 填充
-export {};
+// src/core/parse/index.ts — 统一导出所有解析器
+export * from './markdown.js';

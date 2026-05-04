@@ -14,7 +14,7 @@
 | 1 | 融合定位 | OpenSpec 作主干(产物 + 归档);superpowers 作武器库(行为纪律);独立项目,不依赖任一边 |
 | 2 | 形态 | npm CLI + 多 harness 适配器(参考 OpenSpec 形态) |
 | 3 | 工作流 | 线性 6 命令流水线(brainstorm → propose → apply → review → verify → archive) |
-| 4 | 支持 harness | Claude Code、Codex、OpenCode(目标;v0.1 实际范围由决策 18 的 Phase 0.5 spike 决定) |
+| 4 | 支持 harness | **v0.1 = Claude Code + Codex(2 harness)**;OpenCode 推 v0.2 等 plugin(`experimental.chat.messages.transform`)实现。基于 Phase 0.5 spike 实测结果(详见 [`spike/RESULTS.md`](../../spike/RESULTS.md)) |
 | 5 | 移植 superpowers skill | 12 个(见 §2.2) |
 | 6 | 移植 OpenSpec workflow | 4 个公开 + 1 个内部:propose、apply、verify、archive-change(公开 slash 命令);specs-sync(内部模块,仅 archive 内部调用,不公开为 CLI) |
 | 7 | brainstorm 输出形态 | draft → promote(`forge/drafts/` 草稿区,propose 时消费) |
@@ -28,7 +28,7 @@
 | 15 | adapter 失败 | 三阶段原子化(Stage→Backup→Commit + 反向回滚,见 §4.2) |
 | 16 | 标记文件管理 | `.verify-passed`/`.review-passed` 是 YAML,**分层 hash 绑定**:verify 绑 [tasks_hash + content_hash + evidence log_hash + pass];review 绑 [tasks_hash + content_hash + git.head + git.diff_hash]。进 git;archive 按 §3.4 验证;`--force` 显式接受两类降级:human-override 标记 + 非 git 项目跳过 git 字段(均打印 warning) |
 | 17 | skill eval 自动化 | 12 skill 全做 + multi-turn 进 v1 + weekly + PR cadence |
-| 18 | 三 harness 验证 | Phase 0.5 spike(0.5 周)gating,结果决定 v0.1 实际覆盖面 |
+| 18 | 三 harness spike 结果 | **已完成**:Claude Code PASS / Codex PASS / OpenCode FAIL(skill 路径只注册工具不自动注入,需写 plugin)→ v0.1 收紧到 2 harness |
 | 19 | review-passed 时机 | 仅当本轮接受意见已实现 + 测试通过 + 无新增 task 时才打 |
 | 20 | LLM 调用边界 | 用户运行时不调;开发期 eval 允许调 Anthropic API,key 走 CI secret |
 | 21 | OpenSpec 迁移工具 | v0.1 不做,v0.2 加 `forge migrate-from-openspec` |
@@ -762,7 +762,7 @@ case 全干净:报"无半完成状态需要恢复",退出码 0
 
 ### 5.1 优先级最高:harness 集成的端到端 smoke test
 
-参考 superpowers 自己的 acceptance test 模板,**v0.1 实际覆盖到的每个 harness 都跑一次**(实际覆盖范围由 Phase 0.5 spike 决定,可能是 1、2 或 3 个):
+参考 superpowers 自己的 acceptance test 模板,**v0.1 实际覆盖到的每个 harness 都跑一次:Claude Code 和 Codex 2 个**(基于 Phase 0.5 spike 结果)。OpenCode v0.2 加。
 
 ```
 test_session_claude_code:
@@ -777,7 +777,7 @@ test_session_codex:    (同上,Codex)
 test_session_opencode: (同上,OpenCode)
 ```
 
-这是最容易出问题的地方——bootstrap 注入是各 harness 私有协议,纯单元测覆盖不了。每发一个 release **必须人工跑一遍 v0.1 覆盖的全部 smoke,不通过不发版**(若 v0.1 只覆盖 Claude Code,只跑 Claude Code smoke;若覆盖三个,三个都跑)。在 CI 里跑不了(harness 是闭源 GUI),所以是 **release gate manual checklist**。
+这是最容易出问题的地方——bootstrap 注入是各 harness 私有协议,纯单元测覆盖不了。每发一个 release **必须人工跑一遍 Claude Code + Codex 两个 smoke,任一不通过不发版**(对应 v0.1 实际范围)。在 CI 里跑不了(harness 是闭源 GUI),所以是 **release gate manual checklist**。
 
 ### 5.2 优先级第二:CLI 的原子化行为测试
 
@@ -1114,6 +1114,12 @@ PR 不通过 eval 不能 merge(branch protection rule)。
 - 仅 Claude 通过 → v0.1 缩到 1 harness,Codex+OpenCode 推 v0.2
 - 全失败 → 回到设计阶段,重新评估"自动触发"前提
 
+**实际结果**(Phase 0.5 spike 完成于 2026-05-05):
+- Claude Code:PASS — `.claude/skills/<name>/SKILL.md` 自动注入有效
+- Codex:PASS — `.agents/skills/<name>/SKILL.md`(共享 Claude Agent SDK 约定)自动注入有效
+- OpenCode:FAIL — skill 路径只注册工具不自动 inject,推 v0.2(plugin 实现)
+- **v0.1 = Claude Code + Codex(2 harness)**
+
 ### Phase 1:Core Engine 骨架(1.5 周)
 
 - `core/schema/`(spec-driven schema 实现)
@@ -1160,7 +1166,7 @@ PR 不通过 eval 不能 merge(branch protection rule)。
 
 ### 风险与开放问题
 
-1. **三 harness 注入机制差异大**——由 Phase 0.5 spike 显式验证,spike 结果决定 v0.1 实际覆盖面;若 OpenCode/Codex 不通,v0.1 缩到 1-2 harness
+1. **OpenCode 自动注入需 plugin**——Phase 0.5 spike 已确认 OpenCode skill 路径只注册工具不自动 inject。v0.2 通过实现 `experimental.chat.messages.transform` plugin 解决,参考 superpowers `.opencode/plugins/superpowers.js`。v0.1 不支持 OpenCode。
 2. **Multi-turn judge 的稳定性**——LLM-as-judge 在多轮 + 复杂 rubric 下可能波动大,需要 Phase 5 调参
 3. **Skill 文本改名引用同步**——12 个 skill 互相引用,改名时容易漏。需要一个 lint 检查所有 cross-skill reference
 4. **Anthropic 模型版本切换**——v1 锁死 Sonnet 4.6 做 eval baseline,后续 4.7 出来时要重跑全量校准

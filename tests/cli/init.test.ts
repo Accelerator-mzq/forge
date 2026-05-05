@@ -2,7 +2,7 @@
 // 验证 detect + adapters + atomic deploy + forge 目录骨架创建
 
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, rmSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runCli } from './helpers.js';
@@ -18,7 +18,10 @@ describe('forge init', () => {
       // adapter 铺的 skill 文件
       const skillPath = join(d, '.claude', 'skills', 'forge-using-forge', 'SKILL.md');
       expect(existsSync(skillPath)).toBe(true);
-      expect(readFileSync(skillPath, 'utf8')).toContain('placeholder');
+      // Plan 4 之后是真模板,断言含 forge bootstrap 关键标记
+      const skillContent = readFileSync(skillPath, 'utf8');
+      expect(skillContent).toContain('forge:using-forge');
+      expect(skillContent).toContain('/forge:brainstorm');
 
       // forge 目录骨架
       expect(existsSync(join(d, 'forge', 'config.yaml'))).toBe(true);
@@ -43,7 +46,10 @@ describe('forge init', () => {
       // Codex adapter 铺到 .agents/skills/
       const skillPath = join(d, '.agents', 'skills', 'forge-using-forge', 'SKILL.md');
       expect(existsSync(skillPath)).toBe(true);
-      expect(readFileSync(skillPath, 'utf8')).toContain('placeholder');
+      // Plan 4 之后是真模板,断言含 forge bootstrap 关键标记
+      const skillContent = readFileSync(skillPath, 'utf8');
+      expect(skillContent).toContain('forge:using-forge');
+      expect(skillContent).toContain('/forge:brainstorm');
 
       // .claude 不应该被创建
       expect(existsSync(join(d, '.claude', 'skills'))).toBe(false);
@@ -174,14 +180,26 @@ describe('forge init', () => {
     }
   });
 
-  // Test P2.2a: --force flag 被接受(当前 noop,为 Plan 4 准备的 surface)
-  it('P2.2:accepts --force flag (currently noop, prepared for Plan 4)', () => {
+  // Test P2.2: --force flag 真覆盖被用户修改的文件
+  it('P2.2:--force flag 真覆盖被用户修改的文件', () => {
     const d = mkdtempSync(join(tmpdir(), 'forge-init-force-'));
     try {
-      const r = runCli(['init', '--harness=claude', '--force'], d);
-      expect(r.exitCode).toBe(0);
-      // 当前是 noop,只验证不报错,命令正常完成
-      expect(r.stdout).toContain('forge initialized');
+      // 第一次 init,产生真模板
+      runCli(['init', '--harness=claude'], d);
+      const skillPath = join(d, '.claude', 'skills', 'forge-using-forge', 'SKILL.md');
+      // 用户改动 SKILL.md
+      writeFileSync(skillPath, 'USER MODIFIED', 'utf8');
+
+      // 不加 --force → 应跳过 + warn
+      const r1 = runCli(['init', '--harness=claude'], d);
+      expect(r1.exitCode).toBe(0);
+      expect(readFileSync(skillPath, 'utf8')).toBe('USER MODIFIED');
+      expect(r1.stderr + r1.stdout).toMatch(/已被用户修改|跳过/);
+
+      // 加 --force → 应覆盖
+      const r2 = runCli(['init', '--harness=claude', '--force'], d);
+      expect(r2.exitCode).toBe(0);
+      expect(readFileSync(skillPath, 'utf8')).toContain('forge:using-forge');
     } finally {
       rmSync(d, { recursive: true, force: true });
     }

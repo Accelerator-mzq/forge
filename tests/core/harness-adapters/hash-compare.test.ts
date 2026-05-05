@@ -62,5 +62,6 @@ describe('filterByHash', () => {
     expect(r.toWrite).toHaveLength(1);
     expect(r.skippedModified).toHaveLength(0);
     expect(r.unchanged).toHaveLength(0);
+    expect(r.filteredPlans[0]?.files).toHaveLength(1);
   });
 });

@@ -84,8 +84,8 @@ export function buildUpdateCommand(): Command {
       const commands = await loadAllCommands();
       const input: DeployInput = {
         projectRoot: cwd,
-        skills: skills.map((s) => ({ name: s.name, content: s.content })),
-        commands: commands.map((c) => ({ name: c.name, content: c.content })),
+        skills,    // LoadedSkill[] 兼容 SkillSpec[]
+        commands,  // LoadedCommand[] 兼容 CommandSpec[]
       };
       const plans = await Promise.all(adapters.map((a) => a.plan(input)));
 
@@ -107,8 +107,12 @@ export function buildUpdateCommand(): Command {
         return;
       }
       await deployAtomic(cwd, filteredPlans);
+      const modifiedPart =
+        skippedModified.length > 0
+          ? `;${skippedModified.length} 个已修改(跳过,加 --force 覆盖)`
+          : '';
       console.log(
-        `✓ forge updated: ${toWrite.length} 写入;${unchanged.length} 未变;${skippedModified.length} 已修改(--force 覆盖)`,
+        `✓ forge updated: ${toWrite.length} 写入;${unchanged.length} 未变${modifiedPart}`,
       );
     });
 }

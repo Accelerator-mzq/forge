@@ -37,6 +37,7 @@ export async function filterByHash(
 
   for (const plan of plans) {
     for (const f of plan.files) {
+      // 注意:existsSync + readFile 存在 TOCTOU 窗口,单进程 CLI 场景可接受
       const targetAbs = join(projectRoot, f.relPath);
       if (!existsSync(targetAbs)) {
         toWrite.push(f);

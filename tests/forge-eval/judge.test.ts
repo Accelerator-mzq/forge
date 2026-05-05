@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { checkPatterns } from '../../forge-eval/judge.js';
+import { checkPatterns, judgeWithLlm, parseJudgeResponse } from '../../forge-eval/judge.js';
 
 describe('forge-eval/judge.checkPatterns', () => {
   it('assertions 缺失 → skipped=true, pass=true', () => {
@@ -45,5 +45,53 @@ describe('forge-eval/judge.checkPatterns', () => {
       must_not_match: [{ regex: '```' }],
     });
     expect(r.pass).toBe(true);
+  });
+});
+
+describe('forge-eval/judge.parseJudgeResponse', () => {
+  it('合法响应:第一行整数 + 理由', () => {
+    const r = parseJudgeResponse('8\n响应清晰,问对了关键问题');
+    expect(r.score).toBe(8);
+    expect(r.reasoning).toBe('响应清晰,问对了关键问题');
+  });
+
+  it('多行理由', () => {
+    const r = parseJudgeResponse('5\n第一行理由\n第二行补充');
+    expect(r.score).toBe(5);
+    expect(r.reasoning).toBe('第一行理由\n第二行补充');
+  });
+
+  it('第一行非整数 → score=0, rawResponse 保留', () => {
+    const r = parseJudgeResponse('我觉得这个挺好的,8 分吧');
+    expect(r.score).toBe(0);
+    expect(r.reasoning).toContain('解析失败');
+    expect(r.rawResponse).toBe('我觉得这个挺好的,8 分吧');
+  });
+
+  it('分数超出 0-10 → score=0', () => {
+    const r = parseJudgeResponse('15\n超分');
+    expect(r.score).toBe(0);
+  });
+
+  it('无理由行 → reasoning 显示占位', () => {
+    const r = parseJudgeResponse('7');
+    expect(r.score).toBe(7);
+    expect(r.reasoning).toBe('(无理由)');
+  });
+});
+
+describe('forge-eval/judge.judgeWithLlm (with mock client)', () => {
+  it('调 mock client → 返回解析后的 JudgeResult', async () => {
+    const mockClient = {
+      messages: {
+        create: async () => ({
+          content: [{ type: 'text', text: '7\n基本到位' }],
+        }),
+      },
+    } as unknown as import('@anthropic-ai/sdk').default;
+
+    const r = await judgeWithLlm(mockClient, 'AI 响应文本', 'rubric 文本');
+    expect(r.score).toBe(7);
+    expect(r.reasoning).toBe('基本到位');
   });
 });

@@ -22,4 +22,12 @@ describe('templates/commands', () => {
     expect(content).toContain('forge:brainstorming');
     expect(content).toContain('forge/drafts/');
   });
+
+  it('propose 命令引用 forge:writing-plans skill 且写到 forge/changes/', async () => {
+    const content = await loadCommand('propose');
+    expect(content).toContain('forge:writing-plans');
+    expect(content).toContain('forge/changes/');
+    expect(content).toContain('proposal.md');
+    expect(content).toContain('tasks.md');
+  });
 });

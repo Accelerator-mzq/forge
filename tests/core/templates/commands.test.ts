@@ -30,4 +30,14 @@ describe('templates/commands', () => {
     expect(content).toContain('proposal.md');
     expect(content).toContain('tasks.md');
   });
+
+  it('apply 命令引用 forge:subagent-driven-development + forge:test-driven-development', async () => {
+    const content = await loadCommand('apply');
+    expect(content).toContain('forge:subagent-driven-development');
+    expect(content).toContain('forge:test-driven-development');
+    expect(content).toContain('--parallel');
+    expect(content).toContain('forge:dispatching-parallel-agents');
+    expect(content).toContain('forge:using-git-worktrees');
+    expect(content).toContain('applied_commits');
+  });
 });

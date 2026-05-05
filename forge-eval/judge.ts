@@ -55,6 +55,11 @@ export async function judgeWithLlm(
   response: string,
   rubric: string,
 ): Promise<JudgeResult> {
+  // 防御:rubric 在 load-scenario.ts validateTurn 已校验非空,但运行时仍 assert
+  if (!rubric.trim()) {
+    throw new Error('judgeWithLlm: rubric 不能为空(spec §5.5.3 合约)');
+  }
+
   const judgePrompt = `你是一名 skill eval 评判员。请按以下评分标准给 AI 响应打 0-10 分。
 
 # 评分标准(rubric)
@@ -88,6 +93,7 @@ export function parseJudgeResponse(text: string): JudgeResult {
   const trimmed = text.trim();
   const lines = trimmed.split(/\r?\n/);
   const firstLine = lines[0]?.trim() ?? '';
+  // parseInt 对浮点字符串截断(如 '8.5' → 8)是有意接受,不要求严格整数字面量
   const score = Number.parseInt(firstLine, 10);
   if (!Number.isFinite(score) || score < 0 || score > 10) {
     return {

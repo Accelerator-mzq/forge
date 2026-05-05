@@ -22,7 +22,7 @@ export function checkBudget(scenarioCount: number, threshold = DEFAULT_BUDGET_WA
   const estimated = estimateRunCost(scenarioCount);
   if (estimated > threshold) {
     console.warn(
-      `⚠ 估算本次 eval cost ≈ $${estimated.toFixed(2)},超阈值 $${threshold.toFixed(2)};继续 5 秒后开始,Ctrl-C 取消。`,
+      `⚠ 估算本次 eval cost ≈ $${estimated.toFixed(2)},超阈值 $${threshold.toFixed(2)};继续执行中,如需取消请立即 Ctrl-C。`,
     );
   }
   return estimated;

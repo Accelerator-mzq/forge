@@ -5,7 +5,9 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { checkPatterns, judgeWithLlm } from './judge.js';
 import { loadSkillBootstrap, type SkillName } from './load-skill.js';
-import type { Scenario, ScenarioRunResult, TurnResult } from './types.js';
+import { loadScenarioFile, flattenScenarios } from './load-scenario.js';
+import { compareScenarioPair, DEFAULT_DELTA_THRESHOLD } from './compare.js';
+import type { Scenario, ScenarioRunResult, TurnResult, ScenarioPair, RunSummary } from './types.js';
 
 /** 评测用模型默认值;scenario.model 可覆盖 */
 const DEFAULT_MODEL = 'claude-sonnet-4-6';
@@ -97,10 +99,6 @@ function estimateCost(inputTokens: number, outputTokens: number): number {
 }
 
 // ─── orchestrateRun(Task B4) ─────────────────────────────────────────────────
-
-import { loadScenarioFile, flattenScenarios } from './load-scenario.js';
-import { compareScenarioPair, DEFAULT_DELTA_THRESHOLD } from './compare.js';
-import type { ScenarioPair, RunSummary } from './types.js';
 
 /**
  * 跑指定 skill 列表的全部 scenario(每个 scenario:RED + GREEN 双跑 → pair)。

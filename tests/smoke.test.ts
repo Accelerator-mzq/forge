@@ -8,7 +8,8 @@ import {
   validateProposal,
   computeTasksHash,
   buildGraph,
-  TEMPLATES_PLACEHOLDER,
+  SKILL_NAMES,
+  COMMAND_NAMES,
   BOOTSTRAP_PLACEHOLDER,
 } from '../src/index.js';
 
@@ -38,8 +39,10 @@ describe('smoke — top-level public API', () => {
     expect(typeof buildGraph).toBe('function');
   });
 
-  it('exports placeholder templates / bootstrap (Plan 4 will fill)', () => {
-    expect(TEMPLATES_PLACEHOLDER).toBe(true);
+  it('exports templates registry + bootstrap placeholder (Plan 4)', () => {
+    // Plan 4 已用真 registry 替换 placeholder
+    expect(SKILL_NAMES).toHaveLength(12);
+    expect(COMMAND_NAMES).toHaveLength(6);
     expect(BOOTSTRAP_PLACEHOLDER).toBe(true);
   });
 });

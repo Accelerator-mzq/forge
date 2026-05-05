@@ -1,4 +1,18 @@
-// templates 模块占位 — Plan 4 填实
-// 该模块未来导出 6 个 slash command 模板 + 12 个 skill 文本
+// templates 模块顶层导出 — Plan 4
+// 把 skills + commands 两个 sub-registry 聚合成单一入口
 
-export const TEMPLATES_PLACEHOLDER = true as const;
+export {
+  SKILL_NAMES,
+  loadSkill,
+  loadAllSkills,
+  type SkillName,
+  type LoadedSkill,
+} from './skills/index.js';
+
+export {
+  COMMAND_NAMES,
+  loadCommand,
+  loadAllCommands,
+  type CommandName,
+  type LoadedCommand,
+} from './commands/index.js';

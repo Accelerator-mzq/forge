@@ -7,8 +7,9 @@ import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseConfig } from '../../core/parse/index.js';
-import { ClaudeAdapter, CodexAdapter, deployAtomic } from '../../core/harness-adapters/index.js';
+import { ClaudeAdapter, CodexAdapter, deployAtomic, filterByHash } from '../../core/harness-adapters/index.js';
 import type { HarnessAdapter, DeployInput } from '../../core/harness-adapters/index.js';
+import { loadAllSkills, loadAllCommands } from '../../core/templates/index.js';
 
 export function buildUpdateCommand(): Command {
   return new Command('update')
@@ -20,7 +21,7 @@ export function buildUpdateCommand(): Command {
     )
     .option(
       '--force',
-      '强制覆盖已有 skill 文件(v0.1 stub 阶段:此 flag 当前为 noop,Plan 4 真实施 hash 比对后启用)',
+      '强制覆盖已被用户修改的 skill / command 文件(SHA256 hash 比对决定是否覆盖)',
     )
     .action(async (opts: { harness: string; force?: boolean }) => {
       const cwd = process.cwd();
@@ -78,18 +79,36 @@ export function buildUpdateCommand(): Command {
         process.exit(1);
       }
 
-      // 5. plan() — Plan 3 阶段 templates 使用最小 stub 内容
-      // Plan 4 会替换为真实 templates
+      // 5. 加载真实 templates(Plan 4)
+      const skills = await loadAllSkills();
+      const commands = await loadAllCommands();
       const input: DeployInput = {
         projectRoot: cwd,
-        skills: [{ name: 'using-forge', content: '<!-- placeholder, Plan 4 will fill -->' }],
-        commands: [],
+        skills: skills.map((s) => ({ name: s.name, content: s.content })),
+        commands: commands.map((c) => ({ name: c.name, content: c.content })),
       };
       const plans = await Promise.all(adapters.map((a) => a.plan(input)));
 
-      // 6. 原子部署 — Stage→Backup→Commit 三阶段
-      await deployAtomic(cwd, plans);
-
-      console.log(`✓ forge updated for ${adapters.length} harness(es)`);
+      // 6. hash 比对过滤
+      const force = opts.force ?? false;
+      const { filteredPlans, skippedModified, unchanged, toWrite } = await filterByHash(
+        cwd,
+        plans,
+        force,
+      );
+      if (skippedModified.length > 0) {
+        console.warn(
+          `⚠ ${skippedModified.length} 个文件已被用户修改,跳过(加 --force 覆盖):`,
+        );
+        for (const f of skippedModified) console.warn(`  - ${f.relPath}`);
+      }
+      if (toWrite.length === 0) {
+        console.log(`✓ 全部 ${unchanged.length} 个文件已是最新`);
+        return;
+      }
+      await deployAtomic(cwd, filteredPlans);
+      console.log(
+        `✓ forge updated: ${toWrite.length} 写入;${unchanged.length} 未变;${skippedModified.length} 已修改(--force 覆盖)`,
+      );
     });
 }

@@ -1,96 +1,75 @@
 # Forge
 
-> OpenSpec 的产物驱动工作流 × superpowers 的行为塑造 skill 体系,融合成一个独立的 npm CLI + 多 harness 适配器。
+> Multi-harness CLI 把 OpenSpec 的产物驱动工作流和 superpowers 的行为塑造 skill 体系融合到一起。AI 在 Claude Code / Codex 等 harness 里按统一规范工作。
 
-**当前状态**:Phase 1+2+3+4+5 完成(测试全绿,自动化 skill eval 在 weekly + PR cadence 下运行)。**Plan 6(harness 集成 smoke + recovery 命令 + 文档,Release v0.1.0)待启动**。
+```bash
+pnpm dlx @accelerator-mzq/forge init --harness claude
+# 或
+pnpm dlx @accelerator-mzq/forge init --harness codex
+```
+
+## 它做什么
+
+1. **把 12 个行为塑造 skill 装到 harness 里**:`brainstorming`(模糊需求时强制提问)、`test-driven-development`(red→green→refactor)、`subagent-driven-development`(派 fresh 子代理实施每个 task)、`verification-before-completion`(声称完成必附证据)等。
+2. **把 6 个工作流命令铺到 harness**:`/forge:brainstorm` → `/forge:propose` → `/forge:apply` → `/forge:review` → `/forge:verify` → `/forge:archive` 串成产物化流水线。
+3. **CLI 兜底**:`forge validate / archive` 验证产物完整性、严格门禁归档(verify+review marker hash 不对就拒绝)。
+4. **专注 v0.1 = Claude Code + Codex**(OpenCode 推 v0.2,需要 plugin 实现自动注入)。
+
+## 5 分钟跑通
+
+详见 [`docs/getting-started.md`](docs/getting-started.md)。
+
+```bash
+# 1. 装 + 初始化
+mkdir my-project && cd my-project
+git init                                            # 强烈建议(非 git 项目下 review 标记不绑代码 diff)
+pnpm dlx @accelerator-mzq/forge init --harness claude
+
+# 2. 起 harness 会话,第一句话:
+#    "我想做个 todo list 应用"
+#    AI 自动触发 brainstorming,问问题、写 forge/drafts/<date>-todo-list.md
+
+# 3. 你审完 draft,跑:
+#    /forge:propose add-todo --from-draft 2026-05-05-todo-list
+#    AI 调 writing-plans skill,产出 forge/changes/add-todo/{proposal,specs,design,tasks}.md
+
+# 4. 跑 /forge:apply,AI 派子代理跑 TDD 实施每个 task
+# 5. 跑 /forge:review,派 review 子代理 + 主代理处理反馈
+# 6. 跑 /forge:verify,跑 forge validate + 写 .verify-passed
+# 7. 跑 /forge:archive,严格校验 marker hash → mv 到 forge/changes/archive/
+```
+
+## CLI 命令
+
+`forge init / update / config / validate / archive`。详见 [`docs/cli-reference.md`](docs/cli-reference.md)。
+
+## Harness 安装
+
+[Claude Code 与 Codex 的安装步骤、bootstrap 注入路径、调试技巧](docs/harness-setup.md)。
 
 ## 设计文档
 
-- [2026-05-04 融合方案设计](docs/specs/2026-05-04-forge-fusion-design.md) — 1273 行,21 条决策,涵盖架构、组件、数据流、错误处理、测试、实施路线
+- [2026-05-04 融合方案设计](docs/specs/2026-05-04-forge-fusion-design.md)(1273 行,21 条决策,完整架构 / 数据流 / 错误处理 / 测试策略 / 实施路线)
+- [Plan 1-6 实施记录](docs/plans/)
+- [Phase 0.5 spike 结果](spike/RESULTS.md):为什么 v0.1 = Claude Code + Codex 两 harness
 
-## 核心定位
+## 状态
 
-- **OpenSpec 作主干**:产物结构(proposal/specs/design/tasks)+ 归档(`forge/changes/archive/`)+ 配置注入(`forge/config.yaml`)
-- **superpowers 作武器库**:12 个 skill 移植(brainstorming / writing-plans / subagent-driven-development / TDD / code-review / verification-before-completion 等)
-- **6 个 slash 命令流水线**:`/forge:brainstorm` → `/forge:propose` → `/forge:apply` → `/forge:review` → `/forge:verify` → `/forge:archive`
-- **5 个公开 CLI 命令**:`forge init / update / config / validate / archive`(specs-sync 是内部模块,不公开)
-- **目标 harness**:Claude Code、Codex、OpenCode(实际范围由 Phase 0.5 spike 决定)
+**v0.1.0 候选**:Phase 1+2+3+4+5+6 完成。
 
-## 实施路线
+- 本地 5 命令(typecheck / lint / format:check / build / test)全 0
+- 测试 275 passing(含 e2e-acceptance env-gated 1 skipped)
+- CI Linux + Windows 双绿
+- 自动化 skill eval 在 weekly + PR cadence 跑
+- `npm publish` 工件已通过本地 release gate(`scripts/release-gate.mjs`)
 
-约 8 周(单人全职估算):
+**发版前置**:maintainer 跑 [`docs/release-gate-checklist.md`](docs/release-gate-checklist.md) 手动 harness acceptance test 两个 harness。通过即可发 v0.1.0。
 
-| Phase | 内容                                     | 时长   |
-| ----- | ---------------------------------------- | ------ |
-| 0     | 仓库脚手架                               | 0.5 周 |
-| 0.5   | 多 harness Bootstrap Spike(gating)       | 0.5 周 |
-| 1     | Core Engine 骨架                         | 1.5 周 |
-| 2     | CLI 命令 + Adapter 接口                  | 1 周   |
-| 3     | 三个 Adapter 实现                        | 1.5 周 |
-| 4     | 模板内容(12 skill + 6 命令)              | 1 周   |
-| 5     | Skill Eval 框架                          | 1.5 周 |
-| 6     | harness 集成 smoke + recover 命令 + 文档 | 0.5 周 |
-
-## Phase 0.5 Spike 结果
-
-[查看 spike 结果与 v0.1 范围决策](spike/RESULTS.md)
-
-**v0.1 实际范围**:Claude Code + Codex 2 harness(OpenCode 推 v0.2,需开发 plugin 实现自动注入)。
-
-## Plan 2 进度
-
-Phase 1(Core Engine)完成 — `src/core/` 下 8 个模块全部实现 + 单元测试覆盖:
-
-- `schema/` — spec-driven schema 类型
-- `parse/` — markdown / yaml / proposal / specs / design / tasks 解析器
-- `validate/` — 各 artifact + marker schema 校验
-- `hash/` — tasks / content / log / diff 4 种 hash 计算
-- `artifact-graph/` — 依赖图(proposal → specs → design → tasks)
-- `markers/` — verify/review marker YAML 类型 + 解析
-- `specs-sync/` — deltas 应用(internal-only)
-- `templates/` + `bootstrap/` — 占位,Plan 4 填实
-
-Plan 3 接手:Phase 2(CLI 命令)+ Phase 3 cut(claude.ts + codex.ts adapter)。
-
-## Plan 3 进度
-
-Phase 2(CLI)+ Phase 3 cut(2 个 adapter)完成:
-
-- 5 个公开 CLI 命令:`forge init/update/config/validate/archive`(其中 archive 含 `--force` 和 `--recover` 子模式)
-- 2 个 adapter:`claude.ts`(`.claude/skills + .claude/commands`)、`codex.ts`(`.agents/skills` 共享 Claude Agent SDK 约定)
-- archive 顺序原子化(Move→Sync 三阶段 + lock + recover)
-
-Plan 4 接手:Phase 4(12 个 superpowers skill 真实内容 + 6 个 slash 命令模板)。
-
-## Plan 4 进度
-
-Phase 4(模板内容)完成:
-
-- 12 个 superpowers skill MIT 复制移植到 `src/core/templates/skills/`,改名为 `forge:` 命名空间;产物路径调整为 `forge/drafts/` 与 `forge/changes/<id>/`
-- 6 个 `/forge:*` slash 命令模板(brainstorm / propose / apply / review / verify / archive)
-- `--force` flag 真启用:SHA256 hash 比对决定是否覆盖(默认:被改文件跳过 + warn;`--force`:强制覆盖)
-- e2e brainstorming acceptance test(env-gated by `CLAUDE_BIN` + `ANTHROPIC_API_KEY`)
-- LICENSE-THIRD-PARTY.md 补全 superpowers MIT attribution + 12 skill 来源映射
-
-Plan 5 接手:Phase 5(Skill Eval 框架,详 spec §5.5)。
-
-## Plan 5 进度
-
-Phase 5(Skill Eval 框架)完成:
-
-- `forge-eval/` 目录:`runner.ts` / `judge.ts` / `compare.ts` / `report.ts` / `changed-only.ts` / `budget.ts` / `index.ts` + 12 个 scenario YAML(合计 29 scenario)
-- RED/GREEN 双跑(spec §5.5.4):验证 skill bootstrap 真起作用,delta 默认阈值 1.5
-- 双轨 grading(spec §5.5.3):模式匹配可选 + LLM-as-judge 必需
-- CI 三 trigger(`.github/workflows/skill-eval.yml`):PR `--changed-only` / weekly Sunday / 手动触发
-- 月度预算 ~$50-80(spec §5.5.7),全量跑约 $6.5
-
-**前置**:仓库 Settings → Secrets 添加 `ANTHROPIC_API_KEY`(本地从 `forge-eval/.env.example` 复制 .env 填)。
-
-Plan 6 接手:Phase 6(harness 集成 smoke + `forge archive --recover` 真实施 + 用户文档 + Release v0.1.0)。
+详见 [`CHANGELOG.md`](CHANGELOG.md)。
 
 ## 许可
 
-MIT License
+MIT。复制了 superpowers 的 12 个 skill 文本(MIT 许可),attribution 见 [`LICENSE-THIRD-PARTY.md`](LICENSE-THIRD-PARTY.md)。
 
 ## 致谢
 

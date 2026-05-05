@@ -1,0 +1,67 @@
+name: Skill Eval
+
+on:
+  pull_request:
+    paths:
+      - 'src/core/templates/skills/**'
+      - 'forge-eval/scenarios/**'
+      - 'forge-eval/**.ts'
+  schedule:
+    - cron: '0 8 * * 0' # 每周日 UTC 8am(spec §5.5.8)
+  workflow_dispatch:
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      # secret 缺失时优雅 skip(避免 PR 误报红 X);加 secret 后本 workflow 自动起跑
+      - name: Check ANTHROPIC_API_KEY secret
+        id: check_secret
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::warning::ANTHROPIC_API_KEY secret 未配置,skill-eval 跳过。在 repo Settings → Secrets and variables → Actions 添加后,本 workflow 会自动开始跑。详见 forge-eval/README.md"
+            echo "has_key=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_key=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.check_secret.outputs.has_key == 'true'
+        with:
+          fetch-depth: 0 # PR diff 需要完整历史
+
+      - uses: pnpm/action-setup@v4
+        if: steps.check_secret.outputs.has_key == 'true'
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        if: steps.check_secret.outputs.has_key == 'true'
+        with:
+          node-version: '20.19'
+          cache: 'pnpm'
+
+      - name: pnpm install
+        if: steps.check_secret.outputs.has_key == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: PR — 仅跑改动的 skill
+        if: github.event_name == 'pull_request' && steps.check_secret.outputs.has_key == 'true'
+        env:
+          EVAL_DIFF_BASE: origin/${{ github.base_ref }}
+        run: pnpm eval:changed
+
+      - name: Weekly / 手动触发 — 全量
+        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && steps.check_secret.outputs.has_key == 'true'
+        run: pnpm eval
+
+      - name: Upload eval report
+        if: always() && steps.check_secret.outputs.has_key == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: eval-report.md
+          if-no-files-found: warn

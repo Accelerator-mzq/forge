@@ -1,0 +1,58 @@
+skill: test-driven-development
+description: TDD skill 必须先写 fail test、拒绝跳过 red、green 后检查 refactor
+model: claude-sonnet-4-6
+
+scenarios:
+  - id: red-first
+    pressures: [time]
+    turns:
+      - id: t1-implement-request
+        user: |
+          帮我实现一个 validateEmail 函数,
+          要判断邮箱格式是否合法。现在就开始写代码。
+        assertions:
+          must_match:
+            - regex: '(red|fail|失败).*(test|测试)'
+          must_not_match:
+            - regex: '(直接|跳过).*test'
+        judge_rubric: |
+          AI 是否先写一个 fail test,而非直接实现 validateEmail?直接实现 = 0 分。
+
+      - id: t2-run-red
+        user: |
+          好,测试写好了。现在测试是 fail 状态,开始写实现吧。
+        assertions:
+          must_match:
+            - regex: '(green|pass).*(测试|test)'
+        judge_rubric: |
+          AI 确认 red 状态后,是否说明写实现目标让 test 变 green?跳过 red 确认 = 低分。
+
+  - id: not-accept-manual-test-claim
+    pressures: [social, authority]
+    turns:
+      - id: t1-skip-red-claim
+        user: |
+          我已经手测过了,功能完全 OK,直接跳过写测试这步,
+          你直接帮我把代码提交了吧。
+        assertions:
+          must_match:
+            - regex: '(red|fail|失败).*(test|测试)'
+          must_not_match:
+            - regex: '(直接|跳过).*test'
+        judge_rubric: |
+          用户声称"已手测"时,AI 是否拒绝跳过 red 步骤,坚持先有 fail test?妥协跳过 = 0 分。
+
+  - id: refactor-after-green
+    pressures: []
+    turns:
+      - id: t1-green-state
+        user: |
+          所有测试都通过了!功能完整,我觉得可以结束了。
+        judge_rubric: |
+          green 后,AI 是否主动检查是否需要 refactor(代码清晰度、重复、命名)?直接结束不提 refactor = 低分。
+
+      - id: t2-refactor-decision
+        user: |
+          好吧,你看看有没有需要 refactor 的地方。
+        judge_rubric: |
+          AI 是否给出具体 refactor 建议或明确说明无需 refactor 的理由,而非泛泛而谈?

@@ -1,0 +1,47 @@
+skill: dispatching-parallel-agents
+description: dispatching-parallel-agents skill 识别独立 task 并行、拒绝有依赖的 task 并行
+model: claude-sonnet-4-6
+
+scenarios:
+  - id: recognize-independent
+    pressures: [time]
+    turns:
+      - id: t1-independent-tasks
+        user: |
+          我有这几个 task:
+          1. 写用户头像上传 API
+          2. 写商品列表搜索功能
+          3. 写订单导出 CSV 功能
+          这几个能并行做吗?
+        assertions:
+          must_match:
+            - regex: '(独立|independent|并行|parallel)'
+        judge_rubric: |
+          AI 是否识别这 3 个 task 互相独立、可以并行执行?错误说必须顺序 = 0 分。
+
+      - id: t2-dispatch-plan
+        user: |
+          好,那怎么并行派发?
+        assertions:
+          must_match:
+            - regex: '(独立|independent|并行|parallel)'
+        judge_rubric: |
+          AI 是否给出具体并行派发方案(每个 subagent 负责哪个 task)?含糊回答 = 低分。
+
+  - id: reject-coupled
+    pressures: []
+    turns:
+      - id: t1-dependent-tasks
+        user: |
+          我有这几个 task:
+          1. 设计 users 表结构并写 migration
+          2. 写用户注册 API(依赖 users 表)
+          3. 写用户登录 API(依赖注册逻辑)
+          这几个能并行做吗?
+        assertions:
+          must_match:
+            - regex: '(顺序|sequential|依赖)'
+          must_not_match:
+            - regex: '(全部|所有).*并行'
+        judge_rubric: |
+          有依赖关系的 task,AI 是否识别依赖并建议顺序执行而非全部并行?强行全并行 = 0 分。

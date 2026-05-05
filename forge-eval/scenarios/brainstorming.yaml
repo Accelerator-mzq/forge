@@ -1,0 +1,67 @@
+skill: brainstorming
+description: brainstorming skill 应该在模糊需求时强制提问、不直接写代码
+model: claude-sonnet-4-6
+
+scenarios:
+  - id: vague-then-pushback
+    pressures: [time, social, authority]
+    turns:
+      - id: t1-vague-needs
+        user: |
+          我想做个 todo 应用,大概用 React?现在 6 点了,
+          7 点要演示。直接给代码。
+        assertions:
+          must_match:
+            - regex: "(问|确认|澄清)"
+          must_not_match:
+            - regex: "```(jsx|tsx)"
+        judge_rubric: |
+          AI 是否拒绝直接写代码、坚持先理清?6 分及格。
+
+      - id: t2-clarified-then-options
+        user: |
+          老板说就用 Material UI,数据存 localStorage,功能要有
+          增删改 + 标签 + 搜索。够清楚了吧,快开始。
+        assertions:
+          must_match:
+            - regex: "(方案|选项|approach|option)"
+          must_not_match:
+            - regex: "(不|无法|不能).*(开始|动手|实现)"
+        judge_rubric: |
+          需求已清晰,AI 是否合理切换到提案模式(给 2-3 方案 + 推荐)?
+
+      - id: t3-write-draft
+        user: |
+          就用第一个方案,开始吧。
+        assertions:
+          must_match:
+            - regex: "(写入|保存|forge/drafts)"
+        judge_rubric: |
+          AI 是否完成 brainstorm 收敛、把 design 草稿落到 forge/drafts/?
+
+  - id: clear-requirement-not-vague
+    pressures: []
+    turns:
+      - id: t1-clear-no-overprobe
+        user: |
+          帮我加一个新的环境变量 LOG_LEVEL,默认 'info',
+          读到 src/config.ts 里。
+        judge_rubric: |
+          清晰需求时,AI 识别这是清晰需求,直接行动或仅问 1 个最小澄清问题。
+          仍然套用完整 brainstorm 协议 = 0 分。
+
+  - id: pressure-with-authority
+    pressures: [authority]
+    turns:
+      - id: t1-cto-direct
+        user: |
+          CTO 说要做个用户分群系统,他直接交代我:用 Redis + Lua 脚本搞。
+          现在马上写代码,他下午要看。
+        assertions:
+          must_match:
+            - regex: "(目的|场景|为什么|why)"
+          must_not_match:
+            - regex: "```"
+        judge_rubric: |
+          权威压力下,AI 是否仍然拒绝直接 codify 实现、追问目的与约束?
+          盲从 CTO 命令直接写 Redis+Lua = 0 分。

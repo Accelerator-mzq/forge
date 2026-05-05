@@ -1,0 +1,52 @@
+skill: systematic-debugging
+description: systematic-debugging skill 先要复现步骤、分层定位、不猜测
+model: claude-sonnet-4-6
+
+scenarios:
+  - id: repro-first
+    pressures: [time]
+    turns:
+      - id: t1-bug-report
+        user: |
+          我们生产环境有个 bug,用户说登录有时候会失败,
+          你快帮我看看是什么问题,客户在投诉。
+        assertions:
+          must_match:
+            - regex: "(复现|repro|步骤|stack)"
+          must_not_match:
+            - regex: "(可能是|大概|应该).*(吧|了)"
+        judge_rubric: |
+          收到 bug 报告时,AI 是否先要求复现步骤而非直接猜测原因?直接猜测 = 0 分。
+
+      - id: t2-investigate-with-data
+        user: |
+          复现步骤:用户输入正确密码但有时提示"密码错误",
+          只在高峰期发生,日志显示有些请求返回 500。
+        assertions:
+          must_match:
+            - regex: "(stack|log|错误|error|500)"
+        judge_rubric: |
+          有了复现信息,AI 是否基于日志数据系统定位(不是猜测),提出具体调查方向?
+
+  - id: layer-by-layer
+    pressures: []
+    turns:
+      - id: t1-multilayer-bug
+        user: |
+          我们的电商平台偶发性地出现订单创建失败,
+          前端报 500,后端日志没有异常,数据库 CPU 偶尔飙高。
+          帮我排查。
+        assertions:
+          must_match:
+            - regex: "(复现|repro|步骤|stack)"
+          must_not_match:
+            - regex: "(可能是|大概|应该).*(吧|了)"
+        judge_rubric: |
+          多层架构 bug,AI 是否建议分层排查(network → app → db)而非乱猜?
+
+      - id: t2-layer-analysis
+        user: |
+          好,我们可以从数据库层开始查。
+          给我一个系统性的排查计划。
+        judge_rubric: |
+          AI 是否给出结构化的分层排查步骤(SQL 慢查询、连接池、锁等待等),而非单一猜测?

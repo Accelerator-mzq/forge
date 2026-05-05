@@ -5,6 +5,7 @@ import { Command } from 'commander';
 import { FORGE_VERSION } from '../index.js';
 import { buildConfigCommand } from './commands/config.js';
 import { buildValidateCommand } from './commands/validate.js';
+import { buildInitCommand } from './commands/init.js';
 
 // 创建主命令
 const program = new Command();
@@ -19,6 +20,9 @@ program.addCommand(buildConfigCommand());
 
 // 注册 validate 子命令
 program.addCommand(buildValidateCommand());
+
+// 注册 init 子命令
+program.addCommand(buildInitCommand());
 
 // 后续 task 在这里 .addCommand(...)
 

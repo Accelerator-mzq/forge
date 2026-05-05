@@ -59,4 +59,12 @@ describe('templates/commands', () => {
     expect(content).toContain('fake_completions');
     expect(content).toContain('evidence');
   });
+
+  it('archive 命令调 forge archive CLI 且引用 forge:finishing-a-development-branch', async () => {
+    const content = await loadCommand('archive');
+    expect(content).toContain('forge archive');
+    expect(content).toContain('forge:finishing-a-development-branch');
+    expect(content).toContain('--force');
+    expect(content).toContain('--recover');
+  });
 });

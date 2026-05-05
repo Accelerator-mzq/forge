@@ -13,6 +13,28 @@ export interface RecoverResult {
   case: 'clean' | 'A' | 'B' | 'C' | 'corrupt';
   /** 人类可读说明(含操作指引) */
   message: string;
+  /**
+   * case='C' 时填充,提供 CLI 进行交互式二选一所需上下文。
+   * 其他 case 为 undefined。
+   */
+  caseCData?: {
+    /** archive change 目录绝对路径(用于"撤销归档"反向 rename) */
+    archiveChangeDir: string;
+    /** 原 change 名(去掉日期前缀,用于"撤销归档"反向 rename 目标) */
+    changeOrigId: string;
+    /** backup 目录绝对路径 */
+    backupDir: string;
+    /** archive specs 目录(用于"完成归档"重跑 Sync) */
+    archiveSpecsDir: string;
+    /** current specs 目录(用于"完成归档"或"撤销归档") */
+    currentSpecsDir: string;
+    /** 待应用 deltas(用于"完成归档") */
+    deltas: SpecDelta[];
+    /** backup 完整性 check 结果 */
+    backupIntegrity: BackupIntegrityResult;
+    /** archive 完整性 check 结果 */
+    archiveIntegrity: ArchiveIntegrityResult;
+  };
 }
 
 /**
@@ -114,15 +136,31 @@ export async function recover(forgeRoot: string): Promise<RecoverResult> {
     };
   }
 
-  // case C:deltas 含 delete 或内容不一致(说明状态不一致),需要用户手动介入
+  // case C:deltas 含 delete 或内容不一致(说明状态不一致)
+  // Plan 6:加完整性 check + 给 CLI 提供 caseCData 让其决定走交互(两者都完整)或退出 4(任一不完整)
   const changeOrigId = halfArchivedChange.replace(/^\d{4}-\d{2}-\d{2}-/, '');
+  const archiveChangeDir = join(archiveDir, halfArchivedChange);
+  const backupIntegrity = await checkBackupIntegrity(backupDir);
+  const archiveIntegrity = await checkArchiveIntegrity(archiveChangeDir);
+
+  const baseMsg =
+    `case C:archive/${halfArchivedChange} 与 backup 不一致(specs 应用状态)。\n` +
+    `  archive 位置:${archiveChangeDir}\n` +
+    `  backup 位置:${backupDir}`;
+
   return {
     case: 'C',
-    message:
-      `case C:archive/${halfArchivedChange} 与 backup 不一致,需用户介入。请手动选择:\n` +
-      `  [完成归档] 恢复 specs 后再跑 forge archive --recover\n` +
-      `  [撤销归档] mv ${join(archiveDir, halfArchivedChange)} ${join(forgeRoot, 'changes', changeOrigId)}\n` +
-      `  backup 位置:${backupDir}`,
+    message: baseMsg,
+    caseCData: {
+      archiveChangeDir,
+      changeOrigId,
+      backupDir,
+      archiveSpecsDir,
+      currentSpecsDir,
+      deltas,
+      backupIntegrity,
+      archiveIntegrity,
+    },
   };
 }
 

@@ -8,8 +8,9 @@ import {
   validateProposal,
   computeTasksHash,
   buildGraph,
-  TEMPLATES_PLACEHOLDER,
-  BOOTSTRAP_PLACEHOLDER,
+  SKILL_NAMES,
+  COMMAND_NAMES,
+  USING_FORGE_SKILL_NAME,
 } from '../src/index.js';
 
 describe('smoke — top-level public API', () => {
@@ -38,8 +39,10 @@ describe('smoke — top-level public API', () => {
     expect(typeof buildGraph).toBe('function');
   });
 
-  it('exports placeholder templates / bootstrap (Plan 4 will fill)', () => {
-    expect(TEMPLATES_PLACEHOLDER).toBe(true);
-    expect(BOOTSTRAP_PLACEHOLDER).toBe(true);
+  it('exports templates registry + bootstrap skill name (Plan 4)', () => {
+    // Plan 4 已用真 registry 替换 placeholder,bootstrap 退化为 USING_FORGE_SKILL_NAME 常量
+    expect(SKILL_NAMES).toHaveLength(12);
+    expect(COMMAND_NAMES).toHaveLength(6);
+    expect(USING_FORGE_SKILL_NAME).toBe('using-forge');
   });
 });

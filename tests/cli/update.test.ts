@@ -8,29 +8,27 @@ import { join } from 'node:path';
 import { runCli } from './helpers.js';
 
 describe('forge update', () => {
-  // Test 1: 已 init 的 claude 项目 → 重铺 .claude/skills/(new content via deployAtomic)
-  it('已 init 的项目(claude) → forge update 重铺 SKILL.md 成功', () => {
+  // Test 1: 已 init 项目 → forge update 默认不覆盖被改文件,--force 才覆盖
+  it('已 init 项目 → forge update 默认不覆盖被改文件,--force 才覆盖', () => {
     const d = mkdtempSync(join(tmpdir(), 'forge-update-claude-'));
     try {
-      // 先跑 init
       const initR = runCli(['init', '--harness=claude'], d);
       expect(initR.exitCode).toBe(0);
 
-      // 手动修改 SKILL.md 内容,模拟文件被改动
       const skillPath = join(d, '.claude', 'skills', 'forge-using-forge', 'SKILL.md');
-      expect(existsSync(skillPath)).toBe(true);
-      writeFileSync(skillPath, 'MODIFIED_CONTENT', 'utf8');
-      expect(readFileSync(skillPath, 'utf8')).toBe('MODIFIED_CONTENT');
+      writeFileSync(skillPath, 'USER MODIFIED', 'utf8');
 
-      // 跑 update → 应该重铺回 placeholder 内容
-      const r = runCli(['update'], d);
-      expect(r.exitCode).toBe(0);
-      expect(r.stdout).toContain('updated');
+      // update 不加 --force → 跳过
+      const r1 = runCli(['update'], d);
+      expect(r1.exitCode).toBe(0);
+      expect(readFileSync(skillPath, 'utf8')).toBe('USER MODIFIED');
 
-      // SKILL.md 内容应该被恢复为 placeholder
-      const updatedContent = readFileSync(skillPath, 'utf8');
-      expect(updatedContent).toContain('placeholder');
-      expect(updatedContent).not.toBe('MODIFIED_CONTENT');
+      // update --force → 覆盖回真模板
+      const r2 = runCli(['update', '--force'], d);
+      expect(r2.exitCode).toBe(0);
+      const restored = readFileSync(skillPath, 'utf8');
+      expect(restored).toContain('forge:using-forge');
+      expect(restored).not.toBe('USER MODIFIED');
     } finally {
       rmSync(d, { recursive: true, force: true });
     }
@@ -81,24 +79,6 @@ describe('forge update', () => {
       expect(r.exitCode).toBe(1);
       // 错误提示包含如何修复的信息
       expect(r.stderr).toMatch(/harness|--harness/i);
-    } finally {
-      rmSync(d, { recursive: true, force: true });
-    }
-  });
-
-  // Test P2.2: --force flag 被接受(当前 noop,为 Plan 4 准备的 surface)
-  it('P2.2:accepts --force flag (currently noop, prepared for Plan 4)', () => {
-    const d = mkdtempSync(join(tmpdir(), 'forge-update-force-'));
-    try {
-      // 先 init
-      const initR = runCli(['init', '--harness=claude'], d);
-      expect(initR.exitCode).toBe(0);
-
-      // 跑 update --force → 应该不报错
-      const r = runCli(['update', '--force'], d);
-      expect(r.exitCode).toBe(0);
-      // 当前是 noop,只验证不报错,命令正常完成
-      expect(r.stdout).toContain('updated');
     } finally {
       rmSync(d, { recursive: true, force: true });
     }

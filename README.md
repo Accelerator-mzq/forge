@@ -2,7 +2,7 @@
 
 > OpenSpec 的产物驱动工作流 × superpowers 的行为塑造 skill 体系,融合成一个独立的 npm CLI + 多 harness 适配器。
 
-**当前状态**:Phase 1+2+3 cut 完成(146 unit/integration tests passing)。**Phase 4(skill 文本移植)+ eval 框架待启动**(Plan 4 / Plan 5)。
+**当前状态**:Phase 1+2+3+4 cut 完成(测试全绿)。**Plan 5(Skill Eval 框架)待启动**。
 
 ## 设计文档
 
@@ -61,6 +61,18 @@ Phase 2(CLI)+ Phase 3 cut(2 个 adapter)完成:
 - archive 顺序原子化(Move→Sync 三阶段 + lock + recover)
 
 Plan 4 接手:Phase 4(12 个 superpowers skill 真实内容 + 6 个 slash 命令模板)。
+
+## Plan 4 进度
+
+Phase 4(模板内容)完成:
+
+- 12 个 superpowers skill MIT 复制移植到 `src/core/templates/skills/`,改名为 `forge:` 命名空间;产物路径调整为 `forge/drafts/` 与 `forge/changes/<id>/`
+- 6 个 `/forge:*` slash 命令模板(brainstorm / propose / apply / review / verify / archive)
+- `--force` flag 真启用:SHA256 hash 比对决定是否覆盖(默认:被改文件跳过 + warn;`--force`:强制覆盖)
+- e2e brainstorming acceptance test(env-gated by `CLAUDE_BIN` + `ANTHROPIC_API_KEY`)
+- LICENSE-THIRD-PARTY.md 补全 superpowers MIT attribution + 12 skill 来源映射
+
+Plan 5 接手:Phase 5(Skill Eval 框架,详 spec §5.5)。
 
 ## 许可
 

@@ -11,18 +11,17 @@ import {
   ClaudeAdapter,
   CodexAdapter,
   deployAtomic,
+  filterByHash,
 } from '../../core/harness-adapters/index.js';
 import type { HarnessAdapter, DeployInput } from '../../core/harness-adapters/index.js';
 import { parseConfig } from '../../core/parse/index.js';
+import { loadAllSkills, loadAllCommands } from '../../core/templates/index.js';
 
 export function buildInitCommand(): Command {
   return new Command('init')
     .description('Initialize forge in current directory')
     .option('--harness <list>', 'comma-separated harness ids (claude,codex)', '')
-    .option(
-      '--force',
-      '强制覆盖已有 skill 文件(v0.1 stub 阶段:此 flag 当前为 noop,Plan 4 真实施 hash 比对后启用)',
-    )
+    .option('--force', '强制覆盖已被用户修改的 skill / command 文件(SHA256 hash 比对决定是否覆盖)')
     .action(async (opts: { harness: string; force?: boolean }) => {
       const cwd = process.cwd();
 
@@ -60,19 +59,40 @@ export function buildInitCommand(): Command {
         }
       }
 
-      // 步骤 4:plan() — Plan 3 阶段 templates 使用最小 stub 内容
-      // Plan 4 会替换为真实 templates
+      // 步骤 4:加载真实 templates(Plan 4 替换原 stub)
+      const skills = await loadAllSkills();
+      const commands = await loadAllCommands();
       const input: DeployInput = {
         projectRoot: cwd,
-        skills: [{ name: 'using-forge', content: '<!-- placeholder, Plan 4 will fill -->' }],
-        commands: [],
+        skills, // LoadedSkill[] 兼容 SkillSpec[]
+        commands, // LoadedCommand[] 兼容 CommandSpec[]
       };
       const plans = await Promise.all(adapters.map((a) => a.plan(input)));
 
-      // 步骤 5:原子部署 — Stage→Backup→Commit 三阶段
-      await deployAtomic(cwd, plans);
+      // 步骤 5:hash 比对过滤(Plan 4 真实施 --force)
+      const force = opts.force ?? false;
+      const { filteredPlans, skippedModified, unchanged, toWrite } = await filterByHash(
+        cwd,
+        plans,
+        force,
+      );
+      if (skippedModified.length > 0) {
+        console.warn(`⚠ ${skippedModified.length} 个文件已被用户修改,跳过(加 --force 覆盖):`);
+        for (const f of skippedModified) console.warn(`  - ${f.relPath}`);
+      }
+      if (toWrite.length === 0) {
+        console.log(`✓ 全部 ${unchanged.length} 个文件已是最新,无需部署`);
+      } else {
+        // 步骤 6:原子部署 — Stage→Backup→Commit 三阶段
+        await deployAtomic(cwd, filteredPlans);
+        const modifiedPart =
+          skippedModified.length > 0
+            ? `;${skippedModified.length} 个已修改(跳过,加 --force 覆盖)`
+            : '';
+        console.log(`✓ 部署 ${toWrite.length} 个文件;${unchanged.length} 个未变${modifiedPart}`);
+      }
 
-      // 步骤 6:创建 forge/config.yaml + 目录骨架
+      // 步骤 7:创建 forge/config.yaml + 目录骨架
       const forgeDir = join(cwd, 'forge');
       await mkdir(join(forgeDir, 'drafts'), { recursive: true });
       await mkdir(join(forgeDir, 'changes'), { recursive: true });
@@ -99,7 +119,7 @@ export function buildInitCommand(): Command {
       };
       await writeFile(configPath, stringifyYAML(configData), 'utf8');
 
-      // 步骤 7:检测非 git 项目并 warn
+      // 步骤 8:检测非 git 项目并 warn
       if (!existsSync(join(cwd, '.git'))) {
         console.warn(
           '⚠ 非 git 项目下 review 标记不绑定代码 diff,archive 必须 --force 才接受。建议跑 `git init`。',

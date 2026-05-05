@@ -4,7 +4,7 @@
 // 任一失败 exit 非 0,docs/release-gate-checklist.md 的"自动化部分"调用本脚本
 
 import { execSync } from 'node:child_process';
-import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -56,7 +56,10 @@ try {
 console.log('\n[tarball-content] 验证 tarball 内容 ...');
 try {
   const out = execSync(`tar -tzf ${tarballName}`, { encoding: 'utf8' });
-  const entries = out.split(/\r?\n/).filter(Boolean).map((e) => e.replace(/^package\//, ''));
+  const entries = out
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((e) => e.replace(/^package\//, ''));
   // 期望:dist/cli/index.js + dist/core/templates/skills/<12>.md + README.md + LICENSE + LICENSE-THIRD-PARTY.md + package.json
   const requiredPrefixes = [
     'dist/cli/index.js',
@@ -81,7 +84,9 @@ try {
 } catch (err) {
   // Windows 下 tar 命令可能不可用,warn 后跳过(不阻塞)
   if (process.platform === 'win32') {
-    console.warn('  ⚠ Windows 下 tar 命令不可用,跳过 tarball 内容验证(请用 WSL 或 macOS/Linux 重跑)');
+    console.warn(
+      '  ⚠ Windows 下 tar 命令不可用,跳过 tarball 内容验证(请用 WSL 或 macOS/Linux 重跑)',
+    );
   } else {
     // 非 Windows 环境 tarball 验证失败是真实错误
     console.error('FAIL: tarball 内容验证');
@@ -102,7 +107,9 @@ try {
   const versionOut = execSync('npx forge --version', { cwd: dryDir, encoding: 'utf8' });
   const expected = JSON.parse(readFileSync('package.json', 'utf8')).version;
   if (!versionOut.includes(expected)) {
-    throw new Error(`forge --version 输出 "${versionOut.trim()}" 不含 package.json 版本号 "${expected}"`);
+    throw new Error(
+      `forge --version 输出 "${versionOut.trim()}" 不含 package.json 版本号 "${expected}"`,
+    );
   }
   console.log(`  → forge --version 输出含 ${expected},OK`);
 } catch (err) {

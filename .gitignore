@@ -24,3 +24,7 @@ forge/.cache/
 # env
 .env
 .env.local
+
+# forge-eval 本地配置
+forge-eval/.env
+eval-report.md

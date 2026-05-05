@@ -273,6 +273,8 @@ If systematic investigation reveals issue is truly environmental, timing-depende
 
 **But:** 95% of "no root cause" cases are incomplete investigation.
 
+<!-- root-cause-tracing / defense-in-depth / condition-based-waiting 支持文件在 forge v0.1 不提供 -->
+
 ## Related Skills
 
 - **forge:test-driven-development** - For creating failing test case (Phase 4, Step 1)

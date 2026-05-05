@@ -4,6 +4,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { mkdtempSync, rmSync, existsSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { stringify as stringifyYAML } from 'yaml';
@@ -569,6 +570,73 @@ describe('forge archive', () => {
       const r = runCli(['archive', 'add-login', '--force'], projectRoot);
       expect(r.exitCode).toBe(2);
       expect(r.stderr).toMatch(/review_outcomes|resolved/);
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  // ─── 三审 P1 安全回归测试 ────────────────────────────────────────────────────
+
+  // Test P1-sec-1:关键安全回归
+  // 在真实 git 项目里,marker 写 is_git_repo: false + --force → 应拒绝(检测到伪造)
+  it('P1 安全回归:真实 git 项目中 marker 写 is_git_repo=false + --force → 拒绝,stderr 含"伪造"', async () => {
+    // 用 mkdtemp 创建临时目录并 git init,模拟真实 git 项目
+    const projectRoot = mkdtempSync(join(tmpdir(), 'forge-archive-p1sec-'));
+    try {
+      // 初始化真实 git repo
+      execSync('git init', { cwd: projectRoot, stdio: 'pipe' });
+      execSync('git config user.email "test@test.com"', { cwd: projectRoot, stdio: 'pipe' });
+      execSync('git config user.name "Test"', { cwd: projectRoot, stdio: 'pipe' });
+
+      const changesDir = setupForgeRoot(projectRoot);
+      // setupValidChange 默认 is_git_repo: false → 与真实 git 状态不符 → 应被拒绝
+      await setupValidChange(changesDir, 'add-login');
+
+      // --force 也不能覆盖 marker 与真实状态不一致的情况
+      const r = runCli(['archive', 'add-login', '--force'], projectRoot);
+      expect(r.exitCode).toBe(2);
+      // stderr 含"伪造"或类似拒绝信息
+      expect(r.stderr).toMatch(/伪造|is_git_repo=false.*git|实际是 git/);
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  // Test P1-sec-2:非 git 项目但 marker 写 is_git_repo=true → 拒绝
+  it('P1 安全回归:非 git 项目中 marker 写 is_git_repo=true → 拒绝,stderr 含"伪造"', async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'forge-archive-p1sec2-'));
+    try {
+      const changesDir = setupForgeRoot(projectRoot);
+      await setupValidChange(changesDir, 'add-login');
+
+      // 覆盖 .review-passed,把 is_git_repo 改为 true(与真实非 git 状态矛盾)
+      const changeDir = join(changesDir, 'add-login');
+      const tasksContent = '# Tasks\n\n- [ ] t1: implement login\n- [ ] t2: write tests\n';
+      const tasksHash = computeTasksHash(tasksContent);
+      const contentHash = await computeContentHash(changeDir);
+
+      // 伪造合法 git marker:schema 校验通过,但真实环境不是 git → 步骤 4b 拒绝
+      // is_git_repo=true 时 schema 还要求 head/diff_hash/diff_pathspec
+      const fakeGitReviewMarker = {
+        schema: 'forge-review/v1',
+        reviewed_at: '2026-05-04T13:00:00Z',
+        reviewed_by: 'ai-agent',
+        tasks_hash: tasksHash,
+        content_hash: contentHash,
+        git: {
+          is_git_repo: true, // 伪造:声称是 git 但实际不是
+          head: 'a'.repeat(40), // 凑合 schema 校验的 40 位 hex
+          diff_hash: 'sha256:' + 'b'.repeat(64), // 凑合 sha256 格式
+          diff_pathspec: { include: ['forge/changes/add-login/'], exclude: [] },
+        },
+        review_outcomes: [],
+      };
+      writeFileSync(join(changeDir, '.review-passed'), stringifyYAML(fakeGitReviewMarker), 'utf8');
+
+      // 无论是否 --force,都应拒绝
+      const r = runCli(['archive', 'add-login', '--force'], projectRoot);
+      expect(r.exitCode).toBe(2);
+      expect(r.stderr).toMatch(/伪造|is_git_repo=true.*不是 git|实际不是 git/);
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
     }

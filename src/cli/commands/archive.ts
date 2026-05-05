@@ -7,6 +7,7 @@
 import { Command } from 'commander';
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { parseMarker } from '../../core/markers/index.js';
 import { validateMarkerSchema } from '../../core/validate/index.js';
@@ -19,6 +20,25 @@ import { computeTasksHash, computeContentHash } from '../../core/hash/index.js';
 import { archiveTransaction } from '../../core/archive/transaction.js';
 import { acquireLock, LockHeldError } from '../../core/archive/lock.js';
 import { recover } from '../../core/archive/recover.js';
+
+/**
+ * 检测当前目录是否真实处于 git 工作树中
+ * P1 修复:用真实 git 状态决定,不信 marker 字段
+ * @param cwd 要检测的目录路径
+ * @returns true = 真实 git 工作树, false = 非 git
+ */
+function isProjectActuallyGit(cwd: string): boolean {
+  try {
+    execFileSync('git', ['rev-parse', '--is-inside-work-tree'], {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export function buildArchiveCommand(): Command {
   return new Command('archive')
@@ -173,11 +193,13 @@ export function buildArchiveCommand(): Command {
           process.exit(2);
         }
 
-        // 步骤 4:human-override + non-git --force + git integrity + outcomes 校验
+        // 步骤 4:human-override + 真实 git 状态校验 + outcomes 校验
         const verifyBy = vRec['verified_by'];
         const reviewBy = rRec['reviewed_by'];
         const reviewGit = reviewRec['git'] as Record<string, unknown> | undefined;
-        const isGitRepo = reviewGit?.['is_git_repo'] === true;
+        const markerSaysGit = reviewGit?.['is_git_repo'] === true;
+        // P1 修复:用真实 git 状态决定,不信 marker 字段
+        const projectIsGit = isProjectActuallyGit(process.cwd());
 
         // 4a. human-override 必须 --force
         if (verifyBy === 'human-override' || reviewBy === 'human-override') {
@@ -195,15 +217,31 @@ export function buildArchiveCommand(): Command {
           }
         }
 
-        // 4b. P1.3 — non-git review 必须 --force(spec §3.4 要求)
-        if (!isGitRepo && !opts.force) {
+        // 4b. marker 与真实 git 状态不一致 → 可疑伪造,拒绝(--force 也不能覆盖)
+        if (projectIsGit && !markerSaysGit) {
+          console.error(
+            '✗ review marker 标记 is_git_repo=false,但项目实际是 git。可能为伪造,拒绝(即使 --force)',
+          );
+          await archiveRelease();
+          process.exit(2);
+        }
+        if (!projectIsGit && markerSaysGit) {
+          console.error(
+            '✗ review marker 标记 is_git_repo=true,但项目实际不是 git。可能为伪造,拒绝',
+          );
+          await archiveRelease();
+          process.exit(2);
+        }
+
+        // 4c. 真非 git → 必须 --force(spec §3.4 要求)
+        if (!projectIsGit && !opts.force) {
           console.error(`✗ 非 git 项目下 review 标记不绑定代码 diff,archive 必须 --force 才接受`);
           await archiveRelease();
           process.exit(2);
         }
 
-        // 4c. P1.3 — git review:重算 git.head + git.diff_hash 比对
-        if (isGitRepo) {
+        // 4d. 真 git → 跑 git integrity(重算 head + diff_hash)
+        if (projectIsGit) {
           const gitResult = await validateReviewGitIntegrity(reviewRec, process.cwd(), reviewPath);
           if (!gitResult.valid) {
             console.error('✗ review git 完整性校验失败:');
@@ -213,7 +251,7 @@ export function buildArchiveCommand(): Command {
           }
         }
 
-        // 4d. P1.3 — review_outcomes:accepted=true 必须 resolved=true
+        // 4e. review_outcomes:accepted=true 必须 resolved=true(已实现,不变)
         const outResult = validateReviewOutcomes(reviewRec, reviewPath);
         if (!outResult.valid) {
           console.error('✗ review_outcomes 校验失败:');

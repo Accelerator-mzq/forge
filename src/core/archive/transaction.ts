@@ -46,19 +46,36 @@ export async function archiveTransaction(input: ArchiveTransactionInput): Promis
   // 若目标已存在,rename 会失败(EEXIST/ENOTEMPTY),即 Move 失败路径
   await rename(sourceDir, archiveTargetDir);
 
-  // —— 阶段 2:Sync(可回滚)——
+  // —— 阶段 1.5:Backup(独立阶段,失败立即反向 rename + 不进 Sync)——
+  // P2.2 修复:backup 独立成阶段,失败时 specs 不被破坏
+  let backupSucceeded = false;
   try {
-    // 2a. 备份当前 specs/(用于回滚)
     if (existsSync(currentSpecsDir)) {
       await cp(currentSpecsDir, backupDir, { recursive: true });
     }
+    backupSucceeded = true;
+  } catch (backupErr) {
+    // 部分 backup 残留 → 清理
+    if (existsSync(backupDir)) {
+      await rm(backupDir, { recursive: true, force: true });
+    }
+    // 反向 rename:把已移走的 change 目录恢复(specs/ 未动)
+    try {
+      await rename(archiveTargetDir, sourceDir);
+    } catch {
+      // 反向 rename 失败也忽略,把原始 backup 错抛出去(用户能看到 specs/ 未变)
+    }
+    throw new Error(`Backup failed before sync: ${(backupErr as Error).message}`);
+  }
 
-    // 2b. 读 deltas + 应用
+  // —— 阶段 2:Sync(可回滚,只在 backup 成功时启用 backup 路径)——
+  try {
+    // 2a. 读 deltas + 应用
     const archiveSpecsDir = join(archiveTargetDir, 'specs');
     const deltas = await readDeltas(archiveSpecsDir, currentSpecsDir);
     await applyDeltas(currentSpecsDir, deltas);
 
-    // 2c. 成功 → 清理 backup
+    // 2b. 成功 → 清理 backup
     if (existsSync(backupDir)) {
       await rm(backupDir, { recursive: true, force: true });
     }
@@ -66,8 +83,8 @@ export async function archiveTransaction(input: ArchiveTransactionInput): Promis
     // —— 回滚路径(P2.3 修复:用 rolledBack flag 防止 throw 被 inner catch 误捕获)——
     let rolledBack = false;
     try {
-      // a. 从 backup 恢复 specs/
-      if (existsSync(backupDir)) {
+      // a. 仅 backupSucceeded 时才从 backup 恢复 specs/
+      if (backupSucceeded && existsSync(backupDir)) {
         // 清除(可能)已部分修改的 specs/
         await rm(currentSpecsDir, { recursive: true, force: true });
         await cp(backupDir, currentSpecsDir, { recursive: true });

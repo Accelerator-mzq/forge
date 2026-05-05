@@ -122,4 +122,29 @@ describe('acquireLock — O_CREAT|O_EXCL lock with stale pid detection', () => {
       cleanup();
     }
   });
+
+  // —— case 5:P2.1 修复 — fresh clone 时 .cache/ 不存在 → acquireLock 不抛 ENOENT ——
+  it('P2.1:fresh tmpdir 不预创建 .cache/ → acquireLock 自动 mkdir,正常获取并 release', async () => {
+    // 创建一个全新 tmpdir,不调用 setupForgeRoot(不预创建 .cache/)
+    const forgeRoot = mkdtempSync(join(tmpdir(), 'forge-lock-fresh-'));
+    const lockPath = join(forgeRoot, '.cache', 'archive.lock');
+    try {
+      // 验证 .cache/ 确实不存在
+      expect(existsSync(join(forgeRoot, '.cache'))).toBe(false);
+
+      // acquireLock 应该自动创建 .cache/ 目录,不抛 ENOENT
+      const release = await acquireLock(forgeRoot, 'archive');
+
+      // lock 文件已创建
+      expect(existsSync(lockPath)).toBe(true);
+
+      // release lock
+      await release();
+
+      // lock 文件已被删除
+      expect(existsSync(lockPath)).toBe(false);
+    } finally {
+      rmSync(forgeRoot, { recursive: true, force: true });
+    }
+  });
 });

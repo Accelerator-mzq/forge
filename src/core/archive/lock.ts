@@ -2,8 +2,8 @@
 // 用 O_CREAT|O_EXCL 独占创建 .cache/archive.lock,含 stale pid 检测
 
 import { writeFile, readFile, rm } from 'node:fs/promises';
-import { existsSync, openSync, closeSync, constants } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, openSync, closeSync, mkdirSync, constants } from 'node:fs';
+import { join, dirname } from 'node:path';
 
 /** lock 文件内容结构 */
 interface LockData {
@@ -41,6 +41,9 @@ export async function acquireLock(
   mode: 'archive' | 'recover',
 ): Promise<() => Promise<void>> {
   const lockPath = join(forgeRoot, '.cache', 'archive.lock');
+
+  // P2.1 修复:fresh clone 后 .cache/ 不存在 → 提前 mkdir
+  mkdirSync(dirname(lockPath), { recursive: true });
 
   // 用 O_CREAT|O_EXCL 独占创建 lock 文件
   let fd: number;

@@ -212,4 +212,53 @@ describe('archiveTransaction — Move→Sync 顺序原子化(spec §3.5)', () =>
       cleanup();
     }
   });
+
+  // —— P2.2 专项:backup 阶段失败 → specs 未被修改 + change 目录已恢复 ——
+  // 通过在 backupDir 路径预建一个普通文件来让 cp(dir→file) 失败,触发 Backup 失败路径
+  it('P2.2:backup 阶段 cp 抛错 → throw "Backup failed" + specs 未变 + change 目录恢复', async () => {
+    const changeId = 'p22-backup-fail';
+    const archiveDate = '2026-05-04';
+    const { forgeRoot, changeDir, cleanup } = setupForgeRoot(changeId);
+    try {
+      // 在 forge/specs/ 放预有文件,验证 backup 失败时 specs 未被修改
+      const specsDir = join(forgeRoot, 'specs');
+      writeFileSync(join(specsDir, 'existing-spec.md'), '# Existing Spec\n');
+
+      // 记录 specs 目录原始内容
+      const specsBefore = readdirSync(specsDir).sort();
+
+      // 预先在 backupDir 路径创建一个普通文件(而非目录)
+      // cp(currentSpecsDir, backupDir, { recursive: true }) 试图将目录 copy 到已有文件路径 → 会失败
+      const cacheDir = join(forgeRoot, '.cache');
+      mkdirSync(cacheDir, { recursive: true });
+      // backupDir 用 process.pid,与 transaction.ts 中保持一致
+      const backupDir = join(cacheDir, `archive-sync-backup-${process.pid}`);
+      // 预建为普通文件:cp 将目录拷贝到此路径时会遇到 EEXIST/ENOTDIR 类错误
+      writeFileSync(backupDir, 'blocker', 'utf8');
+
+      let caughtError: Error | null = null;
+      try {
+        await archiveTransaction({ forgeRoot, changeId, archiveDate });
+      } catch (e) {
+        caughtError = e as Error;
+      }
+
+      // 1. 应该抛出包含 "Backup failed" 的错误
+      expect(caughtError).not.toBeNull();
+      expect(caughtError!.message).toContain('Backup failed');
+
+      // 2. forge/specs/ 未被修改(内容不变)
+      const specsAfter = readdirSync(specsDir).sort();
+      expect(specsAfter).toEqual(specsBefore);
+
+      // 3. forge/changes/<id>/ 已恢复(反向 rename 成功)
+      expect(existsSync(changeDir)).toBe(true);
+
+      // 4. archive 目标目录不应存在(已被反向 rename 恢复)
+      const archivedDir = join(forgeRoot, 'changes', 'archive', `${archiveDate}-${changeId}`);
+      expect(existsSync(archivedDir)).toBe(false);
+    } finally {
+      cleanup();
+    }
+  });
 });

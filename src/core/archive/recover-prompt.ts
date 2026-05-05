@@ -21,9 +21,9 @@ export async function promptRecoverChoice(
   const rl = createInterface({ input, output });
   try {
     while (true) {
-      const answer = (await rl.question(
-        '请输入 [1] 完成归档(重跑 Sync) 或 [2] 撤销归档(从 backup 还原):',
-      )).trim();
+      const answer = (
+        await rl.question('请输入 [1] 完成归档(重跑 Sync) 或 [2] 撤销归档(从 backup 还原):')
+      ).trim();
       if (answer === '1') return 'complete-archive';
       if (answer === '2') return 'undo-archive';
       console.log('无效输入,请输入 1 或 2');

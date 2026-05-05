@@ -6,7 +6,11 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { recover, checkBackupIntegrity, checkArchiveIntegrity } from '../../../src/core/archive/recover.js';
+import {
+  recover,
+  checkBackupIntegrity,
+  checkArchiveIntegrity,
+} from '../../../src/core/archive/recover.js';
 
 // —— helper:创建基础 forgeRoot 目录结构 ——
 function setupForgeRoot(): { forgeRoot: string; cleanup: () => void } {
@@ -250,7 +254,9 @@ describe('forge-archive/recover Plan 6 case C 完整性 check', () => {
   });
 
   it('checkBackupIntegrity:目录不存在 → ok=false', async () => {
-    const r = await checkBackupIntegrity(join(forgeRoot, 'forge', '.cache', 'archive-sync-backup-x'));
+    const r = await checkBackupIntegrity(
+      join(forgeRoot, 'forge', '.cache', 'archive-sync-backup-x'),
+    );
     expect(r.ok).toBe(false);
     expect(r.reason).toContain('不存在');
   });

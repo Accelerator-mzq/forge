@@ -253,7 +253,9 @@ export interface ArchiveIntegrityResult {
  *
  * 若任一不满足 → ok=false + reason 描述
  */
-export async function checkArchiveIntegrity(archiveChangeDir: string): Promise<ArchiveIntegrityResult> {
+export async function checkArchiveIntegrity(
+  archiveChangeDir: string,
+): Promise<ArchiveIntegrityResult> {
   if (!existsSync(archiveChangeDir)) {
     return { ok: false, reason: 'archive change 目录不存在' };
   }

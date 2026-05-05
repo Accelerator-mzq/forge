@@ -55,7 +55,17 @@ pnpm dlx @accelerator-mzq/forge init --harness claude
 
 ## 状态
 
-**v0.1 候选**:Phase 1+2+3+4+5+6 完成,自动化 skill eval 跑在 weekly + PR cadence,本地 5 命令全 0,**release gate 通过即可发版**。详见 [`CHANGELOG.md`](CHANGELOG.md)。
+**v0.1.0 候选**:Phase 1+2+3+4+5+6 完成。
+
+- 本地 5 命令(typecheck / lint / format:check / build / test)全 0
+- 测试 275 passing(含 e2e-acceptance env-gated 1 skipped)
+- CI Linux + Windows 双绿
+- 自动化 skill eval 在 weekly + PR cadence 跑
+- `npm publish` 工件已通过本地 release gate(`scripts/release-gate.mjs`)
+
+**发版前置**:maintainer 跑 [`docs/release-gate-checklist.md`](docs/release-gate-checklist.md) 手动 harness acceptance test 两个 harness。通过即可发 v0.1.0。
+
+详见 [`CHANGELOG.md`](CHANGELOG.md)。
 
 ## 许可
 

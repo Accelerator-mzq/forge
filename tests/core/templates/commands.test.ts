@@ -49,4 +49,14 @@ describe('templates/commands', () => {
     expect(content).toContain('forge-review/v1');
     expect(content).toContain('review_outcomes');
   });
+
+  it('verify 命令引用 forge:verification-before-completion 且含 verify-passed YAML schema', async () => {
+    const content = await loadCommand('verify');
+    expect(content).toContain('forge:verification-before-completion');
+    expect(content).toContain('.verify-passed');
+    expect(content).toContain('.verify-failed');
+    expect(content).toContain('forge-verify/v1');
+    expect(content).toContain('fake_completions');
+    expect(content).toContain('evidence');
+  });
 });

@@ -20,6 +20,7 @@ export const COMMAND_NAMES = [
 
 export type CommandName = (typeof COMMAND_NAMES)[number];
 
+/** 单 command 内容加载 — 用 import.meta.url 定位,开发与生产路径自适应 */
 export async function loadCommand(name: CommandName): Promise<string> {
   return readFile(join(__dirname, `${name}.md`), 'utf8');
 }
@@ -29,6 +30,7 @@ export interface LoadedCommand {
   content: string;
 }
 
+/** 全量加载 6 个 slash 命令,失败抛错(说明某个 .md 漏建) */
 export async function loadAllCommands(): Promise<LoadedCommand[]> {
   return Promise.all(
     COMMAND_NAMES.map(async (name) => ({ name, content: await loadCommand(name) })),

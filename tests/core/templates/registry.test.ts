@@ -1,7 +1,6 @@
 // templates registry 测试 — SKILL_NAMES + COMMAND_NAMES 数量与拼写
 import { describe, it, expect } from 'vitest';
-import { SKILL_NAMES } from '../../../src/core/templates/skills/index.js';
-import { COMMAND_NAMES } from '../../../src/core/templates/commands/index.js';
+import { SKILL_NAMES, COMMAND_NAMES } from '../../../src/core/templates/index.js';
 
 describe('templates registry', () => {
   // 验证 spec §2.2 表里的 12 个 skill 全到位
@@ -10,13 +9,21 @@ describe('templates registry', () => {
     expect(new Set(SKILL_NAMES).size).toBe(12);
   });
 
-  // 验证关键 skill 名无拼写漂移(Plan 5 eval scenarios.yaml 文件名要对得上)
-  it('SKILL_NAMES 含核心几个 skill 字面量', () => {
-    expect(SKILL_NAMES).toContain('using-forge');
-    expect(SKILL_NAMES).toContain('brainstorming');
-    expect(SKILL_NAMES).toContain('writing-plans');
-    expect(SKILL_NAMES).toContain('test-driven-development');
-    expect(SKILL_NAMES).toContain('verification-before-completion');
+  it('SKILL_NAMES 全量字面量与顺序匹配 spec §2.2 表', () => {
+    expect(SKILL_NAMES).toEqual([
+      'using-forge',
+      'brainstorming',
+      'writing-plans',
+      'subagent-driven-development',
+      'test-driven-development',
+      'requesting-code-review',
+      'receiving-code-review',
+      'verification-before-completion',
+      'systematic-debugging',
+      'dispatching-parallel-agents',
+      'using-git-worktrees',
+      'finishing-a-development-branch',
+    ]);
   });
 
   it('COMMAND_NAMES 含 6 个不重复命令', () => {

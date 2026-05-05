@@ -1,15 +1,11 @@
 // forge update 子命令集成测试
 // 验证:已 init 后重铺 skills、未 init 报错、--harness 参数
 
-import { describe, it, expect, beforeAll } from 'vitest';
-import { execSync } from 'node:child_process';
+import { describe, it, expect } from 'vitest';
 import { mkdtempSync, rmSync, existsSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runCli } from './helpers.js';
-
-// 确保 dist/cli/index.js 是最新构建
-beforeAll(() => execSync('pnpm build', { stdio: 'inherit' }));
 
 describe('forge update', () => {
   // Test 1: 已 init 的 claude 项目 → 重铺 .claude/skills/(new content via deployAtomic)

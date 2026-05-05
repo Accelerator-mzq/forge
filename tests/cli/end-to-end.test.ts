@@ -1,15 +1,11 @@
 // forge CLI 端到端集成测试 — 真跑 forge CLI 命令,验证完整工作流
 // 包含 forge init、forge --version 等关键命令的端到端流程验证
 
-import { describe, it, expect, beforeAll } from 'vitest';
-import { execSync } from 'node:child_process';
+import { describe, it, expect } from 'vitest';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runCli } from './helpers.js';
-
-// 确保 dist/cli/index.js 是最新构建
-beforeAll(() => execSync('pnpm build', { stdio: 'inherit' }));
 
 describe('forge CLI end-to-end', () => {
   // Test 1: forge init --harness=claude 在空目录 → 创建完整结构并 exit 0

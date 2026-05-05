@@ -1,14 +1,11 @@
 // forge validate 子命令测试
 // 测试验证 change 目录的成功/失败路径
 
-import { describe, it, expect, beforeAll } from 'vitest';
-import { execSync } from 'node:child_process';
+import { describe, it, expect } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runCli } from './helpers.js';
-
-beforeAll(() => execSync('pnpm build', { stdio: 'inherit' }));
 
 // 帮助函数：生成临时 change 目录，支持覆盖 proposal、design、tasks、specs 文件
 function makeChangeDir(

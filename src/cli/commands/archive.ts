@@ -35,12 +35,22 @@ export function buildArchiveCommand(): Command {
           //   clean / A / B / C → 0(clean/已恢复/需用户看消息后决策)
           //   corrupt → 4(需人工介入)
           if (r.case === 'corrupt') {
+            // C2 修复:先 release lock 再 exit,避免 process.exit 跳过 finally
+            // 置 undefined 防止 finally 再次调用
+            const rel = release;
+            release = undefined;
+            if (rel) await rel();
             process.exit(4);
           }
+          // C2 修复:先 release lock 再 exit,置 undefined 防止 finally 重复调用
+          const rel = release;
+          release = undefined;
+          if (rel) await rel();
           process.exit(0);
         } catch (err) {
           if (err instanceof LockHeldError) {
             console.error(err.message);
+            // LockHeldError 时 release 未赋值,无需 release
             process.exit(5);
           }
           throw err;
@@ -55,8 +65,10 @@ export function buildArchiveCommand(): Command {
         process.exit(1);
       }
 
-      const release = await acquireLock(forgeRoot, 'archive');
+      // C2 修复:改为 let,允许在 process.exit 前先 release
+      let archiveRelease: (() => Promise<void>) | undefined;
       try {
+        archiveRelease = await acquireLock(forgeRoot, 'archive');
         const changeDir = join(forgeRoot, 'changes', changeId);
         const verifyPath = join(changeDir, '.verify-passed');
         const reviewPath = join(changeDir, '.review-passed');
@@ -64,10 +76,14 @@ export function buildArchiveCommand(): Command {
         // 步骤 1:检查 .verify-passed 和 .review-passed 都存在
         if (!existsSync(verifyPath)) {
           console.error(`✗ archive 拒绝:缺 .verify-passed (in ${changeDir})`);
+          // C2 修复:先 release lock 再 exit
+          await archiveRelease();
           process.exit(2);
         }
         if (!existsSync(reviewPath)) {
           console.error(`✗ archive 拒绝:缺 .review-passed (in ${changeDir})`);
+          // C2 修复:先 release lock 再 exit
+          await archiveRelease();
           process.exit(2);
         }
 
@@ -83,6 +99,8 @@ export function buildArchiveCommand(): Command {
           console.error(
             `✗ .verify-passed marker schema 校验失败:${verifyResult.errors[0]?.message}`,
           );
+          // C2 修复:先 release lock 再 exit
+          await archiveRelease();
           process.exit(2);
         }
         const reviewResult = validateMarkerSchema(reviewMarker, reviewPath);
@@ -90,6 +108,8 @@ export function buildArchiveCommand(): Command {
           console.error(
             `✗ .review-passed marker schema 校验失败:${reviewResult.errors[0]?.message}`,
           );
+          // C2 修复:先 release lock 再 exit
+          await archiveRelease();
           process.exit(2);
         }
 
@@ -105,12 +125,16 @@ export function buildArchiveCommand(): Command {
         // 比对 verify marker 里的 hash
         if (tasksHashNow !== vRec['tasks_hash'] || contentHashNow !== vRec['content_hash']) {
           console.error('✗ .verify-passed marker 已过期(tasks/content hash 不匹配),请重跑 verify');
+          // C2 修复:先 release lock 再 exit
+          await archiveRelease();
           process.exit(2);
         }
 
         // 比对 review marker 里的 hash
         if (tasksHashNow !== rRec['tasks_hash'] || contentHashNow !== rRec['content_hash']) {
           console.error('✗ .review-passed marker 已过期(tasks/content hash 不匹配),请重跑 review');
+          // C2 修复:先 release lock 再 exit
+          await archiveRelease();
           process.exit(2);
         }
 
@@ -126,6 +150,8 @@ export function buildArchiveCommand(): Command {
                 '  reviewed_by=' +
                 reviewBy,
             );
+            // C2 修复:先 release lock 再 exit
+            await archiveRelease();
             process.exit(2);
           }
         }
@@ -136,7 +162,8 @@ export function buildArchiveCommand(): Command {
 
         console.log(`✓ archived ${changeId} → changes/archive/${archiveDate}-${changeId}`);
       } finally {
-        await release();
+        // finally 仍保留作为兜底(捕获 throw 时也能 release)
+        if (archiveRelease) await archiveRelease();
       }
     });
 }

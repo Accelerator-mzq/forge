@@ -1,14 +1,11 @@
 // forge config 子命令测试
 // 测试 get/set 操作及错误路径
 
-import { describe, it, expect, beforeAll } from 'vitest';
-import { execSync } from 'node:child_process';
+import { describe, it, expect } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runCli } from './helpers.js';
-
-beforeAll(() => execSync('pnpm build', { stdio: 'inherit' }));
 
 describe('forge config', () => {
   // Test 1: forge config set <field> <value> 能写入 forge/config.yaml

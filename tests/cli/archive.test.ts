@@ -1,17 +1,13 @@
 // forge archive 子命令集成测试
 // 覆盖:happy path / 缺 marker / hash 不匹配 / human-override + --force / --recover
 
-import { describe, it, expect, beforeAll } from 'vitest';
-import { execSync } from 'node:child_process';
+import { describe, it, expect } from 'vitest';
 import { mkdtempSync, rmSync, existsSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { stringify as stringifyYAML } from 'yaml';
 import { computeTasksHash, computeContentHash } from '../../src/core/hash/index.js';
 import { runCli } from './helpers.js';
-
-// 确保 dist/cli/index.js 是最新构建
-beforeAll(() => execSync('pnpm build', { stdio: 'inherit' }));
 
 // ─── Helper: 搭建标准 forge 骨架 ───────────────────────────────────────────────
 

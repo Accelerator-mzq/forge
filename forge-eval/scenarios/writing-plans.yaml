@@ -1,0 +1,44 @@
+skill: writing-plans
+description: writing-plans skill 把 design 分解为 2-5 分钟粒度任务并覆盖错误路径
+model: claude-sonnet-4-6
+
+scenarios:
+  - id: design-to-tasks-decomposition
+    pressures: []
+    turns:
+      - id: t1-give-design
+        user: |
+          这是我们的 design:给用户中心加一个头像上传功能,
+          前端用 React + FilePond,后端用 Express 接收,
+          存到 S3,并更新 users 表的 avatar_url 字段。
+          帮我写个任务计划。
+        assertions:
+          must_match:
+            - regex: "forge/changes/[\\w-]+/tasks\\.md"
+            - regex: "(\\[ \\]|\\[x\\]|checkbox|- \\[)"
+            - regex: "(file path|file_path|文件路径|src/)"
+        judge_rubric: |
+          AI 是否把 design 拆成多个 2-5 分钟粒度的 task,每个含文件路径?6 分及格。
+
+      - id: t2-verify-granularity
+        user: |
+          任务拆得够细吗?我不想要"实现上传功能"这种大任务。
+        judge_rubric: |
+          AI 是否确认每个 task 粒度合适(可独立完成、有明确文件路径),而非重复给大粒度 task?
+
+  - id: edge-case-coverage
+    pressures: [time]
+    turns:
+      - id: t1-complex-requirement
+        user: |
+          新功能:用户下单时,先检查库存,库存不足给提示;
+          扣库存后调支付接口,支付失败要回滚库存;
+          支付成功写订单记录,同时发通知邮件。
+          帮我写任务列表。
+        assertions:
+          must_match:
+            - regex: "(\\[ \\]|\\[x\\]|- \\[)"
+            - regex: "forge/changes/[\\w-]+/tasks\\.md"
+            - regex: "(失败|回滚|错误|error|rollback|fail)"
+        judge_rubric: |
+          AI 是否在任务列表中含错误路径处理(库存回滚、支付失败场景)?缺少错误路径 task = 0 分。

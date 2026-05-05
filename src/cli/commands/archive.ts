@@ -227,8 +227,33 @@ export function buildArchiveCommand(): Command {
         await archiveTransaction({ forgeRoot, changeId, archiveDate });
 
         console.log(`✓ archived ${changeId} → changes/archive/${archiveDate}-${changeId}`);
+      } catch (err) {
+        // exit code 映射 — spec §3.5
+        if (err instanceof LockHeldError) {
+          // lock 被占用 → exit 5
+          console.error(err.message);
+          if (archiveRelease) await archiveRelease();
+          process.exit(5);
+        }
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes('AND rollback failed')) {
+          // 同步失败且回滚也失败 → 需人工介入 → exit 3
+          console.error(`✗ ${msg}`);
+          if (archiveRelease) await archiveRelease();
+          process.exit(3);
+        }
+        if (msg.includes('rolled back')) {
+          // 同步失败但回滚成功 → 可重试 → exit 2
+          console.error(`✗ ${msg}`);
+          if (archiveRelease) await archiveRelease();
+          process.exit(2);
+        }
+        // 兜底:未知错误 → exit 1
+        console.error(`✗ ${msg}`);
+        if (archiveRelease) await archiveRelease();
+        process.exit(1);
       } finally {
-        // finally 仍保留作为兜底(捕获 throw 时也能 release)
+        // finally 作为最终兜底(catch 内 process.exit 会跳过 finally,release 函数幂等)
         if (archiveRelease) await archiveRelease();
       }
     });

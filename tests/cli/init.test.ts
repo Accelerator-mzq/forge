@@ -128,8 +128,8 @@ describe('forge init', () => {
     }
   });
 
-  // Test 7: 幂等性 — 二次 forge init 不会覆盖已有 config.yaml(不重写)
-  it('二次 forge init → config.yaml 存在但不覆盖内容', () => {
+  // Test 7: 幂等性 — 二次 forge init 相同 harness → harness 字段相同
+  it('二次 forge init 相同 harness → harness 字段保持不变', () => {
     const d = mkdtempSync(join(tmpdir(), 'forge-init-idempotent-'));
     try {
       // 第一次 init
@@ -137,14 +137,51 @@ describe('forge init', () => {
       const configPath = join(d, 'forge', 'config.yaml');
       expect(existsSync(configPath)).toBe(true);
 
-      const originalContent = readFileSync(configPath, 'utf8');
-
-      // 第二次 init 不应重写 config.yaml
+      // 第二次 init 相同 harness
       const r2 = runCli(['init', '--harness=claude'], d);
       expect(r2.exitCode).toBe(0);
 
+      // harness 字段应该一致(yaml 格式可能有细微空白差异,只检查字段内容)
       const afterContent = readFileSync(configPath, 'utf8');
-      expect(afterContent).toBe(originalContent);
+      expect(afterContent).toContain('claude');
+    } finally {
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  // Test P2.1: 已有 config.yaml + forge init --harness=codex → harness 变 codex,schema 字段保留
+  it('P2.1:已有 config.yaml(harness=claude) + init --harness=codex → harness 变 codex,schema 字段保留', () => {
+    const d = mkdtempSync(join(tmpdir(), 'forge-init-p21-'));
+    try {
+      // 第一次 init claude
+      runCli(['init', '--harness=claude'], d);
+      const configPath = join(d, 'forge', 'config.yaml');
+      expect(existsSync(configPath)).toBe(true);
+      const firstContent = readFileSync(configPath, 'utf8');
+      expect(firstContent).toContain('claude');
+
+      // 第二次 init codex — 应该覆盖 harness 字段,但保留 schema
+      const r2 = runCli(['init', '--harness=codex'], d);
+      expect(r2.exitCode).toBe(0);
+
+      const afterContent = readFileSync(configPath, 'utf8');
+      // harness 字段更新为 codex
+      expect(afterContent).toContain('codex');
+      // schema 字段保留
+      expect(afterContent).toContain('forge-spec-driven/v1');
+    } finally {
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  // Test P2.2a: --force flag 被接受(当前 noop,为 Plan 4 准备的 surface)
+  it('P2.2:accepts --force flag (currently noop, prepared for Plan 4)', () => {
+    const d = mkdtempSync(join(tmpdir(), 'forge-init-force-'));
+    try {
+      const r = runCli(['init', '--harness=claude', '--force'], d);
+      expect(r.exitCode).toBe(0);
+      // 当前是 noop,只验证不报错,命令正常完成
+      expect(r.stdout).toContain('forge initialized');
     } finally {
       rmSync(d, { recursive: true, force: true });
     }

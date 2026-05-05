@@ -85,4 +85,22 @@ describe('forge update', () => {
       rmSync(d, { recursive: true, force: true });
     }
   });
+
+  // Test P2.2: --force flag 被接受(当前 noop,为 Plan 4 准备的 surface)
+  it('P2.2:accepts --force flag (currently noop, prepared for Plan 4)', () => {
+    const d = mkdtempSync(join(tmpdir(), 'forge-update-force-'));
+    try {
+      // 先 init
+      const initR = runCli(['init', '--harness=claude'], d);
+      expect(initR.exitCode).toBe(0);
+
+      // 跑 update --force → 应该不报错
+      const r = runCli(['update', '--force'], d);
+      expect(r.exitCode).toBe(0);
+      // 当前是 noop,只验证不报错,命令正常完成
+      expect(r.stdout).toContain('updated');
+    } finally {
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
 });

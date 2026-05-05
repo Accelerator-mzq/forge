@@ -18,7 +18,11 @@ export function buildUpdateCommand(): Command {
       'comma-separated harness ids (claude,codex); overrides config.yaml',
       '',
     )
-    .action(async (opts: { harness: string }) => {
+    .option(
+      '--force',
+      '强制覆盖已有 skill 文件(v0.1 stub 阶段:此 flag 当前为 noop,Plan 4 真实施 hash 比对后启用)',
+    )
+    .action(async (opts: { harness: string; force?: boolean }) => {
       const cwd = process.cwd();
       const forgeDir = join(cwd, 'forge');
       const configPath = join(forgeDir, 'config.yaml');

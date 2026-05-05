@@ -694,6 +694,8 @@ case 全干净:报"无半完成状态需要恢复",退出码 0
 | 写入 `.claude/skills/...` 时权限不足 | 报错并提示 chmod / 切目录;不静默跳过 |
 | 已经有同名 skill(用户/其他工具铺过) | **不覆盖**——警告"已存在 .claude/skills/forge-brainstorming/SKILL.md,跳过。要强制覆盖请加 `--force`" |
 | `forge update` 检测到 skill 文本被用户改过(hash 不匹配) | 默认不覆盖 + 警告;`--force` 才覆盖。提示"如想保留改动,请改名为 forge-brainstorming-mine" |
+
+**v0.1 实施差异**:Plan 3 的 transaction.ts(`src/core/harness-adapters/transaction.ts`)Commit 阶段当前**无条件**覆盖目标文件(rm 旧 + rename 新),不做 hash 比对。理由:Plan 3 stub 阶段(Plan 4 之前)用户极少手改 forge-* skill。CLI 已经预留 `--force` flag(forge init / forge update)作为未来 surface,Plan 4 真模板上线时实施 hash 比对 + 默认拒绝覆盖语义。**v0.1 用户警告**:不要手改 `forge-*` skill 文件,会被下次 update 静默覆盖。
 | Adapter 部分成功(claude 成功 codex 失败) | **原子化:三阶段 Stage→Backup→Commit + 反向回滚**(见下"原子化协议") |
 
 **原子化协议(三阶段提交)**:

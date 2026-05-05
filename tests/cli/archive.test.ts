@@ -489,6 +489,50 @@ describe('forge archive', () => {
     }
   });
 
+  // Test P2.3a: lock 被占用(预写真活 pid 的 lock 文件) → exit 5 + stderr 含 LockHeldError 信息
+  it('P2.3:lock 被占用(写入当前进程 pid 的 lock 文件) → archive exit 5,stderr 含锁占用信息', async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'forge-archive-lockbusy-'));
+    try {
+      const changesDir = setupForgeRoot(projectRoot);
+      await setupValidChange(changesDir, 'add-login');
+
+      // 预先写入一个"存活"进程的 lock 文件(使用 process.pid 自身)
+      const lockPath = join(projectRoot, 'forge', '.cache', 'archive.lock');
+      writeFileSync(
+        lockPath,
+        JSON.stringify({
+          pid: process.pid, // 当前进程 pid → 系统认为该进程存活 → lock 被占用
+          started_at: new Date().toISOString(),
+          mode: 'archive',
+        }),
+        'utf8',
+      );
+
+      const r = runCli(['archive', 'add-login', '--force'], projectRoot);
+      // lock 被占用 → exit 5
+      expect(r.exitCode).toBe(5);
+      // stderr 含锁占用相关信息(LockHeldError 消息格式: "another forge archive is in progress ...")
+      expect(r.stderr).toMatch(/lock|occupied|busy|占用|LockHeld|in progress/i);
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  // Test P2.3b: 成功 archive 仍 exit 0(确保 catch 不误吞正常路径)
+  it('P2.3 回归:成功 archive 仍 exit 0(catch 不误吞正常路径)', async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'forge-archive-p23b-'));
+    try {
+      const changesDir = setupForgeRoot(projectRoot);
+      await setupValidChange(changesDir, 'add-login');
+
+      const r = runCli(['archive', 'add-login', '--force'], projectRoot);
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout).toContain('archived');
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   // Test P1.3c: review_outcomes accepted=true + resolved=false → 拒绝
   it('P1.3c:review_outcomes 含 accepted=true + resolved=false → archive 拒绝,stderr 含 review_outcomes', async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), 'forge-archive-p13c-'));

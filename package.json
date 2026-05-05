@@ -17,7 +17,7 @@
     "LICENSE-THIRD-PARTY.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node scripts/copy-templates.mjs && tsc -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",

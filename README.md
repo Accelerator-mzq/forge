@@ -2,7 +2,7 @@
 
 > OpenSpec 的产物驱动工作流 × superpowers 的行为塑造 skill 体系,融合成一个独立的 npm CLI + 多 harness 适配器。
 
-**当前状态**:设计阶段(spec 已完成 5 轮 Codex 对抗审查)。实施未开始。
+**当前状态**:Phase 1 Core Engine 完成(80 unit tests passing)。**Phase 2 CLI + Phase 3 Adapters 进行中**(Plan 3)。
 
 ## 设计文档
 

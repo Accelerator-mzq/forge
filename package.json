@@ -46,6 +46,20 @@
     "typescript": "^5.6.0",
     "vitest": "^2.0.0"
   },
+  "keywords": [
+    "openspec",
+    "superpowers",
+    "skill",
+    "ai-workflow",
+    "claude-code",
+    "codex",
+    "spec-driven-development",
+    "tdd",
+    "code-review"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",

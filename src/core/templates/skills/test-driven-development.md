@@ -361,6 +361,8 @@ When adding mocks or test utilities, avoid common pitfalls:
 - Adding test-only methods to production classes
 - Mocking without understanding dependencies
 
+<!-- testing-anti-patterns 支持文件在 forge v0.1 不提供 -->
+
 ## Final Rule
 
 ```

@@ -26,6 +26,7 @@ digraph when_to_use {
     "Tasks mostly independent?" -> "Stay in this session?" [label="yes"];
     "Tasks mostly independent?" -> "Manual execution or brainstorm first" [label="no - tightly coupled"];
     "Stay in this session?" -> "forge:subagent-driven-development" [label="yes"];
+    "Stay in this session?" -> "Manual execution or brainstorm first" [label="no - parallel session"];
 }
 ```
 

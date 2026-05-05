@@ -133,12 +133,10 @@ If you find issues, fix them inline. No need to re-review — just fix and move 
 
 ## Execution Handoff
 
-After saving the plan, proceed with execution:
+After saving the plan, offer execution choice:
 
-**"Plan complete and saved to `forge/changes/<change-id>/tasks.md`.**
+> "Plan complete and saved to `forge/changes/<change-id>/tasks.md`. Execution will use the **Subagent-Driven** approach: each task is dispatched to a fresh subagent with two-stage review (spec compliance + code quality)."
 
-**Single execution option: Subagent-Driven (recommended)**
+**REQUIRED SUB-SKILL:** Use forge:subagent-driven-development to implement this plan task-by-task.
 
-**REQUIRED SUB-SKILL:** Use forge:subagent-driven-development
-- Fresh subagent per task + two-stage review
-- forge v0.1 统一用 subagent 派发,无 inline executing 模式"
+Note: forge v0.1 仅提供 subagent-driven 模式,无 inline executing 模式。

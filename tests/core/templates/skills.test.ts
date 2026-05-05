@@ -11,6 +11,8 @@ describe('templates/skills', () => {
     const parsed = matter(content);
     expect(parsed.data.name).toBe(`forge:${name}`);
     expect(parsed.data.description).toBeTruthy();
+    expect(typeof parsed.data.description).toBe('string');
+    expect((parsed.data.description as string).length).toBeGreaterThan(50);
     // 正文非空
     expect(parsed.content.trim().length).toBeGreaterThan(100);
   });

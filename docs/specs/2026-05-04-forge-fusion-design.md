@@ -606,6 +606,16 @@ archive 是两步(rename change 目录 + sync specs deltas),需保证半途失�
     退出,不进入 Move 阶段)
 ```
 
+**specs-sync delete 语义推 v0.2**:
+
+v0.1 的 specs-sync 模块(`core/specs-sync/`)只支持 `create` 和 `replace` 两种 deltas 操作。spec 中"新增/修改/删除"三种语义里,**delete 语义留给 v0.2 实现**——理由:
+
+- v0.1 的常规工作流是"新增 spec"或"修改既有 spec",删除 spec 极少见(说明该 change 决定撤销某个功能)
+- delete 需要在 changes/<id>/specs/ 用特殊标记表达(如空文件 + frontmatter `deleted: true`),会引入 schema 设计决策
+- v0.1 的 archive 命令调 specs-sync 时,如果 deltas 含 delete operation,直接抛错(`v0.2 not implemented`)
+
+v0.2 加 delete 时会同步更新 spec §3.5 + plan,设计 deletion marker 格式。
+
 **`forge archive --recover` 命令**(单次尝试 + 明确终止 + 人工驱动重试):
 
 ```
@@ -728,6 +738,7 @@ case 全干净:报"无半完成状态需要恢复",退出码 0
 | 错误 | 兜底 |
 |---|---|
 | AI 跑 `/forge:propose` 但没产出 tasks.md(漏一个产物) | `forge validate <id>` 跑完报"tasks.md missing",AI 模板要求收到这个错就回去补 |
+| AI 在 `/forge:propose` 但没产出 design.md 或产出空 design.md | `forge validate <id>` 跑完报"design.md missing or empty H1"。最小约束:必须有 H1 标题(同 proposal/specs 一致)。AI 模板要求收到这个错就回去补 |
 | AI 在 specs/ 里写了非 Given/When/Then 格式 | `forge validate` 解析失败 → 报错 → AI 必须重写 |
 | AI 在 `/forge:apply` 里勾了 task 但代码没改 / 测试没过 | 靠 verify 兜底——verify **不修改已勾的 task**(维护 §3.3 不变量 2)。改为 (a) 把虚假声称的 task id 写入 `.verify-failed` YAML 的 `fake_completions` 字段;(b) append 一条 `verify-fix-N` 修复任务到 tasks.md;(c) 由用户决定是否手动把原 task 改回 `[ ]` 重做 |
 | AI 跳过 brainstorming 直接写 propose(模糊需求被错误处理) | using-forge bootstrap 的红旗清单——"声称需求清晰但用户原话有'大概/也许/不太确定'就要回 brainstorming"。靠提示工程,做不到 100%,用户可手动撤销 propose 跑 brainstorm |

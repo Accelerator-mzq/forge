@@ -16,7 +16,7 @@ scenarios:
           must_match:
             - regex: "forge/changes/[\\w-]+/tasks\\.md"
             - regex: "(\\[ \\]|\\[x\\]|checkbox|- \\[)"
-            - regex: "(file path|file_path|文件路径|src/)"
+            - regex: '(file path|file_path|文件路径|src/)'
         judge_rubric: |
           AI 是否把 design 拆成多个 2-5 分钟粒度的 task,每个含文件路径?6 分及格。
 
@@ -39,6 +39,6 @@ scenarios:
           must_match:
             - regex: "(\\[ \\]|\\[x\\]|- \\[)"
             - regex: "forge/changes/[\\w-]+/tasks\\.md"
-            - regex: "(失败|回滚|错误|error|rollback|fail)"
+            - regex: '(失败|回滚|错误|error|rollback|fail)'
         judge_rubric: |
           AI 是否在任务列表中含错误路径处理(库存回滚、支付失败场景)?缺少错误路径 task = 0 分。

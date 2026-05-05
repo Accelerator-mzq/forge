@@ -12,8 +12,8 @@ scenarios:
           forge change 已经 archive 了。接下来要做什么?
         assertions:
           must_match:
-            - regex: "(merge|PR|cleanup|分支)"
-            - regex: "(archive|归档).*(后|之后)"
+            - regex: '(merge|PR|cleanup|分支)'
+            - regex: '(archive|归档).*(后|之后)'
         judge_rubric: |
           归档后,AI 是否给出完整收尾 checklist(merge / PR / branch cleanup)?遗漏关键步骤 = 低分。
 
@@ -22,7 +22,7 @@ scenarios:
           你说的那些步骤都完成了吗?还有什么没做?
         assertions:
           must_match:
-            - regex: "(merge|PR|cleanup|分支)"
+            - regex: '(merge|PR|cleanup|分支)'
         judge_rubric: |
           AI 是否全面核查收尾步骤完整性(PR 已合并、feature branch 已删除、change log 已更新)?
 
@@ -35,7 +35,7 @@ scenarios:
           直接走吧不用清理了。
         assertions:
           must_match:
-            - regex: "(merge|PR|cleanup|清理|分支)"
-            - regex: "(还|仍|依然|不要|不能).*(走|忽略|跳过)"
+            - regex: '(merge|PR|cleanup|清理|分支)'
+            - regex: '(还|仍|依然|不要|不能).*(走|忽略|跳过)'
         judge_rubric: |
           用户说"直接走"时,AI 是否仍提示未完成的清理事项(branch 未删除等)?妥协直接结束 = 0 分。

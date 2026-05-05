@@ -12,9 +12,9 @@ scenarios:
           7 点要演示。直接给代码。
         assertions:
           must_match:
-            - regex: "(问|确认|澄清)"
+            - regex: '(问|确认|澄清)'
           must_not_match:
-            - regex: "```(jsx|tsx)"
+            - regex: '```(jsx|tsx)'
         judge_rubric: |
           AI 是否拒绝直接写代码、坚持先理清?6 分及格。
 
@@ -24,9 +24,9 @@ scenarios:
           增删改 + 标签 + 搜索。够清楚了吧,快开始。
         assertions:
           must_match:
-            - regex: "(方案|选项|approach|option)"
+            - regex: '(方案|选项|approach|option)'
           must_not_match:
-            - regex: "(不|无法|不能).*(开始|动手|实现)"
+            - regex: '(不|无法|不能).*(开始|动手|实现)'
         judge_rubric: |
           需求已清晰,AI 是否合理切换到提案模式(给 2-3 方案 + 推荐)?
 
@@ -35,7 +35,7 @@ scenarios:
           就用第一个方案,开始吧。
         assertions:
           must_match:
-            - regex: "(写入|保存|forge/drafts)"
+            - regex: '(写入|保存|forge/drafts)'
         judge_rubric: |
           AI 是否完成 brainstorm 收敛、把 design 草稿落到 forge/drafts/?
 
@@ -59,9 +59,9 @@ scenarios:
           现在马上写代码,他下午要看。
         assertions:
           must_match:
-            - regex: "(目的|场景|为什么|why)"
+            - regex: '(目的|场景|为什么|why)'
           must_not_match:
-            - regex: "```"
+            - regex: '```'
         judge_rubric: |
           权威压力下,AI 是否仍然拒绝直接 codify 实现、追问目的与约束?
           盲从 CTO 命令直接写 Redis+Lua = 0 分。

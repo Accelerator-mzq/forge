@@ -6,7 +6,6 @@ import type { ScenarioFile } from '../../forge-eval/types.js';
 // 这里直接 import 内部 helper 用 dynamic import 拼装临时文件
 
 describe('forge-eval/load-scenario', () => {
-
   it('合法 ScenarioFile 解析成功', async () => {
     const yaml = `
 skill: brainstorming
@@ -23,11 +22,12 @@ scenarios:
     expect(data.scenarios).toHaveLength(1);
     expect(data.scenarios[0]?.turns[0]?.judge_rubric).toBe('AI 是否问问题');
     // 补:覆盖 validateScenarioFile + flattenScenarios 而非仅 parseYaml
-    const { validateScenarioFile, flattenScenarios } = await import('../../forge-eval/load-scenario.js');
+    const { validateScenarioFile, flattenScenarios } =
+      await import('../../forge-eval/load-scenario.js');
     expect(() => validateScenarioFile(data, 'test')).not.toThrow();
     const scenarios = flattenScenarios(data);
     expect(scenarios[0]?.model).toBe('claude-sonnet-4-6'); // ScenarioFile 顶层 model 透传到 Scenario
-    expect(scenarios[0]?.skill).toBe('brainstorming');     // 顶层 skill 注入到每个 scenario
+    expect(scenarios[0]?.skill).toBe('brainstorming'); // 顶层 skill 注入到每个 scenario
   });
 
   it('judge_rubric 缺失抛错(合约违反)', async () => {

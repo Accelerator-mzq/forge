@@ -11,7 +11,9 @@ describe('forge-eval/changed-only regex', () => {
   it('skill template 路径匹配', async () => {
     const m = await import('../../forge-eval/changed-only.js');
     // matchSkillTemplate / matchScenarioFile 已 export
-    expect(m.matchSkillTemplate?.('src/core/templates/skills/brainstorming.md')).toBe('brainstorming');
+    expect(m.matchSkillTemplate?.('src/core/templates/skills/brainstorming.md')).toBe(
+      'brainstorming',
+    );
     expect(m.matchSkillTemplate?.('src/core/templates/skills/unknown.md')).toBeNull();
     expect(m.matchSkillTemplate?.('src/cli/index.ts')).toBeNull();
   });

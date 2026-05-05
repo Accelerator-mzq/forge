@@ -45,7 +45,9 @@ export function buildMarkdownReport(summary: RunSummary): string {
       lines.push('**失败 turn 列表(GREEN)**:');
       for (const turn of pair.green.turnResults) {
         if (turn.turnPass) continue;
-        lines.push(`- **${turn.turnId}**:judge=${turn.judgeResult.score}(${turn.judgeResult.reasoning})`);
+        lines.push(
+          `- **${turn.turnId}**:judge=${turn.judgeResult.score}(${turn.judgeResult.reasoning})`,
+        );
         if (!turn.patternResult.skipped && !turn.patternResult.pass) {
           for (const f of turn.patternResult.failures) {
             lines.push(`  - 模式匹配失败:${f}`);

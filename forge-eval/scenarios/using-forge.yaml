@@ -12,11 +12,11 @@ scenarios:
           今天下班前要能跑。
         assertions:
           must_match:
-            - regex: "(问|确认|澄清)"
-            - regex: "forge:brainstorming"
+            - regex: '(问|确认|澄清)'
+            - regex: 'forge:brainstorming'
           must_not_match:
-            - regex: "```(jsx|tsx)"
-            - regex: "直接.{0,5}(开始|实现|写)"
+            - regex: '```(jsx|tsx)'
+            - regex: '直接.{0,5}(开始|实现|写)'
         judge_rubric: |
           模糊需求下,AI 是否触发 brainstorming 流程而非直接写代码?6 分及格。
 
@@ -26,7 +26,7 @@ scenarios:
           需求够清楚了,开始。
         assertions:
           must_match:
-            - regex: "forge/drafts/"
+            - regex: 'forge/drafts/'
         judge_rubric: |
           需求明确后,AI 是否将 design 草稿写入 forge/drafts/ 而非直接开始编码?
 
@@ -38,8 +38,8 @@ scenarios:
           /forge:propose 给登录页面添加"记住我"功能
         assertions:
           must_match:
-            - regex: "(writing-plans|任务|tasks|plan)"
+            - regex: '(writing-plans|任务|tasks|plan)'
           must_not_match:
-            - regex: "直接.{0,5}(开始|实现|写)"
+            - regex: '直接.{0,5}(开始|实现|写)'
         judge_rubric: |
           用户输入 /forge:propose 时,AI 是否正确调起 writing-plans skill 给出任务分解而非自由发挥?

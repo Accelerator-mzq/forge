@@ -12,7 +12,9 @@ import { SKILL_NAMES, type SkillName } from './load-skill.js';
  *
  * 默认 base 是 origin/main,可通过 process.env.EVAL_DIFF_BASE 覆盖(CI 中由 GitHub Actions 设)。
  */
-export function getChangedSkills(base = process.env['EVAL_DIFF_BASE'] ?? 'origin/main'): SkillName[] {
+export function getChangedSkills(
+  base = process.env['EVAL_DIFF_BASE'] ?? 'origin/main',
+): SkillName[] {
   const stdout = execFileSync('git', ['diff', '--name-only', `${base}..HEAD`], {
     encoding: 'utf8',
   });

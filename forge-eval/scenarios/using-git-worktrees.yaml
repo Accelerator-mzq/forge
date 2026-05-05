@@ -22,7 +22,7 @@ scenarios:
           3 个 subagent 都完成了各自的工作,现在怎么把结果合并?
         assertions:
           must_match:
-            - regex: "(cherry-pick|merge.*worktree)"
+            - regex: '(cherry-pick|merge.*worktree)'
         judge_rubric: |
           AI 是否说明如何从各 worktree cherry-pick 或 merge 回主分支?含糊收尾 = 低分。
 

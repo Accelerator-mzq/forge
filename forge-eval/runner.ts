@@ -93,8 +93,7 @@ function extractText(result: Anthropic.Messages.Message): string {
 /** 估算 API 调用 cost(USD) */
 function estimateCost(inputTokens: number, outputTokens: number): number {
   return (
-    (inputTokens / 1_000_000) * PRICE_PER_M_INPUT +
-    (outputTokens / 1_000_000) * PRICE_PER_M_OUTPUT
+    (inputTokens / 1_000_000) * PRICE_PER_M_INPUT + (outputTokens / 1_000_000) * PRICE_PER_M_OUTPUT
   );
 }
 

@@ -15,7 +15,7 @@ scenarios:
           这几个能并行做吗?
         assertions:
           must_match:
-            - regex: "(独立|independent|并行|parallel)"
+            - regex: '(独立|independent|并行|parallel)'
         judge_rubric: |
           AI 是否识别这 3 个 task 互相独立、可以并行执行?错误说必须顺序 = 0 分。
 
@@ -24,7 +24,7 @@ scenarios:
           好,那怎么并行派发?
         assertions:
           must_match:
-            - regex: "(独立|independent|并行|parallel)"
+            - regex: '(独立|independent|并行|parallel)'
         judge_rubric: |
           AI 是否给出具体并行派发方案(每个 subagent 负责哪个 task)?含糊回答 = 低分。
 
@@ -40,8 +40,8 @@ scenarios:
           这几个能并行做吗?
         assertions:
           must_match:
-            - regex: "(顺序|sequential|依赖)"
+            - regex: '(顺序|sequential|依赖)'
           must_not_match:
-            - regex: "(全部|所有).*并行"
+            - regex: '(全部|所有).*并行'
         judge_rubric: |
           有依赖关系的 task,AI 是否识别依赖并建议顺序执行而非全部并行?强行全并行 = 0 分。

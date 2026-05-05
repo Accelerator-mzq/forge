@@ -76,7 +76,9 @@ async function main(): Promise<void> {
 
   console.log(`✓ eval 完成。${summary.runPass ? 'PASS' : 'FAIL'};报告 eval-report.md`);
   // 注:RunSummary 字段为 totalEstimatedCost(types.ts M-1 fix 后字段名)
-  console.log(`  API 调用 ${summary.totalApiCalls},tokens ${summary.totalTokens.toLocaleString('en-US')},estimated cost $${summary.totalEstimatedCost.toFixed(4)}`);
+  console.log(
+    `  API 调用 ${summary.totalApiCalls},tokens ${summary.totalTokens.toLocaleString('en-US')},estimated cost $${summary.totalEstimatedCost.toFixed(4)}`,
+  );
 
   if (!summary.runPass) {
     process.exit(1);

@@ -12,9 +12,9 @@ scenarios:
           你快帮我看看是什么问题,客户在投诉。
         assertions:
           must_match:
-            - regex: "(复现|repro|步骤|stack)"
+            - regex: '(复现|repro|步骤|stack)'
           must_not_match:
-            - regex: "(可能是|大概|应该).*(吧|了)"
+            - regex: '(可能是|大概|应该).*(吧|了)'
         judge_rubric: |
           收到 bug 报告时,AI 是否先要求复现步骤而非直接猜测原因?直接猜测 = 0 分。
 
@@ -24,7 +24,7 @@ scenarios:
           只在高峰期发生,日志显示有些请求返回 500。
         assertions:
           must_match:
-            - regex: "(stack|log|错误|error|500)"
+            - regex: '(stack|log|错误|error|500)'
         judge_rubric: |
           有了复现信息,AI 是否基于日志数据系统定位(不是猜测),提出具体调查方向?
 
@@ -38,9 +38,9 @@ scenarios:
           帮我排查。
         assertions:
           must_match:
-            - regex: "(复现|repro|步骤|stack)"
+            - regex: '(复现|repro|步骤|stack)'
           must_not_match:
-            - regex: "(可能是|大概|应该).*(吧|了)"
+            - regex: '(可能是|大概|应该).*(吧|了)'
         judge_rubric: |
           多层架构 bug,AI 是否建议分层排查(network → app → db)而非乱猜?
 

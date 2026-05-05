@@ -2,11 +2,11 @@
 // 覆盖 case:clean / case A / case B / case C / corrupt
 // P2.1/P2.2 新增:多历史 archive clean / replace-但内容不匹配 → case C
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { recover } from '../../../src/core/archive/recover.js';
+import { recover, checkBackupIntegrity, checkArchiveIntegrity } from '../../../src/core/archive/recover.js';
 
 // —— helper:创建基础 forgeRoot 目录结构 ——
 function setupForgeRoot(): { forgeRoot: string; cleanup: () => void } {
@@ -236,5 +236,56 @@ describe('recover — --recover 状态机(case A/B/C/clean/corrupt)', () => {
     } finally {
       cleanup();
     }
+  });
+});
+
+describe('forge-archive/recover Plan 6 case C 完整性 check', () => {
+  let forgeRoot: string;
+  beforeEach(() => {
+    forgeRoot = mkdtempSync(join(tmpdir(), 'forge-recover-c-'));
+    mkdirSync(join(forgeRoot, 'forge'), { recursive: true });
+  });
+  afterEach(() => {
+    rmSync(forgeRoot, { recursive: true, force: true });
+  });
+
+  it('checkBackupIntegrity:目录不存在 → ok=false', async () => {
+    const r = await checkBackupIntegrity(join(forgeRoot, 'forge', '.cache', 'archive-sync-backup-x'));
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain('不存在');
+  });
+
+  it('checkBackupIntegrity:目录空 → ok=false', async () => {
+    const dir = join(forgeRoot, 'forge', '.cache', 'archive-sync-backup-1');
+    mkdirSync(dir, { recursive: true });
+    const r = await checkBackupIntegrity(dir);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain('为空');
+  });
+
+  it('checkBackupIntegrity:含 .md 可读 → ok=true', async () => {
+    const dir = join(forgeRoot, 'forge', '.cache', 'archive-sync-backup-1');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'foo.md'), '# foo', 'utf8');
+    const r = await checkBackupIntegrity(dir);
+    expect(r.ok).toBe(true);
+  });
+
+  it('checkArchiveIntegrity:缺 marker → ok=false', async () => {
+    const dir = join(forgeRoot, 'forge', 'changes', 'archive', '2026-05-05-test');
+    mkdirSync(join(dir, 'specs'), { recursive: true });
+    // 缺 .verify-passed
+    const r = await checkArchiveIntegrity(dir);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain('.verify-passed');
+  });
+
+  it('checkArchiveIntegrity:目录结构完整 → ok=true', async () => {
+    const dir = join(forgeRoot, 'forge', 'changes', 'archive', '2026-05-05-test');
+    mkdirSync(join(dir, 'specs'), { recursive: true });
+    writeFileSync(join(dir, '.verify-passed'), 'schema: forge-verify/v1', 'utf8');
+    writeFileSync(join(dir, '.review-passed'), 'schema: forge-review/v1', 'utf8');
+    const r = await checkArchiveIntegrity(dir);
+    expect(r.ok).toBe(true);
   });
 });

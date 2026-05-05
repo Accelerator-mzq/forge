@@ -152,3 +152,85 @@ async function verifyAllReplacedAlreadyApplied(
   }
   return true;
 }
+
+/** backup 完整性检查结果 */
+export interface BackupIntegrityResult {
+  ok: boolean;
+  reason?: string;
+}
+
+/**
+ * 检查 backup 目录完整性(Plan 6 — spec §3.5 case C 前置条件)。
+ *
+ * 完整性条件:
+ * 1. backup 目录可读
+ * 2. 目录非空(至少一个文件,否则代表 sync 没产生备份就死了)
+ * 3. 内含 .md 文件能被 utf8 读取(非二进制损坏)
+ *
+ * 若任一不满足 → ok=false + reason 描述哪条不满足
+ */
+export async function checkBackupIntegrity(backupDir: string): Promise<BackupIntegrityResult> {
+  if (!existsSync(backupDir)) {
+    return { ok: false, reason: 'backup 目录不存在' };
+  }
+  let entries: string[];
+  try {
+    entries = await readdir(backupDir);
+  } catch (err) {
+    return { ok: false, reason: `backup 目录无法读取:${(err as Error).message}` };
+  }
+  if (entries.length === 0) {
+    return { ok: false, reason: 'backup 目录为空(预期至少一个备份文件)' };
+  }
+  // 抽查前 3 个 .md 文件能否 utf8 读取
+  const mdFiles = entries.filter((e) => e.endsWith('.md')).slice(0, 3);
+  for (const name of mdFiles) {
+    try {
+      await readFile(join(backupDir, name), 'utf8');
+    } catch (err) {
+      return { ok: false, reason: `backup/${name} 无法读取:${(err as Error).message}` };
+    }
+  }
+  return { ok: true };
+}
+
+/** archive 完整性检查结果 */
+export interface ArchiveIntegrityResult {
+  ok: boolean;
+  reason?: string;
+}
+
+/**
+ * 检查 archive/<date>-<id>/ 目录完整性(Plan 6 — spec §3.5 case C 前置条件)。
+ *
+ * 完整性条件:
+ * 1. 目录存在
+ * 2. 包含 specs/ 子目录(可空,但必须存在)
+ * 3. 包含 .verify-passed 与 .review-passed 两个 marker 文件
+ * 4. 两个 marker 都能被 utf8 读取(YAML 解析交给 archive 命令的 schema 校验)
+ *
+ * 若任一不满足 → ok=false + reason 描述
+ */
+export async function checkArchiveIntegrity(archiveChangeDir: string): Promise<ArchiveIntegrityResult> {
+  if (!existsSync(archiveChangeDir)) {
+    return { ok: false, reason: 'archive change 目录不存在' };
+  }
+  if (!existsSync(join(archiveChangeDir, 'specs'))) {
+    return { ok: false, reason: 'archive 内缺 specs/ 子目录' };
+  }
+  const verifyPath = join(archiveChangeDir, '.verify-passed');
+  const reviewPath = join(archiveChangeDir, '.review-passed');
+  if (!existsSync(verifyPath)) {
+    return { ok: false, reason: '.verify-passed marker 不存在' };
+  }
+  if (!existsSync(reviewPath)) {
+    return { ok: false, reason: '.review-passed marker 不存在' };
+  }
+  try {
+    await readFile(verifyPath, 'utf8');
+    await readFile(reviewPath, 'utf8');
+  } catch (err) {
+    return { ok: false, reason: `marker 文件读取失败:${(err as Error).message}` };
+  }
+  return { ok: true };
+}

@@ -11,28 +11,28 @@ import { runCli } from './helpers.js';
 beforeAll(() => execSync('pnpm build', { stdio: 'inherit' }));
 
 // 帮助函数：生成临时 change 目录，支持覆盖 proposal、design、tasks、specs 文件
-function makeChangeDir(changeId: string, overrides?: {
-  proposal?: string;
-  design?: string;
-  tasks?: string;
-  specs?: Record<string, string>;
-}): { dir: string; cleanup: () => void } {
+function makeChangeDir(
+  changeId: string,
+  overrides?: {
+    proposal?: string;
+    design?: string;
+    tasks?: string;
+    specs?: Record<string, string>;
+  },
+): { dir: string; cleanup: () => void } {
   const d = mkdtempSync(join(tmpdir(), 'forge-cli-validate-'));
   const changeDir = join(d, 'forge', 'changes', changeId);
   mkdirSync(changeDir, { recursive: true });
 
   writeFileSync(
     join(changeDir, 'proposal.md'),
-    overrides?.proposal ?? '# Title\n\n## Why\nr\n\n## What\nw\n'
+    overrides?.proposal ?? '# Title\n\n## Why\nr\n\n## What\nw\n',
   );
   writeFileSync(
     join(changeDir, 'design.md'),
-    overrides?.design ?? '# Design\n\n## Architecture\nx\n'
+    overrides?.design ?? '# Design\n\n## Architecture\nx\n',
   );
-  writeFileSync(
-    join(changeDir, 'tasks.md'),
-    overrides?.tasks ?? '# T\n\n- [ ] t1: a\n'
-  );
+  writeFileSync(join(changeDir, 'tasks.md'), overrides?.tasks ?? '# T\n\n- [ ] t1: a\n');
 
   const specsDir = join(changeDir, 'specs');
   mkdirSync(specsDir);
@@ -43,13 +43,13 @@ function makeChangeDir(changeId: string, overrides?: {
   } else {
     writeFileSync(
       join(specsDir, 's.md'),
-      '# S\n\n## Scenario: x\n\n**Given** g\n**When** w\n**Then** t\n'
+      '# S\n\n## Scenario: x\n\n**Given** g\n**When** w\n**Then** t\n',
     );
   }
 
   return {
     dir: d,
-    cleanup: () => rmSync(d, { recursive: true, force: true })
+    cleanup: () => rmSync(d, { recursive: true, force: true }),
   };
 }
 

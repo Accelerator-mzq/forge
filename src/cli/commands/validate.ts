@@ -23,7 +23,7 @@ export function buildValidateCommand(): Command {
         console.error(`✗ ${changeId}: ${result.errors.length} errors`);
         for (const e of result.errors) {
           console.error(
-            `  - [${e.artifact}] ${e.field ?? ''}: ${e.message}${e.file ? ` (${e.file}${e.line ? `:${e.line}` : ''})` : ''}`
+            `  - [${e.artifact}] ${e.field ?? ''}: ${e.message}${e.file ? ` (${e.file}${e.line ? `:${e.line}` : ''})` : ''}`,
           );
         }
         process.exit(2);

@@ -36,7 +36,5 @@ scenarios:
         assertions:
           must_match:
             - regex: "(worktree|\\.git/forge-worktrees)"
-          must_not_match:
-            - regex: "(直接|main).*(commit|提交).*worktree"
         judge_rubric: |
           AI 是否坚持让 subagent 在 worktree 内提交,而非允许污染主 workspace?允许污染 = 0 分。

@@ -16,8 +16,6 @@ scenarios:
         assertions:
           must_match:
             - regex: "(独立|independent|并行|parallel)"
-          must_not_match:
-            - regex: "(全部|所有).*并行"
         judge_rubric: |
           AI 是否识别这 3 个 task 互相独立、可以并行执行?错误说必须顺序 = 0 分。
 

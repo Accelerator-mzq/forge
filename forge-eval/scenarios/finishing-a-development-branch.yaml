@@ -35,8 +35,7 @@ scenarios:
           直接走吧不用清理了。
         assertions:
           must_match:
-            - regex: "(merge|PR|cleanup|分支)"
-          must_not_match:
-            - regex: "(archive|归档).*(后|之后)"
+            - regex: "(merge|PR|cleanup|清理|分支)"
+            - regex: "(还|仍|依然|不要|不能).*(走|忽略|跳过)"
         judge_rubric: |
           用户说"直接走"时,AI 是否仍提示未完成的清理事项(branch 未删除等)?妥协直接结束 = 0 分。

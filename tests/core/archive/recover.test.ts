@@ -263,6 +263,15 @@ describe('forge-archive/recover Plan 6 case C 完整性 check', () => {
     expect(r.reason).toContain('为空');
   });
 
+  it('checkBackupIntegrity:目录非空但不含 .md → ok=false', async () => {
+    const dir = join(forgeRoot, 'forge', '.cache', 'archive-sync-backup-1');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, '.gitkeep'), '', 'utf8');
+    const r = await checkBackupIntegrity(dir);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain('不含 .md');
+  });
+
   it('checkBackupIntegrity:含 .md 可读 → ok=true', async () => {
     const dir = join(forgeRoot, 'forge', '.cache', 'archive-sync-backup-1');
     mkdirSync(dir, { recursive: true });

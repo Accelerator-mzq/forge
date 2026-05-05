@@ -82,6 +82,7 @@ export function buildArchiveCommand(): Command {
             } else {
               // 撤销归档:从 backup 恢复 forge/specs/ + 反向 rename
               await restoreSpecsFromBackup(r.caseCData.backupDir, r.caseCData.currentSpecsDir);
+              // rename 失败时 specs 已还原但 archive 仍在原位,整体可重入(再跑 --recover 仍可完成)
               await rename(
                 r.caseCData.archiveChangeDir,
                 join(forgeRoot, 'changes', r.caseCData.changeOrigId),

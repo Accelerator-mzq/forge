@@ -222,6 +222,10 @@ export async function checkBackupIntegrity(backupDir: string): Promise<BackupInt
   }
   // 抽查前 3 个 .md 文件能否 utf8 读取
   const mdFiles = entries.filter((e) => e.endsWith('.md')).slice(0, 3);
+  // 防御:backup 必须含至少一个 .md 文件(否则 restoreSpecsFromBackup 会静默不还原)
+  if (mdFiles.length === 0) {
+    return { ok: false, reason: 'backup 目录不含 .md 文件(可能备份不完整)' };
+  }
   for (const name of mdFiles) {
     try {
       await readFile(join(backupDir, name), 'utf8');

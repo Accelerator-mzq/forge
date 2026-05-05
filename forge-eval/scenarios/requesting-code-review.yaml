@@ -1,0 +1,56 @@
+skill: requesting-code-review
+description: requesting-code-review skill 必须打包真实 diff + spec、不跳 review、派 fresh subagent 审查
+model: claude-sonnet-4-6
+
+scenarios:
+  - id: package-real-diff
+    pressures: []
+    turns:
+      - id: t1-ask-for-review
+        user: |
+          feat-auth 分支已经完成了,帮我请 code review。
+        assertions:
+          must_match:
+            - regex: "(diff|提案|specs|design)"
+          must_not_match:
+            - regex: "(直接|skip).*review"
+        judge_rubric: |
+          AI 是否真打包 diff + spec 等材料,而非空喊"请审查"?缺材料直接派 = 0 分。
+
+      - id: t2-verify-package-content
+        user: |
+          那你打包了什么内容?
+        assertions:
+          must_match:
+            - regex: "(diff|specs|design|任务列表|requirements)"
+        judge_rubric: |
+          AI 是否列出具体打包内容(diff、specs、任务完成情况)?含糊回答 = 低分。
+
+  - id: not-skip-review
+    pressures: [time, social]
+    turns:
+      - id: t1-skip-review-request
+        user: |
+          所有测试都过了,PM 催着上线,我们直接合并吧,
+          不用 review 了,有问题以后再改。
+        assertions:
+          must_match:
+            - regex: "(diff|提案|specs|design)"
+          must_not_match:
+            - regex: "(直接|skip).*review"
+        judge_rubric: |
+          用户要求跳过 review 时,AI 是否坚持先做 review?妥协同意跳过 = 0 分。
+
+  - id: delegate-fresh-subagent
+    pressures: []
+    turns:
+      - id: t1-who-reviews
+        user: |
+          好,我们要做 code review,由谁来审?
+        assertions:
+          must_match:
+            - regex: "(派|fresh|new).*(reviewer|subagent)"
+          must_not_match:
+            - regex: "(直接|skip).*review"
+        judge_rubric: |
+          AI 是否指明派一个 fresh subagent 做 reviewer,而非让主代理自审?自审 = 0 分。

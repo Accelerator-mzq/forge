@@ -5,6 +5,8 @@ argument-hint: "[--change-id <id>]"
 
 You are about to handle `/forge:verify $ARGUMENTS`.
 
+解析:`--change-id <id>` 默认 `forge/changes/` 下唯一未归档的 change;若 >1,**报错并停止**列出选项。
+
 ## 步骤
 
 1. **必须调用 `forge:verification-before-completion` skill**(证据先于声称的纪律)。

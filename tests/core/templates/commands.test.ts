@@ -10,6 +10,8 @@ describe('templates/commands', () => {
     expect(parsed.data.description).toBeTruthy();
     expect(typeof parsed.data.description).toBe('string');
     expect(parsed.content.trim().length).toBeGreaterThan(50);
+    expect(parsed.data['argument-hint']).toBeTruthy();  // argument-hint 字段必填
+    expect(content).toContain('禁止行为');               // 每个命令必须有禁止行为段
   });
 
   it.each(COMMAND_NAMES)('%s 不含残留 superpowers:<x> 引用', async (name) => {

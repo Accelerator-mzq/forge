@@ -17,7 +17,8 @@ Follow these steps strictly. Do NOT skip any:
 4. 若 `forge/drafts/` 目录不存在,先 `mkdir -p forge/drafts/`。
 5. 写完后,提示用户:"draft 保存到 `forge/drafts/<file>`,确认要推进就跑 `/forge:propose <change-id> --from-draft <date>-<topic>`"。
 
-**禁止行为**:
+## 禁止行为
+
 - 不允许直接产出 `forge/changes/<id>/` 任何文件(那是 `/forge:propose` 的工作)
 - 不允许跳过 `forge:brainstorming` skill 的提问环节,即使用户表示"我已经想清楚了"
 - 不允许在 `forge/specs/` 里写任何东西(specs/ 仅由 archive 内部 sync 写入)

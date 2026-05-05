@@ -31,6 +31,12 @@ forge archive $ARGUMENTS
 5. **archive 顺序原子化**(spec §3.5):Move(rename)→ Sync(specs/ deltas)→ 失败回滚
 6. **`--recover` 子模式**:扫描半归档状态(case A/B/C)并修复
 
+## 禁止行为
+
+- 不允许手工实现 Move/Sync/Rollback 原子化步骤(那是 CLI 内部实现;AI 只调 CLI,不重现 CLI 行为)
+- 不允许在 archive 失败时绕过 verify+review 标记直接 mv 文件
+- 不允许在 `--force` 不被允许的场景(如 hash 不匹配)主动加 `--force` 试图绕过
+
 ## AI 后续行为
 
 archive 成功后,**调用 `forge:finishing-a-development-branch` skill** 提示用户做 git 层面的合并/PR/清理决策。

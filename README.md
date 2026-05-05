@@ -2,7 +2,7 @@
 
 > OpenSpec 的产物驱动工作流 × superpowers 的行为塑造 skill 体系,融合成一个独立的 npm CLI + 多 harness 适配器。
 
-**当前状态**:Phase 1 Core Engine 完成(80 unit tests passing)。**Phase 2 CLI + Phase 3 Adapters 进行中**(Plan 3)。
+**当前状态**:Phase 1+2+3 cut 完成(146 unit/integration tests passing)。**Phase 4(skill 文本移植)+ eval 框架待启动**(Plan 4 / Plan 5)。
 
 ## 设计文档
 
@@ -51,6 +51,16 @@ Phase 1(Core Engine)完成 — `src/core/` 下 8 个模块全部实现 + 单元�
 - `templates/` + `bootstrap/` — 占位,Plan 4 填实
 
 Plan 3 接手:Phase 2(CLI 命令)+ Phase 3 cut(claude.ts + codex.ts adapter)。
+
+## Plan 3 进度
+
+Phase 2(CLI)+ Phase 3 cut(2 个 adapter)完成:
+
+- 5 个公开 CLI 命令:`forge init/update/config/validate/archive`(其中 archive 含 `--force` 和 `--recover` 子模式)
+- 2 个 adapter:`claude.ts`(`.claude/skills + .claude/commands`)、`codex.ts`(`.agents/skills` 共享 Claude Agent SDK 约定)
+- archive 顺序原子化(Move→Sync 三阶段 + lock + recover)
+
+Plan 4 接手:Phase 4(12 个 superpowers skill 真实内容 + 6 个 slash 命令模板)。
 
 ## 许可
 

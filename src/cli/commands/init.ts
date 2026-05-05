@@ -5,6 +5,7 @@ import { Command } from 'commander';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { stringify as stringifyYAML } from 'yaml';
 import {
   detectAll,
   ClaudeAdapter,
@@ -72,8 +73,14 @@ export function buildInitCommand(): Command {
       await mkdir(join(forgeDir, 'changes'), { recursive: true });
       await mkdir(join(forgeDir, 'specs'), { recursive: true });
       const configPath = join(forgeDir, 'config.yaml');
+      // 写入 config.yaml(包含 harness 列表供 forge update 读取)
+      // 若已存在则覆盖 harness 字段(保留其他字段不变)
       if (!existsSync(configPath)) {
-        await writeFile(configPath, 'schema: forge-spec-driven/v1\n', 'utf8');
+        const configData = {
+          schema: 'forge-spec-driven/v1',
+          harness: adapters.map((a) => a.id),
+        };
+        await writeFile(configPath, stringifyYAML(configData), 'utf8');
       }
 
       // 步骤 7:检测非 git 项目并 warn

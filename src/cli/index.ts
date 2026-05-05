@@ -6,6 +6,8 @@ import { FORGE_VERSION } from '../index.js';
 import { buildConfigCommand } from './commands/config.js';
 import { buildValidateCommand } from './commands/validate.js';
 import { buildInitCommand } from './commands/init.js';
+import { buildUpdateCommand } from './commands/update.js';
+import { buildArchiveCommand } from './commands/archive.js';
 
 // 创建主命令
 const program = new Command();
@@ -24,7 +26,11 @@ program.addCommand(buildValidateCommand());
 // 注册 init 子命令
 program.addCommand(buildInitCommand());
 
-// 后续 task 在这里 .addCommand(...)
+// 注册 update 子命令(Task 17)
+program.addCommand(buildUpdateCommand());
+
+// 注册 archive 子命令(Task 17)
+program.addCommand(buildArchiveCommand());
 
 // 解析命令行参数,遇到错误时打印并退出
 program.parseAsync(process.argv).catch((err: unknown) => {

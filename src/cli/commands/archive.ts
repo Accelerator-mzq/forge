@@ -5,7 +5,7 @@
 //   forge archive --recover              — 从半完成状态恢复
 
 import { Command } from 'commander';
-import { readFile } from 'node:fs/promises';
+import { readFile, rm, rename, readdir, copyFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
@@ -20,6 +20,8 @@ import { computeTasksHash, computeContentHash } from '../../core/hash/index.js';
 import { archiveTransaction } from '../../core/archive/transaction.js';
 import { acquireLock, LockHeldError } from '../../core/archive/lock.js';
 import { recover } from '../../core/archive/recover.js';
+import { promptRecoverChoice } from '../../core/archive/recover-prompt.js';
+import { applyDeltas } from '../../core/specs-sync/index.js';
 
 /**
  * 检测当前目录是否真实处于 git 工作树中
@@ -56,9 +58,43 @@ export function buildArchiveCommand(): Command {
           release = await acquireLock(forgeRoot, 'recover');
           const r = await recover(forgeRoot);
           console.log(r.message);
-          // 状态机退出码:
-          //   clean / A / B / C → 0(clean/已恢复/需用户看消息后决策)
-          //   corrupt → 4(需人工介入)
+
+          // Plan 6:case C 处理 — 完整性 check + 交互二选一
+          if (r.case === 'C' && r.caseCData) {
+            const { backupIntegrity, archiveIntegrity } = r.caseCData;
+            // 任一不完整 → 退出码 4(spec §3.5 case C 末尾"任一不完整 → 输出诊断 + 退出码 4")
+            if (!backupIntegrity.ok || !archiveIntegrity.ok) {
+              console.error('✗ case C 完整性 check 失败,需人工介入:');
+              if (!backupIntegrity.ok) console.error(`  backup: ${backupIntegrity.reason}`);
+              if (!archiveIntegrity.ok) console.error(`  archive: ${archiveIntegrity.reason}`);
+              const rel = release;
+              release = undefined;
+              if (rel) await rel();
+              process.exit(4);
+            }
+            // 两者都完整 → 交互式二选一
+            const choice = await promptRecoverChoice();
+            if (choice === 'complete-archive') {
+              // 完成归档:重跑 Sync(applyDeltas)+ 删 backup
+              await applyDeltas(r.caseCData.currentSpecsDir, r.caseCData.deltas);
+              await rm(r.caseCData.backupDir, { recursive: true, force: true });
+              console.log('✓ case C 选择 [1] 完成归档:Sync 重跑成功,backup 已清理');
+            } else {
+              // 撤销归档:从 backup 恢复 forge/specs/ + 反向 rename
+              await restoreSpecsFromBackup(r.caseCData.backupDir, r.caseCData.currentSpecsDir);
+              await rename(
+                r.caseCData.archiveChangeDir,
+                join(forgeRoot, 'changes', r.caseCData.changeOrigId),
+              );
+              await rm(r.caseCData.backupDir, { recursive: true, force: true });
+              console.log('✓ case C 选择 [2] 撤销归档:specs 已还原,archive 反向 rename 完成');
+            }
+            const rel = release;
+            release = undefined;
+            if (rel) await rel();
+            process.exit(0);
+          }
+
           if (r.case === 'corrupt') {
             // C2 修复:先 release lock 再 exit,避免 process.exit 跳过 finally
             // 置 undefined 防止 finally 再次调用
@@ -295,4 +331,20 @@ export function buildArchiveCommand(): Command {
         if (archiveRelease) await archiveRelease();
       }
     });
+}
+
+/**
+ * 从 backup 目录把所有备份的 specs 文件还原到 currentSpecsDir(case C [2] 撤销归档用)。
+ *
+ * 简单语义:backup 内每个 .md 文件 copy 回 currentSpecsDir/ 同名位置,
+ *           对应的 currentSpecsDir 内文件被覆盖。
+ * 不删除 currentSpecsDir 中"backup 没有的文件"(理由:那些是 archive 没影响的旧文件)。
+ */
+async function restoreSpecsFromBackup(backupDir: string, currentSpecsDir: string): Promise<void> {
+  const entries = await readdir(backupDir);
+  await mkdir(currentSpecsDir, { recursive: true });
+  for (const name of entries) {
+    if (!name.endsWith('.md')) continue;
+    await copyFile(join(backupDir, name), join(currentSpecsDir, name));
+  }
 }

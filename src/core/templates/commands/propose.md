@@ -1,6 +1,6 @@
 ---
 description: 把 draft(可选)转化为 forge/changes/<id>/ 下的 4 件套(proposal + specs + design + tasks)
-argument-hint: "<change-id> [--from-draft <date-topic>]"
+argument-hint: '<change-id> [--from-draft <date-topic>]'
 ---
 
 You are about to handle `/forge:propose $ARGUMENTS`.

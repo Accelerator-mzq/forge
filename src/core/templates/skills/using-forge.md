@@ -69,20 +69,20 @@ digraph skill_flow {
 
 These thoughts mean STOP—you're rationalizing:
 
-| Thought | Reality |
-|---------|---------|
-| "This is just a simple question" | Questions are tasks. Check for skills. |
-| "I need more context first" | Skill check comes BEFORE clarifying questions. |
-| "Let me explore the codebase first" | Skills tell you HOW to explore. Check first. |
-| "I can check git/files quickly" | Files lack conversation context. Check for skills. |
-| "Let me gather information first" | Skills tell you HOW to gather information. |
-| "This doesn't need a formal skill" | If a skill exists, use it. |
-| "I remember this skill" | Skills evolve. Read current version. |
-| "This doesn't count as a task" | Action = task. Check for skills. |
-| "The skill is overkill" | Simple things become complex. Use it. |
-| "I'll just do this one thing first" | Check BEFORE doing anything. |
-| "This feels productive" | Undisciplined action wastes time. Skills prevent this. |
-| "I know what that means" | Knowing the concept ≠ using the skill. Invoke it. |
+| Thought                             | Reality                                                |
+| ----------------------------------- | ------------------------------------------------------ |
+| "This is just a simple question"    | Questions are tasks. Check for skills.                 |
+| "I need more context first"         | Skill check comes BEFORE clarifying questions.         |
+| "Let me explore the codebase first" | Skills tell you HOW to explore. Check first.           |
+| "I can check git/files quickly"     | Files lack conversation context. Check for skills.     |
+| "Let me gather information first"   | Skills tell you HOW to gather information.             |
+| "This doesn't need a formal skill"  | If a skill exists, use it.                             |
+| "I remember this skill"             | Skills evolve. Read current version.                   |
+| "This doesn't count as a task"      | Action = task. Check for skills.                       |
+| "The skill is overkill"             | Simple things become complex. Use it.                  |
+| "I'll just do this one thing first" | Check BEFORE doing anything.                           |
+| "This feels productive"             | Undisciplined action wastes time. Skills prevent this. |
+| "I know what that means"            | Knowing the concept ≠ using the skill. Invoke it.      |
 
 ## Skill Priority
 
@@ -110,19 +110,19 @@ Instructions say WHAT, not HOW. "Add X" or "Fix Y" doesn't mean skip workflows.
 
 触发以下任一命令时,会自动调起对应 skill 链:
 
-| 命令 | 用途 | 调起 skill |
-|---|---|---|
-| `/forge:brainstorm <topic>` | 模糊想法 → forge/drafts/<date>-<topic>.md | forge:brainstorming |
-| `/forge:propose <change-id> [--from-draft <name>]` | draft → 4 个 change 产物 | forge:writing-plans |
-| `/forge:apply [--parallel]` | tasks.md → 实施 | forge:subagent-driven-development + forge:test-driven-development(--parallel 加 forge:dispatching-parallel-agents + forge:using-git-worktrees) |
-| `/forge:review` | 派 review subagent + 收反馈 | forge:requesting-code-review + forge:receiving-code-review |
-| `/forge:verify` | 跑 forge validate + 写 verify-passed YAML | forge:verification-before-completion |
-| `/forge:archive` | 归档 change 到 forge/changes/archive/ | (CLI `forge archive`,无 skill 链) |
+| 命令                                               | 用途                                      | 调起 skill                                                                                                                                     |
+| -------------------------------------------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/forge:brainstorm <topic>`                        | 模糊想法 → forge/drafts/<date>-<topic>.md | forge:brainstorming                                                                                                                            |
+| `/forge:propose <change-id> [--from-draft <name>]` | draft → 4 个 change 产物                  | forge:writing-plans                                                                                                                            |
+| `/forge:apply [--parallel]`                        | tasks.md → 实施                           | forge:subagent-driven-development + forge:test-driven-development(--parallel 加 forge:dispatching-parallel-agents + forge:using-git-worktrees) |
+| `/forge:review`                                    | 派 review subagent + 收反馈               | forge:requesting-code-review + forge:receiving-code-review                                                                                     |
+| `/forge:verify`                                    | 跑 forge validate + 写 verify-passed YAML | forge:verification-before-completion                                                                                                           |
+| `/forge:archive`                                   | 归档 change 到 forge/changes/archive/     | (CLI `forge archive`,无 skill 链)                                                                                                              |
 
 ## forge 红旗清单(覆盖 superpowers 红旗清单的 forge 专属补充)
 
 除了 superpowers 通用红旗,forge 多一条:
 
-| 想法 | 现实 |
-|---|---|
+| 想法                                     | 现实                                                                                                             |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | "用户需求看起来很清晰,直接写 propose 吧" | 用户原话有 "大概 / 也许 / 不太确定 / 看着办" 任一关键词 → 必须先 `/forge:brainstorm`,不允许直接 `/forge:propose` |

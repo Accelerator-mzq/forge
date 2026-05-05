@@ -1,6 +1,6 @@
 ---
 description: 调 forge archive CLI 把 change 移到 archive/、内部 sync specs/、严格校验 verify+review 标记
-argument-hint: "<change-id> [--force] [--recover]"
+argument-hint: '<change-id> [--force] [--recover]'
 ---
 
 You are about to handle `/forge:archive $ARGUMENTS`.

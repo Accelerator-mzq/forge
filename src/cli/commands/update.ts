@@ -7,7 +7,12 @@ import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseConfig } from '../../core/parse/index.js';
-import { ClaudeAdapter, CodexAdapter, deployAtomic, filterByHash } from '../../core/harness-adapters/index.js';
+import {
+  ClaudeAdapter,
+  CodexAdapter,
+  deployAtomic,
+  filterByHash,
+} from '../../core/harness-adapters/index.js';
 import type { HarnessAdapter, DeployInput } from '../../core/harness-adapters/index.js';
 import { loadAllSkills, loadAllCommands } from '../../core/templates/index.js';
 
@@ -19,10 +24,7 @@ export function buildUpdateCommand(): Command {
       'comma-separated harness ids (claude,codex); overrides config.yaml',
       '',
     )
-    .option(
-      '--force',
-      '强制覆盖已被用户修改的 skill / command 文件(SHA256 hash 比对决定是否覆盖)',
-    )
+    .option('--force', '强制覆盖已被用户修改的 skill / command 文件(SHA256 hash 比对决定是否覆盖)')
     .action(async (opts: { harness: string; force?: boolean }) => {
       const cwd = process.cwd();
       const forgeDir = join(cwd, 'forge');
@@ -84,8 +86,8 @@ export function buildUpdateCommand(): Command {
       const commands = await loadAllCommands();
       const input: DeployInput = {
         projectRoot: cwd,
-        skills,    // LoadedSkill[] 兼容 SkillSpec[]
-        commands,  // LoadedCommand[] 兼容 CommandSpec[]
+        skills, // LoadedSkill[] 兼容 SkillSpec[]
+        commands, // LoadedCommand[] 兼容 CommandSpec[]
       };
       const plans = await Promise.all(adapters.map((a) => a.plan(input)));
 
@@ -97,9 +99,7 @@ export function buildUpdateCommand(): Command {
         force,
       );
       if (skippedModified.length > 0) {
-        console.warn(
-          `⚠ ${skippedModified.length} 个文件已被用户修改,跳过(加 --force 覆盖):`,
-        );
+        console.warn(`⚠ ${skippedModified.length} 个文件已被用户修改,跳过(加 --force 覆盖):`);
         for (const f of skippedModified) console.warn(`  - ${f.relPath}`);
       }
       if (toWrite.length === 0) {

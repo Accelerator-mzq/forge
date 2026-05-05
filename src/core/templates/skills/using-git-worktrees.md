@@ -63,6 +63,7 @@ git check-ignore -q .worktrees 2>/dev/null || git check-ignore -q worktrees 2>/d
 **If NOT ignored:**
 
 Per "Fix broken things immediately" rule:
+
 1. Add appropriate line to .gitignore
 2. Commit the change
 3. Proceed with worktree creation
@@ -150,15 +151,15 @@ forge --parallel 默认 worktree 名 `forge-<change-id>-<task-id>`,放在 `.git/
 
 ## Quick Reference
 
-| Situation | Action |
-|-----------|--------|
-| `.worktrees/` exists | Use it (verify ignored) |
-| `worktrees/` exists | Use it (verify ignored) |
-| Both exist | Use `.worktrees/` |
-| Neither exists | Check CLAUDE.md/AGENTS.md → Ask user |
-| Directory not ignored | Add to .gitignore + commit |
-| Tests fail during baseline | Report failures + ask |
-| No package.json/Cargo.toml | Skip dependency install |
+| Situation                  | Action                               |
+| -------------------------- | ------------------------------------ |
+| `.worktrees/` exists       | Use it (verify ignored)              |
+| `worktrees/` exists        | Use it (verify ignored)              |
+| Both exist                 | Use `.worktrees/`                    |
+| Neither exists             | Check CLAUDE.md/AGENTS.md → Ask user |
+| Directory not ignored      | Add to .gitignore + commit           |
+| Tests fail during baseline | Report failures + ask                |
+| No package.json/Cargo.toml | Skip dependency install              |
 
 ## Common Mistakes
 
@@ -201,6 +202,7 @@ Ready to implement auth feature
 ## Red Flags
 
 **Never:**
+
 - Create worktree without verifying it's ignored (project-local)
 - Skip baseline test verification
 - Proceed with failing tests without asking
@@ -208,6 +210,7 @@ Ready to implement auth feature
 - Skip CLAUDE.md/AGENTS.md check
 
 **Always:**
+
 - Follow directory priority: existing > CLAUDE.md/AGENTS.md > ask
 - Verify directory is ignored for project-local
 - Auto-detect and run project setup
@@ -216,9 +219,11 @@ Ready to implement auth feature
 ## Integration
 
 **Called by:**
+
 - **forge:brainstorming** (Phase 4) - REQUIRED when design is approved and implementation follows
 - **forge:subagent-driven-development** - REQUIRED before executing any tasks
 - Any skill needing isolated workspace
 
 **Pairs with:**
+
 - **forge:finishing-a-development-branch** - REQUIRED for cleanup after work complete

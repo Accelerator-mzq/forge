@@ -34,7 +34,10 @@ describe.skipIf(!ENABLED)('e2e brainstorming acceptance', () => {
 
       // 3. 断言:含至少 2 个问题信号(中文问号或英文问号)
       const questionCount = (out.match(/[??]/g) ?? []).length;
-      expect(questionCount, `期望至少 2 个问题信号,实际 ${questionCount}\n响应:\n${out}`).toBeGreaterThanOrEqual(2);
+      expect(
+        questionCount,
+        `期望至少 2 个问题信号,实际 ${questionCount}\n响应:\n${out}`,
+      ).toBeGreaterThanOrEqual(2);
 
       // 4. 断言:不含代码 block(brainstorming 阶段不应该写代码)
       expect(out).not.toMatch(/```[a-z]/i);

@@ -38,7 +38,5 @@ export interface LoadedSkill {
 
 /** 全量加载 12 个 skill,失败抛错(说明某个 .md 漏建) */
 export async function loadAllSkills(): Promise<LoadedSkill[]> {
-  return Promise.all(
-    SKILL_NAMES.map(async (name) => ({ name, content: await loadSkill(name) })),
-  );
+  return Promise.all(SKILL_NAMES.map(async (name) => ({ name, content: await loadSkill(name) })));
 }

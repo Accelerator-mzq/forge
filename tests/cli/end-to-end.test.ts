@@ -29,11 +29,17 @@ describe('forge CLI end-to-end', () => {
 
       // Plan 4 真模板:验证 12 skill + 6 cmd 文件全部存在
       const skillNames = [
-        'using-forge', 'brainstorming', 'writing-plans',
-        'subagent-driven-development', 'test-driven-development',
-        'requesting-code-review', 'receiving-code-review',
-        'verification-before-completion', 'systematic-debugging',
-        'dispatching-parallel-agents', 'using-git-worktrees',
+        'using-forge',
+        'brainstorming',
+        'writing-plans',
+        'subagent-driven-development',
+        'test-driven-development',
+        'requesting-code-review',
+        'receiving-code-review',
+        'verification-before-completion',
+        'systematic-debugging',
+        'dispatching-parallel-agents',
+        'using-git-worktrees',
         'finishing-a-development-branch',
       ];
       for (const n of skillNames) {

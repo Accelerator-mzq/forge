@@ -1,6 +1,6 @@
 ---
 description: 派 review subagent 审 [proposal + specs + design + diff],主代理处理反馈,满足三条件打 review-passed YAML
-argument-hint: "[--change-id <id>]"
+argument-hint: '[--change-id <id>]'
 ---
 
 You are about to handle `/forge:review $ARGUMENTS`.
@@ -28,7 +28,7 @@ You are about to handle `/forge:review $ARGUMENTS`.
    schema: forge-review/v1
    tasks_hash: <sha256(tasks.md 已勾段)>
    content_hash: <sha256(proposal+specs+design)>
-   reviewed_by: ai-agent  # 或 human-override(需 archive --force)
+   reviewed_by: ai-agent # 或 human-override(需 archive --force)
    git:
      is_git_repo: true
      head: <git rev-parse HEAD>

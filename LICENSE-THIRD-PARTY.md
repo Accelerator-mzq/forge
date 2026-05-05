@@ -6,19 +6,19 @@ Forge 包含来自以下开源项目的代码或文本(均为 MIT,允许复制�
 
 Forge 的 `src/core/templates/skills/` 下 12 个 skill markdown 文本(下表)均改自 superpowers 仓库 `skills/<name>/SKILL.md`,做了 namespace 改名(`superpowers:` → `forge:`)和产物路径改写(`docs/superpowers/specs|plans/` → `forge/drafts|changes/<id>/`)。原文行文、红旗清单、反模式表、流程图保持原样以保留原作者 tuning。
 
-| Forge 文件 | superpowers 源文件 |
-|---|---|
-| `using-forge.md` | `skills/using-superpowers/SKILL.md` |
-| `brainstorming.md` | `skills/brainstorming/SKILL.md` |
-| `writing-plans.md` | `skills/writing-plans/SKILL.md` |
-| `subagent-driven-development.md` | `skills/subagent-driven-development/SKILL.md` |
-| `test-driven-development.md` | `skills/test-driven-development/SKILL.md` |
-| `requesting-code-review.md` | `skills/requesting-code-review/SKILL.md` |
-| `receiving-code-review.md` | `skills/receiving-code-review/SKILL.md` |
+| Forge 文件                          | superpowers 源文件                               |
+| ----------------------------------- | ------------------------------------------------ |
+| `using-forge.md`                    | `skills/using-superpowers/SKILL.md`              |
+| `brainstorming.md`                  | `skills/brainstorming/SKILL.md`                  |
+| `writing-plans.md`                  | `skills/writing-plans/SKILL.md`                  |
+| `subagent-driven-development.md`    | `skills/subagent-driven-development/SKILL.md`    |
+| `test-driven-development.md`        | `skills/test-driven-development/SKILL.md`        |
+| `requesting-code-review.md`         | `skills/requesting-code-review/SKILL.md`         |
+| `receiving-code-review.md`          | `skills/receiving-code-review/SKILL.md`          |
 | `verification-before-completion.md` | `skills/verification-before-completion/SKILL.md` |
-| `systematic-debugging.md` | `skills/systematic-debugging/SKILL.md` |
-| `dispatching-parallel-agents.md` | `skills/dispatching-parallel-agents/SKILL.md` |
-| `using-git-worktrees.md` | `skills/using-git-worktrees/SKILL.md` |
+| `systematic-debugging.md`           | `skills/systematic-debugging/SKILL.md`           |
+| `dispatching-parallel-agents.md`    | `skills/dispatching-parallel-agents/SKILL.md`    |
+| `using-git-worktrees.md`            | `skills/using-git-worktrees/SKILL.md`            |
 | `finishing-a-development-branch.md` | `skills/finishing-a-development-branch/SKILL.md` |
 
 ```

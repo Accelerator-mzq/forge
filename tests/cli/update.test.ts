@@ -83,5 +83,4 @@ describe('forge update', () => {
       rmSync(d, { recursive: true, force: true });
     }
   });
-
 });

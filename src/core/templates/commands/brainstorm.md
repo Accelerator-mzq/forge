@@ -1,6 +1,6 @@
 ---
 description: 把模糊想法转化为 forge/drafts/ 下的结构化 draft,通过强制提问 + 设计探讨完成
-argument-hint: "<topic>"
+argument-hint: '<topic>'
 ---
 
 You are about to handle a `/forge:brainstorm <topic>` invocation. The user typed:

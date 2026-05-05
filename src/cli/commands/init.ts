@@ -21,10 +21,7 @@ export function buildInitCommand(): Command {
   return new Command('init')
     .description('Initialize forge in current directory')
     .option('--harness <list>', 'comma-separated harness ids (claude,codex)', '')
-    .option(
-      '--force',
-      '强制覆盖已被用户修改的 skill / command 文件(SHA256 hash 比对决定是否覆盖)',
-    )
+    .option('--force', '强制覆盖已被用户修改的 skill / command 文件(SHA256 hash 比对决定是否覆盖)')
     .action(async (opts: { harness: string; force?: boolean }) => {
       const cwd = process.cwd();
 
@@ -67,8 +64,8 @@ export function buildInitCommand(): Command {
       const commands = await loadAllCommands();
       const input: DeployInput = {
         projectRoot: cwd,
-        skills,    // LoadedSkill[] 兼容 SkillSpec[]
-        commands,  // LoadedCommand[] 兼容 CommandSpec[]
+        skills, // LoadedSkill[] 兼容 SkillSpec[]
+        commands, // LoadedCommand[] 兼容 CommandSpec[]
       };
       const plans = await Promise.all(adapters.map((a) => a.plan(input)));
 
@@ -80,9 +77,7 @@ export function buildInitCommand(): Command {
         force,
       );
       if (skippedModified.length > 0) {
-        console.warn(
-          `⚠ ${skippedModified.length} 个文件已被用户修改,跳过(加 --force 覆盖):`,
-        );
+        console.warn(`⚠ ${skippedModified.length} 个文件已被用户修改,跳过(加 --force 覆盖):`);
         for (const f of skippedModified) console.warn(`  - ${f.relPath}`);
       }
       if (toWrite.length === 0) {
@@ -94,9 +89,7 @@ export function buildInitCommand(): Command {
           skippedModified.length > 0
             ? `;${skippedModified.length} 个已修改(跳过,加 --force 覆盖)`
             : '';
-        console.log(
-          `✓ 部署 ${toWrite.length} 个文件;${unchanged.length} 个未变${modifiedPart}`,
-        );
+        console.log(`✓ 部署 ${toWrite.length} 个文件;${unchanged.length} 个未变${modifiedPart}`);
       }
 
       // 步骤 7:创建 forge/config.yaml + 目录骨架

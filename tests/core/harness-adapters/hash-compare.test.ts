@@ -16,9 +16,7 @@ describe('filterByHash', () => {
   });
 
   const plan: DeployPlan = {
-    files: [
-      { relPath: '.claude/skills/forge-using-forge/SKILL.md', content: 'NEW CONTENT' },
-    ],
+    files: [{ relPath: '.claude/skills/forge-using-forge/SKILL.md', content: 'NEW CONTENT' }],
   };
 
   it('case 1: 目标不存在 → toWrite', async () => {

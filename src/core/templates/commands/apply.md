@@ -1,11 +1,12 @@
 ---
 description: 读 tasks.md 派子代理实施每个 task,顺序模式或 --parallel 模式
-argument-hint: "[--parallel] [--change-id <id>]"
+argument-hint: '[--parallel] [--change-id <id>]'
 ---
 
 You are about to handle `/forge:apply $ARGUMENTS`.
 
 解析:
+
 - 默认:顺序模式(主工作区直接跑)
 - `--parallel`:并行模式(每个独立 task 一个 worktree;遵循 forge:dispatching-parallel-agents 的 cherry-pick 串行协议)
 - `--change-id <id>`:指定 change(默认为 `forge/changes/` 下唯一未归档的 change;若 >1,**报错并停止**列出选项)

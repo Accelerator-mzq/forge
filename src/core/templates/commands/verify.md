@@ -1,6 +1,6 @@
 ---
 description: 跑 forge validate + verification-before-completion;失败时自动 append fake_completions 到 tasks.md
-argument-hint: "[--change-id <id>]"
+argument-hint: '[--change-id <id>]'
 ---
 
 You are about to handle `/forge:verify $ARGUMENTS`.
@@ -18,9 +18,9 @@ You are about to handle `/forge:verify $ARGUMENTS`.
      schema: forge-verify/v1
      verified_by: ai-agent
      pass: false
-     fake_completions:           # 已勾选但代码未改/测试未过的 task id 列表
+     fake_completions: # 已勾选但代码未改/测试未过的 task id 列表
        - tasks.md#task-3
-     appended_tasks:             # 自动追加的修复 task id 列表
+     appended_tasks: # 自动追加的修复 task id 列表
        - verify-fix-1
      ```
    - **append 修复 task 到 `forge/changes/<id>/tasks.md`**:每个 fake_completion 一条 `- [ ] verify-fix-N: 修正 task-X 的实施(原声称完成但 verify 失败:<具体原因>)`
@@ -36,7 +36,7 @@ You are about to handle `/forge:verify $ARGUMENTS`.
      verified_by: ai-agent
      pass: true
      evidence:
-       - description: "项目测试套件通过"
+       - description: '项目测试套件通过'
          log_path: .evidence/test-output.log
          log_hash: <log_hash>
      ```

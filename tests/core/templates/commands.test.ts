@@ -40,4 +40,13 @@ describe('templates/commands', () => {
     expect(content).toContain('forge:using-git-worktrees');
     expect(content).toContain('applied_commits');
   });
+
+  it('review 命令引用 forge:requesting-code-review + forge:receiving-code-review', async () => {
+    const content = await loadCommand('review');
+    expect(content).toContain('forge:requesting-code-review');
+    expect(content).toContain('forge:receiving-code-review');
+    expect(content).toContain('.review-passed');
+    expect(content).toContain('forge-review/v1');
+    expect(content).toContain('review_outcomes');
+  });
 });

@@ -120,8 +120,8 @@ export interface RunSummary {
   totalApiCalls: number;
   /** 总 tokens(全 RED+GREEN+judge) */
   totalTokens: number;
-  /** 总估算 cost(USD) */
-  totalCost: number;
+  /** 总估算 cost(USD;由各 ScenarioRunResult.estimatedCost 累加) */
+  totalEstimatedCost: number;
   /** 全部 pair 都 pass 才视为 run pass */
   runPass: boolean;
 }

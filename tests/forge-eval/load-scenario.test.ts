@@ -1,7 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { describe, it, expect } from 'vitest';
 import { parse as parseYaml } from 'yaml';
 import type { ScenarioFile } from '../../forge-eval/types.js';
 
@@ -9,15 +6,8 @@ import type { ScenarioFile } from '../../forge-eval/types.js';
 // 这里直接 import 内部 helper 用 dynamic import 拼装临时文件
 
 describe('forge-eval/load-scenario', () => {
-  let tmpDir: string;
-  beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'forge-eval-scenario-'));
-  });
-  afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
-  });
 
-  it('合法 ScenarioFile 解析成功', () => {
+  it('合法 ScenarioFile 解析成功', async () => {
     const yaml = `
 skill: brainstorming
 description: 测试用
@@ -32,6 +22,12 @@ scenarios:
     expect(data.skill).toBe('brainstorming');
     expect(data.scenarios).toHaveLength(1);
     expect(data.scenarios[0]?.turns[0]?.judge_rubric).toBe('AI 是否问问题');
+    // 补:覆盖 validateScenarioFile + flattenScenarios 而非仅 parseYaml
+    const { validateScenarioFile, flattenScenarios } = await import('../../forge-eval/load-scenario.js');
+    expect(() => validateScenarioFile(data, 'test')).not.toThrow();
+    const scenarios = flattenScenarios(data);
+    expect(scenarios[0]?.model).toBe('claude-sonnet-4-6'); // ScenarioFile 顶层 model 透传到 Scenario
+    expect(scenarios[0]?.skill).toBe('brainstorming');     // 顶层 skill 注入到每个 scenario
   });
 
   it('judge_rubric 缺失抛错(合约违反)', async () => {

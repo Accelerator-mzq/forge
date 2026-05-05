@@ -95,3 +95,52 @@ function estimateCost(inputTokens: number, outputTokens: number): number {
     (outputTokens / 1_000_000) * PRICE_PER_M_OUTPUT
   );
 }
+
+// ─── orchestrateRun(Task B4) ─────────────────────────────────────────────────
+
+import { loadScenarioFile, flattenScenarios } from './load-scenario.js';
+import { compareScenarioPair, DEFAULT_DELTA_THRESHOLD } from './compare.js';
+import type { ScenarioPair, RunSummary } from './types.js';
+
+/**
+ * 跑指定 skill 列表的全部 scenario(每个 scenario:RED + GREEN 双跑 → pair)。
+ * 返回 RunSummary,可传给 report.ts 渲染 markdown。
+ */
+export async function orchestrateRun(
+  skillsToRun: string[],
+  client: Anthropic,
+  deltaThreshold = DEFAULT_DELTA_THRESHOLD,
+): Promise<RunSummary> {
+  const pairs: ScenarioPair[] = [];
+  let totalApiCalls = 0;
+  let totalTokens = 0;
+  let totalEstimatedCost = 0;
+
+  for (const skill of skillsToRun) {
+    const file = await loadScenarioFile(skill);
+    const scenarios = flattenScenarios(file);
+    for (const scenario of scenarios) {
+      // RED:不加 skill bootstrap
+      const red = await runScenario(scenario, false, client);
+      // GREEN:加 skill bootstrap
+      const green = await runScenario(scenario, true, client);
+      const pair = compareScenarioPair(scenario, red, green, deltaThreshold);
+      pairs.push(pair);
+      // 每个 turn 至少 2 次 API call(主 + judge);turn 数累加
+      totalApiCalls += red.turnResults.length * 2 + green.turnResults.length * 2;
+      totalTokens += red.totalTokens + green.totalTokens;
+      totalEstimatedCost += red.estimatedCost + green.estimatedCost;
+    }
+  }
+
+  const runPass = pairs.every((p) => p.pairPass);
+  return {
+    timestamp: new Date().toISOString(),
+    skillsRun: skillsToRun,
+    pairs,
+    totalApiCalls,
+    totalTokens,
+    totalEstimatedCost,
+    runPass,
+  };
+}

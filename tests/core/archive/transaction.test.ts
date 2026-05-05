@@ -182,4 +182,34 @@ describe('archiveTransaction — Move→Sync 顺序原子化(spec §3.5)', () =>
       cleanup();
     }
   });
+
+  // —— P2.3 专项:Sync 失败 + 回滚成功 → error message 含 "rolled back" 不含 "AND rollback failed" ——
+  // 验证 rolledBack flag 模式的正确性(不被 inner catch 误捕获)
+  it('P2.3:Sync 失败 + 回滚成功 → error 含 "rolled back" 不含 "AND rollback failed"', async () => {
+    const changeId = 'p23-test';
+    const archiveDate = '2026-05-04';
+    const { forgeRoot, cleanup } = setupForgeRoot(changeId);
+    try {
+      // mock applyDeltas 抛错 → 触发回滚
+      vi.spyOn(specsSync, 'applyDeltas').mockRejectedValueOnce(new Error('simulated sync failure'));
+
+      let caughtError: Error | null = null;
+      try {
+        await archiveTransaction({ forgeRoot, changeId, archiveDate });
+      } catch (e) {
+        caughtError = e as Error;
+      }
+
+      // 必须抛出错误
+      expect(caughtError).not.toBeNull();
+
+      // error message 必须含 "rolled back"
+      expect(caughtError!.message).toContain('rolled back');
+
+      // error message 不能含 "AND rollback failed"(否则说明 rolledBack flag 逻辑有误)
+      expect(caughtError!.message).not.toContain('AND rollback failed');
+    } finally {
+      cleanup();
+    }
+  });
 });

@@ -63,7 +63,8 @@ export async function archiveTransaction(input: ArchiveTransactionInput): Promis
       await rm(backupDir, { recursive: true, force: true });
     }
   } catch (syncErr) {
-    // —— 回滚路径 ——
+    // —— 回滚路径(P2.3 修复:用 rolledBack flag 防止 throw 被 inner catch 误捕获)——
+    let rolledBack = false;
     try {
       // a. 从 backup 恢复 specs/
       if (existsSync(backupDir)) {
@@ -80,14 +81,17 @@ export async function archiveTransaction(input: ArchiveTransactionInput): Promis
         await rm(backupDir, { recursive: true, force: true });
       }
 
-      // 抛回滚后的错误(区分于回滚自身失败)
-      throw new Error(`Sync failed and rolled back: ${(syncErr as Error).message}`);
+      rolledBack = true;
     } catch (rbErr) {
       // 回滚本身也失败 — 人工介入
       throw new Error(
         `Sync failed AND rollback failed: ${(syncErr as Error).message} / ${(rbErr as Error).message}\n` +
           `请手动检查 ${backupDir} 和 ${archiveTargetDir}`,
       );
+    }
+    // 回滚成功 → 在 inner try 外面 throw,避免被 inner catch 误捕获
+    if (rolledBack) {
+      throw new Error(`Sync failed and rolled back: ${(syncErr as Error).message}`);
     }
   }
 }

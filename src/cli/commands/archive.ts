@@ -1,7 +1,7 @@
 // forge archive 子命令 — 归档 change(spec §3.5)
 // 支持:
 //   forge archive <changeId>             — 正常归档(检查 marker + hash + lock)
-//   forge archive <changeId> --force     — 接受 human-override 标记
+//   forge archive <changeId> --force     — 接受 human-override 标记 或 非 git 项目
 //   forge archive --recover              — 从半完成状态恢复
 
 import { Command } from 'commander';
@@ -10,6 +10,11 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseMarker } from '../../core/markers/index.js';
 import { validateMarkerSchema } from '../../core/validate/index.js';
+import {
+  validateEvidence,
+  validateReviewGitIntegrity,
+  validateReviewOutcomes,
+} from '../../core/validate/marker-integrity.js';
 import { computeTasksHash, computeContentHash } from '../../core/hash/index.js';
 import { archiveTransaction } from '../../core/archive/transaction.js';
 import { acquireLock, LockHeldError } from '../../core/archive/lock.js';
@@ -94,6 +99,7 @@ export function buildArchiveCommand(): Command {
         const verifyMarker = parseMarker(verifyText);
         const reviewMarker = parseMarker(reviewText);
 
+        // 步骤 2a:schema 结构校验
         const verifyResult = validateMarkerSchema(verifyMarker, verifyPath);
         if (!verifyResult.valid) {
           console.error(
@@ -113,14 +119,34 @@ export function buildArchiveCommand(): Command {
           process.exit(2);
         }
 
+        // 步骤 2b:P1.1 — schema 类型限定(.verify-passed 必须是 forge-verify/v1)
+        // 通过 unknown 中转以绕过 TS 的交叉类型检查
+        const verifyRec = verifyMarker as unknown as Record<string, unknown>;
+        const reviewRec = reviewMarker as unknown as Record<string, unknown>;
+
+        if (verifyRec['schema'] !== 'forge-verify/v1') {
+          console.error(
+            `✗ .verify-passed 必须是 forge-verify/v1,实际:${String(verifyRec['schema'])}`,
+          );
+          await archiveRelease();
+          process.exit(2);
+        }
+        if (reviewRec['schema'] !== 'forge-review/v1') {
+          console.error(
+            `✗ .review-passed 必须是 forge-review/v1,实际:${String(reviewRec['schema'])}`,
+          );
+          await archiveRelease();
+          process.exit(2);
+        }
+
         // 步骤 3:重算 tasks_hash 和 content_hash + 比对
         const tasksContent = await readFile(join(changeDir, 'tasks.md'), 'utf8');
         const tasksHashNow = computeTasksHash(tasksContent);
         const contentHashNow = await computeContentHash(changeDir);
 
         // 将 marker 转为 Record 以便访问字段
-        const vRec = verifyMarker as unknown as Record<string, string>;
-        const rRec = reviewMarker as unknown as Record<string, string>;
+        const vRec = verifyRec as unknown as Record<string, string>;
+        const rRec = reviewRec as unknown as Record<string, string>;
 
         // 比对 verify marker 里的 hash
         if (tasksHashNow !== vRec['tasks_hash'] || contentHashNow !== vRec['content_hash']) {
@@ -138,9 +164,22 @@ export function buildArchiveCommand(): Command {
           process.exit(2);
         }
 
-        // 步骤 4:human-override 检查 — 必须 --force
+        // 步骤 3.5:P1.2 — 验证 evidence 完整性
+        const evResult = await validateEvidence(verifyRec, verifyPath);
+        if (!evResult.valid) {
+          console.error('✗ verify evidence 校验失败:');
+          for (const e of evResult.errors) console.error(`  - ${e.field}: ${e.message}`);
+          await archiveRelease();
+          process.exit(2);
+        }
+
+        // 步骤 4:human-override + non-git --force + git integrity + outcomes 校验
         const verifyBy = vRec['verified_by'];
         const reviewBy = rRec['reviewed_by'];
+        const reviewGit = reviewRec['git'] as Record<string, unknown> | undefined;
+        const isGitRepo = reviewGit?.['is_git_repo'] === true;
+
+        // 4a. human-override 必须 --force
         if (verifyBy === 'human-override' || reviewBy === 'human-override') {
           if (!opts.force) {
             console.error(
@@ -154,6 +193,33 @@ export function buildArchiveCommand(): Command {
             await archiveRelease();
             process.exit(2);
           }
+        }
+
+        // 4b. P1.3 — non-git review 必须 --force(spec §3.4 要求)
+        if (!isGitRepo && !opts.force) {
+          console.error(`✗ 非 git 项目下 review 标记不绑定代码 diff,archive 必须 --force 才接受`);
+          await archiveRelease();
+          process.exit(2);
+        }
+
+        // 4c. P1.3 — git review:重算 git.head + git.diff_hash 比对
+        if (isGitRepo) {
+          const gitResult = await validateReviewGitIntegrity(reviewRec, process.cwd(), reviewPath);
+          if (!gitResult.valid) {
+            console.error('✗ review git 完整性校验失败:');
+            for (const e of gitResult.errors) console.error(`  - ${e.field}: ${e.message}`);
+            await archiveRelease();
+            process.exit(2);
+          }
+        }
+
+        // 4d. P1.3 — review_outcomes:accepted=true 必须 resolved=true
+        const outResult = validateReviewOutcomes(reviewRec, reviewPath);
+        if (!outResult.valid) {
+          console.error('✗ review_outcomes 校验失败:');
+          for (const e of outResult.errors) console.error(`  - ${e.field}: ${e.message}`);
+          await archiveRelease();
+          process.exit(2);
         }
 
         // 步骤 5:调 archiveTransaction(Move→Sync)

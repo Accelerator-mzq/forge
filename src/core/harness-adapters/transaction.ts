@@ -74,7 +74,8 @@ export async function deployAtomic(projectRoot: string, plans: DeployPlan[]): Pr
     await rm(stagingDir, { recursive: true, force: true });
     await rm(backupDir, { recursive: true, force: true });
   } catch (err) {
-    // 反向回滚
+    // 反向回滚(P2.4 修复:用 rolledBack flag 防止 throw 被 inner catch 误捕获)
+    let rolledBack = false;
     try {
       for (const rel of committed) {
         const targetAbs = join(projectRoot, rel);
@@ -84,13 +85,17 @@ export async function deployAtomic(projectRoot: string, plans: DeployPlan[]): Pr
       }
       await rm(stagingDir, { recursive: true, force: true });
       await rm(backupDir, { recursive: true, force: true });
-      throw new Error(`Commit failed and rolled back: ${(err as Error).message}`);
+      rolledBack = true;
     } catch (rollbackErr) {
       // 回滚也失败
       throw new Error(
         `Commit failed AND rollback failed: ${(err as Error).message} / ${(rollbackErr as Error).message}\n` +
           `请手动清理 ${stagingDir} 和 ${backupDir},然后从 backup 恢复目标位置`,
       );
+    }
+    // 回滚成功 → 在 inner try 外面 throw,避免被 inner catch 误捕获
+    if (rolledBack) {
+      throw new Error(`Commit failed and rolled back: ${(err as Error).message}`);
     }
   }
 }

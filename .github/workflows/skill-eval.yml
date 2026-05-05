@@ -1,0 +1,51 @@
+name: Skill Eval
+
+on:
+  pull_request:
+    paths:
+      - 'src/core/templates/skills/**'
+      - 'forge-eval/scenarios/**'
+      - 'forge-eval/**.ts'
+  schedule:
+    - cron: '0 8 * * 0' # 每周日 UTC 8am(spec §5.5.8)
+  workflow_dispatch:
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # PR diff 需要完整历史
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.19'
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: PR — 仅跑改动的 skill
+        if: github.event_name == 'pull_request'
+        env:
+          EVAL_DIFF_BASE: origin/${{ github.base_ref }}
+        run: pnpm eval:changed
+
+      - name: Weekly / 手动触发 — 全量
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: pnpm eval
+
+      - name: Upload eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: eval-report.md
+          if-no-files-found: warn

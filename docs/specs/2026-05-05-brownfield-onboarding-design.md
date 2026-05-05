@@ -28,7 +28,20 @@
 - **审计**:审计员要的是签字版,不是 LLM 重写版
 - **团队共识**:多团队按老文档协作,不能单方面切换为 forge 内部 GWT spec
 
-v0.2 brownfield onboarding 的核心目标:**让 forge 与老文档体系并存 + 双向同步**,而非"替代"。
+v0.2 brownfield onboarding 的核心目标:**让 forge 与老文档体系并存 + archive→legacy 单向同步**(反向 sync 推 v0.3),而非"替代"。
+
+### 1.1.1 v0.2 突破 v0.1 §2.3 LLM 边界(必读)
+
+主 spec §2.3 line 189 明确:"不在用户运行时写 LLM 调用——所有用户的 AI 行为都通过 harness 发生,forge 不替代 harness 也不直接调 Anthropic API 服务用户。**例外**:forge 自身的开发期 skill eval"。
+
+**v0.2 brownfield 是已知的第二个例外**。`forge legacy-bridge regenerate / index / sync-check` 三个命令在用户路径上直接调 Anthropic API(读老文档 + 代码 + 测试用例 → 发 LLM)。这突破 v0.1 §2.3 边界,需要:
+
+- **显式 opt-in 机制**:`forge/config.yaml#legacy_bridge.allow_llm_calls` 默认 `false`;首次跑 `regenerate / index / sync-check` 时,工具检测到该字段缺失或为 false 时拒绝运行,**要求用户显式启用并明示数据将被发送到 Anthropic API**(类似 ANTHROPIC_API_KEY 缺失的提示)
+- **数据传输声明**:启用后,工具在每次 LLM 调用前显示一行 stdout `→ sending {N} bytes to Anthropic API ({provider}, region: {region})`(用户能感知数据流向)
+- **provider 配置(预留)**:`legacy_bridge.provider: anthropic`(v0.2 默认且唯一);v0.3 加 OpenAI / 自托管选项时只需改此字段
+- **离线禁用**:用户在 enterprise / air-gapped 场景可永久 `allow_llm_calls: false`,brownfield 工具拒绝运行,sync-check 在 archive hook 中自动 graceful skip
+
+**主 spec §2.3 须同步更新**(本 design 的 PR 内一并改),把"v0.2 brownfield"列为已知例外 #2。
 
 ### 1.2 三层能力架构
 
@@ -78,10 +91,12 @@ v0.2 brownfield onboarding 的核心目标:**让 forge 与老文档体系并存 
 | 15 | 复写器生命周期 | **One-shot 初始化工具**;后续日常 archive 不重跑;用户改复写产物如改老 SRS,**生命周期归用户** |
 | 16 | 复写质量验证 | **双 LLM 抽样**(模型 A 复写,模型 B 抽 30 条事实验证保真率);**默认 90% 阈值**;**无 retry**(失败直接报告丢失事实让用户手补) |
 | 17 | 复写产物保护 | **不需要 forge-protected 段机制**(因 one-shot 不重跑) |
-| 18 | 跨 anchor 一致性 | **自动决策不报为 diff**;第一优先级 mtime 最新,第二优先级 role 优先级写死(requirements > HLD > LLD > system-tests) |
-| 19 | sync-check 阻塞 | 默认 **不阻塞** archive;`forge/config.yaml#legacy_bridge.enforce_sync: true` 才阻塞未 resolve 的 critical 项 |
-| 20 | 敏感数据 | **redact 字段配置**(regex / 字面量),发 LLM 前 mask;内置 5-7 条默认规则(AWS/GCP/Azure key / 私钥 / 邮箱 / IPv4-private)兜底 |
-| 21 | 合规边界 | 复写产物**不替代权威交付物**;每份复写产物自动加 frontmatter `generated-by: forge-legacy-bridge` + 顶部 disclaimer |
+| 18 | 跨 anchor 一致性 | **同 role 多版本** → 自动用 `authoritative: true` 当前版(无 diff);**跨 role 不一致**(SRS vs HLD)→ **默认入 diff 让用户审**(major 档),**不**自动决策;`config.yaml#legacy_bridge.auto_resolve_cross_anchor: true` 才走 mtime > role 优先级自动决策(高级用户用)|
+| 19 | sync-check 触发时机 | **enforce 检查走 archive preflight**(Move→Sync 之前);post-archive 仅产报告(不再用作阻塞);`config.yaml#legacy_bridge.enforce_sync: true` 时 critical 未 resolve 在 preflight 阻塞,exit 2 |
+| 20 | 敏感数据 redact | **redact 字段配置**(regex / 字面量),发 LLM 前 mask;内置 12+ 条默认规则(AWS/GCP/Azure key、GitHub PAT、Slack token、JWT、DB URL with creds、私钥 BEGIN markers、邮箱、IPv4-private、generic Bearer / Basic 认证) |
+| 21 | 合规边界 | 复写产物**不替代权威交付物**;每份复写产物自动加 frontmatter + 顶部 disclaimer;**许可默认 `derived-from-source`**(继承 anchor 源许可,不擅自 MIT 化);`forge/config.yaml#legacy_bridge.regen_license` 用户可覆盖 |
+| 22 | LLM 调用边界 | **突破 v0.1 §2.3 边界**:`legacy-bridge regenerate / index / sync-check` 在用户路径直调 Anthropic API。需 `config.yaml#legacy_bridge.allow_llm_calls: true` 显式 opt-in;首次缺失 → 拒绝运行 + 提示;每次 LLM 调用前 stdout 显示数据传输信息(provider / 字节数);`false` 时 sync-check 自动 graceful skip(不阻塞 archive) |
+| 23 | 并发 lock | `forge/.cache/legacy-bridge.lock`(独立于 archive.lock);`map / regenerate / index / resolve` 各自获 legacy-bridge lock;`sync-check` 在 archive 内调用时**复用 archive.lock**(避免双重 lock 死锁);并发冲突时后到者 exit 5(同 archive.lock 模式)|
 
 ---
 
@@ -93,7 +108,7 @@ v0.2 brownfield onboarding 的核心目标:**让 forge 与老文档体系并存 
 
 | 子命令 | 用途 | 触发 |
 |---|---|---|
-| `forge legacy-bridge map` | 二阶段 mapping 第一阶段(LLM 扫 docs/+src/ 产 anchors-draft.yaml + 同名 .md 概览)| 用户主动(初始化时跑一次) |
+| `forge legacy-bridge map [--merge \| --overwrite]` | 二阶段 mapping 第一阶段(LLM 扫 docs/+src/ 产 anchors-draft.yaml + 同名 .md 概览)。`--merge`(默认)与已存在 anchors.yaml 合并新发现项,保留用户审过部分;`--overwrite` 全量重生成(覆盖用户改动,需用户确认)| 用户主动(初始化时跑一次) |
 | `forge legacy-bridge regenerate [--role <r>] [--dry-run] [--include-historical]` | 复写器:读 anchors → LLM 生成规范 SRS/HLD/LLD/system-tests → 双 LLM 抽样验证 → 写 `forge/docs/regenerated/`| 用户主动(one-shot 初始化) |
 | `forge legacy-bridge index` | 索引摘要:为每个 anchor 产 ~100 字 LLM 摘要 → `forge/docs/index.md` | 用户主动(随 regenerate 后跑) |
 | `forge legacy-bridge sync-check [--change-id <id>]` | 检测某 change 影响哪些 anchor → LLM 输出 5 档差异 → `forge/legacy-sync-state/<id>.{md,yaml}`| 自动(`forge archive` hook)+ 用户主动 |
@@ -157,29 +172,132 @@ src/cli/commands/
 
 ### 2.5 与 forge 现有工作流的衔接
 
+archive 流程**新增两个 hook 点**:preflight(Move 之前)与 post-archive(Sync 之后)。enforce 阻塞走 preflight,因为 Move 后再阻塞已晚——change 已搬到 archive 目录、`forge/specs/` 已 sync。
+
 ```
 用户跑 /forge:archive
    │
    ▼
 src/cli/commands/archive.ts(Plan 3+6 写的)
    │
-   ├─► archive 严格门禁(原有,不动)
-   ├─► archiveTransaction Move→Sync(原有,不动)
+   ├─► acquireLock("archive")(原 archive.lock,Plan 3 写的)
    │
-   ├─► 【新增】legacy-bridge sync-check 自动调用
+   ├─► 【新增 PREFLIGHT】sync-check enforce(可阻塞)
    │       │
-   │       ├─► 检测每 anchor SHA256 vs anchors.yaml 记录值
-   │       │   不一致 → warn "anchor X 已改动"
+   │       │ 仅当:legacy-anchors.yaml 存在 AND
+   │       │      config.yaml#legacy_bridge.allow_llm_calls=true AND
+   │       │      config.yaml#legacy_bridge.enforce_sync=true
+   │       │ 才进入此 hook(否则跳过)
    │       │
    │       ├─► 找本次 change 影响的模块,LLM 输出 5 档差异
    │       │   → forge/legacy-sync-state/<change-id>.{md,yaml}
    │       │
+   │       ├─► 检测 anchor hash 变化 / 跨 anchor 冲突
+   │       │
+   │       ├─► IF 含 critical 项 status=pending → exit 2 + 提示
+   │       │   "X 项 critical 差异未 resolve,跑
+   │       │    forge legacy-bridge resolve <change-id> 后重试"
+   │       │   (此时 archive 未动用户文件)
+   │       │
+   │       └─► IF 全部 critical 已 ack → 继续
+   │
+   ├─► archive 严格门禁(原有,不动)
+   ├─► archiveTransaction Move→Sync(原有,不动)
+   │
+   ├─► 【新增 POST-ARCHIVE】sync-check 报告(不阻塞)
+   │       │
+   │       │ 仅当 allow_llm_calls=true 才进入(graceful skip otherwise)
+   │       │
+   │       ├─► 若 enforce_sync=false:首次跑 sync-check 产报告
+   │       │   (preflight 已 skip,这是用户唯一时机看 sync 结果)
+   │       │
+   │       ├─► 若 enforce_sync=true:preflight 已跑过,这里只
+   │       │   更新 anchor hash + last_sync_at,不再调 LLM
+   │       │
    │       └─► stdout:"⚠ N 项老文档可能需更新,详见 sync-state/<id>.md"
    │
-   └─► archive exit 0(默认不阻塞;config 里 enforce_sync=true 才阻塞 critical 未 resolve)
+   ├─► releaseLock("archive")
+   │
+   └─► archive exit 0
 ```
 
-注:archive 默认**不阻塞**(sync-check warn 不导致 exit 非 0)。`forge/config.yaml#legacy_bridge.enforce_sync: true` 时才把"未 resolve 的 critical 差异"作为 archive 阻塞条件(参 review_outcomes.resolved 机制)。
+**enforce_sync 默认值**:`false`(用户体验渐进 — 老 forge 项目升级到 v0.2 后行为不变)。用户在合规场景手动启用 `true` 进入严格模式。
+
+**安全性保证**:
+- 默认模式(enforce_sync=false):sync-check post-archive 跑;archive 行为兼容 v0.1
+- 严格模式(enforce_sync=true):sync-check preflight 跑;**critical 未 resolve 时 archive 还没 Move 文件**,exit 2 不破坏现有状态
+- `archive.lock` 包裹整个流程,sync-check 复用此锁(决策 #23),不会有"sync-check 跑到一半另一进程 archive"竞争
+
+### 2.6 并发 lock 设计(决策 #23)
+
+brownfield 命令读写共享状态(`legacy-anchors.yaml` 含 hash + last_regenerated;`forge/legacy-sync-state/<id>.yaml` 含 status;`forge/docs/regenerated/`)。无锁 → `regenerate` 与 `archive sync-check` 同时跑会:
+
+- regenerate 写 anchor hash 到 yaml,sync-check 读到旧 hash,误报"anchor 已改动"
+- 两个 archive 同时跑(虽然 archive.lock 已挡),但若 regenerate 跟 archive 在不同进程同时写 yaml,可能互相覆盖
+
+**设计**:
+
+| Lock 文件 | 持有者 | 作用 |
+|---|---|---|
+| `forge/.cache/archive.lock`(Plan 3 已有) | `forge archive`(及其内部的 sync-check)| 防 archive 并发 |
+| `forge/.cache/legacy-bridge.lock`(新增) | `legacy-bridge map / regenerate / index / resolve` 各自获 | 防 brownfield 命令之间冲突 |
+
+**复用 vs 独立**(决策点):
+
+- `archive sync-check` 在 archive 内部跑 → **复用 archive.lock**,不再获 legacy-bridge.lock(避免双重 lock 死锁:某进程 A 持有 archive.lock 等 legacy-bridge.lock,某进程 B 持有 legacy-bridge.lock 等 archive.lock)
+- `legacy-bridge regenerate / index` 跟 archive 互斥:用户跑 regenerate 时 archive 阻塞(获 archive.lock 失败 → exit 5);反之亦然 → **regenerate 同时获 archive.lock + legacy-bridge.lock**,顺序固定为先 archive.lock 后 legacy-bridge.lock(任何持有 legacy-bridge.lock 的命令都不能再获 archive.lock)
+- `legacy-bridge map` 不写 sync-state,不影响 archive,只获 legacy-bridge.lock
+- `legacy-bridge resolve` 改 sync-state.yaml,但不与 archive 冲突(archive 在 preflight 检测 status,看到 pending 就阻塞,resolve 完成前用户必须手 ack)→ 仅获 legacy-bridge.lock
+
+**实现复用 Plan 3** `src/core/archive/lock.ts`(`acquireLock(forgeRoot, mode)`),`mode` 字段扩展支持 `'archive' | 'recover' | 'legacy-bridge-map' | 'legacy-bridge-regenerate' | ...`,持有者写入 `{pid, started_at, mode}` 与现有格式一致。
+
+**stale lock**:与 archive.lock 相同处理(Plan 3 line 626):lock 已存在 → 检 pid 存活 → 不存活强制清理。
+
+### 2.7 LLM 调用 opt-in 流程(决策 #22)
+
+首次跑 `legacy-bridge regenerate / index / sync-check`(或 archive 中触发 sync-check)时:
+
+```
+forge legacy-bridge regenerate
+   │
+   ▼
+检查 forge/config.yaml#legacy_bridge.allow_llm_calls
+   │
+   ├─► 未配置 / 为 false →
+   │      ┌──────────────────────────────────────────────────────────────┐
+   │      │ ✗ legacy-bridge 命令需要发送数据到 Anthropic API。            │
+   │      │                                                                │
+   │      │ 数据传输内容:                                                  │
+   │      │ - docs/legacy/ 下的老文档全文                                  │
+   │      │ - src/ 下的代码片段                                            │
+   │      │ - tests/ 下的测试用例                                          │
+   │      │                                                                │
+   │      │ 数据已通过 forge/legacy-anchors.yaml#redact 配置 mask。        │
+   │      │ 提供商:Anthropic Claude API(默认,v0.2 唯一支持)            │
+   │      │ 数据驻留:Anthropic 当前默认不保留 30+ 天                      │
+   │      │                                                                │
+   │      │ 启用步骤:                                                      │
+   │      │ 1. 在 forge/config.yaml 加:                                   │
+   │      │    legacy_bridge:                                              │
+   │      │      allow_llm_calls: true                                     │
+   │      │ 2. 跑 forge legacy-bridge --acknowledge-data-transfer          │
+   │      │    (一次性 ack,记录到 forge/.cache/llm-ack.yaml)              │
+   │      │ 3. 重新跑当前命令                                              │
+   │      │                                                                │
+   │      │ 合规场景:enterprise / air-gapped / GDPR 要求数据驻留时,      │
+   │      │ 保持 false 或省略此字段。brownfield 工具拒绝运行,            │
+   │      │ archive sync-check 自动 graceful skip,forge 主工作流不变。   │
+   │      └──────────────────────────────────────────────────────────────┘
+   │      exit 1
+   │
+   └─► 为 true 且 ack 文件存在 →
+          每次 LLM 调用前 stdout:
+            "→ Anthropic API: sending {N} bytes
+              (provider=anthropic, region={region}, model=claude-sonnet-4-6)"
+          继续执行
+```
+
+`--acknowledge-data-transfer` 一次性 ack 写入 `forge/.cache/llm-ack.yaml`(含 `acknowledged_at`、`config_hash`);若用户后改 config 显著(如 redact 字段),hash 变 → 要求重新 ack。这是 GDPR / 合规审计的"用户知情同意"证据链。
 
 ---
 
@@ -380,7 +498,7 @@ exit 0,不阻塞 archive
 | anchors.yaml 引用文件不存在 | 用户改了 docs/ 但没改 yaml | exit 2 + 列出失踪文件,**不阻塞已存在文件的处理**(部分降级) |
 | 同 role 多个 `authoritative: true` | 配置错误 | exit 1 + 报哪个 role 多个 authoritative |
 | 文档目录全空 | 没文档化的小项目 | `legacy-bridge map` 输出 "no docs found",exit 0 + 写空 anchors.yaml |
-| 老文档非 UTF-8(GBK Word 转 markdown 常见) | Windows 老项目 | 强制 `{ encoding: 'utf8' }`;mojibake → exit 2 + 提示用户用 iconv / vscode 转换 |
+| 老文档非 UTF-8(GBK Word 转 markdown 常见) | Windows 老项目 | 强制 `{ encoding: 'utf8' }`;mojibake → exit 2 + 提示用户用 iconv / vscode 转换;**dry-run 时**(`--dry-run`)输出文件路径 + 疑似编码(用 `chardet` 库探测,可选依赖)+ mojibake 段前后 80 字符 hex/text 对照,帮用户定位 |
 | Excel 解析失败 | .xlsx 损坏 / 含 chart / pivot | exit 2 + 提示导出 .csv 重试;不在工具内做复杂 Excel 修复 |
 
 ### 4.2 LLM 调用错误
@@ -398,19 +516,21 @@ exit 0,不阻塞 archive
 
 | 不变量 | 保护机制 |
 |---|---|
-| **anchors.yaml 记录的 hash 与实际 anchor 文件 hash 一致** | archive 的 sync-check 时**重算**每 anchor 的 hash;不一致 → warn(不阻塞);regenerate 跑完才更新 hash + last_regenerated |
+| **anchors.yaml 记录的 hash 与实际 anchor 文件 hash 一致**(此哲学**比 v0.1 marker hash 更宽松**:marker hash 不一致直接拒绝 archive,anchor hash 不一致默认仅 warn —— 因为 anchor 改动是用户合规活动的常态,marker 改动是过期信号) | archive 的 sync-check 时**重算**每 anchor 的 hash;不一致默认 warn(不阻塞);`config.yaml#legacy_bridge.enforce_sync=true` 时进入 preflight,critical 项 status=pending → exit 2;regenerate 跑完才更新 hash + last_regenerated |
 | **sync-state YAML 的 status ∈ {pending, resolved-by-doc-update, false-positive, skipped}** | resolve 命令前置校验;非法值 exit 1 |
 | **resolve 校验所有 diffs status ≠ pending 才标 resolved** | 仍有 pending → exit 2 + 列出 |
-| **enforce_sync = true 时,critical 未 resolve 阻塞 archive** | archive 命令开头检测 forge/legacy-sync-state/ 最近 N 份;有 critical 未 resolve → exit 2 |
+| **enforce_sync = true 时,critical 未 resolve 阻塞 archive**(走 preflight,Move 之前;Move 之后再阻塞已晚)| archive **preflight** 检测最近 sync-state.yaml 含 critical 未 resolve → exit 2(此时 change 未 Move,用户文件零变化) |
 | **复写产物 markdown 格式合法**(章节层级 / code block 闭合 / frontmatter 合法) | regenerator output validator(用 gray-matter + remark);不合法 → exit 2 + .invalid 文件 |
-| **复写产物 frontmatter 含 disclaimer** | regenerator 自动添加 `generated-by: forge-legacy-bridge` + `version: <commit-sha>` + 顶部声明 "**此文档由 LLM 复写,不是项目权威交付物**;权威源:`docs/legacy/`" |
-| **跨 anchor 一致性自动决策**(不列为 diff) | conflict.ts:第一优先级 mtime 最新,平局时 role 优先级写死;sync-check 与 regenerator 都遵循 |
+| **复写产物 frontmatter 含 disclaimer + license** | regenerator 自动添加 `generated-by: forge-legacy-bridge` + `version: <commit-sha>` + `license: derived-from-source`(决策 #21)+ 顶部声明 "**此文档由 LLM 复写,不是项目权威交付物**;权威源:`docs/legacy/`" |
+| **跨 anchor 一致性默认入 diff(决策 #18 修订)** | conflict.ts:**同 role 多版本** → 用 authoritative=true 当前版自动决策(无 diff);**跨 role 不一致** → **默认入 diff(major 档)让用户审**;`config.yaml#legacy_bridge.auto_resolve_cross_anchor=true` 才走 mtime > role 优先级自动决策(高级用户,理解 mtime 风险后才启用) |
+| **LLM opt-in 已 ack** | 跑前检测 `forge/.cache/llm-ack.yaml` + `config.yaml#legacy_bridge.allow_llm_calls=true`;任一缺失 → exit 1 + 提示启用步骤(决策 #22) |
+| **lock 顺序**(避免死锁) | regenerate / index 同时获 archive.lock + legacy-bridge.lock,顺序固定:**先 archive.lock 后 legacy-bridge.lock**;sync-check 在 archive 内不重复获 lock(复用 archive.lock)|
 
 ### 4.4 预算与速率(成本控制)
 
 | 场景 | 处理 |
 |---|---|
-| `regenerate` 估算 cost > $20(中型项目 SRS+HLD+LLD+system-tests 全跑) | 命令开头 console.warn 估算成本 + "继续 5 秒,Ctrl-C 取消"(同 forge-eval `budget.ts` 风格) |
+| `regenerate` 估算 cost > $20(中型项目 SRS+HLD+LLD+system-tests 全跑) | 命令开头 console.warn 估算成本;**TTY**(交互终端)→ 5 秒倒计时 + Ctrl-C 取消;**非 TTY**(CI / 脚本管道)→ 拒绝运行,exit 1 + 提示 `--yes` flag(用户显式同意)|
 | `regenerate --dry-run` | 不调 LLM,只估算 cost + 列要扫的文件;给用户决策依据 |
 | sync-check 单次 cost > $5 | 同 warn 不阻塞 |
 | 月度累计 brownfield cost(sync-check + regenerate)记录 `forge/.cache/legacy-bridge-cost.log` | 用户可 cat 查;过 $50/月 警告(参 forge-eval `DEFAULT_BUDGET_WARN_USD = 20.0` 同风格) |
@@ -431,13 +551,41 @@ redact:
   - literal: "INTERNAL-DB-PROD-01"      # 用户自补字面量
 ```
 
-**默认内置规则**(用户不写也兜底):
+**默认内置规则**(12 类,用户不写也兜底):
+
+云厂商 secret:
 - AWS access key:`AKIA[0-9A-Z]{16}`
 - GCP API key:`AIza[0-9A-Za-z_-]{35}`
 - Azure connection string:`DefaultEndpointsProtocol=...`
+
+代码托管 / 协作工具 token:
+- GitHub Personal Access Token:`ghp_[A-Za-z0-9]{36,}` / `gho_[A-Za-z0-9]{36,}` / `ghu_[A-Za-z0-9]{36,}` / `ghs_[A-Za-z0-9]{36,}` / `ghr_[A-Za-z0-9]{36,}`
+- GitLab token:`glpat-[A-Za-z0-9_-]{20,}`
+- Slack token:`xox[bpoa]-[0-9]{10,}-[0-9]{10,}-[A-Za-z0-9]{20,}`
+- OAuth client secret(generic Bearer / Basic):`(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{20,}`
+
+身份验证:
+- JWT:`eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`
+- 私钥 BEGIN markers:`-----BEGIN (RSA|EC|OPENSSH|DSA|ENCRYPTED) PRIVATE KEY-----`
+
+数据库连接:
+- DB URL with creds:`(postgres|mysql|mongodb|redis)(\+[a-z]+)?://[^:]+:[^@]+@[^/\s]+`(匹配 `postgres://user:pass@host`)
+
+通用 PII:
 - Email:`[\w.-]+@[\w.-]+\.[a-z]{2,4}`
 - IPv4 private:`10\.\d+\.\d+\.\d+` / `192\.168\.\d+\.\d+` / `172\.(1[6-9]|2\d|3[01])\.\d+\.\d+`
-- 私钥 BEGIN markers
+
+**`--redact-report` flag**:跑命令时加此 flag → stdout 输出每条规则的命中**数量**(不输出原值),用户能验证 redact 真生效:
+
+```
+$ forge legacy-bridge regenerate --redact-report
+[redact] aws-access-key:    3 命中
+[redact] github-pat:         12 命中
+[redact] db-url-with-creds:  2 命中
+[redact] jwt:                0 命中
+...(共 12 类规则)
+total: 17 项已 mask 为 <<REDACTED-N>>
+```
 
 mask 字符:`<<REDACTED-{n}>>`(`{n}` 是序号:第一处 redact 替换为 `<<REDACTED-1>>`,第二处 `<<REDACTED-2>>`,以此类推;让 LLM 能区分多处占位但不暴露原值)。
 
@@ -479,9 +627,55 @@ forge-eval/regeneration-scenarios/
 每个 scenario 含:
 - 输入老文档(可能多份,模拟真实)
 - **关键事实清单**(人工标注:这份 SRS 至少 N 条事实必须保留)
+- **critical-facts 子集**(标注哪些事实属于 critical 级别 — 合规 / 安全 / 业务硬约束)
 - 期望保真率阈值
 
-跑 `pnpm eval-regen` → 调真 LLM → 抽 30 条事实 → 验证保真率 ≥ 90% → 输出报告。
+**分层抽样**(对抗 LLM 长文档低频 fact 漏报):
+
+抽样不是简单"随机 30 条",而是:
+
+1. **critical-facts 全量抽**(标注的 critical 集合,通常 5-10 条)→ 这部分**必须 100% 保留**(任一丢失 → 整体失败,无关 90% 阈值)
+2. **每个章节按比例抽**(章节越大抽越多,但每章至少 1 条)→ 防止 LLM 集中改写某章导致该章 fact 全丢但其他章 fact 多保留拉高总比率的"统计骗术"
+3. **总抽样数仍约 30**,但分布按 1+2 决定
+
+数据形态:
+
+```yaml
+# regeneration-scenarios/well-formed-srs.yaml
+input_anchors:
+  - role: requirements
+    path: fixtures/srs.md
+key_facts:
+  - text: "支付幂等性必须用 Idempotency-Key 头"
+    section: "§4.5"
+    critical: true            # 合规硬约束,必抽必保留
+  - text: "Order 表 user_id 字段非空"
+    section: "§3.1"
+    critical: true
+  - text: "退款 7 天内完成"
+    section: "§4.6"
+    critical: false           # 业务规则,允许同义改写但不能丢
+
+regeneration_threshold: 0.9   # 非 critical 90% 保真率
+critical_must_preserve: 1.0   # critical 必须 100%
+```
+
+跑 `pnpm eval-regen` → 调真 LLM → 分层抽样 → 验证 critical 100% + 总体 ≥ 90% → 输出报告(含未覆盖章节清单)。
+
+`quality-judge.ts` 输出新增字段:
+
+```typescript
+interface QualityResult {
+  total_rate: number;            // 总体保真率(critical + non-critical)
+  critical_rate: number;         // critical 子集保真率(必须 1.0)
+  per_section_rates: Record<string, number>;  // 各章节保真率(防统计骗术)
+  lost_critical: KeyFact[];      // 丢失的 critical(致命)
+  lost_non_critical: KeyFact[];  // 丢失的 non-critical
+  uncovered_sections: string[];  // 抽样未覆盖的章节(警告)
+}
+```
+
+**失败路径**:critical 任一丢失 → exit 2,不 retry,直接报告 + 写 .partial 让用户决定接受 / 重写 prompt / 手补(决策 #16,无 retry)。
 
 CI 集成同 Plan 5:**weekly + PR(若改 regenerator.ts / quality-judge.ts) + 手动**;`ANTHROPIC_API_KEY` 缺失时优雅 skip。
 
@@ -494,10 +688,20 @@ tests/core/legacy-bridge/sync-check.test.ts(mock LLM client)
 - 受影响模块识别:本次 change 改了 specs/payment.md → 找出 anchors.modules.payment 列的所有文件
 - 5 档严重度判定:fixture 中 LLM 返回 5 档,验证报告分组正确
 - graceful skip:legacy-anchors.yaml 不存在 → exit 0 + skip
+- graceful skip:allow_llm_calls=false → exit 0 + skip(决策 #22)
+- malformed yaml(用户改坏 anchors.yaml,非法字段 / 同 role 多 authoritative)→ exit 1 + 行号
 - hash 过期检测:anchor SHA256 与 yaml 记录不一致 → warn 输出含 "anchor X 已改动"
 - 部分降级:anchors.yaml 引用 5 文件,3 存 2 缺 → 处理 3 个 + 报告 2 缺,不整体失败
 - 全干净:本次 change 改的模块在 anchors 里没配 → "no affected anchors, exiting"
-- 跨 anchor 不一致**不报为 diff**(LLM 返回冲突时 conflict.ts 自动决策)
+- 同 role 跨版本 → 自动用 authoritative=true 当前版(无 diff)
+- **跨 role 不一致默认入 diff**(决策 #18 修订);auto_resolve_cross_anchor=true 时才走 mtime>role 自动决策
+
+并发 / lock 测试(新增,对抗 Codex C-2 / I-5):
+- regenerate 与 archive 同时跑 → archive.lock 互斥(后到者 exit 5)
+- regenerate 与 map 同时跑 → legacy-bridge.lock 互斥
+- archive 内 sync-check 复用 archive.lock(不再获 legacy-bridge.lock,不死锁)
+- resolve 与 sync-check 同 change-id 竞争(resolve 改 status,sync-check 重写 yaml)→ legacy-bridge.lock 互斥
+- stale lock(pid 不存活)→ 自动清理后获(同 archive.lock 模式)
 ```
 
 ### 5.3 CLI 行为集成测试
@@ -556,11 +760,12 @@ CI Linux + macOS + **Windows runner**(同 forge 现有 ci.yml);Windows-specific 
 | 类别 | 新增 |
 |---|---|
 | 复写质量 eval(scenario YAML) | 6 scenario × 平均 3-4 turn ≈ 22 |
-| sync-check 单元 | 7 case |
+| sync-check 单元(含并发 / lock / malformed yaml / opt-in skip)| 12 case |
 | CLI 集成(5 命令) | 25 case |
-| Core engine 单元 | 50 case |
+| Core engine 单元(含 redact / conflict / lock / quality-judge 分层抽样)| 60 case |
 | 跨平台 fixture | 10 case |
-| **合计** | **~114 新 tests**(总 ~390 = 原 275 + 新 114) |
+| 并发 / 集成测试(I-5 新增) | 6 case |
+| **合计** | **~135 新 tests**(总 ~410 = 原 275 + 新 135) |
 
 ---
 
@@ -570,44 +775,73 @@ CI Linux + macOS + **Windows runner**(同 forge 现有 ci.yml);Windows-specific 
 
 参考 forge spec §6 + Plan 4-6 实施风格,Plan 7 内部分 6 phase:
 
+原始版本 Phase B "1 周做 5 模块" Codex 对抗审查指出过于乐观(Plan 6 实际经验:archive --recover case C 单一功能 5 sub-task 用了 1 周)。**修订版**把 B 拆 B1/B2/B3,E/F 也重估:
+
 | Phase | 内容 | 时长(单人全职) | 依赖 |
 |---|---|---|---|
-| **A. 基础设施 + schema** | `anchors.ts` 解析 + 校验 / `legacy-bridge` CLI 子命令骨架 / 3 个新 schema 注册 / `legacy-anchors.yaml` 模板 | 1 周 | Plan 6 main 已合 |
-| **B. 复写器 + 质量验证** | `regenerator.ts`(多版本合并 + disclaimer)/ `quality-judge.ts`(双 LLM 抽样,复用 forge-eval/judge.ts)/ `redact.ts`(默认规则 + mask)/ `conflict.ts`(mtime > role 优先级)/ budget 估算 | **1 周**(简化:无 forge-protected 段 + 无 retry)| A 完 |
-| **C. sync-check + 差异报告** | `sync-check.ts`(archive hook + 受影响模块识别)/ `diff-report.ts`(5 档严重度 + markdown/YAML 双栈)/ `resolve` 命令 / `enforce_sync` 配置 | 1 周 | B 完 |
-| **D. 索引 + mapper** | `mapper.ts`(二阶段第一阶段 + draft yaml)/ `indexer.ts`(每 anchor ~100 字摘要)/ archive 集成 hash 检测 | 0.5 周 | C 完(可与 C 并行) |
-| **E. 复写质量 eval 框架** | `forge-eval/regeneration-scenarios/` 6 scenario / `regeneration-runner.ts` / CI workflow paths trigger / weekly schedule | 0.4 周 | B 完 |
-| **F. 用户文档 + Release v0.2.0** | `docs/legacy-bridge.md` / 主 README + `getting-started.md` 加 brownfield 段 / CHANGELOG.md / release-gate-checklist.md 加 brownfield acceptance test / npm publish v0.2.0 工件 | 0.5 周 | A-E 全完 |
+| **A. 基础设施 + schema** | `anchors.ts` 解析 + 校验(支持 `forge-legacy-anchor/v1` schema + redact + role + multi-version + lock 字段)/ `legacy-bridge` CLI 子命令骨架(commander)/ 4 个新 schema 注册(legacy-anchor / legacy-sync / regen-quality / llm-ack)/ `legacy-anchors.yaml` 模板 / **依赖选定**:`exceljs`(Apache 2.0,选定理由 见 §6.5)+ `chardet`(可选 dep,encoding detect) / 复用 `src/core/archive/lock.ts` 加 mode 扩展(决策 #23)/ `forge/.cache/llm-ack.yaml` schema | 1 周 | Plan 6 main 已合 |
+| **B1. redact + conflict + LLM opt-in** | `redact.ts`(12+ 默认规则 + 自定义 + mask)/ `conflict.ts`(同 role authoritative + 跨 role 默认入 diff)/ `legacy-bridge --acknowledge-data-transfer` ack 流程(决策 #22)/ budget 估算 + TTY/非 TTY 分支 | 0.5 周 | A 完 |
+| **B2. regenerator + 多版本 + disclaimer** | `regenerator.ts`(读 anchors → 多版本合并 → 调 LLM → 加 frontmatter `generated-by` + `license: derived-from-source` + 顶部 disclaimer → 输出)/ output validator(gray-matter + remark)/ excel 解析(`exceljs`,sheet 字段精确指向) | 0.5 周 | B1 完 |
+| **B3. quality-judge 分层抽样** | `quality-judge.ts`(模型 A 抽 fact + critical-facts 全量必抽 + 各章节按比例抽;模型 B 验证三态 preserved/paraphrased/lost;输出 per-section 保真率 + lost critical / lost non-critical / uncovered sections;无 retry,失败直接 .partial)| 0.5 周 | B2 完 |
+| **C. sync-check + 差异报告** | `sync-check.ts`(archive **preflight** + post-archive 双 hook,根据 enforce_sync 选择走哪边)/ `diff-report.ts`(5 档严重度,跨 anchor 冲突默认入 diff)/ `resolve` 命令 / `enforce_sync` 配置 / archive.ts 集成 preflight | 1 周 | B3 完 |
+| **D. 索引 + mapper** | `mapper.ts`(二阶段第一阶段 + draft yaml + `--merge` / `--overwrite` 参数)/ `indexer.ts`(每 anchor ~100 字摘要 + 大文件分块)/ archive 集成 hash 检测 | 0.5 周 | C 完(可与 C 并行) |
+| **E. 复写质量 eval 框架 + harden** | `forge-eval/regeneration-scenarios/` 6 scenario(含 critical-facts 标注)/ `regeneration-runner.ts` 分层抽样实现 / CI workflow paths trigger / weekly schedule / **release hardening 子任务**:并发场景测试(B/C/D 完后手工跑 regenerate 与 archive 同时跑验证 lock)、跨平台 fixture 验证 | **0.7 周** | B3 完(可与 C/D 并行) |
+| **F. 用户文档 + Release v0.2.0** | `docs/legacy-bridge.md`(完整使用手册 + opt-in 流程示例 + 合规场景 FAQ)/ 主 README + `getting-started.md` 加 brownfield 段 / CHANGELOG.md / release-gate-checklist.md 加 brownfield acceptance test 段(7 个 acceptance scenario:opt-in 流程 / redact 真生效 / preflight 阻塞 / lock 并发 / 多 harness skill smoke 不退化 / Excel 解析 / disclaimer 含 license)/ npm publish v0.2.0 工件 / **同步更新主 spec §7**(I-7:OpenCode + specs-sync delete 路线图正式调整) | **0.7 周** | A-E 全完 |
 
-**合计 4.4 周**,加 review 修复 + 调试缓冲约 **4-5 周**。
+**合计 5.4 周**,加 review 修复 + 调试缓冲约 **5-6 周**。
+
+**修订理由**(对应 Codex I-4):
+- 原 Phase B 1 周做 5 模块 → 拆 B1/B2/B3 各 0.5 周,功能边界清晰可独立 review
+- 原 Phase E 0.4 周 → 0.7 周,加 release hardening 子任务(并发 / 跨平台 / 真 LLM eval 校准)
+- 原 Phase F 0.5 周 → 0.7 周,加主 spec §7 同步更新 + acceptance test 数从 5 增到 7
+
+### 6.2 阶段间依赖关系
 
 ### 6.2 阶段间依赖关系
 
 ```
-                  ┌─────────────────────┐
-                  │ A. 基础设施 + schema │
-                  └──────────┬──────────┘
-                             │
-                             ▼
-                  ┌─────────────────────────┐
-                  │ B. 复写器 + quality-judge│  ◄── 核心 phase
-                  │    (1 周,简化后)         │
-                  └──────────┬──────────────┘
-                             │
-                  ┌──────────┼──────────┬──────────┐
-                  ▼          ▼          ▼          ▼
-                ┌────┐   ┌────┐   ┌────┐   ┌─────────┐
-                │ C  │   │ D  │   │ E  │   │ F (Doc) │
-                │sync│   │idx │   │eval│   │ Release │
-                └─┬──┘   └─┬──┘   └─┬──┘   └────┬────┘
-                  │        │        │            │
-                  └────────┴────────┴────────────┘
-                                │
-                                ▼
-                          v0.2.0 候选
+                       ┌──────────────────────┐
+                       │ A. 基础设施 + schema  │
+                       │     (1 周)           │
+                       └──────────┬───────────┘
+                                  │
+                                  ▼
+                       ┌──────────────────────┐
+                       │ B1. redact+conflict  │
+                       │     +LLM opt-in      │
+                       │      (0.5 周)         │
+                       └──────────┬───────────┘
+                                  │
+                                  ▼
+                       ┌──────────────────────┐
+                       │ B2. regenerator+     │
+                       │     多版本+disclaimer │
+                       │      (0.5 周)         │
+                       └──────────┬───────────┘
+                                  │
+                                  ▼
+                       ┌──────────────────────┐
+                       │ B3. quality-judge    │
+                       │     分层抽样          │
+                       │      (0.5 周)         │
+                       └──────────┬───────────┘
+                                  │
+                       ┌──────────┼──────────┬──────────┐
+                       ▼          ▼          ▼          ▼
+                     ┌────┐   ┌────┐   ┌──────┐   ┌────────┐
+                     │ C  │   │ D  │   │  E   │   │   F    │
+                     │sync│   │idx │   │ eval │   │  Doc + │
+                     │1 周 │   │0.5 │   │+harden│   │Release │
+                     └─┬──┘   └─┬──┘   │0.7 周 │   │0.7 周  │
+                       │        │      └──┬───┘   └────┬───┘
+                       │        │         │            │
+                       └────────┴─────────┴────────────┘
+                                          │
+                                          ▼
+                                    v0.2.0 候选
 ```
 
-C/D/E 在 B 完成后可部分并行;F 必须最后。
+C/D/E 在 B3 完成后可部分并行;F 必须最后(因含主 spec §7 同步更新 + 完整 release-gate)。
 
 ### 6.3 风险与开放问题
 
@@ -621,7 +855,24 @@ C/D/E 在 B 完成后可部分并行;F 必须最后。
 | 6 | 跨 anchor 一致性自动决策的边角情况(SRS 与 HLD 矛盾,但用户其实想保留这个矛盾以便讨论)| Phase C `--no-auto-resolve-cross-anchor` flag(高级用户用);默认走自动决策 |
 | 7 | one-shot regenerate 重跑会覆盖用户手编辑 | T3 数据流明示"重跑前须 git commit 当前版";`regenerate` 命令前置检测 git status 含 unstaged 改动 → warn confirm |
 
-### 6.4 与 forge 现有路线图衔接
+### 6.5 关键依赖选定(对抗 Codex I-6)
+
+`.xlsx` 解析库二选一:
+
+| 库 | 许可 | 大小 | 解析能力 | 公式 / pivot / chart |
+|---|---|---|---|---|
+| `xlsx` (SheetJS Community) | Apache 2.0 | ~660KB | 强 | 公式部分支持,pivot/chart 不支持 |
+| **`exceljs`(选定)** | MIT | ~340KB | 强 | 公式不解析(读取计算缓存值),pivot/chart 不支持 |
+
+**选 `exceljs`**:
+- MIT 许可与 forge 主项目一致(`xlsx` Apache 2.0 兼容但增加 license 复杂度)
+- 大小更小(节约打包尺寸)
+- v0.2 不需要公式 / pivot / chart(测试用例 Excel 通常是简单 sheet);若用户 Excel 含这些复杂特性,**Phase A 失败提示用户先导出 .csv**(spec §4.1 已声明)
+- v0.3 若需要公式/pivot/chart 解析,届时再加 `xlsx` 或迁移
+
+**Phase A 加依赖**:`pnpm add exceljs@^4`,验证 npm pack tarball 增量 ~340KB(可接受,对齐 release-gate.mjs 的 tarball 内容验证)。
+
+### 6.6 与 forge 现有路线图衔接
 
 ```
 v0.1.0 (Plan 1-6, 已发布)
@@ -644,24 +895,28 @@ v0.3.0 (规划) — Plan 8+
 
 注:v0.2 不再做 OpenCode 与 specs-sync delete(原 spec §7 标 v0.2 的两项)— brownfield 工作量已经足够大,这两项推 v0.3 更合理。Plan 7 完成后,**spec §7 的 v0.2 范围只有 brownfield-bridge 这一项**。
 
+**主 spec §7 同步更新**(对抗 Codex I-7):本 design 修订路线图后,Plan 7 Phase F 内含主 spec `docs/specs/2026-05-04-forge-fusion-design.md` §7 / §6 路线图修订:把 OpenCode adapter 与 specs-sync delete 从 v0.2 移到 v0.3 范围。同时 specs-sync 在 archive 中遇到 delete delta 时仍保持现有的 `v0.2 not implemented` 错误信息,这是已发布 v0.1 的行为延续(用户预期内,不破坏向后兼容)。
+
 ---
 
 ## 7. 不在 v0.2 范围(显式)
 
 继承 forge spec §7 的"不做项",并新增 brownfield 相关:
 
-- ❌ **不替代老文档**(只共存 + 同步)
+- ❌ **不替代老文档**(只共存 + archive→legacy 单向同步;反向 sync 推 v0.3)
+- ❌ **不实施反向 sync**(改老锚点 → 自动建议新 change;v0.3 — 注:v0.2 hash 检测 warn 是被动信号,不是反向 sync)
 - ❌ **不导入老文档为 forge GWT specs**(决策 #6;sync-check 持续同步替代一次性导入)
-- ❌ **不导入验收报告**(决策 #8;关键决策用户手摘要塞 config.yaml#context)
+- ❌ **不全量导入验收报告**(决策 #8);**但 v0.2 接受 metadata-only 导入**(对抗 Codex I-8):用户可在 `legacy-anchors.yaml` 把验收报告 mark 为 `role: acceptance-report`,工具仅在 `forge/docs/index.md` 索引该文件名 + 客户 / 日期 / 通过条目数等 metadata(不读全文,不发 LLM),提供 trace graph 入口;具体内容用户手查原文件
 - ❌ **不实施 forge-protected 段保留机制**(决策 #15-17;复写器 one-shot 不重跑)
 - ❌ **不做 LLM 自评保真率**(决策 #16;靠双 LLM 抽样)
+- ❌ **不默认开启 LLM 调用**(决策 #22;突破 v0.1 §2.3 边界,需 opt-in)
 - ❌ **不支持外部文档 URL**(决策 #12;v0.2 只支持 git 内文件)
 - ❌ **不支持 Word / PDF 原生解析**(决策 #13;用户先 pandoc 转 markdown)
 - ❌ **不在复写产物**还原 redact 占位(决策 #20;敏感数据不进 forge)
 - ❌ **不自动重跑 regenerate**(决策 #15;用户主动跑;hash 过期只 warn)
-- ❌ **不实施反向 sync**(老锚点改了 → 自动建议新 change;v0.3)
-- ❌ **不实施跨 anchor 一致性专门审计**(自动决策融入 sync-check;v0.3 单独命令)
+- ❌ **不实施跨 anchor 一致性专门审计**(默认入 diff 融入 sync-check;v0.3 单独命令做整体审计)
 - ❌ **不实施代码逆向 brownfield**(无文档项目从代码推 SRS;v0.3)
+- ❌ **不在非 TTY 环境跑 regenerate / index 时无声 confirm**(M-4:非 TTY 必须显式 `--yes`)
 
 ---
 
@@ -686,19 +941,31 @@ v0.3.0 (规划) — Plan 8+
 - 新增 `forge-eval/regeneration-scenarios/`(6 scenario)+ `regeneration-runner.ts`,与现有 `forge-eval/scenarios/`(12 个 skill)平行
 - `pnpm eval` 默认仍只跑 skill scenarios(向后兼容);加 `pnpm eval-regen` 单独跑 regeneration scenarios
 
-### 8.4 hash + marker 哲学一致
+### 8.4 hash + marker 哲学**类似但不完全一致**(措辞修订 — Codex C-4)
 
-- `legacy-anchors.yaml` 的 anchor hash 用 SHA256(同 spec §3.4 marker hash)
+- `legacy-anchors.yaml` 的 anchor hash 用 SHA256(同 spec §3.4 marker hash 算法)
 - sync-state YAML 的 status 字段(pending / resolved-by-doc-update / false-positive / skipped)同 marker review_outcomes resolved 风格
 - 都是"显式声明 + 严格校验 + 不擅自修复"
+- **关键差异**(此 design 与 v0.1 marker 在严格度上的不对称):
+  - v0.1 marker hash 不一致 → archive 直接拒绝(marker 是"过期信号",改了说明 verify/review 已失效)
+  - **brownfield anchor hash 不一致默认仅 warn**(anchor 改动是用户合规活动的常态:每次老 SRS 评审后改一次很正常,严格阻塞会让工具不可用)
+  - 用户可在合规场景设 `enforce_sync: true` 手动严格化,与 v0.1 marker 对齐
+  - **本设计哲学声明**:brownfield 在默认安全级别上比 v0.1 marker **更宽松一档**,但提供 enforce_sync flag 让用户在需要时升级到与 v0.1 同等严格
 
 ---
 
 ## 9. 许可与署名
 
 - forge 自身:MIT(同 v0.1)
-- 复写产物:由 forge 工具生成,默认 MIT(用户可在 `forge/config.yaml#license` 覆盖);复写产物 frontmatter 含 `generated-by: forge-legacy-bridge` 标识
+- **复写产物默认许可:`derived-from-source`**(对抗 Codex I-9 — 不假定 MIT,因为客户 SRS 派生物可能不能 MIT 化):
+  - frontmatter `license: derived-from-source` 表示"许可继承自 anchor 源,需用户根据老文档版权决定"
+  - 用户可在 `forge/config.yaml#legacy_bridge.regen_license` 显式覆盖(如 MIT / Apache-2.0 / Proprietary / CC-BY-NC)
+  - **不擅自 MIT 化**:防止用户把客户 SRS 复写产物错误以 MIT 发布、或提交到不允许衍生授权的仓库
 - 老文档原件(`docs/legacy/`)的版权归用户;forge 不修改不持有
+- **GDPR / 客户数据 / 跨境传输确认门**(对抗 Codex I-9):
+  - 首次启用 `allow_llm_calls: true` 时,工具检测 `legacy-anchors.yaml` 是否含被标记 `contains_customer_data: true` 的文件
+  - 若有 → 跑前额外提示"以下文件标为含客户数据,启用前请确认有数据出境授权(GDPR Art. 44+ / DPA 协议),并已签 Anthropic DPA"+ exit 1 等用户在 `forge/.cache/llm-ack.yaml` 加 `customer_data_acknowledged: true`
+  - 若没 mark 但用户实际上有客户数据,责任自负(forge 仅在显式 mark 上提示,不做 PII 自动检测)
 - 复写产物 frontmatter 自动加合规 disclaimer:
 
 ```markdown
@@ -709,14 +976,59 @@ sources:
   - docs/legacy/SRS-v3.2.md
   - docs/legacy/payment-detailed.md
 fidelity-rate: 92%
-license: MIT
+critical-fact-rate: 100%      # critical 子集保真率(分层抽样,决策 #16)
+license: derived-from-source  # 默认值,见 §9
+forge-version: 0.2.0
 ---
 
 > **⚠ 此文档由 forge 自动生成**
 > 这是 LLM 复写的规范化版本,**不是项目权威交付物**。
 > 权威源:`docs/legacy/`(用户原版老文档)
 > 客户验收 / 审计 / 法律证据请引用权威源,不要引用本文件
+> 
+> 许可:`derived-from-source` — 实际许可由 anchor 源决定,
+> 在 `forge/config.yaml#legacy_bridge.regen_license` 显式声明前不假定任何 OSS 许可
 ```
+
+---
+
+---
+
+## 10. 修订记录
+
+### v0.2(本版本,2026-05-05 — 基于 Codex 对抗审查的修订)
+
+外部对抗审查(Codex `gpt-5.3-codex` `--effort high`)指出 v0.1 设计有 4 项 Critical + 9 项 Important + 5 项 Minor 缺陷。本 design 经核实后接受/修订/反驳如下:
+
+| Codex 项 | 处理 | 修订位置 |
+|---|---|---|
+| C-1 LLM 边界(突破 v0.1 §2.3) | 接受,加 opt-in 机制 | §1.1.1 / 决策 #22 / §2.7 |
+| C-2 并发 lock 缺失 | 接受,加共享 lock 设计 | 决策 #23 / §2.6 |
+| C-3 sync-check 时机错误(post-archive 阻塞失效) | 接受,改 preflight | 决策 #19 / §2.5 重写 |
+| C-4 hash 哲学双标措辞 | 部分接受(改文档表述,默认值合理保留) | §8.4 修订 |
+| I-1 redact 默认规则不全 | 接受,扩展 5 → 12+ 类 | §4.5 |
+| I-2 抽样不防低频 fact | 接受,改分层抽样 + critical 必抽 | §5.1 / 决策 #16 |
+| I-3 mtime 优先风险 | 部分接受(跨 role 冲突默认入 diff)| 决策 #18 修订 / §4.3 |
+| I-4 Phase B 时长乐观 | 接受,B 拆 B1/B2/B3,总 4-5 周 → 5-6 周 | §6.1 / §6.2 重新画图 |
+| I-5 测试盲点 | 接受,补并发/lock/yaml-malformed/竞争测试 | §5.2 / §5.7(135 → 原 114)|
+| I-6 .xlsx 库未选 | 接受,选定 exceljs,Phase A 加依赖 | §6.5 新增 |
+| I-7 路线图与主 spec 冲突 | 接受,Phase F 加主 spec §7 同步更新 | §6.6(原 6.4)/ Phase F |
+| I-8 审计盲点(acceptance reports / 反向 sync)| 部分接受(metadata-only acceptance reports 导入) | §7 修订 |
+| I-9 复写产物 license MIT 化风险 | 接受,改默认 `derived-from-source` + GDPR 确认门 | 决策 #21 / §9 |
+| M-1 措辞冲突(双向 vs 单向)| 接受 | §1.2 / §7 |
+| M-2 --merge / --overwrite 缺定义 | 接受 | §2.1 |
+| M-3 编码 dry-run 提示 | 接受 | §4.1 |
+| M-4 非 TTY 倒计时不适用 | 接受,加 `--yes` flag | §4.4 / §7 |
+| M-5 配置职责分裂 | 接受,声明 `legacy-anchors.yaml` = anchor metadata,`config.yaml#legacy_bridge` = global policy | 决策 #19 / §2.5 |
+
+**Codex Open Questions 回应**:
+- Q-1 / Q-2:Plan 6 已合 main(commit 99c510f,PR #5);Plan 7 实施计划待 brainstorming 完成后 invoke writing-plans 写
+- Q-3:本 design §1.1.1 / 决策 #22 / §2.7 / §9 已正式声明 v0.2 突破 §2.3 LLM 边界 + 数据传输声明 + opt-in 机制 + GDPR 确认门
+- Q-4:验收报告处理改为 metadata-only 导入(§7 / I-8 部分接受),不全量但保留 trace graph 入口
+
+### v0.1(初稿,2026-05-05 上午)
+
+10+5 轮 brainstorming 澄清后写出。被 Codex 对抗审查发现 18 项缺陷(见 v0.2 修订记录)。
 
 ---
 

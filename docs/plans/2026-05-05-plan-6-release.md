@@ -1819,3 +1819,14 @@ Plan 6 完成 + PR 合并到 main 后,maintainer 走 release gate:
 **实施顺序约束**:
 - Task A2 加 helper(`checkBackupIntegrity` / `checkArchiveIntegrity`)+ Task A3 改 RecoverResult 接口 → Task A4 archive.ts 的 --recover 路径才能用上 caseCData。严格按 A1 → A2 → A3 → A4 → A5 顺序
 - Phase B / C / D 互相独立,可乱序;但 Phase E 要等所有前置完成
+
+---
+
+## Plan 6 完成记录
+
+- 完成时间:2026-05-05 13:15(UTC)
+- 总测试数:275 passed + 1 skipped
+- CI run URL:https://github.com/Accelerator-mzq/forge/pull/6(PR check;CI 触发中)
+- 关键 commit 范围:`32d5524..b77230a57a2cd4d3ef7b88fa47ed38d56bdbe1ea`
+- v0.1.0 release gate 自动化部分:**已通过**(本地 release-gate.mjs exit 0)
+- v0.1.0 release gate 手动部分(Claude Code + Codex acceptance test):**待 maintainer 跑**(spec §5.1 + docs/release-gate-checklist.md §2)

@@ -4,8 +4,8 @@ import tsPlugin from '@typescript-eslint/eslint-plugin';
 
 export default [
   {
-    // 忽略构建产物、依赖、spike 目录和配置文件本身
-    ignores: ['dist/**', 'node_modules/**', 'spike/**', '**/*.config.js', '**/*.config.ts'],
+    // 忽略构建产物、依赖、spike 目录(配置文件本身移到末尾专用 block 处理)
+    ignores: ['dist/**', 'node_modules/**', 'spike/**'],
   },
   {
     files: ['src/**/*.ts', 'tests/**/*.ts'],
@@ -50,6 +50,26 @@ export default [
       '@typescript-eslint/no-floating-promises': 'error',
       '@typescript-eslint/no-misused-promises': 'error',
       '@typescript-eslint/await-thenable': 'error',
+    },
+  },
+  // 配置文件自己进 lint(eslint.config.js / vitest.config.ts / etc),但不开 type-aware
+  {
+    files: ['*.config.{js,ts,mjs,cjs}', 'scripts/**/*.{js,mjs,ts}'],
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: {
+        ecmaVersion: 2022,
+        sourceType: 'module',
+        // 配置文件不进 tsconfig.json,不开 type-aware
+      },
+    },
+    plugins: {
+      '@typescript-eslint': tsPlugin,
+    },
+    rules: {
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+      '@typescript-eslint/no-explicit-any': 'warn',
+      'no-console': 'off',
     },
   },
 ];

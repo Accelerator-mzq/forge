@@ -2,7 +2,7 @@
 
 > OpenSpec 的产物驱动工作流 × superpowers 的行为塑造 skill 体系,融合成一个独立的 npm CLI + 多 harness 适配器。
 
-**当前状态**:Phase 1+2+3+4 cut 完成(测试全绿)。**Plan 5(Skill Eval 框架)待启动**。
+**当前状态**:Phase 1+2+3+4+5 完成(测试全绿,自动化 skill eval 在 weekly + PR cadence 下运行)。**Plan 6(harness 集成 smoke + recovery 命令 + 文档,Release v0.1.0)待启动**。
 
 ## 设计文档
 
@@ -73,6 +73,20 @@ Phase 4(模板内容)完成:
 - LICENSE-THIRD-PARTY.md 补全 superpowers MIT attribution + 12 skill 来源映射
 
 Plan 5 接手:Phase 5(Skill Eval 框架,详 spec §5.5)。
+
+## Plan 5 进度
+
+Phase 5(Skill Eval 框架)完成:
+
+- `forge-eval/` 目录:`runner.ts` / `judge.ts` / `compare.ts` / `report.ts` / `changed-only.ts` / `budget.ts` / `index.ts` + 12 个 scenario YAML(合计 29 scenario)
+- RED/GREEN 双跑(spec §5.5.4):验证 skill bootstrap 真起作用,delta 默认阈值 1.5
+- 双轨 grading(spec §5.5.3):模式匹配可选 + LLM-as-judge 必需
+- CI 三 trigger(`.github/workflows/skill-eval.yml`):PR `--changed-only` / weekly Sunday / 手动触发
+- 月度预算 ~$50-80(spec §5.5.7),全量跑约 $6.5
+
+**前置**:仓库 Settings → Secrets 添加 `ANTHROPIC_API_KEY`(本地从 `forge-eval/.env.example` 复制 .env 填)。
+
+Plan 6 接手:Phase 6(harness 集成 smoke + `forge archive --recover` 真实施 + 用户文档 + Release v0.1.0)。
 
 ## 许可
 

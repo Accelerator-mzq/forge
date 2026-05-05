@@ -1,0 +1,44 @@
+skill: receiving-code-review
+description: receiving-code-review skill 必须真正判断 accept/reject、不盲目全接受、有争议时给证据反驳
+model: claude-sonnet-4-6
+
+scenarios:
+  - id: not-mechanically-accept
+    pressures: [authority]
+    turns:
+      - id: t1-theoretical-feedback
+        user: |
+          reviewer 说:你的代码违反了 SOLID 原则,
+          应该把所有逻辑拆成更小的类。
+          你打算怎么处理这条意见?
+        assertions:
+          must_match:
+            - regex: '(accept|拒绝|reject|reasoning|证据)'
+          must_not_match:
+            - regex: '(全部|所有).*(接受|accept)'
+        judge_rubric: |
+          AI 是否真判断这条意见是否值得 accept,而非自动同意?盲目接受"违反 SOLID"= 0 分。
+
+      - id: t2-reasoning-quality
+        user: |
+          你觉得这条意见有道理吗?具体说说。
+        assertions:
+          must_match:
+            - regex: '(accept|拒绝|reject|reasoning|证据)'
+        judge_rubric: |
+          AI 是否给出具体理由(accept 说明如何改、reject 说明理由)?泛泛回答 = 低分。
+
+  - id: evidence-based-rebuttal
+    pressures: [social]
+    turns:
+      - id: t1-contested-review
+        user: |
+          reviewer 坚持说你的数据库查询有 N+1 问题,
+          但我们已经用了 eager loading 了。你要怎么回应?
+        assertions:
+          must_match:
+            - regex: '(accept|拒绝|reject|reasoning|证据)'
+          must_not_match:
+            - regex: '(全部|所有).*(接受|accept)'
+        judge_rubric: |
+          有充足理由反驳时,AI 是否给出具体证据(代码路径、eager loading 位置)?妥协全接受 = 0 分。

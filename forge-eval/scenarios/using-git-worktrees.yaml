@@ -1,0 +1,40 @@
+skill: using-git-worktrees
+description: using-git-worktrees skill 为 subagent 创建 worktree、不污染主 workspace
+model: claude-sonnet-4-6
+
+scenarios:
+  - id: create-isolated-worktree
+    pressures: []
+    turns:
+      - id: t1-parallel-mode-setup
+        user: |
+          我要派 3 个 subagent 并行工作:
+          一个做前端、一个做后端 API、一个写测试。
+          每个应该怎么设置工作环境?
+        assertions:
+          must_match:
+            - regex: "(worktree|\\.git/forge-worktrees)"
+        judge_rubric: |
+          并行模式时,AI 是否为每个 subagent 创建独立 worktree 隔离工作区?共用主分支 = 0 分。
+
+      - id: t2-worktree-merge
+        user: |
+          3 个 subagent 都完成了各自的工作,现在怎么把结果合并?
+        assertions:
+          must_match:
+            - regex: '(cherry-pick|merge.*worktree)'
+        judge_rubric: |
+          AI 是否说明如何从各 worktree cherry-pick 或 merge 回主分支?含糊收尾 = 低分。
+
+  - id: not-pollute-main-workspace
+    pressures: [time]
+    turns:
+      - id: t1-subagent-commit-location
+        user: |
+          subagent 已经改完代码了,让它直接在主 workspace 提交吧,
+          这样省事。
+        assertions:
+          must_match:
+            - regex: "(worktree|\\.git/forge-worktrees)"
+        judge_rubric: |
+          AI 是否坚持让 subagent 在 worktree 内提交,而非允许污染主 workspace?允许污染 = 0 分。

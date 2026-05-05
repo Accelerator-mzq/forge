@@ -13,6 +13,28 @@ export interface RecoverResult {
   case: 'clean' | 'A' | 'B' | 'C' | 'corrupt';
   /** 人类可读说明(含操作指引) */
   message: string;
+  /**
+   * case='C' 时填充,提供 CLI 进行交互式二选一所需上下文。
+   * 其他 case 为 undefined。
+   */
+  caseCData?: {
+    /** archive change 目录绝对路径(用于"撤销归档"反向 rename) */
+    archiveChangeDir: string;
+    /** 原 change 名(去掉日期前缀,用于"撤销归档"反向 rename 目标) */
+    changeOrigId: string;
+    /** backup 目录绝对路径 */
+    backupDir: string;
+    /** archive specs 目录(用于"完成归档"重跑 Sync) */
+    archiveSpecsDir: string;
+    /** current specs 目录(用于"完成归档"或"撤销归档") */
+    currentSpecsDir: string;
+    /** 待应用 deltas(用于"完成归档") */
+    deltas: SpecDelta[];
+    /** backup 完整性 check 结果 */
+    backupIntegrity: BackupIntegrityResult;
+    /** archive 完整性 check 结果 */
+    archiveIntegrity: ArchiveIntegrityResult;
+  };
 }
 
 /**
@@ -114,15 +136,31 @@ export async function recover(forgeRoot: string): Promise<RecoverResult> {
     };
   }
 
-  // case C:deltas 含 delete 或内容不一致(说明状态不一致),需要用户手动介入
+  // case C:deltas 含 delete 或内容不一致(说明状态不一致)
+  // Plan 6:加完整性 check + 给 CLI 提供 caseCData 让其决定走交互(两者都完整)或退出 4(任一不完整)
   const changeOrigId = halfArchivedChange.replace(/^\d{4}-\d{2}-\d{2}-/, '');
+  const archiveChangeDir = join(archiveDir, halfArchivedChange);
+  const backupIntegrity = await checkBackupIntegrity(backupDir);
+  const archiveIntegrity = await checkArchiveIntegrity(archiveChangeDir);
+
+  const baseMsg =
+    `case C:archive/${halfArchivedChange} 与 backup 不一致(specs 应用状态)。\n` +
+    `  archive 位置:${archiveChangeDir}\n` +
+    `  backup 位置:${backupDir}`;
+
   return {
     case: 'C',
-    message:
-      `case C:archive/${halfArchivedChange} 与 backup 不一致,需用户介入。请手动选择:\n` +
-      `  [完成归档] 恢复 specs 后再跑 forge archive --recover\n` +
-      `  [撤销归档] mv ${join(archiveDir, halfArchivedChange)} ${join(forgeRoot, 'changes', changeOrigId)}\n` +
-      `  backup 位置:${backupDir}`,
+    message: baseMsg,
+    caseCData: {
+      archiveChangeDir,
+      changeOrigId,
+      backupDir,
+      archiveSpecsDir,
+      currentSpecsDir,
+      deltas,
+      backupIntegrity,
+      archiveIntegrity,
+    },
   };
 }
 
@@ -151,4 +189,92 @@ async function verifyAllReplacedAlreadyApplied(
     }
   }
   return true;
+}
+
+/** backup 完整性检查结果 */
+export interface BackupIntegrityResult {
+  ok: boolean;
+  reason?: string;
+}
+
+/**
+ * 检查 backup 目录完整性(Plan 6 — spec §3.5 case C 前置条件)。
+ *
+ * 完整性条件:
+ * 1. backup 目录可读
+ * 2. 目录非空(至少一个文件,否则代表 sync 没产生备份就死了)
+ * 3. 内含 .md 文件能被 utf8 读取(非二进制损坏)
+ *
+ * 若任一不满足 → ok=false + reason 描述哪条不满足
+ */
+export async function checkBackupIntegrity(backupDir: string): Promise<BackupIntegrityResult> {
+  if (!existsSync(backupDir)) {
+    return { ok: false, reason: 'backup 目录不存在' };
+  }
+  let entries: string[];
+  try {
+    entries = await readdir(backupDir);
+  } catch (err) {
+    return { ok: false, reason: `backup 目录无法读取:${(err as Error).message}` };
+  }
+  if (entries.length === 0) {
+    return { ok: false, reason: 'backup 目录为空(预期至少一个备份文件)' };
+  }
+  // 抽查前 3 个 .md 文件能否 utf8 读取
+  const mdFiles = entries.filter((e) => e.endsWith('.md')).slice(0, 3);
+  // 防御:backup 必须含至少一个 .md 文件(否则 restoreSpecsFromBackup 会静默不还原)
+  if (mdFiles.length === 0) {
+    return { ok: false, reason: 'backup 目录不含 .md 文件(可能备份不完整)' };
+  }
+  for (const name of mdFiles) {
+    try {
+      await readFile(join(backupDir, name), 'utf8');
+    } catch (err) {
+      return { ok: false, reason: `backup/${name} 无法读取:${(err as Error).message}` };
+    }
+  }
+  return { ok: true };
+}
+
+/** archive 完整性检查结果 */
+export interface ArchiveIntegrityResult {
+  ok: boolean;
+  reason?: string;
+}
+
+/**
+ * 检查 archive/<date>-<id>/ 目录完整性(Plan 6 — spec §3.5 case C 前置条件)。
+ *
+ * 完整性条件:
+ * 1. 目录存在
+ * 2. 包含 specs/ 子目录(可空,但必须存在)
+ * 3. 包含 .verify-passed 与 .review-passed 两个 marker 文件
+ * 4. 两个 marker 都能被 utf8 读取(YAML 解析交给 archive 命令的 schema 校验)
+ *
+ * 若任一不满足 → ok=false + reason 描述
+ */
+export async function checkArchiveIntegrity(
+  archiveChangeDir: string,
+): Promise<ArchiveIntegrityResult> {
+  if (!existsSync(archiveChangeDir)) {
+    return { ok: false, reason: 'archive change 目录不存在' };
+  }
+  if (!existsSync(join(archiveChangeDir, 'specs'))) {
+    return { ok: false, reason: 'archive 内缺 specs/ 子目录' };
+  }
+  const verifyPath = join(archiveChangeDir, '.verify-passed');
+  const reviewPath = join(archiveChangeDir, '.review-passed');
+  if (!existsSync(verifyPath)) {
+    return { ok: false, reason: '.verify-passed marker 不存在' };
+  }
+  if (!existsSync(reviewPath)) {
+    return { ok: false, reason: '.review-passed marker 不存在' };
+  }
+  try {
+    await readFile(verifyPath, 'utf8');
+    await readFile(reviewPath, 'utf8');
+  } catch (err) {
+    return { ok: false, reason: `marker 文件读取失败:${(err as Error).message}` };
+  }
+  return { ok: true };
 }

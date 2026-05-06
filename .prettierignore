@@ -4,5 +4,7 @@ pnpm-lock.yaml
 spike/**/SKILL.md
 spike/**/*.md
 docs/
-# malformed fixture 故意不合法，不能被 prettier 解析
+# 第三方 skill 安装,跟上游同步,不走项目 prettier 规则
+.claude/skills/
+# malformed fixture 故意不合法,不能被 prettier 解析
 tests/fixtures/configs/malformed.yaml

@@ -27,11 +27,14 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "eval": "tsx forge-eval/index.ts",
     "eval:changed": "tsx forge-eval/index.ts --changed-only",
-    "eval:skill": "tsx forge-eval/index.ts --skill"
+    "eval:skill": "tsx forge-eval/index.ts --skill",
+    "eval-regen": "tsx forge-eval/regeneration-index.ts",
+    "eval-regen:scenario": "tsx forge-eval/regeneration-index.ts --scenario"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.93.0",
     "commander": "^12.1.0",
+    "exceljs": "^4.4.0",
     "gray-matter": "^4.0.3",
     "yaml": "^2.8.4"
   },
@@ -39,6 +42,7 @@
     "@types/node": "^20.14.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
+    "chardet": "^2.1.1",
     "dotenv": "^17.4.2",
     "eslint": "^9.0.0",
     "prettier": "^3.3.0",

@@ -7,7 +7,7 @@ metadata:
   author: forgeue project (extracted to generic)
   version: "1.0-generic"
   scenario_subtype_count: 28
-  case_study_count: 0
+  case_study_count: 1
   retrospect_protocol: trigger-type-matrix(5 types × per-type intensity)
 ---
 
@@ -133,15 +133,27 @@ This skill uses **Claude Code tool names** (PascalCase: `Skill`, `Agent`, `Read`
 
 ## Self-Review Checklist(before reporting DONE)
 - [ ] All N fence tests pass
-- [ ] python -m pytest -q shows no regression
+- [ ] **Stack-specific full verify 命令(必跑;按项目语言匹配;**漏一条 = DONE_WITH_CONCERNS**)**
 - [ ] File header follows project style
 - [ ] Stdlib only(no external deps)
 - [ ] Commit created and visible in git log -1
 - [ ] Self-review found issues fixed before reporting
-- [ ] Report includes file paths + pytest count + commit SHA
+- [ ] Report includes file paths + verify outputs + commit SHA
 ```
 
-**Failure mode if skipped**:implementer 自由 design / hallucinate self-report / 漏 commit / commit 错 branch(see Pattern §3.1 worktree leak)。
+**Stack-specific full verify 命令清单**(沿 §2.1 prompt 必含;Python 模板套 TS 漏 lint/format 是真实失败模式 — 见 §6 catalog "self-review checklist stack-mismatch" 行):
+
+| Stack | 必跑命令(全 0 才算 DONE) |
+|---|---|
+| **TypeScript / Node(pnpm)** | `pnpm typecheck` / `pnpm lint` / **`pnpm format:check`**(漏 → CI 双平台 fail)/ `pnpm test --run` / `pnpm build`(若改 src/* 影响 dist) |
+| **Python(pytest)** | `python -m pytest -q` / `ruff check`(若用 ruff)/ `mypy <package>`(若用 mypy) |
+| **Rust(cargo)** | `cargo fmt --check` / `cargo clippy -- -D warnings` / `cargo test` |
+| **Go** | `go vet ./...` / `gofmt -l .`(空输出)/ `go test ./...` |
+
+**Plan inline code escape valve**(implementer 自我反思口子;§6 catalog "Plan inline code 含 latent bug" 行):
+若 self-review 中发现 plan inline code 看似有 bug(IO 不在 try 内 / fd 不 close / type 越界 / race window 等 runtime correctness 问题),**不擅自改 plan**,在 self-review 报告中加 "Observation: plan line X-Y 似有 <issue>,留 reviewer 判断" 段。Sonnet code_quality reviewer 沿 §1.3.4 runtime correctness MANDATORY 兜底。
+
+**Failure mode if skipped**:implementer 自由 design / hallucinate self-report / 漏 commit / commit 错 branch(see Pattern §3.1 worktree leak)/ stack-mismatch self-review 漏 lint/format 导致 CI fail(see §5 Case 01)/ 照搬 plan inline latent bug 不报 observation。
 
 ### §2.2 Spec / Compliance Reviewer Haiku Reliability Playbook
 
@@ -462,6 +474,64 @@ git update-ref refs/heads/<wrong-branch> <prior-base-sha>
 
 ---
 
+### Case 01: forge-repo / Plan 7 Phase A / legacy-bridge 基础设施
+
+**Date**:2026-05-06
+**Trigger Type**:Type 1(3-stage full retrospect)
+**Project context**:TS/Node monorepo(opsp/forge-repo),Plan 7 Phase A 落 legacy-bridge 6 task 基础设施(deps、lock 扩展、config 段、types、anchors schema、CLI 骨架)
+
+**Subagent dispatch**:
+| Subagent | Scenario subtype(§1.X.Y)| Model | $cost | Verdict |
+|---|---|---|---|---|
+| A1 implementer(deps + script) | §1.1.1 Mechanical | opus 4.7 默认继承(应 haiku) | ~$1.50 | DONE — over-cost(沿 §6 catalog 第 1 行) |
+| A1 spec_reviewer | §1.2.1 string matching | sonnet | ~$0.10 | ✅ |
+| A1 code_quality_reviewer | §1.3.3 maintainability | sonnet | ~$0.10 | ⚠️ 6 deprecated subdeps + dangling script(non-blocker) |
+| A2-A6 implementer × 5 | §1.1.1 Mechanical | haiku | ~$0.10 ea | DONE × 5 |
+| A2-A6 spec_reviewer × 5 | §1.2.1 string matching | sonnet | ~$0.10 ea | ✅ × 5 |
+| A2-A6 code_quality_reviewer × 5 | §1.3.4 runtime correctness | sonnet | ~$0.10 ea | ⚠️ × 5(critical/important inline-fixable) |
+| Phase chore-fix | direct | controller | ~$0 | prettier 修 3 文件(stack-specific self-review 漏 format:check)|
+
+**Real issues caught / failed**:
+| Issue | Severity | Caught by | Scenario subtype 验证 |
+|---|---|---|---|
+| A2 lock fd leak + corrupt lock(plan 6 既存搬运)| Critical | sonnet code_quality | §1.3.4 — Sonnet runtime correctness 抓 plan-inline latent bug |
+| A2 LockMode union breaking 担忧 | Critical(claimed)| sonnet code_quality | controller 独立核 plan §2.6 决策 #23 → 拒,JSDoc 加 callsite 约定 |
+| A3 provider literal v0.3 breaking 担忧 | Critical(claimed)| sonnet code_quality | controller 核 plan 决策 #22 → 拒,JSDoc 加 forward-compat 提示 |
+| A5 readFile 在 try 之外 EACCES 绕过 LegacyAnchorsError | Critical | sonnet code_quality | §1.3.4 — plan inline code 自带 bug,Haiku implementer 照搬未发现 |
+| A4 §9 GDPR 段引用错(实是 spec §4.5)| Important | sonnet code_quality | §1.2.1 — JSDoc 引用核对 |
+| A5 satisfies readonly 增 exhaustive guard | Important | sonnet code_quality | controller 部分采纳 — 不加越界 _AssertExhaustive |
+| A6 --merge default vs --overwrite 互斥 | Important(claimed)| sonnet code_quality | controller 核 plan D3 已用三元守住 → 拒 |
+| Multiple JSDoc / minor 措辞 | Minor × ~10 | sonnet code_quality | §1.3.1 / §1.3.3 — controller inline 选采 |
+| **prettier CI format:check 双 fail(A2/A4/A5)** | **CI blocker** | **CI(format:check)** | **§2.1 self-review checklist 缺 `pnpm format:check` / `pnpm lint`** — Python 模板套 TS stack-mismatch |
+
+**Lesson**(reinforce / new pattern / 边界 refinement):
+
+1. **NEW pattern A — Plan inline code 含 latent bug,Mechanical implementer 不发现**
+   - §1.1.1 Mechanical 设计前提 "plan inline code 可信" 在 plan 自身有 bug 时崩;§1.3.4 Sonnet code_quality 是兜底防线 — A5 readFile 包装实证 Sonnet 抓到 Haiku 抓不到的 plan-inline runtime bug。
+   - **维持 §1.3.4 MANDATORY Sonnet 不可降级**(强化 §1.3 takeaway)。
+   - §2.1 implementer playbook 加 escape valve:"若 self-review 中发现 plan inline code 看似有 bug,标 observation 给 reviewer,不擅自改"。
+
+2. **NEW pattern B — §2.1 self-review stack-mismatch(Python 模板套 TS 漏 format/lint)**
+   - 当前 §2.1 checklist 只含 `python -m pytest -q`,TS/Node 项目实操 prompt 沿模板就漏 `pnpm format:check` / `pnpm lint` / `pnpm build`。
+   - Haiku 严格按 prompt 列表跑,prompt 不写就不跑 — **不是 model 退化,是 prompt 模板 stack-mismatch**。
+   - §2.1 加 stack-specific checklist 段,TS/Node + Python + Rust + Go 各列必备命令。
+
+3. **REINFORCE — controller cross-verify 必抗 reviewer 越权 claim**
+   - 12 份 reviewer report 中 ≥3 个 Critical claim 经 controller 独立对照 plan/spec 后 **拒绝**(A2 LockMode 担忧 / A3 provider literal / A6 互斥陷阱)— Sonnet reviewer 在 reasoning code 时倾向 "假设最坏",controller 是唯一持 plan 上下文的 ground truth 持有者。
+   - §3.2 cross-verify "reviewer Critical claim → controller 必对照 plan 决策表独立核" 应显化(隐含但未明文)。
+
+4. **REINFORCE — A1 默认 opus 4.7 over-cost 沿用既存 §6 catalog 第 1 行**
+   - 用户后续反馈已存 user memory:haiku 机械 / sonnet review / opus 设计。
+   - 后 5 task A2-A6 全显式传 haiku 修正。证明 §6 catalog 第 1 行 prevention "显式 model + dispatch 时传 model: 参数" 有效。
+
+**Cost vs all-Opus alternative**:
+- 实际:A1 opus(~$1.50)+ A2-A6 haiku × 5(~$0.50)+ reviewer × 12 sonnet(~$1.20)+ retrospect opus(~$0.50)≈ **$3.70**
+- 全 Opus 假设:6 implementer + 12 reviewer + 1 retrospect ≈ **$15-20**
+- 节省 ratio:~75-80%
+- 质量:6 task 全 commit + CI green(prettier chore 修后)+ PR #11 已合 dev
+
+---
+
 ## §6 Pattern Catalog(failure mode → scenario subtype + recovery)
 
 | Subagent failure mode | Root cause(scenario subtype 误配)| Prevention | Recovery |
@@ -472,6 +542,9 @@ git update-ref refs/heads/<wrong-branch> <prior-base-sha>
 | worktree-scope leak | §3.1 STRICT cwd 写 prompt 但被跳过 | §3.1 + §3.2 branch verify | §4.1 cherry-pick recovery |
 | 自我汇报幻觉 | subagent 输出 trust 过度 | §3.2 cross-verify 必跑 | §3.2 5 类 verify 命令 |
 | 静态 review 漏 runtime correctness | §1.3.4 误用 Haiku 替代 Sonnet | §1.3.4 MANDATORY Sonnet | controller catches downstream / Sonnet code_quality 必跑 |
+| Plan inline code 含 latent bug,Mechanical implementer 照搬不抓(see §5 Case 01)| §1.1.1 Mechanical 假设 plan 可信;Plan 上一阶段既存 bug 搬运 / Plan 自身 review 不彻底 | §1.3.4 Sonnet code_quality 兜底(MANDATORY)+ §2.1 implementer escape valve("觉得 plan code 有 bug → 标 observation") | Sonnet code_quality 抓到后 controller inline fix 修复 |
+| Implementer self-review stack-mismatch(Python 模板套 TS 漏 format/lint;see §5 Case 01)| §2.1 playbook checklist 写 generic Python 命令 | §2.1 stack-specific 命令清单(TS/Node:`pnpm format:check + lint + build`;Python:`ruff + mypy + pytest`;Rust:`cargo fmt + clippy + test`)| chore commit 自动修(单 commit 修 N 文件) |
+| Reviewer Critical claim 越权(假设最坏 / 偏离 plan 决策表) | code_quality reviewer 不持 plan 上下文,reasoning code 时倾向最坏假设 | §3.2 controller cross-verify reviewer Critical claim → 对照 plan 决策表独立核(see §5 Case 01 Lesson 3)| controller 独立核后拒绝 / 部分采纳;只接受不偏离 plan 的 inline fix |
 
 ---
 

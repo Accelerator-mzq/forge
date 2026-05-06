@@ -3,6 +3,13 @@
 // spec §2.1 子命令一览 + 决策 #22 LLM opt-in 流程
 
 import { Command } from 'commander';
+import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { parse as parseYaml } from 'yaml';
+import { writeAck } from '../../core/legacy-bridge/ack.js';
+import { loadAnchorsFile } from '../../core/legacy-bridge/anchors.js';
+import type { ForgeConfig } from '../../core/schema/types.js';
 
 /** 5 子命令通用退出码,与 forge 现有约定一致(spec §4.6) */
 export const LB_EXIT_OK = 0;
@@ -16,16 +23,59 @@ export const LB_EXIT_LOCK_HELD = 5;
 export function buildLegacyBridgeCommand(): Command {
   const cmd = new Command('legacy-bridge')
     .description('Brownfield onboarding:与老文档体系并存 + archive→legacy 单向同步(v0.2)')
-    .option('--acknowledge-data-transfer', 'opt-in:ack 数据将被发送到 LLM provider(决策 #22)');
+    .option('--acknowledge-data-transfer', 'opt-in:ack 数据将被发送到 LLM provider(决策 #22)')
+    .option('--acknowledge-customer-data', '同时 ack 含客户数据的 anchor(§4.5 GDPR 二次确认门)');
 
-  cmd.action(async (opts: { acknowledgeDataTransfer?: boolean }) => {
-    if (opts.acknowledgeDataTransfer) {
-      // Phase A 骨架,后续 Phase B1 Task B1.3 替换为真实 ack 写入
-      console.error('--acknowledge-data-transfer:Phase B1 待替换骨架');
-      process.exit(LB_EXIT_GENERAL_ERROR);
-    }
-    cmd.help();
-  });
+  cmd.action(
+    async (opts: { acknowledgeDataTransfer?: boolean; acknowledgeCustomerData?: boolean }) => {
+      // M2 修:--acknowledge-customer-data 必须与 --acknowledge-data-transfer 同用,
+      // 单独传不应静默走 help(用户不知 flag 没生效)
+      if (opts.acknowledgeCustomerData && !opts.acknowledgeDataTransfer) {
+        console.error('✗ --acknowledge-customer-data 必须与 --acknowledge-data-transfer 同时使用');
+        process.exit(LB_EXIT_GENERAL_ERROR);
+      }
+      if (opts.acknowledgeDataTransfer) {
+        const forgeRoot = join(process.cwd(), 'forge');
+        const configPath = join(forgeRoot, 'config.yaml');
+        if (!existsSync(configPath)) {
+          console.error('forge/config.yaml 不存在,先跑 forge init 初始化项目');
+          process.exit(LB_EXIT_GENERAL_ERROR);
+        }
+        // I1 修:config.yaml 格式损坏时 parseYaml 抛异常,用 try/catch 包装给友好提示
+        let config: ForgeConfig;
+        try {
+          config = parseYaml(await readFile(configPath, 'utf8')) as ForgeConfig;
+        } catch (e) {
+          console.error(`forge/config.yaml 格式错误:${(e as Error).message}`);
+          process.exit(LB_EXIT_GENERAL_ERROR);
+        }
+        if (!config.legacy_bridge?.allow_llm_calls) {
+          console.error(
+            '✗ forge/config.yaml 未声明 legacy_bridge.allow_llm_calls: true,请先在 config 加该字段',
+          );
+          process.exit(LB_EXIT_GENERAL_ERROR);
+        }
+        // 检 anchors 中是否有 contains_customer_data
+        const anchors = await loadAnchorsFile(forgeRoot);
+        const hasCustomerData = (anchors?.anchors ?? []).some(
+          (a) => a.contains_customer_data === true,
+        );
+        if (hasCustomerData && !opts.acknowledgeCustomerData) {
+          console.error(
+            '✗ legacy-anchors.yaml 标有 contains_customer_data=true 的 anchor;\n' +
+              '请加 --acknowledge-customer-data 一并确认(§4.5 GDPR)',
+          );
+          process.exit(LB_EXIT_GENERAL_ERROR);
+        }
+        await writeAck(forgeRoot, config, hasCustomerData);
+        console.log(
+          `✓ ack 已写入 forge/.cache/llm-ack.yaml(customer_data_acknowledged=${hasCustomerData})`,
+        );
+        process.exit(LB_EXIT_OK);
+      }
+      cmd.help();
+    },
+  );
 
   // 5 个子命令骨架(各 Phase 填实)
   cmd

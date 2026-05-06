@@ -99,10 +99,7 @@ export async function acquireLockByPath(
  * @param mode      当前操作模式(LockMode union 支持 legacy-bridge-* 是为统一类型,但实际 callsite 应仅传 'archive' / 'recover')
  * @returns         release 函数(幂等,可多次调用)
  */
-export async function acquireLock(
-  forgeRoot: string,
-  mode: LockMode,
-): Promise<() => Promise<void>> {
+export async function acquireLock(forgeRoot: string, mode: LockMode): Promise<() => Promise<void>> {
   return acquireLockByPath(forgeRoot, mode, 'archive.lock');
 }
 

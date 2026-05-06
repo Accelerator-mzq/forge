@@ -38,10 +38,7 @@ export async function loadAnchorsFile(forgeRoot: string): Promise<LegacyAnchorsF
   try {
     raw = await readFile(path, 'utf8');
   } catch (err) {
-    throw new LegacyAnchorsError(
-      `读取失败:${(err as NodeJS.ErrnoException).message}`,
-      path,
-    );
+    throw new LegacyAnchorsError(`读取失败:${(err as NodeJS.ErrnoException).message}`, path);
   }
   let parsed: unknown;
   try {

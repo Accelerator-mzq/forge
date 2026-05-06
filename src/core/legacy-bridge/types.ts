@@ -3,13 +3,13 @@
 
 /** 老锚点的角色(决策 #9 用户显式声明 + LLM 推测草稿) */
 export type LegacyAnchorRole =
-  | 'requirements'       // SRS / PRD / 需求规格
-  | 'high-level-design'  // HLD / 概要设计 / Architecture
-  | 'low-level-design'   // LLD / 详细设计 / Module Spec
-  | 'system-tests'       // 系统测试用例 / testcases / .xlsx
-  | 'acceptance-report'  // 验收报告(决策 #8 metadata-only)
-  | 'rationale'          // 设计决策 / 历史背景
-  | 'glossary';          // 术语表
+  | 'requirements' // SRS / PRD / 需求规格
+  | 'high-level-design' // HLD / 概要设计 / Architecture
+  | 'low-level-design' // LLD / 详细设计 / Module Spec
+  | 'system-tests' // 系统测试用例 / testcases / .xlsx
+  | 'acceptance-report' // 验收报告(决策 #8 metadata-only)
+  | 'rationale' // 设计决策 / 历史背景
+  | 'glossary'; // 术语表
 
 /** 单个老锚点配置项(legacy-anchors.yaml#anchors[] 数组项) */
 export interface LegacyAnchor {
@@ -46,9 +46,7 @@ export interface LegacyAnchorsFile {
 }
 
 /** redact 规则(决策 #20) */
-export type RedactRule =
-  | { regex: string; name?: string }
-  | { literal: string; name?: string };
+export type RedactRule = { regex: string; name?: string } | { literal: string; name?: string };
 
 /** 5 档差异严重度(决策 #5) */
 export type DiffSeverity = 'critical' | 'major' | 'minor' | 'style' | 'info';

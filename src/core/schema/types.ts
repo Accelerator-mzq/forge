@@ -17,6 +17,29 @@ export interface ForgeConfig {
     include?: string[];
     exclude?: string[];
   };
+  /**
+   * v0.2 brownfield onboarding 全局策略(brownfield design §2.7 / 决策 #19/#22)。
+   * 缺失或全字段缺失时,brownfield 工具拒绝运行;archive 内的 sync-check graceful skip。
+   *
+   * **运行时默认值**:本 interface 是纯类型定义,parseConfig 透传不补默认值;
+   * 调用方应以 `??` fallback(如 `config.legacy_bridge?.allow_llm_calls ?? false`)。
+   */
+  legacy_bridge?: {
+    /** 决策 #22:opt-in LLM 调用;缺失时调用方应视为 false */
+    allow_llm_calls?: boolean;
+    /** 决策 #19:enforce_sync,critical 未 resolve 时 archive preflight 阻塞;缺失视为 false */
+    enforce_sync?: boolean;
+    /** 决策 #18:跨 anchor 不一致是否走 mtime 自动决策;缺失视为 false(默认入 diff) */
+    auto_resolve_cross_anchor?: boolean;
+    /** 决策 #21:复写产物许可;缺失时调用方应 fallback 为 'derived-from-source' */
+    regen_license?: string;
+    /**
+     * 决策 #22 预留:LLM provider。v0.2 仅 'anthropic';
+     * v0.3 加 'openai' 等时改为 union(`'anthropic' | 'openai' | ...`)。
+     * 现 literal 类型让 v0.2 用户得到 IDE 补全;v0.3 spec 定稿后该字段会扩 union。
+     */
+    provider?: 'anthropic';
+  };
 }
 
 /**

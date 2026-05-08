@@ -127,6 +127,12 @@ describe('legacy-bridge/regenerator', () => {
     expect(() => validateRegenOutput(good, 'requirements')).not.toThrow();
   });
 
+  it('validateRegenOutput LLM 输出以 --- 开头但非 frontmatter(thematic break + 标题)→ 通过(I-1 false positive 修复)', () => {
+    // gray-matter 对 `---\n\n# 标题` 会把 data 解析成 100+ 数字键 → 修后只在真 frontmatter delimiter 时检测
+    const goodWithThematicBreak = `---\n\n# 复写\n## 1. 章节\n${'a'.repeat(100)}`;
+    expect(() => validateRegenOutput(goodWithThematicBreak, 'requirements')).not.toThrow();
+  });
+
   it('xlsx anchor 也能复写(走 sheetToMarkdown)', async () => {
     const mock = makeMock('# 测试用例\n## TC-001\n登录测试 ' + 'x'.repeat(200));
     const out = await regenerateRole(

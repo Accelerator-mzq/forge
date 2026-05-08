@@ -4,9 +4,9 @@
 import Anthropic from '@anthropic-ai/sdk';
 import matter from 'gray-matter';
 import type { LegacyAnchor, LegacyAnchorRole, LegacyAnchorsFile } from './types.js';
-import { redact } from './redact.js';
+import { redact, type RedactReport } from './redact.js';
 import { readAnchorFile } from './encoding.js';
-import { parseWorkbook, getSheet, sheetToMarkdown } from './excel.js';
+import { parseWorkbook, getSheet, sheetToMarkdown, ExcelParseError } from './excel.js';
 import { extname } from 'node:path';
 
 /** 复写参数 */
@@ -32,7 +32,7 @@ export interface RegenerateOutput {
   /** 用于 quality-judge 验证的复写正文(不含 frontmatter / disclaimer) */
   body: string;
   /** redact 命中数(用于 --redact-report) */
-  redactReport: ReturnType<typeof redact>;
+  redactReport: RedactReport;
   /** 估算 token / cost */
   tokensUsed: number;
   estimatedCost: number;
@@ -48,6 +48,17 @@ export interface RegenerateClient {
 const DEFAULT_MODEL = 'claude-sonnet-4-6';
 const PRICE_PER_M_INPUT = 3.0;
 const PRICE_PER_M_OUTPUT = 15.0;
+
+/** role → 人类可读全名(LLM prompt 用) */
+const ROLE_HUMAN_NAME: Record<LegacyAnchorRole, string> = {
+  requirements: 'Software Requirements Specification (SRS)',
+  'high-level-design': 'High-Level Design (HLD)',
+  'low-level-design': 'Low-Level Design (LLD)',
+  'system-tests': 'System Test Cases',
+  'acceptance-report': 'Acceptance Report',
+  rationale: 'Design Rationale',
+  glossary: 'Glossary',
+};
 
 /** role → 文件名映射(决策 #14:每 role 一份大文件) */
 export const REGEN_FILENAMES: Record<LegacyAnchorRole, string> = {
@@ -73,7 +84,6 @@ async function readAnchorAsText(anchor: LegacyAnchor): Promise<string> {
     const sheet = getSheet(wb, anchor.sheet, anchor.path);
     // P7-09 修复:决策 §4.1 line 502 — chart/pivot/formula 不支持时拒绝运行,引导导出 csv
     if (sheet.unsupportedFeatures.length > 0) {
-      const { ExcelParseError } = await import('./excel.js');
       throw new ExcelParseError(
         `sheet '${sheet.name}' 含不支持特性(${sheet.unsupportedFeatures.join(', ')});请在 Excel 另存为 .csv 后改 anchors.yaml path 指向 .csv(决策 §4.1)`,
         anchor.path,
@@ -92,17 +102,8 @@ function buildRegeneratePrompt(
   historicalText?: string,
 ): string {
   const role = input.role;
-  const roleHumanName: Record<LegacyAnchorRole, string> = {
-    requirements: 'Software Requirements Specification (SRS)',
-    'high-level-design': 'High-Level Design (HLD)',
-    'low-level-design': 'Low-Level Design (LLD)',
-    'system-tests': 'System Test Cases',
-    'acceptance-report': 'Acceptance Report',
-    rationale: 'Design Rationale',
-    glossary: 'Glossary',
-  };
 
-  let prompt = `你是一名技术文档规范化助手。请把下列老文档内容**忠实复写**为规范化的 ${roleHumanName[role]}。
+  let prompt = `你是一名技术文档规范化助手。请把下列老文档内容**忠实复写**为规范化的 ${ROLE_HUMAN_NAME[role]}。
 
 # 复写要求(strict)
 1. **不丢失任何事实** — 包括数字、字段约束、合规条款、设计决策
@@ -151,11 +152,27 @@ export async function regenerateRole(
 
   // redact 在发 LLM 前 mask(决策 #20)
   const redactRules = [...(input.globalRedactRules ?? []), ...(input.authoritative.redact ?? [])];
-  const redactReport = redact(authText + (historicalCombined ?? ''), redactRules);
-  const maskedAuth = redact(authText, redactRules).redactedText;
-  const maskedHistorical = historicalCombined
-    ? redact(historicalCombined, redactRules).redactedText
-    : undefined;
+  // 分别 redact auth 和 historical;两段在不同 region 各自命中 + 各自占位编号(LLM 视占位为 sentinel,
+  // 不解读编号语义,所以两段编号独立不影响复写;reviewer 关切的是 redactReport audit
+  // 准确性 — 这里通过累加两段 hitsByRule 拿到真发 LLM 的总命中数)
+  const authReport = redact(authText, redactRules);
+  const maskedAuth = authReport.redactedText;
+  let totalHits = authReport.hitsByRule;
+  let totalReplacements = authReport.totalReplacements;
+  let maskedHistorical: string | undefined;
+  if (historicalCombined) {
+    const histReport = redact(historicalCombined, redactRules);
+    maskedHistorical = histReport.redactedText;
+    totalReplacements += histReport.totalReplacements;
+    // 累加 hitsByRule 字典(每条规则的命中数)
+    totalHits = mergeHits(totalHits, histReport.hitsByRule);
+  }
+  const redactReport: RedactReport = {
+    ...authReport,
+    redactedText: maskedAuth + (maskedHistorical ? '\n\n' + maskedHistorical : ''),
+    totalReplacements,
+    hitsByRule: totalHits,
+  };
 
   const prompt = buildRegeneratePrompt(input, maskedAuth, maskedHistorical);
 
@@ -199,15 +216,22 @@ export function validateRegenOutput(body: string, role: LegacyAnchorRole): void 
   if (!body || body.trim().length < 50) {
     throw new RegenOutputError(`复写产物为空或过短(role=${role}),LLM 可能未正确响应`, role);
   }
-  // LLM 不该输出 frontmatter(我们另加);若开头 `---\n`,警告但不强 fail(用 gray-matter 试解析判断)
-  const parsed = matter(body);
-  if (Object.keys(parsed.data).length > 0) {
-    throw new RegenOutputError(
-      `LLM 输出含 frontmatter 字段(${Object.keys(parsed.data).join(',')}),应只输出正文`,
-      role,
-    );
+  // LLM 不该输出 frontmatter(我们另加);只在真模式 `---\n<key>:<val>\n...\n---` 时拒绝
+  // gray-matter 对 `---\n\n# 标题` 这类合法 markdown(thematic break + 空行 + 标题)误判为 frontmatter
+  // (data 会被解析成数字键 record),所以先用正则锚定真 frontmatter 才走 gray-matter
+  const FRONTMATTER_RE = /^---\r?\n([\s\S]+?)\r?\n---(?:\r?\n|$)/;
+  const fmMatch = body.match(FRONTMATTER_RE);
+  if (fmMatch) {
+    // 含真 frontmatter delimiters;再用 gray-matter parse 看是否含 key:value
+    const parsed = matter(body);
+    if (Object.keys(parsed.data).length > 0) {
+      throw new RegenOutputError(
+        `LLM 输出含 frontmatter 字段(${Object.keys(parsed.data).join(',')}),应只输出正文`,
+        role,
+      );
+    }
   }
-  // code block 闭合检查(简易:对 ``` 计数应为偶数)
+  // 简易 ` ``` ` 计数(只检 3-backtick fence;4+backtick fence 极少见,LLM 实际不会输出,边界忽略)
   const fenceCount = (body.match(/^```/gm) ?? []).length;
   if (fenceCount % 2 !== 0) {
     throw new RegenOutputError(
@@ -231,9 +255,12 @@ export class RegenOutputError extends Error {
 /** 加 frontmatter + 顶部 disclaimer(决策 #21 / §9) */
 function wrapWithFrontmatterAndDisclaimer(body: string, input: RegenerateInput): string {
   const generatedAt = new Date().toISOString();
+  // 用 JSON.stringify 包裹路径,确保含特殊 yaml 字符(`: ` / `#` / `\n` 等)的路径不破 yaml 结构
+  // (JSON 字符串字面量是 yaml 双引号字符串的合法子集)
+  const quoteYamlPath = (p: string): string => JSON.stringify(p);
   const sourcesYaml = input.authoritative.path
-    ? `\nsources:\n  - ${input.authoritative.path}` +
-      (input.historical?.map((a) => `\n  - ${a.path}`).join('') ?? '')
+    ? `\nsources:\n  - ${quoteYamlPath(input.authoritative.path)}` +
+      (input.historical?.map((a) => `\n  - ${quoteYamlPath(a.path)}`).join('') ?? '')
     : '';
 
   const frontmatter = `---
@@ -260,4 +287,13 @@ forge-version: ${input.forgeVersion}
 function extractText(result: Anthropic.Messages.Message): string {
   const block = result.content.find((b): b is Anthropic.Messages.TextBlock => b.type === 'text');
   return block?.text ?? '';
+}
+
+/** 合并两段 hitsByRule 字典(累加每条规则的命中数) */
+function mergeHits(a: Record<string, number>, b: Record<string, number>): Record<string, number> {
+  const merged: Record<string, number> = { ...a };
+  for (const [name, count] of Object.entries(b)) {
+    merged[name] = (merged[name] ?? 0) + count;
+  }
+  return merged;
 }

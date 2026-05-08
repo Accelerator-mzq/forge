@@ -55,7 +55,12 @@ describe('legacy-bridge/encoding', () => {
       'Big5',
       'windows-1252',
     ]).toContain(probe.detectedEncoding);
-    expect(probe.mojibakeContext).toContain('before 80');
+    expect(probe.mojibakeContext).toContain('before 80 text');
+    expect(probe.mojibakeContext).toContain('before 80 hex');
+    expect(probe.mojibakeContext).toContain('after 80 hex');
+    // hex 段必须是十六进制(只含 0-9a-f),允许空(若 byteIdx=0 时 before 80 hex 为空)
+    expect(probe.mojibakeContext).toMatch(/\[before 80 hex\]:\s+[0-9a-f]*/);
+    expect(probe.mojibakeContext).toMatch(/\[after 80 hex\]:\s+[0-9a-f]+/);
   });
 
   it('dryRunEncodingProbe utf8 文件无 mojibakeContext', async () => {

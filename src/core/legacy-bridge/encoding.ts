@@ -9,7 +9,7 @@ export interface ReadAnchorResult {
   text: string;
   /** 原始字节(dry-run 时用于探测) */
   raw: Buffer;
-  /** 是否含 mojibake 嫌疑(简易 heuristic:含 U+FFFD 或大量孤立 surrogate) */
+  /** 是否含 mojibake 嫌疑(简易 heuristic:含 U+FFFD 替换字符) */
   hasMojibake: boolean;
   /** 行尾(LF / CRLF) */
   lineEnding: 'LF' | 'CRLF' | 'mixed' | 'none';
@@ -28,7 +28,7 @@ export async function readAnchorFile(path: string): Promise<ReadAnchorResult> {
   return { text, raw, hasMojibake, lineEnding };
 }
 
-/** 检测行尾(spec §5.5 windows-crlf fixture) */
+/** 检测行尾(见 fixture tests/fixtures/legacy-bridge/windows-crlf-srs.md) */
 export function detectLineEnding(text: string): ReadAnchorResult['lineEnding'] {
   // 计数 CRLF
   const crlf = (text.match(/\r\n/g) ?? []).length;
@@ -49,8 +49,9 @@ export interface EncodingDryRunReport {
 }
 
 /**
- * 用 chardet 探测疑似编码(可选依赖,缺失时 detectedEncoding='unknown')。
- * spec §4.1 (M-3) dry-run 输出文件路径 + 疑似编码 + mojibake 段前后 80 字符 hex/text 对照。
+ * 用 chardet 探测疑似编码(可选依赖,缺失时 detectedEncoding='chardet-not-installed';
+ * 运行时错误时 detectedEncoding='chardet-error: <msg>')。
+ * spec §4.1 (M-3) dry-run 输出文件路径 + 疑似编码 + mojibake 段前后 80 字符 text + 80 字节 hex 对照。
  */
 export async function dryRunEncodingProbe(
   path: string,
@@ -61,20 +62,38 @@ export async function dryRunEncodingProbe(
     // chardet 是可选 devDep;运行时无则 fallback
     const chardet = (await import('chardet')) as { detect: (buf: Buffer) => string | null };
     detectedEncoding = chardet.detect(result.raw) ?? 'unknown';
-  } catch {
-    detectedEncoding = 'chardet-not-installed';
+  } catch (e) {
+    // 区分模块缺失 vs 运行时错误,排查体验:用户看到 'chardet-not-installed' 时确知要装 chardet
+    const code = (e as NodeJS.ErrnoException).code;
+    if (
+      code === 'ERR_MODULE_NOT_FOUND' ||
+      code === 'MODULE_NOT_FOUND' ||
+      code === 'ERR_CANNOT_FIND_MODULE'
+    ) {
+      detectedEncoding = 'chardet-not-installed';
+    } else {
+      detectedEncoding = `chardet-error: ${(e as Error).message}`;
+    }
   }
 
   let mojibakeContext: string | undefined;
   if (result.hasMojibake) {
-    // 找到第一个 mojibake 标记位置
+    // 仅取第一处 mojibake 作 context 锚点;多处 mojibake 时 caller 可重跑或扩 dryRun API
     const idx = result.text.indexOf('�');
-    // 获取前 80 字符
-    const before = result.text.slice(Math.max(0, idx - 80), idx);
-    // 获取后 80 字符
-    const after = result.text.slice(idx, Math.min(result.text.length, idx + 80));
-    // 格式化输出
-    mojibakeContext = `[before 80]: ${JSON.stringify(before)}\n[after 80]:  ${JSON.stringify(after)}`;
+    const beforeText = result.text.slice(Math.max(0, idx - 80), idx);
+    const afterText = result.text.slice(idx, Math.min(result.text.length, idx + 80));
+    // byte offset 换算:utf8 编码的字节数(注意 mojibake 字符 U+FFFD 在 utf8 是 3 字节,原始字节可能是任意 1-2 字节,
+    // 这里给的是 mojibake-after-decode 视角下的 byte 位置,作 hex dump 锚点;实际原始 GBK 字节序与该位置略有偏移属可接受)
+    const byteIdx = Buffer.byteLength(result.text.slice(0, idx), 'utf8');
+    const beforeHex = result.raw.subarray(Math.max(0, byteIdx - 80), byteIdx).toString('hex');
+    const afterHex = result.raw
+      .subarray(byteIdx, Math.min(result.raw.length, byteIdx + 80))
+      .toString('hex');
+    mojibakeContext =
+      `[before 80 text]: ${JSON.stringify(beforeText)}\n` +
+      `[before 80 hex]:  ${beforeHex}\n` +
+      `[after 80 text]:  ${JSON.stringify(afterText)}\n` +
+      `[after 80 hex]:   ${afterHex}`;
   }
 
   return { path, detectedEncoding, mojibakeContext };

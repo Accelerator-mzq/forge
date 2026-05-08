@@ -3,9 +3,10 @@
 
 import { describe, it, expect } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { acquireLock, LockHeldError } from '../../../src/core/archive/lock.js';
+import { acquireLock, acquireLockByPath, LockHeldError } from '../../../src/core/archive/lock.js';
 
 // —— helper:创建含 .cache/ 的 forgeRoot 临时目录 ——
 function setupForgeRoot(): { forgeRoot: string; lockPath: string; cleanup: () => void } {
@@ -145,6 +146,49 @@ describe('acquireLock — O_CREAT|O_EXCL lock with stale pid detection', () => {
       expect(existsSync(lockPath)).toBe(false);
     } finally {
       rmSync(forgeRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('lock - legacy-bridge mode 扩展(决策 #23)', () => {
+  it('acquireLockByPath 用 legacy-bridge.lock 文件名', async () => {
+    const d = mkdtempSync(join(tmpdir(), 'forge-lb-lock-'));
+    try {
+      const release = await acquireLockByPath(d, 'legacy-bridge-regenerate', 'legacy-bridge.lock');
+      expect(existsSync(join(d, '.cache', 'legacy-bridge.lock'))).toBe(true);
+      const data = JSON.parse(await readFile(join(d, '.cache', 'legacy-bridge.lock'), 'utf8'));
+      expect(data.mode).toBe('legacy-bridge-regenerate');
+      await release();
+      expect(existsSync(join(d, '.cache', 'legacy-bridge.lock'))).toBe(false);
+    } finally {
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  it('archive.lock 与 legacy-bridge.lock 互不影响', async () => {
+    const d = mkdtempSync(join(tmpdir(), 'forge-mix-lock-'));
+    try {
+      const releaseA = await acquireLockByPath(d, 'archive', 'archive.lock');
+      const releaseB = await acquireLockByPath(d, 'legacy-bridge-map', 'legacy-bridge.lock');
+      expect(existsSync(join(d, '.cache', 'archive.lock'))).toBe(true);
+      expect(existsSync(join(d, '.cache', 'legacy-bridge.lock'))).toBe(true);
+      await releaseA();
+      await releaseB();
+    } finally {
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  it('legacy-bridge.lock 已被持有 → 抛 LockHeldError', async () => {
+    const d = mkdtempSync(join(tmpdir(), 'forge-lb-held-'));
+    try {
+      const release = await acquireLockByPath(d, 'legacy-bridge-regenerate', 'legacy-bridge.lock');
+      await expect(
+        acquireLockByPath(d, 'legacy-bridge-index', 'legacy-bridge.lock'),
+      ).rejects.toThrow(/another forge archive is in progress.*legacy-bridge-regenerate/);
+      await release();
+    } finally {
+      rmSync(d, { recursive: true, force: true });
     }
   });
 });

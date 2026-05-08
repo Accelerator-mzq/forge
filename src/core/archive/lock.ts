@@ -1,15 +1,25 @@
-// archive 进程锁 — Plan 3 Task 12
-// 用 O_CREAT|O_EXCL 独占创建 .cache/archive.lock,含 stale pid 检测
+// archive 进程锁 — Plan 3 Task 12;Plan 7 Phase A Task A2 扩展支持 legacy-bridge.lock
+// 用 O_CREAT|O_EXCL 独占创建 .cache/<lockName>,含 stale pid 检测
 
 import { writeFile, readFile, rm } from 'node:fs/promises';
 import { existsSync, openSync, closeSync, mkdirSync, constants } from 'node:fs';
 import { join, dirname } from 'node:path';
 
+// 决策 #23:扩展 mode union 支持 legacy-bridge 命令(C-2 / spec §2.6)
+export type LockMode =
+  | 'archive'
+  | 'recover'
+  | 'legacy-bridge-map'
+  | 'legacy-bridge-regenerate'
+  | 'legacy-bridge-index'
+  | 'legacy-bridge-resolve'
+  | 'legacy-bridge-sync-check';
+
 /** lock 文件内容结构 */
 interface LockData {
   pid: number;
   started_at: string;
-  mode: 'archive' | 'recover';
+  mode: LockMode;
 }
 
 /** 当 lock 被另一个活进程持有时抛出 */
@@ -23,48 +33,40 @@ export class LockHeldError extends Error {
 }
 
 /**
- * 获取 archive 进程锁
+ * acquireLock 的可定制 lock 文件版本(决策 #23)。
  *
- * 用 O_CREAT|O_EXCL 原子创建 .cache/archive.lock:
- * - 若文件不存在 → 独占创建,写入 {pid, started_at, mode},返回 release 函数
- * - 若文件已存在:
- *   - 检查持有者 pid 是否存活(isPidAlive)
- *   - stale(进程已死) → 删除 lock + 递归重试
- *   - alive → 抛 LockHeldError
+ * legacy-bridge 命令获 forge/.cache/legacy-bridge.lock(独立于 archive.lock);
+ * regenerate/index 同时获 archive.lock + legacy-bridge.lock(顺序固定:先 archive.lock 后 legacy-bridge.lock)。
  *
- * @param forgeRoot forge 根目录(含 .cache/ 子目录)
- * @param mode      当前操作模式
+ * @param forgeRoot forge 根目录
+ * @param mode      操作 mode(也写入 lock 数据)
+ * @param lockName  lock 文件名,默认 'archive.lock'
  * @returns         release 函数(幂等,可多次调用)
  */
-export async function acquireLock(
+export async function acquireLockByPath(
   forgeRoot: string,
-  mode: 'archive' | 'recover',
+  mode: LockMode,
+  lockName: string = 'archive.lock',
 ): Promise<() => Promise<void>> {
-  const lockPath = join(forgeRoot, '.cache', 'archive.lock');
+  const lockPath = join(forgeRoot, '.cache', lockName);
 
-  // P2.1 修复:fresh clone 后 .cache/ 不存在 → 提前 mkdir
   mkdirSync(dirname(lockPath), { recursive: true });
 
-  // 用 O_CREAT|O_EXCL 独占创建 lock 文件
   let fd: number;
   try {
     fd = openSync(lockPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o644);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
-      // lock 文件已存在 — 检查 stale
       const data = JSON.parse(await readFile(lockPath, 'utf8')) as LockData;
       if (!isPidAlive(data.pid)) {
-        // stale lock:进程已死 → 清理后重试
         await rm(lockPath, { force: true });
-        return acquireLock(forgeRoot, mode);
+        return acquireLockByPath(forgeRoot, mode, lockName);
       }
-      // 活进程持有 lock → 报错
       throw new LockHeldError(data);
     }
     throw err;
   }
 
-  // 写入 lock 数据
   const data: LockData = {
     pid: process.pid,
     started_at: new Date().toISOString(),
@@ -73,12 +75,32 @@ export async function acquireLock(
   await writeFile(lockPath, JSON.stringify(data, null, 2), { encoding: 'utf8', flag: 'w' });
   closeSync(fd);
 
-  // 返回幂等的 release 函数
   return async (): Promise<void> => {
     if (existsSync(lockPath)) {
       await rm(lockPath, { force: true });
     }
   };
+}
+
+/**
+ * 获取 archive 进程锁(`.cache/archive.lock` 专用 wrapper)。
+ *
+ * 用 O_CREAT|O_EXCL 原子创建 .cache/archive.lock:
+ * - 若文件不存在 → 独占创建,写入 {pid, started_at, mode},返回 release 函数
+ * - 若文件已存在:
+ *   - 检查持有者 pid 是否存活(isPidAlive)
+ *   - stale(进程已死) → 删除 lock + 递归重试
+ *   - alive → 抛 LockHeldError
+ *
+ * **使用约定**:本函数仅供 archive / recover 命令使用;
+ * legacy-bridge 命令应直接调 `acquireLockByPath(forgeRoot, mode, 'legacy-bridge.lock')`(决策 #23)。
+ *
+ * @param forgeRoot forge 根目录(含 .cache/ 子目录)
+ * @param mode      当前操作模式(LockMode union 支持 legacy-bridge-* 是为统一类型,但实际 callsite 应仅传 'archive' / 'recover')
+ * @returns         release 函数(幂等,可多次调用)
+ */
+export async function acquireLock(forgeRoot: string, mode: LockMode): Promise<() => Promise<void>> {
+  return acquireLockByPath(forgeRoot, mode, 'archive.lock');
 }
 
 /**

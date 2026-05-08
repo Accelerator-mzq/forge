@@ -76,4 +76,25 @@ describe('legacy-bridge/hash-anchor', () => {
     });
     expect(r.state).toBe('no-record');
   });
+
+  it('readFile 抛非 ENOENT 错误 → 向上传(不吞)', async () => {
+    // 给一个目录 path,readFile 会抛 EISDIR(不是 ENOENT)
+    const dirPath = FIXTURE_DIR; // 是个目录
+    await expect(computeAnchorHash(dirPath)).rejects.toThrow();
+  });
+
+  it('单独 \\r(老 Mac 行尾)→ 与 LF 同 hash', async () => {
+    const d = mkdtempSync(join(tmpdir(), 'hash-anchor-cr-'));
+    try {
+      const lfPath = join(d, 'lf.md');
+      const crPath = join(d, 'cr.md');
+      writeFileSync(lfPath, 'a\nb\nc');
+      writeFileSync(crPath, 'a\rb\rc');
+      const lf = await computeAnchorHash(lfPath);
+      const cr = await computeAnchorHash(crPath);
+      expect(lf).toBe(cr);
+    } finally {
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
 });

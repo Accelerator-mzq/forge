@@ -7,33 +7,41 @@
 
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
 import { extname } from 'node:path';
 import type { LegacyAnchor } from './types.js';
 
 /** 用 SHA256 算单文件 hash(返回 64 字符 hex 全长) */
-function sha256(buf: Buffer): string {
-  return createHash('sha256').update(buf).digest('hex');
+function sha256(input: Buffer | string): string {
+  return createHash('sha256').update(input).digest('hex');
 }
 
 /**
  * 计算 anchor 内容 hash(SHA256)。
  *
- * - markdown / txt / 其他文本:utf8 解码 + 行尾 normalize 为 LF(避免 CRLF/LF 漂移触发误警)
+ * - markdown / txt / 其他文本:utf8 解码 + 行尾 normalize 为 LF(同时处理 CRLF + 单独 CR;
+ *   与 src/core/hash/content.ts 先例一致)
  * - xlsx / .bin / 二进制:用原始字节
  *
- * @returns hash 字符串(64 字符 hex);文件不存在 → null(caller 决定是否警告)
+ * 返回 64 字符 hex SHA256(**不含** `sha256:` 前缀;区别于 src/core/hash/content.ts 的
+ * `computeContentHash` 它返回 `sha256:<hex>` 全长 71 字符)。
+ *
+ * @returns hash 字符串(64 字符 hex);文件不存在 → null
  */
 export async function computeAnchorHash(path: string): Promise<string | null> {
-  if (!existsSync(path)) return null;
+  let raw: Buffer;
+  try {
+    raw = await readFile(path);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw err; // 其他 IO 错误(EACCES / EBUSY)向上抛
+  }
   const ext = extname(path).toLowerCase();
-  const raw = await readFile(path);
   if (ext === '.xlsx' || ext === '.bin') {
     return sha256(raw);
   }
-  // 文本:utf8 normalize + LF
-  const text = raw.toString('utf8').replace(/\r\n/g, '\n');
-  return sha256(Buffer.from(text, 'utf8'));
+  // 文本:utf8 normalize CRLF / 单独 CR → LF
+  const text = raw.toString('utf8').replace(/\r\n?/g, '\n');
+  return sha256(text);
 }
 
 /** 校验 anchor 当前文件 hash 与 yaml 记录的 hash 是否一致 */

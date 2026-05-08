@@ -1,0 +1,3 @@
+windows-crlf-srs.md text eol=crlf
+gbk-encoded-srs.md binary
+*.xlsx binary

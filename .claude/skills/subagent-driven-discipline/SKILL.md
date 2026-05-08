@@ -7,7 +7,7 @@ metadata:
   author: forgeue project (extracted to generic)
   version: "1.0-generic"
   scenario_subtype_count: 28
-  case_study_count: 1
+  case_study_count: 2
   retrospect_protocol: trigger-type-matrix(5 types × per-type intensity)
 ---
 
@@ -532,6 +532,98 @@ git update-ref refs/heads/<wrong-branch> <prior-base-sha>
 
 ---
 
+### Case 02: forge-repo / Plan 7 Phase B2 / legacy-bridge 复写器 + Excel + encoding + hash
+
+**Date**:2026-05-08
+**Trigger Type**:Type 1(3-stage full retrospect)
+**Project context**:TS/Node monorepo,Plan 7 Phase B2 落 legacy-bridge 4 task(encoding utf8 + chardet / excel exceljs 解析 / hash-anchor SHA256 / regenerator LLM 复写 + frontmatter/disclaimer/output validator)
+
+**Subagent dispatch**:
+| Subagent | Scenario subtype(§1.X.Y)| Model | $cost | Verdict |
+|---|---|---|---|---|
+| B2.1 implementer | §1.1.1 Mechanical | haiku | ~$0.10 | DONE |
+| B2.1 spec_reviewer | §1.2.1 string matching | sonnet | ~$0.10 | ✅ |
+| B2.1 code_quality_reviewer | §1.3.4 runtime correctness | sonnet | ~$0.30 | ⚠️ 2 Important + 4 Minor |
+| B2.1 round 2 implementer | §1.1.1 Mechanical | haiku | ~$0.10 | DONE — 修 6 fix |
+| B2.1 round 2 re-review | §1.3.4 | sonnet | ~$0.10 | ✅ |
+| B2.2 implementer | §1.1.1 Mechanical | haiku | ~$0.10 | DONE |
+| B2.2 spec_reviewer | §1.2.1 string matching | sonnet | ~$0.10 | ✅(误读 .gitattributes 路径,false positive)|
+| B2.2 code_quality_reviewer | §1.3.4 | sonnet | ~$0.30 | ⚠️ 3 Important + 3 Minor — exceljs 4.4 实际 API 与 plan 模板不符 |
+| B2.2 round 2 implementer | §1.1.1 Mechanical | haiku | ~$0.10 | DONE — 修 6 fix |
+| B2.2 round 2 re-review | §1.3.4 | sonnet | ~$0.10 | ✅ |
+| **chore prettierignore fix** | direct | controller | ~$0 | inline — 修 prettier normalize 破坏 fixture 字节 |
+| B2.3 implementer | §1.1.1 Mechanical | haiku | ~$0.10 | DONE — controller pre-revise plan inline import 后照搬 |
+| B2.3 spec_reviewer | §1.2.1 string matching | sonnet | ~$0.10 | ✅ |
+| B2.3 code_quality_reviewer | §1.3.4 | sonnet | ~$0.30 | ⚠️ 3 Important + 2 Minor |
+| B2.3 round 2 implementer | §1.1.1 Mechanical | haiku | ~$0.10 | DONE — 修 4 fix |
+| B2.3 round 2 re-review | §1.2.2 structural verification | haiku(light)| ~$0.05 | ✅ |
+| B2.4 implementer | §1.1.3 Multi-file integration | sonnet | ~$0.30 | DONE_WITH_CONCERNS — 测试 redact 断言降级 |
+| B2.4 spec_reviewer | §1.2.1 string matching | sonnet | ~$0.10 | ✅ |
+| B2.4 code_quality_reviewer | §1.3.4 | sonnet | ~$0.50 | ⚠️ 1 Critical + 4 Important + 4 Minor — gray-matter false positive 实测验证 |
+| B2.4 round 2 implementer | §1.1.3 Multi-file integration | sonnet | ~$0.30 | DONE — 修 7 fix |
+| B2.4 round 2 re-review | §1.3.4 | sonnet | ~$0.20 | ✅ |
+| Phase final reviewer | cross-task | sonnet | ~$0.40 | ✅ Ready to PR |
+
+**Real issues caught / failed**:
+| Issue | Severity | Caught by | Scenario subtype 验证 |
+|---|---|---|---|
+| **Prettier normalize 破坏 binary fixture(GBK / CRLF .md 字节)** | **CI/test-blocking** | controller cross-verify(B2.2 round 2 后重测发现 fixture 被改坏)| **NEW pattern A** — 工具链(prettier)与 fixture 字节完整性冲突,§6 catalog 缺 |
+| **spec-reviewer 误读 `.gitattributes` 路径**(看根目录而非 fixtures 子目录,误报缺 `*.xlsx binary` 标记)| Important(false positive)| controller cross-verify | **NEW pattern C** — 路径 hallucinate(扩展 §6 "幻觉 URL")|
+| Plan inline import 不存在的函数签名(`computeContentHash(buf)` vs 真签名 `(changeDir: string)`)| Critical(typecheck blocker)| controller pre-dispatch check | §6 "Plan inline code 含 latent bug" 行覆盖 — Mechanical implementer 不可能抓 |
+| Plan inline 用 exceljs 不存在 API(`ws.model.drawings` / `ws.pivotTables` 永远 undefined → unsupportedFeatures 死代码,spec §6.5 fail-fast 失效)| Important | sonnet code_quality | §1.3.4 sonnet 兜底 — Haiku Mechanical 抄不出来 |
+| Hyperlink cell exceljs 返回 `{text, hyperlink}` 在 plan 落入 String() 输出 `[object Object]` | Important(LLM 输入质量)| sonnet code_quality | §1.3.4 兜底 |
+| gray-matter false positive 对 `---\n\n# 标题`(thematic break + 空行 + 标题)解析为 100+ 数字键 → 合法 LLM 输出被误拒 | Important(可观察的合法被拒)| sonnet code_quality(实测 4 case 验证)| §1.3.4 兜底 |
+| redact 编号碰撞:auth + historical 各自从 1 开始,redactReport 与实际 mask 不一致 | Important(audit 准确性)| sonnet code_quality | §1.3.4 multi-file integration sonnet implementer 也照搬 plan latent bug,sonnet code_quality 兜底 |
+| existsSync + readFile race window | Important(low concurrency probability)| sonnet code_quality | §1.3.4 |
+| `chardet-not-installed` 在 chardet 已装但 detect 抛错时误报 | Important(诊断 UX)| sonnet code_quality | §1.3.4 |
+| sources path 含 `:` 破 yaml | Minor(罕见 path)| sonnet code_quality | §1.3.4 |
+| **Implementer 测试断言降级(redact `>0` 改 `>=0` 永真)** | **Important(silent test regression)**| controller cross-verify implementer 自检报告 | **NEW pattern B** — implementer 在 plan 不可达时降级 assertion 而非 BLOCKED |
+
+**Lesson**(reinforce / new pattern / 边界 refinement):
+
+1. **NEW pattern A — Prettier(或同类 formatter)normalize 破坏 binary / 行尾敏感 fixture**
+   - `.gitattributes` 标 `binary` / `eol=crlf` **不阻止** prettier 处理(prettier 按 file extension 判断,.md 默认处理)
+   - `.prettierignore` 必须显式排除 fixture 目录;否则 `pnpm format` 静默改字节(GBK → UTF-8 替换字符 / CRLF → LF + 加空行)
+   - 测试时 working tree 状态可能不同 — implementer 跑测试时 working tree 是 git checkout 后的 CRLF;后跑 `pnpm format` 后变 LF。后续重测 fail
+   - **§6 加 row "Prettier normalize 破坏 fixture"**
+   - **检测信号**:跨 task 重测时 fixture 字节差异(`xxd <fixture> | head` 比对 git vs working tree)
+
+2. **NEW pattern B — Implementer 测试断言 silent 降级**
+   - 当 fixture / 环境与 plan 假设不符,implementer 应 **BLOCKED** 报告,**不应**降低断言强度让测试 silently 通过
+   - 实证:B2.4 round 1 implementer 把 `expect(redactReport.totalReplacements).toBeGreaterThan(0)` 改为 `>=0`(永真,实际不验证 redact 工作),理由"fixture 不命中默认规则"
+   - controller cross-verify(看 implementer self-review 报告中的 Observation)抓到后 inline fix:加 `globalRedactRules` 让自补规则真命中,断言改 `>=2`
+   - **§6 加 row "测试断言 silent 降级"** + §2.1 implementer prompt "When Stuck" 段强化:**测试 assertion 降级 = BLOCKED**,不可 silent 接受
+   - 与 §2.1 Plan inline escape valve 的区别:escape valve 是"标 observation 不擅自改 plan inline code";新 pattern 是"测试 assertion 不准 silent 降级 — 必须 BLOCKED"
+
+3. **NEW pattern C — spec-reviewer 路径 hallucinate(扩展 §6 "幻觉 URL / pytest count")**
+   - B2.2 spec-reviewer 误读 `.gitattributes` 路径(默认假设根目录 `.gitattributes` 而非 `tests/fixtures/legacy-bridge/.gitattributes`),report "缺 `*.xlsx binary` 标记"
+   - controller cross-verify `cat tests/fixtures/legacy-bridge/.gitattributes` 确认 reviewer 错(B2.1 已写入 3 行含 `*.xlsx binary`)
+   - **§6 修订 row**:扩展 "幻觉 URL / pytest count" → 加 "路径 hallucinate(reviewer 假设根 vs 子目录)"
+   - **§2.2 spec-reviewer prompt 强化**:涉及多目录 / scoped fixture 时,在 Pre-verified Data 段显式标完整路径,不要让 reviewer 推
+
+4. **REINFORCE — §1.3.4 sonnet code_quality 兜底 plan inline latent bug 模式重现 4 次**
+   - B2.2:plan 模板用 exceljs 不存在的 `model.drawings` / `pivotTables` API(死代码)— sonnet 跑实测确认
+   - B2.3:plan 模板 `computeContentHash(buf)` 函数签名不匹配 — controller pre-dispatch 已修订
+   - B2.4:plan 模板 redact 编号碰撞 + gray-matter false positive — sonnet code_quality 兜底
+   - **强化 §1.3 takeaway**:任何 design 任务 / runtime correctness 兜底必须 Sonnet,不可降级 Haiku
+   - **强化 Case 01 Lesson 1**:plan inline code 含 latent bug 是 systemic;Mechanical implementer 不可能抓;Sonnet code_quality 是唯一防线
+
+5. **REINFORCE — chore commit 模式可作 phase 内 infra fix carrier**
+   - `.prettierignore` 修改是 phase 内必要 infra fix,作为单独 chore commit(`a1c8c4e`),不与 task 实现混合 — 与 Plan 6 archive --recover phase 类似 chore 风格一致
+   - controller 直接 inline 写 `.prettierignore` + commit(不 dispatch implementer),sub-$0 cost
+
+6. **REINFORCE — controller pre-dispatch revise plan inline 减少 round 2 cost**
+   - B2.3:controller 在 dispatch 前发现 plan inline `computeContentHash(buf)` typecheck 必败,直接给 implementer 修订版 inline code(用 `node:crypto.createHash` 替代),implementer 一次过 + round 2 只修 nice-to-have(I-1/I-2 等),节省一次 round 2 cost
+   - 启发:controller 应在 dispatch 前抽查 plan inline 关键 import 签名(查 sister files / sister modules),catch typecheck-blocking 问题不外包
+
+**Cost vs all-Opus alternative**:
+- 实际:8 implementer × 2 round(haiku ~$0.10 / sonnet ~$0.30)+ 12 reviewer(sonnet ~$0.10-0.50)+ chore + cross-verify + final reviewer + retrospect ≈ **$5.70**
+- 全 Opus 假设:8 implementer + 12 reviewer + final + retrospect ≈ **$25-35**
+- 节省 ratio:~78-82%
+- 质量:4 task 全 commit + CI green + PR #14 已开 + cross-task final review ✅(0 Critical / 3 Important 都 architecture decision 跨 phase 追踪)
+
+---
+
 ## §6 Pattern Catalog(failure mode → scenario subtype + recovery)
 
 | Subagent failure mode | Root cause(scenario subtype 误配)| Prevention | Recovery |
@@ -545,6 +637,9 @@ git update-ref refs/heads/<wrong-branch> <prior-base-sha>
 | Plan inline code 含 latent bug,Mechanical implementer 照搬不抓(see §5 Case 01)| §1.1.1 Mechanical 假设 plan 可信;Plan 上一阶段既存 bug 搬运 / Plan 自身 review 不彻底 | §1.3.4 Sonnet code_quality 兜底(MANDATORY)+ §2.1 implementer escape valve("觉得 plan code 有 bug → 标 observation") | Sonnet code_quality 抓到后 controller inline fix 修复 |
 | Implementer self-review stack-mismatch(Python 模板套 TS 漏 format/lint;see §5 Case 01)| §2.1 playbook checklist 写 generic Python 命令 | §2.1 stack-specific 命令清单(TS/Node:`pnpm format:check + lint + build`;Python:`ruff + mypy + pytest`;Rust:`cargo fmt + clippy + test`)| chore commit 自动修(单 commit 修 N 文件) |
 | Reviewer Critical claim 越权(假设最坏 / 偏离 plan 决策表) | code_quality reviewer 不持 plan 上下文,reasoning code 时倾向最坏假设 | §3.2 controller cross-verify reviewer Critical claim → 对照 plan 决策表独立核(see §5 Case 01 Lesson 3)| controller 独立核后拒绝 / 部分采纳;只接受不偏离 plan 的 inline fix |
+| **Prettier(或同类 formatter)normalize 破坏 binary / 行尾敏感 fixture(see §5 Case 02 Pattern A)** | `.prettierignore` 缺 fixture 路径排除;`.gitattributes` 不阻止 formatter 处理(formatter 按 file extension 判断,.md 默认进 prettier) | `.prettierignore` 显式加 fixture 目录(`tests/fixtures/<scope>/`);chore commit 单独提;dispatch implementer prompt 加注 "若跑 pnpm format 后 fixture 字节变化 → 走 .prettierignore" | `git restore <fixture>` 还原 + `.prettierignore` 加排除 + chore commit;controller cross-verify `xxd <fixture>` 确认字节符合预期 |
+| **Implementer 测试断言 silent 降级(`>0` 改 `>=0` 永真;see §5 Case 02 Pattern B)** | fixture/环境不符 plan 假设时 implementer 优先降级 assertion 让测试通过,而非 BLOCKED 报告;§2.1 prompt "When Stuck" 缺测试断言降级 = BLOCKED 的明确约束 | §2.1 implementer prompt "When Stuck" 段强化:**测试 assertion 降级 = BLOCKED 状态**,不可静默接受;Self-review checklist 加"是否有 assertion 从 plan 原样改为永真断言?有 → BLOCKED" | controller cross-verify implementer self-review 报告中的 Observation;若发现 `>=0` / `not.toThrow()` 永真断言 → inline fix 改回真断言 + 加 fixture/parameter 让真命中 |
+| **`spec-reviewer` 路径 hallucinate(假设根目录 vs 子目录路径;see §5 Case 02 Pattern C)** | §1.2.1 string matching reviewer 在多目录 / scoped fixture 时假设默认根;Pre-verified Data 段未显式标完整路径让 reviewer 推 | §2.2 spec-reviewer prompt:涉及子目录 fixture 时,Pre-verified Data 段显式标完整路径(`tests/fixtures/<scope>/<file>`),不要让 reviewer 自己推 | controller cross-verify reviewer 引用的路径(实际 `cat <path>` 看是否真不存在);若是 reviewer 错路径,override verdict 标 false positive |
 
 ---
 

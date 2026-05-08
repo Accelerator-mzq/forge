@@ -15,6 +15,10 @@ tc.addRows([
   ['TC-002', '登录失败', '输入错密', '提示密码错'],
   ['TC-003', '幂等支付', '同 Idempotency-Key 重复请求', '返回原响应不重复扣款'],
 ]);
+// hyperlink cell + Date cell — 给 round 2 I-3 / m-2 测试用
+const linkRow = tc.addRow(['TC-004', '链接 case', '点链接', '正常跳转']);
+linkRow.getCell(2).value = { text: '点击此链接', hyperlink: 'https://example.com/test' };
+linkRow.getCell(4).value = new Date('2026-01-15T08:00:00Z');
 
 // Sheet 2: Coverage(故意中文 sheet 名)
 const cov = wb.addWorksheet('覆盖率');

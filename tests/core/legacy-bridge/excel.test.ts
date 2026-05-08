@@ -17,10 +17,10 @@ describe('legacy-bridge/excel', () => {
     expect(wb.sheets.map((s) => s.name).sort()).toEqual(['TestCases', '覆盖率']);
   });
 
-  it('TestCases sheet 行数正确(header + 3 case = 4)', async () => {
+  it('TestCases sheet 行数正确(header + 4 case = 5)', async () => {
     const wb = await parseWorkbook(FIXTURE);
     const tc = getSheet(wb, 'TestCases', FIXTURE);
-    expect(tc.rows).toHaveLength(4);
+    expect(tc.rows).toHaveLength(5);
     expect(tc.rows[0]).toEqual(['ID', 'Title', 'Steps', 'Expected']);
     expect(tc.rows[1]?.[0]).toBe('TC-001');
   });
@@ -60,5 +60,21 @@ describe('legacy-bridge/excel', () => {
     const wb = await parseWorkbook(FIXTURE);
     const tc = getSheet(wb, 'TestCases', FIXTURE);
     expect(tc.unsupportedFeatures).toEqual([]);
+  });
+
+  it('hyperlink cell → 取 text 不是 [object Object]', async () => {
+    const wb = await parseWorkbook(FIXTURE);
+    const tc = getSheet(wb, 'TestCases', FIXTURE);
+    const tc004 = tc.rows.find((r) => r[0] === 'TC-004');
+    expect(tc004).toBeDefined();
+    expect(tc004?.[1]).toBe('点击此链接');
+    expect(tc004?.[1]).not.toContain('[object Object]');
+  });
+
+  it('Date cell → ISO 8601 字符串(locale-independent)', async () => {
+    const wb = await parseWorkbook(FIXTURE);
+    const tc = getSheet(wb, 'TestCases', FIXTURE);
+    const tc004 = tc.rows.find((r) => r[0] === 'TC-004');
+    expect(tc004?.[3]).toBe('2026-01-15T08:00:00.000Z');
   });
 });

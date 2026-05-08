@@ -50,19 +50,17 @@ export async function parseWorkbook(path: string): Promise<WorkbookResult> {
     const rows: string[][] = [];
     const unsupportedFeatures: string[] = [];
 
-    // 检测不支持特性
-    // exceljs 把 pivotTable 等暴露为 worksheet.pivotTables;若无属性则 try-catch 兜底
+    // 检测 pivotTable
+    // 注:exceljs 4.4 未公开 API 检测 pivot,此分支为 future-proof 预留(目前恒不命中,false negative 接受)
+    // 用户若用 pivot,Phase A 已 spec §6.5 引导导出 csv
     if ((ws as unknown as { pivotTables?: unknown[] }).pivotTables?.length) {
       unsupportedFeatures.push('pivotTable');
     }
-    // chart / drawing 通过 model.drawings 或 drawings 暴露(版本相关);用 try 兜
-    try {
-      const drawings = (ws.model as unknown as { drawings?: unknown[] }).drawings;
-      if (Array.isArray(drawings) && drawings.length > 0) {
-        unsupportedFeatures.push('chart/drawing');
-      }
-    } catch {
-      // ignore
+    // 检测嵌入图片 / drawing(exceljs 4.4 通过 ws.model.media 暴露 — plan 原写 model.drawings 是 latent bug)
+    // 注:exceljs 4.4 不解析 chart XML,真 chart 无法检测;此处 best-effort 覆盖图片
+    const media = (ws.model as unknown as { media?: unknown[] }).media;
+    if (Array.isArray(media) && media.length > 0) {
+      unsupportedFeatures.push('chart/drawing');
     }
 
     // 遍历行(eachRow 跳过空行;rowNumber 从 1 起)
@@ -75,12 +73,23 @@ export async function parseWorkbook(path: string): Promise<WorkbookResult> {
         if (v === undefined || v === null) {
           cells.push('');
         } else if (typeof v === 'object' && v !== null && 'result' in v) {
-          // formula cell:取计算缓存值
-          cells.push(String((v as { result: unknown }).result ?? ''));
+          // formula cell:取计算缓存值;Date 用 ISO
+          const r = (v as { result: unknown }).result;
+          if (r instanceof Date) {
+            cells.push(r.toISOString());
+          } else {
+            cells.push(String(r ?? ''));
+          }
         } else if (typeof v === 'object' && v !== null && 'richText' in v) {
           // richText:拼 plain
           const rt = (v as { richText: { text: string }[] }).richText;
           cells.push(rt.map((seg) => seg.text).join(''));
+        } else if (typeof v === 'object' && v !== null && 'text' in v && 'hyperlink' in v) {
+          // hyperlink cell:exceljs 暴露 { text, hyperlink },取 text 作显示值(避免 String(obj) → '[object Object]')
+          cells.push(String((v as { text: unknown }).text ?? ''));
+        } else if (v instanceof Date) {
+          // Date:用 ISO 8601 不依赖 locale(LLM-friendly,m-2 fix)
+          cells.push(v.toISOString());
         } else {
           cells.push(String(v));
         }
@@ -129,7 +138,7 @@ export function sheetToMarkdown(sheet: SheetResult): string {
   lines.push(`### Sheet: ${sheet.name}\n`);
   const header = sheet.rows[0] ?? [];
   lines.push('| ' + header.map(escapeMd).join(' | ') + ' |');
-  lines.push('|' + header.map(() => '---').join('|') + '|');
+  lines.push('| ' + header.map(() => '---').join(' | ') + ' |');
   for (const row of sheet.rows.slice(1)) {
     lines.push('| ' + row.map(escapeMd).join(' | ') + ' |');
   }
@@ -137,5 +146,5 @@ export function sheetToMarkdown(sheet: SheetResult): string {
 }
 
 function escapeMd(s: string): string {
-  return s.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+  return s.replace(/\|/g, '\\|').replace(/\r\n|\r|\n/g, ' ');
 }

@@ -66,7 +66,9 @@ describe('legacy-bridge/regenerator', () => {
   });
 
   it('redact 在发 LLM 前生效(原文 token 不被发送)', async () => {
-    // redact-targets.md 含自补 literal 规则命中目标;默认规则无命中(0 也可接受)
+    // redact-targets.md 含 5 处自补 literal 目标(INTERNAL-DB-PROD-01 / ACME-CUSTOMER-A12 等);
+    // 默认规则 0 命中(P7-13 修复,见 plan 顶部测试策略)。
+    // 测试通过传 globalRedactRules 让自补规则命中,验证 redact 整条流程通了。
     const mock = makeMock('# 复写\n## 1. abc\n' + 'x'.repeat(200));
     const out = await regenerateRole(
       {
@@ -76,13 +78,15 @@ describe('legacy-bridge/regenerator', () => {
           path: join(FIXTURE_DIR, 'redact-targets.md'),
           authoritative: true,
         },
+        // 传自补 literal 规则,让 fixture 中的 INTERNAL-DB-PROD-01(出现 2 次)命中
+        globalRedactRules: [{ literal: 'INTERNAL-DB-PROD-01', name: 'internal-db' }],
         forgeVersion: '0.2.0',
         regenLicense: 'derived-from-source',
       },
       mock,
     );
-    // 降低断言:fixture 不含默认规则命中样本,>=0 即可
-    expect(out.redactReport.totalReplacements).toBeGreaterThanOrEqual(0);
+    // 至少 2 处命中(fixture 里 INTERNAL-DB-PROD-01 出现 2 次,验证 redact 真生效)
+    expect(out.redactReport.totalReplacements).toBeGreaterThanOrEqual(2);
   });
 
   it('disclaimer 含 license 字段(决策 #21)', async () => {

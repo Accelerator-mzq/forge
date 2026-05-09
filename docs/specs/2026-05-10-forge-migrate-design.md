@@ -1,7 +1,7 @@
 # Forge Migrate(openspec / superpowers 项目搬运)设计文档
 
 - **作者**:msc(由 Claude Opus 4.7 协助 brainstorming)
-- **日期**:2026-05-10(v3 — 经 Opus subagent 自检发现 12 条新问题 + 6 条 codex 表面解决修订)
+- **日期**:2026-05-10(v4 — 经 codex 第二轮审查 4 阻塞 + 5 关键 major 修订)
 - **状态**:草案,待用户审阅
 - **关联**:
   - 主 spec [`2026-05-04-forge-fusion-design.md`](2026-05-04-forge-fusion-design.md)(forge 工作目录契约 + skill/command 体系)
@@ -16,15 +16,21 @@
 
 **v2 → v3 修订**(对照 Opus subagent 自检 12 条新发现 + 6 条表面解决):
 
-- M9 改"扩 LockMode union 但不动 LockHeldError 文案"(实证:`tests/core/archive/lock.test.ts:188` 硬断言"another forge **archive** is in progress"将破裂;改最小化方案保兼容)
-- M13 archive 降级前**强制二次确认**(`--no-interactive` 时 abort 而非默默降级,反 v2 静默状态变化)
-- M14 trace 用 `.ndjson` + 末态原子 `rename` 到 `.json`(防 reformat 期 crash 留半残双格式文件)
-- M15 source-bundle 改**目标分桶**:proposal 校验 facts 来自 design 的"问题/动机"(独立 prompt);specs 校验 facts 来自 tasks 的"行为/输出";避免 facts 范围与 generated 不重合的"假阴性 .partial"
-- M15 加阈值:facts < 5 → 视为 empty-facts 触发 fail
-- M16 bundled + superpowers 时**前置 prompt** "此模式将产 N 个 [needs-fix],继续吗?";`--no-interactive` 直接 abort
-- §2.5 markdown-aware walker 明示**不识 indented code block(4 空格缩进)**;只识 fenced 且 token 同种收尾
-- §3.1 unsafe-slug 件数 / 总件数 ≥ 50% → exit 4(不走半残)
-- §5.2 / §7.1 锁定 `@anthropic-ai/sdk` 版本(支持 AbortSignal 的最低版本)
+- M9/M13/M14/M15/M16 升级;facts 目标分桶 + 阈值;NDJSON + 原子 rename;markdown-aware indented 边界;unsafe-slug 50% 阈值;SDK 版本下限
+
+**v3 → v4 修订**(codex 第二轮 4 阻塞 + 5 关键 major):
+
+- **#29 cp 顺序重排**(阻塞):每件三步走 `journal pending → write .tmp → rename → journal committed`;无孤儿文件
+- **M9 残留清理**(阻塞):全文统一"扩 union 不动 LockHeldError 文案;migrate CLI catch 后改输出友好文案"(顺手解 B6 排障误导)
+- **B4 测试承诺撤销**(阻塞):删 §4.2 indented code 测试承诺,§7.1 升级为 known limitation
+- **B5 dry-run 前置**(阻塞):`--dry-run` 检查移到 `enforceArchiveIntegrity` 之前;dry-run 永远 exit 0
+- **B3 顺序明确**:伪码 `missingPreview` 早算;bundled+sp prompt 在 plan 表后、ack 前
+- #26 quality.ts 三套 prompt 类型约束(prompt 全文留 plan 阶段 + 加 facts 重复去重)
+- #31 SDK 调用统一封装 `callAnthropic({signal})`;abort 错误映射 `interrupted`
+- #40 README 同步:openspec 静默退化 / superpowers 前置 prompt 区别明示
+- C2 SIGINT `process.once` + finally `off`;不复用 `parse/markdown.ts:parseMarkdown`(不 fence-aware),markdown-aware 自切 section
+- 接受不改:#27 minor、B2 prompt examples(plan 阶段)、B7 函数签名(plan 阶段)
+- scope:14.5 → ~16-18 工日浮动
 
 ---
 
@@ -75,7 +81,7 @@ src/core/migrate/                       ← ★ NEW
 src/cli/commands/
 └── migrate.ts                          ← ★ NEW:commander 子命令骨架,解析参数 → 调 runMigrate
 
-src/core/archive/lock.ts                ← ★ 改:LockMode union 加 'migrate';LockHeldError 文案泛化(不再写死 archive)
+src/core/archive/lock.ts                ← ★ 改:LockMode union 加 'migrate'(LockHeldError 文案不动,migrate CLI catch 后输出友好文案,见 §3.3)
 src/core/parse/markdown.ts              ← 复用现有 parseMarkdown(ATX section)
 
 tests/migrate/                          ← ★ NEW:单元 + 集成测,详 §4
@@ -138,7 +144,9 @@ runMigrate(sourceId, opts):
     warn('also found <other-source>; not migrating it (rerun with that source if needed)')
 
   abortController = new AbortController()
-  process.on('SIGINT', () => { abortController.abort(); journalSigint() })
+  # v4 修订(codex C2):用 process.once 防 listener 累积(测试多次 runMigrate);finally 显式 off 兜底
+  sigintHandler = () => { abortController.abort(); journalSigint() }
+  process.once('SIGINT', sigintHandler)
 
   try:
     scan = source.scan(detect.rootPath)
@@ -153,58 +161,65 @@ runMigrate(sourceId, opts):
     if !opts.noInteractive:
       plan = askUserConfirm(plan, conflicts)
 
+    # v4 修订(codex B3 阻塞):missing 早算 — bundled prompt / archive integrity 都需要 missing 数
+    missingPreview = listAllMissing(plan, source)        # 先用未降级 plan 算一份;不调 LLM,纯目录扫描
+
     regenEnabled = !opts.noRegenerate
 
-    # M16(v3 修订):bundled + superpowers source 不沉默退化
+    # M16(v4 修订,codex #40 / B3 阻塞):bundled 路径顺序明确
     if isBundled() && regenEnabled:
       if source.id == 'superpowers':
-        msg = 'bundled plugin: --regenerate unavailable; superpowers source will produce ' +
-              count(missing) + ' [needs-fix] markers. continue?'
+        msg = 'bundled plugin: --regenerate unavailable;此模式将产生 ' + count(missingPreview) +
+              ' 个 [needs-fix] markers(superpowers 必缺 proposal/specs)。继续?'
         if opts.noInteractive:
           error('bundled + superpowers + --no-interactive: refuse to silently degrade')   # exit 4
         elseif !askUserConfirm(msg):
           exit(0)
-        regenEnabled = false   # 用户确认后才退化
-      else:    # openspec source(缺件少,静默退化可接受)
+        regenEnabled = false                             # 用户确认后才退化
+      else:                                              # openspec source(缺件少,静默退化可接受)
         warn('bundled: --regenerate unavailable, falling back to --no-regenerate')
         regenEnabled = false
 
-    if regenEnabled:
-      missing = listAllMissing(plan, source)
+    # v4 修订(codex B5 阻塞):--dry-run 检查移到 enforceArchiveIntegrity 之前
+    # 保证 dry-run 永远 report-only + exit 0;archive 完整性问题在 dry-run 不应触发 exit 4
+    if opts.dryRun:
+      report.toStdout(plan, missingPreview)              # 含降级前 plan + missing 预览;不动文件
+      return                                             # exit 0
 
-      # M13(v3 修订):enforceArchiveIntegrity 移到 budget 之前,避免估算降级件 token 浪费
+    if regenEnabled:
+      # M13(v4 修订):archive 完整性检查移到 budget 之前,避免估算降级件 token 浪费
       plan = enforceArchiveIntegrity(plan, regenEnabled, opts.noInteractive)
         # 推测 archive 但缺件且 regen 关 / 即将拒绝:
         #   - 交互模式:askUserConfirm('降级 active 还是跳过?')
-        #   - --no-interactive:error('archive 完整性不可达,abort')   # exit 4
+        #   - --no-interactive:error('archive 完整性不可达,abort')   # exit 4(real 执行才 abort)
 
-      missing = listAllMissing(plan, source)             # 降级后重算
+      missing = listAllMissing(plan, source)             # 降级后重算(可能少于 missingPreview)
       cost = budget.estimateMigrateCost(missing)         # migrate 专属公式
       ackOk = ack.optin(cost, source.id)                 # migrate 专属 prompt
       if !ackOk:
         regenEnabled = false                             # 退化纯结构;exit 0
 
-    if opts.dryRun:
-      report.toStdout()                # 不写盘
-      return
-
     ops = source.prepareCopy(plan, target='forge/')
     # M14(v3 修订):journal 写 .ndjson;末态原子 rename 到 .json
     journal = trace.openJournal('forge/migrate-trace.json.ndjson')
 
+    # M14 v4 修订(codex #29 / B1 阻塞):每件三步走 — pending journal → write .tmp + rename → committed journal
+    # 顺序保证 crash 时 journal 永远先于 / 同步 op.target 状态;无孤儿文件
     for op in ops:
       try:
+        journal.append({ ...op, status: 'pending' })   # 1. 先记 intent(crash 后 rollback 知道清 .tmp)
         rawContent = read(op.source)
         transformed = source.transform(rawContent, op.kind)
-        write(op.target, transformed)
-        journal.append(op)               # 立即 fsync
+        write(op.target + '.tmp', transformed)         # 2a. 写到 .tmp(crash 留 .tmp 给 rollback 清)
+        fs.rename(op.target + '.tmp', op.target)        # 2b. 原子 rename(POSIX 原子)
+        journal.update(op, status='committed')          # 3. 标 committed(rollback 时只清 pending,跳过 committed)
         validateResult = validate(op.target, op.kind)
         if validateResult.ok:
           report.mark(op, '[ok]')
         else:
           report.mark(op, '[needs-fix: ' + validateResult.message + ']')
       except IOErr:
-        rollback(journal)               # 反向 rm 已写;源不动
+        rollback(journal)              # 反向 rm 全部 committed + 清残留 .tmp;源不动
         error('cp failed at ' + op.target)   # exit 5
       except ConflictAtCopyTime:        # M7:plan 阶段没看到的并发冲突
         rollback(journal)
@@ -224,6 +239,7 @@ runMigrate(sourceId, opts):
       # M14 v3:fs.rename 原子;rename 失败保留 .ndjson
     printCleanupHints(source.id)
   finally:
+    process.off('SIGINT', sigintHandler)   # v4 修订(C2):兜底清 listener
     releaseLock()
 ```
 
@@ -399,7 +415,7 @@ forge 现状:
      - facts ≥ 5 → 跑 `quality.judgeAll(generated, facts)`
    - **fidelity threshold**:openspec source 默认 0.9(brownfield 同);**superpowers source 默认 0.6**(从零生成,保真期望低,文档 §6.2 明示)
    - 通过 → 落地;失败 → `.partial-<artifact>.md` + 标 `[regen:quality-fail: low-fidelity]`
-7. **AbortController 路径**(M14):写盘前 `if (abortController.signal.aborted) return; .partial 残留`;LLM 请求若已发出,Anthropic SDK 调用通过 `AbortSignal` 取消(**要求 `@anthropic-ai/sdk` ≥ 0.27.0**,该版本起官方支持 AbortSignal;package.json 锁定该版本下限)
+7. **AbortController 路径**(M14,v4 修订):统一封装 `callAnthropic({ signal, model, prompt, ... })`(`src/core/migrate/regenerate.ts` 内一个 helper),**所有 SDK 调用都走它**;abort 后 SDK 抛 `AbortError` 时统一 catch 映射为 `[regen:interrupted]`(不当 network-error,语义不同);写盘前 `if (abortController.signal.aborted) return;` 二次检查 `.partial` 残留;**要求 `@anthropic-ai/sdk` ≥ 0.27.0**(官方 AbortSignal 支持);package.json 锁该版本下限
 
 **用户拒绝 ack**:`regenEnabled = false`;退化纯结构搬运 + transformer + `[needs-fix]`;exit 0。
 
@@ -451,7 +467,7 @@ forge 现状:
 
 ### 3.3 锁与中断
 
-- **LockMode 'migrate' 已扩展**(codex #21);改 `src/core/archive/lock.ts:LockMode` union + `LockHeldError` 文案泛化为"another forge operation is in progress (mode: <mode>)"
+- **LockMode 'migrate' 已扩展**(codex #21,v4 修订定稿):改 `src/core/archive/lock.ts:LockMode` union;**LockHeldError 文案不动**(保留现"another forge archive is in progress");**migrate CLI 入口 catch 后改输出**`forge migrate is blocked by lock: <holder pid>, mode <m>, started <t>` 友好文案(避开 codex B6"用户以为 archive 占锁"的排障误导)
 - 锁文件 `forge/.cache/migrate.lock`(注:复用 `.cache/` 与 `archive.lock` / `legacy-bridge.lock` 同 dir)
 - SIGINT:
   - cp 阶段:journal rollback + 释放 lock
@@ -513,7 +529,7 @@ forge 现状:
 
 | 层     | 文件                                       | 用途                                                                                                  |
 | ------ | ------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
-| 单元   | `tests/migrate/markdown-aware.test.ts`     | walker 状态机:fenced code block 识别(```、~~~、缩进 4 空格 indent block);table-row 识别;嵌套 fence  |
+| 单元   | `tests/migrate/markdown-aware.test.ts`     | walker 状态机:fenced code block 识别(``` 与 ~~~ 必须同种 token 开闭);table-row 识别;**不测 indented code(4 空格)** — 该项 §7.1 标 known limitation |
 | 单元   | `tests/migrate/archive-detect.test.ts`     | 信号 1(checkbox + 总数 ≥ 3)、信号 2(word-boundary + slug 共同命中)、信号 4(marker);git fixture     |
 | 单元   | `tests/migrate/conflict.test.ts`           | `--imported-N` 递增 plan 阶段全锁定;copy 阶段撞冲突 rollback;`--force` trash;config.yaml.imported-N    |
 | 单元   | `tests/migrate/report.test.ts`             | report.md / trace.json journal 写入;downgrades 段;summary 计数                                      |
@@ -617,7 +633,7 @@ tests/fixtures/migrate/
 |------------------------------|--------------|------|
 | `legacy-bridge/redact.ts:redact + DEFAULT_REDACT_RULES + RedactReport + formatRedactReport` | --regenerate 跑 redact;字符串处理无 brownfield 耦合 | 不改 |
 | `archive/lock.ts:acquireLockByPath` | 锁 `forge/.cache/migrate.lock` | **改**(v3 最小化):`LockMode` union 加 `'migrate'`;**LockHeldError 文案保持现状**("another forge archive is in progress (pid ..., mode ..., started ...)";migrate 触发时 mode 字段写 'migrate' 即可,文案稍别扭但兼容现有 `tests/core/archive/lock.test.ts:188` 与 `tests/cli/archive.test.ts:516` 断言,**不改测**) |
-| `parse/markdown.ts:parseMarkdown` | 复用 ATX section 切分(non-fenced) | 不改;`markdown-aware.ts` 在其上加状态机 |
+| `parse/markdown.ts:parseMarkdown` | **不复用**(v4 修订,codex C2):现有 parser 直接按 heading regex 切 section,**不跳过 fenced code block** — 代码块内 `## Scenario:` 会被误切 section;`markdown-aware.ts` 自己重新走 line-walker 切 section,基于自身 fenced-state 判定 | 不改 parse/markdown.ts;migrate 不调它 |
 
 **不复用**(v1 那条全反向调路径删除):
 - `legacy-bridge/ack.ts` — 路径硬编码 `.cache/llm-ack.yaml`、文案 brownfield(codex #23/#24)
@@ -638,7 +654,7 @@ migrate 自实现版本见 §5.2。
 | `src/core/migrate/report.ts`                             | report.md / trace.json journal 写入(NDJSON 行式 + 末态 reformat)                                                |
 | `src/core/migrate/ack.ts`                                | migrate 专属 opt-in prompt + ack 文件读写(`forge/.forge-ack/migrate-<ts>.yaml`)                                  |
 | `src/core/migrate/budget.ts`                             | migrate 专属 cost 估算(按件长度 + token,不用 brownfield 4-role 公式);MIGRATE_WARN_USD = $5                    |
-| `src/core/migrate/quality.ts`                            | **facts 目标分桶**(v3):`extractMotivationFacts(design)` 喂 proposal 校验、`extractBehaviorFacts(tasks)` 喂 specs 校验、`extractFacts(content)` 给 OpenSpec 已有件;facts < 5 / JSON parse fail → 强制 fail;superpowers fidelity 阈值 0.6 |
+| `src/core/migrate/quality.ts`                            | **facts 目标分桶**(v4):三套 prompt **各自约束抽取类型**(motivation 类 / behavior 类 / general)— prompt 全文与 ±examples 在实施期 prompt 文件里写,spec 不嵌全文;facts < 5 / JSON parse fail / facts 间重复(text 相似度 > 0.9 视为同一)→ fail;**`getFidelityThreshold(sourceId)`** 返回 0.6(superpowers)/ 0.9(其他);LLM 调用统一封装 `callAnthropic({ signal })`,abort 后 SDK 抛错统一映射 `interrupted` 标记 |
 | `src/core/migrate/regenerate.ts`                         | --regenerate 主流程;调本模块 ack/budget/quality;复用 redact;AbortController 串通                                |
 | `src/core/migrate/sources/openspec.ts`                   | OpenSpecSource;§2.1 目录映射 + §2.5 transformer(走 markdown-aware.ts walker)                                    |
 | `src/core/migrate/sources/superpowers.ts`                | SuperpowersSource;§2.2 配对 + §2.6 transformer(走 markdown-aware.ts walker)                                      |
@@ -667,7 +683,8 @@ forge migrate openspec       # 默认 --regenerate(LLM 补缺件,会显示估价
 forge migrate superpowers    # 同上;design+plan 配对成 forge change
 
 加 --no-regenerate 跳过 LLM,只搬结构 + 跑 markdown-aware transformer;失败件标 [needs-fix]。
-注:bundled plugin 中 --regenerate 不可用,自动退化为 --no-regenerate。
+注:bundled plugin 中 --regenerate 不可用 — openspec source **静默退化**为 --no-regenerate;
+superpowers source 因结构必缺 proposal/specs 会**前置 prompt 让你确认**(--no-interactive 直接 abort)。
 ```
 
 ### 6.2 `docs/migration/from-openspec.md` + `docs/migration/from-superpowers.md`
@@ -683,7 +700,7 @@ forge migrate superpowers    # 同上;design+plan 配对成 forge change
 | 风险                                                                                                | 缓解                                                                                                                |
 | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | markdown-aware walker 对未知 markdown 变体(setext heading `===`、HTML embed)处理不全               | walker 只识别 ATX + fenced + table;其他保留原样;单元测覆盖已知 + best-effort 说明                                  |
-| **markdown-aware walker 不识 indented code block(4 空格缩进 / Tab)**(v3 新加,Opus A5)            | 文档明示用户**不要用 4 空格 indented code 写示例**(用 fenced 替代);若已有,接受可能误改                            |
+| **markdown-aware walker 不识 indented code block(4 空格 / Tab)** — known limitation(v4 升级)      | 文档 §6 明示;不写测;用户自查改 fenced;若 OpenSpec / superpowers 真实样本中触发,转 GitHub issue 后续 PR 升级 |
 | **OpenSpec 表格内 GWT step**(罕见,Opus 接受 #8)                                                  | walker 跳过 table-row,接受不转换;文档说明用户改 list 形式                                                          |
 | **task 父子语义降级**(`Step 1` 与 `Step 1.1` → 扁平 `task-1` / `task-1-1`,forge tasks parser 实测不识别父子,Opus 接受 #12) | 接受降级;文档明示;若 v0.x 后续 forge 加父子识别,migrate 走它的输出                                              |
 | LLM regenerate 成本超预期                                                                           | budget gate 二次确认;MIGRATE_WARN_USD 阈值 $5;`--no-regenerate` 退化                                                |
@@ -723,8 +740,8 @@ forge migrate superpowers    # 同上;design+plan 配对成 forge change
 | P6   | CLI 端到端测;README + docs/migration/from-*.md(含 M13 / M16 / 0.6 fidelity / bundled 限制说明)                       | 1 day      |
 | P7   | release-gate-checklist 加 §4 v0.4 段;CHANGELOG 写迁移说明                                                          | 0.5 day    |
 
-总计:**14.5 工日**(原 8.5 → v2 14 → v3 14.5,P5 因 facts 目标分桶 + reader 优先级算法 +0.5d)。版本目标:`v0.4.0`;若分版本:`v0.4.0` OpenSpec(P1-P2-P4-P6-P7,~7 工日)+ `v0.4.1` superpowers + LLM(P3 + P5,~7.5 工日)。
+总计:**~16-18 工日浮动**(v3 14.5 → v4 重估;codex 第二轮 C1 指 P5/P4 各覆盖太多,实施期可能拖到 18)。版本目标:`v0.4.0`;若分版本:`v0.4.0` OpenSpec(P1-P2-P4-P6-P7,~8 工日)+ `v0.4.1` superpowers + LLM(P3 + P5,~9 工日)。
 
 ---
 
-**文档结束**(v3)。已采纳 codex 第一轮 40 条 + Opus subagent 自检 12 条新发现。后续步骤:codex 第二轮对抗性审查;若 v3 通过,转 writing-plans skill 产 implementation plan。
+**文档结束**(v4)。已采纳 codex 一轮 40 条 + Opus 12 条 + codex 二轮 4 阻塞 + 5 关键 major;接受非 spec 层细节(prompt examples / 函数签名)留给 plan + 实施期。下一步:转 `writing-plans` skill 产 implementation plan。

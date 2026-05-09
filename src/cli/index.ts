@@ -9,6 +9,7 @@ import { buildInitCommand } from './commands/init.js';
 import { buildUpdateCommand } from './commands/update.js';
 import { buildArchiveCommand } from './commands/archive.js';
 import { buildLegacyBridgeCommand } from './commands/legacy-bridge.js';
+import { buildUpgradeCommand } from './commands/upgrade.js';
 
 // 创建主命令
 const program = new Command();
@@ -35,6 +36,9 @@ program.addCommand(buildArchiveCommand());
 
 // 注册 legacy-bridge 子命令(Plan 7 Phase A 骨架)
 program.addCommand(buildLegacyBridgeCommand());
+
+// 注册 upgrade 子命令(v0.3 Plan 4 — v0.2→v0.3 legacy 清理)
+program.addCommand(buildUpgradeCommand());
 
 // 解析命令行参数,遇到错误时打印并退出
 program.parseAsync(process.argv).catch((err: unknown) => {

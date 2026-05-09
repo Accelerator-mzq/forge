@@ -1,12 +1,20 @@
 // Codex adapter — 铺到 .agents/skills/forge-<name>/SKILL.md
 // 关键:Phase 0.5 spike 实测 Codex 用 .agents/(共享 Claude Agent SDK 约定),不是 .codex/
+// v0.3 Plan 4:加 LegacyDetector 实现(forge upgrade 用)
 
 import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { HarnessAdapter, DeployPlan, PlannedFile } from './interface.js';
+import type {
+  HarnessAdapter,
+  DeployPlan,
+  PlannedFile,
+  LegacyDetector,
+  LegacyArtifact,
+} from './interface.js';
 import type { DeployInput, HarnessDetection } from './types.js';
+import { detectLegacySkills, detectLegacyCommands } from './legacy-detector.js';
 
-export class CodexAdapter implements HarnessAdapter {
+export class CodexAdapter implements HarnessAdapter, LegacyDetector {
   readonly id = 'codex' as const;
 
   async detect(projectRoot: string): Promise<HarnessDetection> {
@@ -40,5 +48,16 @@ export class CodexAdapter implements HarnessAdapter {
       }
     }
     return { files };
+  }
+
+  /**
+   * v0.3 Plan 4 — 扫 `.agents/skills/forge-{name}/SKILL.md` + `.agents/commands/forge/{name}.md`
+   * legacy v0.2 codex adapter 产物,供 `forge upgrade` 5 阶段事务使用。
+   * 注意:Codex 实际写到 `.agents/`(共享 Agent SDK 约定),不是 `.codex/`。
+   */
+  async detectLegacyArtifacts(projectRoot: string): Promise<LegacyArtifact[]> {
+    const skills = await detectLegacySkills(projectRoot, '.agents');
+    const commands = await detectLegacyCommands(projectRoot, '.agents');
+    return [...skills, ...commands];
   }
 }

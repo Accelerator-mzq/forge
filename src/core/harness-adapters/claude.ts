@@ -1,12 +1,20 @@
 // Claude Code adapter — 铺到 .claude/skills/forge-<name>/SKILL.md 和 .claude/commands/forge/<name>.md
 // 路径基于 Phase 0.5 spike 实测(spike/claude-code/.claude/...)
+// v0.3 Plan 4:加 LegacyDetector 实现(forge upgrade 用)
 
 import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { HarnessAdapter, DeployPlan, PlannedFile } from './interface.js';
+import type {
+  HarnessAdapter,
+  DeployPlan,
+  PlannedFile,
+  LegacyDetector,
+  LegacyArtifact,
+} from './interface.js';
 import type { DeployInput, HarnessDetection } from './types.js';
+import { detectLegacySkills, detectLegacyCommands } from './legacy-detector.js';
 
-export class ClaudeAdapter implements HarnessAdapter {
+export class ClaudeAdapter implements HarnessAdapter, LegacyDetector {
   readonly id = 'claude' as const;
 
   async detect(projectRoot: string): Promise<HarnessDetection> {
@@ -34,5 +42,15 @@ export class ClaudeAdapter implements HarnessAdapter {
       });
     }
     return { files };
+  }
+
+  /**
+   * v0.3 Plan 4 — 扫 `.claude/skills/forge-{name}/SKILL.md` + `.claude/commands/forge/{name}.md`
+   * legacy v0.2 adapter 产物,供 `forge upgrade` 5 阶段事务使用。
+   */
+  async detectLegacyArtifacts(projectRoot: string): Promise<LegacyArtifact[]> {
+    const skills = await detectLegacySkills(projectRoot, '.claude');
+    const commands = await detectLegacyCommands(projectRoot, '.claude');
+    return [...skills, ...commands];
   }
 }

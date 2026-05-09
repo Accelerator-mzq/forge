@@ -37,21 +37,26 @@ async function syncSkills() {
   }
 
   // 写入 src/core/templates/skills/(legacy 兼容)
+  // 关键:legacy `forge init` 路径下 skill 装到项目级 .claude/skills/forge-<name>/,
+  //      没有 plugin namespace,frontmatter 必须显式带 `name: forge:<name>` 前缀避免冲突。
+  //      所以 reverse-sync 写入 src/core/templates 时,给 frontmatter `name:` 加回前缀。
+  //      根 skills/(plugin 用)保持无前缀,plugin namespace 隐含 forge:
   const srcTemplatesDir = join(REPO_ROOT, 'src', 'core', 'templates', 'skills');
   await mkdir(srcTemplatesDir, { recursive: true });
   await clearMarkdownFiles(srcTemplatesDir);
-  // 同步 index.ts(若存在,保留)— 实际上 index.ts 是 v0.2 既有,我们重新生成它简单点
   for (const name of validSkills) {
     const content = await readFile(join(srcDir, name, 'SKILL.md'), 'utf8');
-    await writeFile(join(srcTemplatesDir, `${name}.md`), content, 'utf8');
+    const legacyContent = content.replace(/^name: (?!forge:)([\w-]+)$/m, 'name: forge:$1');
+    await writeFile(join(srcTemplatesDir, `${name}.md`), legacyContent, 'utf8');
   }
 
-  // 写入 dist/core/templates/skills/(npm package 运行时)
+  // 写入 dist/core/templates/skills/(npm package 运行时,与 src/core/templates 一致 — 给 legacy `forge init` 用)
   const distDir = join(REPO_ROOT, 'dist', 'core', 'templates', 'skills');
   await mkdir(distDir, { recursive: true });
   for (const name of validSkills) {
     const content = await readFile(join(srcDir, name, 'SKILL.md'), 'utf8');
-    await writeFile(join(distDir, `${name}.md`), content, 'utf8');
+    const legacyContent = content.replace(/^name: (?!forge:)([\w-]+)$/m, 'name: forge:$1');
+    await writeFile(join(distDir, `${name}.md`), legacyContent, 'utf8');
   }
 
   console.log(`✓ synced ${validSkills.length} skills (root → src/core/templates/ + dist/)`);

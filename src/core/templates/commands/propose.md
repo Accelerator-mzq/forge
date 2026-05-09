@@ -1,11 +1,15 @@
 ---
 description: 把 draft(可选)转化为 forge/changes/<id>/ 下的 4 件套(proposal + specs + design + tasks)
-argument-hint: '<change-id> [--from-draft <date-topic>]'
+argument-hint: '<change-id> [--from-draft <date-topic>] [--light]'
 ---
 
 You are about to handle `/forge:propose $ARGUMENTS`.
 
-解析参数:第一个 token 是 `<change-id>`(slug,小写连字符);可选 `--from-draft <date-topic>` 指定要消费的 draft 文件(对应 `forge/drafts/<date-topic>.md`)。
+解析参数:
+
+- 第一个 token 是 `<change-id>`(slug,小写连字符)
+- 可选 `--from-draft <date-topic>` 指定要消费的 draft 文件(对应 `forge/drafts/<date-topic>.md`)
+- **可选 `--light` (v0.3 P3 修复)**:强制 writing-plans skill 走 light mode(1-2 task,跳过 RED/GREEN/REFACTOR 三段强约束),用于 trivial change(加 1 字段 / 改 1 常量 / 修 1 simple bug 等)。不传时由 writing-plans skill 按 proposal 行数 + `forge/config.yaml#writing_plans.light_threshold`(默认 200)自动判定 light vs full mode。
 
 ## 步骤(必须按序)
 

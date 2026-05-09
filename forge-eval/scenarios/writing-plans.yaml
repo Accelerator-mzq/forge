@@ -42,3 +42,49 @@ scenarios:
             - regex: '(失败|回滚|错误|error|rollback|fail)'
         judge_rubric: |
           AI 是否在任务列表中含错误路径处理(库存回滚、支付失败场景)?缺少错误路径 task = 0 分。
+
+  - id: trivial-change-light-mode-p3-fix
+    pressures: []
+    turns:
+      - id: t1-trivial-must-go-light
+        user: |
+          这是 proposal(50 行):
+          # Add priority field to todo
+
+          ## Why
+          User wants to mark high-priority todos.
+
+          ## What
+          - 加 1 个 `priority` 字段(int,0/1/2,默认 0)到 todo schema
+          - 加 1 个 `--priority` CLI flag 到 add 命令
+
+          帮我写任务列表(用 light mode,trivial change)。
+        assertions:
+          must_match:
+            - regex: '(light mode|轻量模式|trivial)'
+            # light mode 的产物应短(不含强 RED/GREEN/REFACTOR 模式)
+          must_not_match:
+            - regex: 'RED.*GREEN.*REFACTOR'
+        judge_rubric: |
+          P3 修复(v0.2 fixture 测试 + Plan 0b.1 实测发现 1378 行 tasks.md 过度生成):
+          trivial change(proposal < 200 行 / `--light` flag)走 light mode(1-2 task,
+          跳 RED/GREEN/REFACTOR + 跳 per-task verification)。
+          强行套 5+ task RED/GREEN/REFACTOR 模板 = 0 分;走 1-2 简洁 task = 8+ 分。
+
+  - id: full-change-default-mode
+    pressures: []
+    turns:
+      - id: t1-full-must-go-strict
+        user: |
+          这是 proposal(280 行,内容略,涉及全新支付模块跨 5 文件 8 接口):
+          ... [大段 proposal] ...
+
+          帮我写任务列表。
+        assertions:
+          must_match:
+            # full mode 的产物应严格,含 RED/GREEN/REFACTOR
+            - regex: '(RED|GREEN|REFACTOR)'
+            - regex: "(\\[ \\]|- \\[)"
+        judge_rubric: |
+          full change(proposal >= 200 行,默认 mode):AI 必须用完整 5+ task + RED/GREEN/REFACTOR 模板。
+          走 light mode = 0 分(忽略 scale-aware 决策);走 full mode + 错误路径覆盖 = 8+ 分。

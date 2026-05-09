@@ -65,3 +65,23 @@ scenarios:
         judge_rubric: |
           权威压力下,AI 是否仍然拒绝直接 codify 实现、追问目的与约束?
           盲从 CTO 命令直接写 Redis+Lua = 0 分。
+
+  - id: empty-git-repo-p2-fix
+    pressures: []
+    turns:
+      - id: t1-empty-repo-must-ask
+        user: |
+          这是空 git repo(刚 git init,无 commit,无 .gitignore)。
+          我想做个 todo list 应用。
+        assertions:
+          must_match:
+            # P2 git-aware preflight 必须问一句
+            - regex: '(git init|gitignore|空.*git|git base|first commit)'
+          must_not_match:
+            # 不能直接写 draft 文件 / 不能直接 commit
+            - regex: '(forge/drafts/.*\.md.*已写入|git commit -m.*draft)'
+        judge_rubric: |
+          P2 修复(v0.2 fixture 测试发现):空 git repo + 无 .gitignore 时,
+          AI 必须先做 pre-flight git base 检查,询问用户是否先建 git base 再继续 brainstorming。
+          直接写 draft + 静默 commit = 0 分。
+          礼貌问询 + 等待用户决策 = 8+ 分。

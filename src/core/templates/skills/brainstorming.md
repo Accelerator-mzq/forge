@@ -17,18 +17,40 @@ Do NOT invoke any implementation skill, write any code, scaffold any project, or
 
 Every project goes through this process. A todo list, a single-function utility, a config change — all of them. "Simple" projects are where unexamined assumptions cause the most wasted work. The design can be short (a few sentences for truly simple projects), but you MUST present it and get approval.
 
+## Pre-flight check — Git base assumption (P2 fix from v0.2 fixture testing)
+
+**Before starting brainstorming flow**, verify the repo has a git base ready for `Write draft` step (Step 5):
+
+```bash
+git rev-parse HEAD 2>/dev/null && test -f .gitignore
+```
+
+If either fails(no commits yet, or no `.gitignore`):
+
+- **Do NOT silently commit the draft later**. Ask the user explicitly first:
+
+  > "我注意到这是空 git repo / 缺 `.gitignore`。要不要先 `git init` + 加 `.gitignore`(标准 Node/Python/etc patterns)+ first commit 再继续 brainstorming?这样 draft commit 才有 base。"
+
+- 用户确认 → 帮加 `.gitignore` + `git init`(若需)+ first commit
+- 用户拒绝 → 跳过 Step 5 commit,只 Write draft 但不 commit;提示用户"draft 已写但未 commit,完成后请手动 commit 或先建 git base"
+
+This pre-flight prevents the v0.2 fixture-test P2 issue: brainstorming silently committing draft on a half-initialized repo.
+
+---
+
 ## Checklist
 
 You MUST create a task for each of these items and complete them in order:
 
-1. **Explore project context** — check files, docs, recent commits
-2. **Ask clarifying questions** — one at a time, understand purpose/constraints/success criteria
-3. **Propose 2-3 approaches** — with trade-offs and your recommendation
-4. **Present design** — in sections scaled to their complexity, get user approval after each section
-5. **Write draft** — save to `forge/drafts/YYYY-MM-DD-<topic>.md` and commit. Do NOT save to forge/specs/(specs/ 仅由 archive 内部 sync 写入,见 spec §3.4).
-6. **Spec self-review** — quick inline check for placeholders, contradictions, ambiguity, scope (see below)
-7. **User reviews written draft** — ask user to review the draft file before proceeding
-8. **Transition to implementation** — invoke forge:writing-plans skill via /forge:propose <change-id> --from-draft <date>-<topic>
+1. **Pre-flight git base check** — see above section; gate before proceeding
+2. **Explore project context** — check files, docs, recent commits
+3. **Ask clarifying questions** — one at a time, understand purpose/constraints/success criteria
+4. **Propose 2-3 approaches** — with trade-offs and your recommendation
+5. **Present design** — in sections scaled to their complexity, get user approval after each section
+6. **Write draft** — save to `forge/drafts/YYYY-MM-DD-<topic>.md` and commit (skip commit step if pre-flight #1 declined). Do NOT save to forge/specs/(specs/ 仅由 archive 内部 sync 写入,见 spec §3.4).
+7. **Spec self-review** — quick inline check for placeholders, contradictions, ambiguity, scope (see below)
+8. **User reviews written draft** — ask user to review the draft file before proceeding
+9. **Transition to implementation** — invoke forge:writing-plans skill via /forge:propose <change-id> --from-draft <date>-<topic>
 
 ## Process Flow
 

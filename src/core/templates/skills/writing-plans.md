@@ -23,6 +23,46 @@ Assume they are a skilled developer, but know almost nothing about our toolset o
 
 If the spec covers multiple independent subsystems, it should have been broken into sub-project specs during brainstorming. If it wasn't, suggest breaking this into separate plans — one per subsystem. Each plan should produce working, testable software on its own.
 
+## Scale-aware mode (P3 fix from v0.2 fixture testing)
+
+**Before writing tasks**, decide between **light mode** (1-2 tasks, ~50-80 lines) vs **full mode** (5+ tasks, ~200+ lines with strict RED → GREEN → REFACTOR + verification per task).
+
+### Decision logic
+
+1. **Read** `forge/changes/<change-id>/proposal.md` — count the line number (e.g., `wc -l`)
+2. **Read** `forge/config.yaml#writing_plans.light_threshold`(if exists);默认 200(由 `validateWritingPlansConfig` fallback,见 `src/core/schema/writing-plans-config.ts`)
+3. **Check** `--light` flag(若用户 `/forge:propose <id> --light` 显式传 → 强制 light mode,跳过 threshold 判定)
+4. **Decide**:
+   - proposal 行数 < `light_threshold` 或 `--light` flag → **light mode**
+   - proposal 行数 >= `light_threshold`(默认)→ **full mode**
+
+### Light mode template (trivial change)
+
+- 1-2 tasks(typically 1 task with multiple steps)
+- 跳过 RED → GREEN → REFACTOR 三段强约束(直接写实现 + 写测试,合并到 1-2 step)
+- 跳过 per-task verification + commit(只在 task 末尾一次性 verify + commit)
+- 总长度 ~50-80 行 tasks.md
+
+**适用场景**:加 1 个字段、加 1 个 CLI flag、改 1 个常量、修 1 个简单 bug、纯文本修改 / docs 改动
+
+### Full mode template (complex feature, 默认)
+
+- 5+ tasks,each with `RED → GREEN → REFACTOR` + verification + commit
+- 每 task 独立可 review,每 step 2-5 分钟可执行
+- 总长度 200+ 行(参见现有 forge-repo plans)
+
+**适用场景**:新模块、跨多文件 refactor、协议变动、新增子系统
+
+### Why this matters (v0.2 P3 fixture test 教训)
+
+v0.2 fixture 测试发现:trivial change(用户原话"加 1 个 priority 字段 + `-p` flag")被 writing-plans 强制套 5-task 完整模板 + 每 task RED/GREEN/REFACTOR + verification → tasks.md **511 行**(后续 Plan 0b.1 实测进一步发现可达 1378 行)。
+
+scale-aware mode 让 trivial change 走 light mode,避免:
+
+- 文档冗长降低 review 体验
+- AI 单次输出长度边界压力
+- "为了 TDD 而 TDD" 形式主义
+
 ## File Structure
 
 Before defining tasks, map out which files will be created or modified and what each one is responsible for. This is where decomposition decisions get locked in.

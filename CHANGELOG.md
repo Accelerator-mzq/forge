@@ -8,6 +8,54 @@ All notable changes to this project will be documented in this file.
 
 (暂无)
 
+## [0.2.0] - 2026-05-XX
+
+### Added(brownfield onboarding)
+
+- **`forge legacy-bridge` 主命令** + 5 子命令(`map / regenerate / index / sync-check / resolve`)
+- **三层能力**:
+  - Layer 1 sync-check(每次 archive 自动跑,5 档差异报告)
+  - Layer 2 index(每 anchor ~100 字摘要)
+  - Layer 3a regenerate(one-shot 复写器,LLM 读老锚点 → 规范化 SRS/HLD/LLD/system-tests)
+- **archive preflight + post-archive 双 hook**(根据 `legacy_bridge.enforce_sync` 选择走哪边)
+- **二阶段 mapping**:`map --merge` / `--overwrite`,LLM 推测 role + 用户审改
+- **双 LLM 抽样验证**:critical 全量必抽 + 各章节按比例抽,失败直报 `.partial`(无 retry)
+- **12+ 类默认 redact 规则** + 自定义 + `--redact-report` 命中数 + `<<REDACTED-N>>` 占位
+- **Excel(.xlsx)原生解析**(`exceljs`,sheet 字段精确指向)
+- **共享 lock 设计**:`legacy-bridge.lock`(独立)+ archive.lock 复用 + 顺序固定避死锁
+- **LLM opt-in 机制**(突破 v0.1 §2.3 边界):
+  - `forge/config.yaml#legacy_bridge.allow_llm_calls` 默认 `false`
+  - 一次性 ack 命令 `forge legacy-bridge --acknowledge-data-transfer`
+  - GDPR 二次确认门 `--acknowledge-customer-data`
+  - 每次 LLM 调用前 stdout 数据传输声明
+- **复写产物 frontmatter** 含 `generated-by` / `generated-at` / `sources` / `fidelity-rate` / `critical-fact-rate` /
+  `license` / `forge-version` + 顶部 disclaimer
+- **跨 anchor 一致性默认入 diff**(major 档);`auto_resolve_cross_anchor: true` 才走 mtime > role 优先级
+- **6 个 regeneration eval scenario** + `pnpm eval-regen` + CI weekly + paths trigger
+- **完整用户文档**:`docs/legacy-bridge.md` + `getting-started.md` brownfield 段 + `cli-reference.md` 命令段 +
+  `release-gate-checklist.md` 7 acceptance
+- **依赖**:`exceljs@^4`(MIT,Apache 2.0 兼容)+ `chardet@^2`(devDep,可选)
+
+### Changed
+
+- `src/core/archive/lock.ts`:`LockMode` union 扩展支持 5 个 legacy-bridge mode
+- `src/cli/commands/archive.ts`:集成 brownfield preflight + post-archive 双 hook
+- `forge/config.yaml`:扩展 `legacy_bridge` 段(allow_llm_calls / enforce_sync /
+  auto_resolve_cross_anchor / regen_license / provider)
+
+### Deferred to v0.3.0(spec §6.6 同步修订主 spec §7)
+
+- OpenCode adapter(原 spec §7 v0.2 → v0.3,plugin 路线)
+- specs-sync delete operation(原 spec §7 v0.2 → v0.3)
+- 反向 sync(改老锚点 → 提示新 change)
+- 跨 anchor 一致性专门审计(`legacy-bridge audit-consistency`)
+- 真 brownfield 代码逆向(无文档项目从代码推 SRS)
+
+### Compatibility
+
+- v0.1.x 项目升级到 v0.2 后,**未配 `legacy-anchors.yaml` 时 sync-check graceful skip**,archive 行为不变
+- 已发布 v0.1 的 archive `delete` delta 错误信息保留(用户预期内,不破坏向后兼容)
+
 ## [0.1.0] — 2026-05-XX
 
 首个公开版本。v0.1 实际范围 = Claude Code + Codex 两 harness(OpenCode 推 v0.2,需 plugin 实现自动注入)。

@@ -50,20 +50,34 @@ pnpm dlx @accelerator-mzq/forge init --harness claude
 ## 设计文档
 
 - [2026-05-04 融合方案设计](docs/specs/2026-05-04-forge-fusion-design.md)(1273 行,21 条决策,完整架构 / 数据流 / 错误处理 / 测试策略 / 实施路线)
-- [Plan 1-6 实施记录](docs/plans/)
+- [Plan 1-7 实施记录](docs/plans/)
 - [Phase 0.5 spike 结果](spike/RESULTS.md):为什么 v0.1 = Claude Code + Codex 两 harness
 
 ## 状态
 
-**v0.1.0 候选**:Phase 1+2+3+4+5+6 完成。
+**当前状态**:Phase 1+2+3+4+5+6+7 完成(测试全绿)。**v0.2.0 候选,Release gate 待跑**。
 
 - 本地 5 命令(typecheck / lint / format:check / build / test)全 0
-- 测试 275 passing(含 e2e-acceptance env-gated 1 skipped)
 - CI Linux + Windows 双绿
 - 自动化 skill eval 在 weekly + PR cadence 跑
 - `npm publish` 工件已通过本地 release gate(`scripts/release-gate.mjs`)
 
-**发版前置**:maintainer 跑 [`docs/release-gate-checklist.md`](docs/release-gate-checklist.md) 手动 harness acceptance test 两个 harness。通过即可发 v0.1.0。
+## Plan 7 进度
+
+Phase 7(brownfield onboarding)完成:
+
+- `forge legacy-bridge` 主命令 + 5 子命令(map / regenerate / index / sync-check / resolve)
+- LLM opt-in 流程(决策 #22:`allow_llm_calls` + `--acknowledge-data-transfer` + GDPR 二次确认)
+- archive preflight + post-archive 双 hook(决策 #19:`enforce_sync` 控制阻塞 / 不阻塞)
+- 双 LLM 抽样保真率验证(分层抽样 + critical 全量必抽 + per-section 防统计骗术)
+- 12+ 类默认 redact + Excel 解析 + 共享 lock(`legacy-bridge.lock`)
+- 6 个 regeneration eval scenario + `pnpm eval-regen` + CI workflow
+- 完整用户文档 + 7 个 brownfield acceptance scenario(release-gate-checklist §2.4)
+
+**前置 v0.2.0 发版**:仓库 Settings → Secrets 已配 `ANTHROPIC_API_KEY`(Plan 5 沿用)。
+**真 publish + git tag + GitHub release 由 maintainer 跑 release gate 通过后手动执行**。
+
+**发版前置**:maintainer 跑 [`docs/release-gate-checklist.md`](docs/release-gate-checklist.md) 手动 harness acceptance test 两个 harness + 7 brownfield scenario。通过即可发 v0.2.0。
 
 详见 [`CHANGELOG.md`](CHANGELOG.md)。
 

@@ -4,7 +4,7 @@
 
 import { Command } from 'commander';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import Anthropic from '@anthropic-ai/sdk';
@@ -16,6 +16,13 @@ import {
 } from '../../core/legacy-bridge/anchors.js';
 import { writeAck, checkAck, renderOptinPrompt } from '../../core/legacy-bridge/ack.js';
 import { formatRedactReport } from '../../core/legacy-bridge/redact.js';
+import { runSyncCheck, type SyncCheckClient } from '../../core/legacy-bridge/sync-check.js';
+import {
+  renderDiffMarkdown,
+  renderDiffYaml,
+  hasCriticalPending,
+} from '../../core/legacy-bridge/diff-report.js';
+import { resolveSyncState, ResolveError } from '../../core/legacy-bridge/resolve.js';
 import {
   regenerateRole,
   REGEN_FILENAMES,
@@ -372,20 +379,169 @@ export function buildLegacyBridgeCommand(): Command {
     .command('sync-check')
     .description('检测 change 影响的老锚点是否需更新 → 5 档差异报告(决策 #5/#19)')
     .option('--change-id <id>', '指定 change-id;默认取最近一次 archive')
-    .action(async () => {
-      // Phase A 骨架,后续 Phase C Task C4 替换为真实实现
-      console.error('forge legacy-bridge sync-check:Phase C 待替换骨架');
-      process.exit(LB_EXIT_GENERAL_ERROR);
+    .action(async (opts: { changeId?: string }) => {
+      const forgeRoot = join(process.cwd(), 'forge');
+      const configPath = join(forgeRoot, 'config.yaml');
+      if (!existsSync(configPath)) {
+        console.error('forge/config.yaml 不存在,先跑 forge init');
+        process.exit(LB_EXIT_GENERAL_ERROR);
+      }
+      const config = parseYaml(await readFile(configPath, 'utf8')) as ForgeConfig;
+      const anchors = await loadAnchorsFile(forgeRoot).catch((err) => {
+        if (err instanceof LegacyAnchorsError) {
+          console.error(`✗ ${err.message}`);
+          process.exit(LB_EXIT_GENERAL_ERROR);
+        }
+        throw err;
+      });
+      // 决策 #11:无 anchors → graceful skip(exit 0)
+      if (!anchors) {
+        console.log('no legacy anchors configured, skipping sync-check');
+        process.exit(LB_EXIT_OK);
+        return;
+      }
+      // ack 检查(若 allow_llm_calls=false 也 graceful skip,决策 #22)
+      const ackResult = await checkAck(forgeRoot, config, anchors);
+      if (!ackResult.ok && ackResult.reason === 'allow_llm_calls=false') {
+        console.log('legacy_bridge.allow_llm_calls=false, sync-check skipped');
+        process.exit(LB_EXIT_OK);
+        return;
+      }
+      if (!ackResult.ok) {
+        console.error(renderOptinPrompt(ackResult.reason, ackResult.customerDataPaths));
+        process.exit(LB_EXIT_GENERAL_ERROR);
+        return;
+      }
+
+      // 拼 change context(读 proposal.md + specs/)
+      const changeId = opts.changeId ?? '(latest-archive)';
+      const changesDir = join(forgeRoot, 'changes', changeId);
+      let changeContext = '';
+      const affectedModules: string[] = [];
+      if (existsSync(join(changesDir, 'proposal.md'))) {
+        changeContext += await readFile(join(changesDir, 'proposal.md'), 'utf8');
+      }
+      if (existsSync(join(changesDir, 'specs'))) {
+        const { readdir } = await import('node:fs/promises');
+        const files = await readdir(join(changesDir, 'specs'));
+        for (const f of files) {
+          const txt = await readFile(join(changesDir, 'specs', f), 'utf8');
+          changeContext += `\n## specs/${f}\n${txt}`;
+          // 推测 module:文件名去 .md 即可(简化)
+          affectedModules.push(f.replace(/\.md$/, ''));
+        }
+      }
+
+      // 锁(legacy-bridge-sync-check 单锁,不与 archive 双重持锁)
+      let release: (() => Promise<void>) | undefined;
+      try {
+        release = await acquireLockByPath(
+          forgeRoot,
+          'legacy-bridge-sync-check',
+          'legacy-bridge.lock',
+        );
+      } catch (err) {
+        if (err instanceof LockHeldError) {
+          console.error(`✗ ${err.message}`);
+          process.exit(LB_EXIT_LOCK_HELD);
+          return;
+        }
+        throw err;
+      }
+
+      try {
+        // 运行时动态加载 forge-eval/load-env(避免 src/ rootDir 静态分析边界限制)
+        const evalLoadEnvPath = new URL('../../../forge-eval/load-env.js', import.meta.url).href;
+        const { loadEnv } = (await import(/* @vite-ignore */ evalLoadEnvPath)) as {
+          loadEnv: () => { anthropicApiKey: string };
+        };
+        const { anthropicApiKey } = loadEnv();
+        // Anthropic overload 与单签名接口不兼容,double-cast(与 regenerate 一致)
+        const client = new Anthropic({ apiKey: anthropicApiKey }) as unknown as SyncCheckClient;
+        const out = await runSyncCheck(
+          client,
+          {
+            changeId,
+            changeContext,
+            affectedModules,
+            anchors,
+            autoResolveCrossAnchor: config.legacy_bridge?.auto_resolve_cross_anchor ?? false,
+            mtimeOf: (p) => {
+              try {
+                return Math.floor(statSync(p).mtimeMs / 1000);
+              } catch {
+                return 0;
+              }
+            },
+          },
+          async (path) => (await readAnchorFile(path)).text,
+        );
+
+        // 写 markdown + yaml 双栈
+        const stateDir = join(forgeRoot, 'legacy-sync-state');
+        await mkdir(stateDir, { recursive: true });
+        await writeFile(join(stateDir, `${changeId}.md`), renderDiffMarkdown(out.syncState), 'utf8');
+        await writeFile(join(stateDir, `${changeId}.yaml`), renderDiffYaml(out.syncState), 'utf8');
+
+        const counts = out.syncState.diffs.length;
+        const critPending = hasCriticalPending(out.syncState);
+        console.log(
+          `⚠ ${counts} 项老文档可能需更新 — 详见 forge/legacy-sync-state/${changeId}.md`,
+        );
+
+        // hash 过期 warn(决策 §4.3)
+        for (const h of out.hashChecks) {
+          if (h.state === 'stale') {
+            console.warn(`⚠ anchor ${h.anchor.path} 已改动(用户改了 docs/legacy/);复写产物可能脱节`);
+          }
+        }
+
+        // enforce_sync 已在 archive preflight 处理,sync-check 命令本身不阻塞(spec §2.5 post-archive)
+        if (critPending) {
+          console.error(
+            `⚠ 含 critical 未 resolve 项;在 enforce_sync=true 模式下,下次 archive 前请跑 forge legacy-bridge resolve ${changeId}`,
+          );
+        }
+        process.exit(LB_EXIT_OK);
+      } finally {
+        if (release) await release();
+      }
     });
 
   cmd
     .command('resolve <change-id>')
     .description('校验 sync-state diffs 全部 ack 后标 resolved(决策 #19)')
-    // _changeId 占位:commander 把 positional 传给 action;Phase C Task C4 替换实现时用
-    .action(async (_changeId: string) => {
-      // Phase A 骨架,后续 Phase C Task C4 替换为真实实现
-      console.error('forge legacy-bridge resolve:Phase C 待替换骨架');
-      process.exit(LB_EXIT_GENERAL_ERROR);
+    .action(async (changeId: string) => {
+      const forgeRoot = join(process.cwd(), 'forge');
+      let release: (() => Promise<void>) | undefined;
+      try {
+        release = await acquireLockByPath(forgeRoot, 'legacy-bridge-resolve', 'legacy-bridge.lock');
+      } catch (err) {
+        if (err instanceof LockHeldError) {
+          console.error(`✗ ${err.message}`);
+          process.exit(LB_EXIT_LOCK_HELD);
+          return;
+        }
+        throw err;
+      }
+
+      try {
+        await resolveSyncState(forgeRoot, changeId);
+        console.log(`✓ ${changeId} 全部 diffs 已 ack,sync-state 标 resolved`);
+        process.exit(LB_EXIT_OK);
+      } catch (err) {
+        if (err instanceof ResolveError) {
+          console.error(`✗ ${err.message}`);
+          if (err.kind === 'invalid-status') process.exit(LB_EXIT_GENERAL_ERROR);
+          if (err.kind === 'state-not-found') process.exit(LB_EXIT_GENERAL_ERROR);
+          // pending-remaining
+          process.exit(LB_EXIT_BUSINESS_RULE_FAIL);
+          return;
+        }
+        throw err;
+      } finally {
+        if (release) await release();
+      }
     });
 
   return cmd;

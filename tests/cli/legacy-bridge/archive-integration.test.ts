@@ -9,7 +9,12 @@ vi.mock('@anthropic-ai/sdk', () => {
     messages: {
       create: vi.fn().mockResolvedValue({
         // LLM 返 critical → preflight 应阻塞
-        content: [{ type: 'text', text: '[{"severity":"critical","section":"§4.5","description":"幂等约束变化"}]' }],
+        content: [
+          {
+            type: 'text',
+            text: '[{"severity":"critical","section":"§4.5","description":"幂等约束变化"}]',
+          },
+        ],
       }),
     },
   }));
@@ -43,10 +48,12 @@ describe('forge archive 集成 brownfield preflight + post-archive', () => {
 
     // ack 文件
     const configHash = createHash('sha256')
-      .update(JSON.stringify(
-        { allow_llm_calls: true, enforce_sync: true },
-        ['allow_llm_calls', 'enforce_sync'],
-      ))
+      .update(
+        JSON.stringify({ allow_llm_calls: true, enforce_sync: true }, [
+          'allow_llm_calls',
+          'enforce_sync',
+        ]),
+      )
       .digest('hex')
       .slice(0, 16);
     writeFileSync(

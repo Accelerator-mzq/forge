@@ -39,7 +39,8 @@ describe('forge legacy-bridge sync-check (CLI)', () => {
     const cwd = process.cwd();
     try {
       process.chdir(tmp);
-      const { buildLegacyBridgeCommand } = await import('../../../src/cli/commands/legacy-bridge.js');
+      const { buildLegacyBridgeCommand } =
+        await import('../../../src/cli/commands/legacy-bridge.js');
       const cmd = buildLegacyBridgeCommand();
       const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
       const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
@@ -64,7 +65,8 @@ describe('forge legacy-bridge sync-check (CLI)', () => {
     const cwd = process.cwd();
     try {
       process.chdir(tmp);
-      const { buildLegacyBridgeCommand } = await import('../../../src/cli/commands/legacy-bridge.js');
+      const { buildLegacyBridgeCommand } =
+        await import('../../../src/cli/commands/legacy-bridge.js');
       const cmd = buildLegacyBridgeCommand();
       const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
       const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
@@ -96,7 +98,10 @@ describe('forge legacy-bridge sync-check (CLI)', () => {
     // change 上下文
     mkdirSync(join(tmp, 'forge', 'changes', 'add-payment', 'specs'), { recursive: true });
     writeFileSync(join(tmp, 'forge', 'changes', 'add-payment', 'proposal.md'), '# 提案');
-    writeFileSync(join(tmp, 'forge', 'changes', 'add-payment', 'specs', 'payment.md'), '# spec payment');
+    writeFileSync(
+      join(tmp, 'forge', 'changes', 'add-payment', 'specs', 'payment.md'),
+      '# spec payment',
+    );
     // ack 文件
     mkdirSync(join(tmp, 'forge', '.cache'), { recursive: true });
     const configHash = createHash('sha256')
@@ -111,7 +116,8 @@ describe('forge legacy-bridge sync-check (CLI)', () => {
     const cwd = process.cwd();
     try {
       process.chdir(tmp);
-      const { buildLegacyBridgeCommand } = await import('../../../src/cli/commands/legacy-bridge.js');
+      const { buildLegacyBridgeCommand } =
+        await import('../../../src/cli/commands/legacy-bridge.js');
       const cmd = buildLegacyBridgeCommand();
       const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
       const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);

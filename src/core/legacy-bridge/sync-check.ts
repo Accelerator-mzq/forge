@@ -4,10 +4,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { redact } from './redact.js';
 import { checkAnchorHash } from './hash-anchor.js';
-import {
-  decideCrossRole,
-  type CrossRoleInput,
-} from './conflict.js';
+import { decideCrossRole, type CrossRoleInput } from './conflict.js';
 import { normalizeDiffsFromLlm } from './diff-report.js';
 import type {
   LegacyAnchor,

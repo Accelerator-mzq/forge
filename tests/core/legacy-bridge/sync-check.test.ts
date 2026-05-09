@@ -10,9 +10,10 @@ import type { LegacyAnchor, LegacyAnchorsFile } from '../../../src/core/legacy-b
 function makeMock(jsonText: string): SyncCheckClient {
   return {
     messages: {
-      create: async () => ({
-        content: [{ type: 'text', text: jsonText }],
-      }) as never,
+      create: async () =>
+        ({
+          content: [{ type: 'text', text: jsonText }],
+        }) as never,
     },
   };
 }
@@ -94,7 +95,9 @@ describe('legacy-bridge/sync-check.parseLlmDiffJson', () => {
 
 describe('legacy-bridge/sync-check.runSyncCheck', () => {
   it('happy path:LLM 返 critical → 报告含 critical', async () => {
-    const client = makeMock('[{"severity":"critical","section":"§4.5","description":"幂等约束变化"}]');
+    const client = makeMock(
+      '[{"severity":"critical","section":"§4.5","description":"幂等约束变化"}]',
+    );
     const r = await runSyncCheck(
       client,
       {

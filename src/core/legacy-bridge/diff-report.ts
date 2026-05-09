@@ -31,14 +31,14 @@ export function renderDiffMarkdown(file: SyncStateFile): string {
   lines.push('');
 
   const counts = countBySeverity(file.diffs);
-  const summary = SEVERITY_ORDER
-    .map((s) => `${SEVERITY_ICON[s]} ${s}: ${counts[s]}`)
-    .join('  ');
+  const summary = SEVERITY_ORDER.map((s) => `${SEVERITY_ICON[s]} ${s}: ${counts[s]}`).join('  ');
   lines.push(`**总览**:${summary}`);
   lines.push('');
 
   if (file.cross_anchor_conflicts && file.cross_anchor_conflicts.length > 0) {
-    lines.push(`> ⚠ 跨 anchor 冲突 ${file.cross_anchor_conflicts.length} 项默认入 diff(决策 #18 修订)`);
+    lines.push(
+      `> ⚠ 跨 anchor 冲突 ${file.cross_anchor_conflicts.length} 项默认入 diff(决策 #18 修订)`,
+    );
     lines.push('');
   }
 

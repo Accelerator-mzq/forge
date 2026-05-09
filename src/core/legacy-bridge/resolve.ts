@@ -74,7 +74,10 @@ export function checkAllAcked(file: SyncStateFile, changeId: string): void {
 }
 
 /** 完整 resolve 流程:读 + validate + checkAllAcked + 写回(标 resolved-meta) */
-export async function resolveSyncState(forgeRoot: string, changeId: string): Promise<SyncStateFile> {
+export async function resolveSyncState(
+  forgeRoot: string,
+  changeId: string,
+): Promise<SyncStateFile> {
   const path = syncStatePath(forgeRoot, changeId);
   if (!existsSync(path)) {
     throw new ResolveError(

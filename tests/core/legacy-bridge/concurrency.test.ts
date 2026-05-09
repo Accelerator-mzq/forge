@@ -2,10 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  acquireLockByPath,
-  LockHeldError,
-} from '../../../src/core/archive/lock.js';
+import { acquireLockByPath, LockHeldError } from '../../../src/core/archive/lock.js';
 
 describe('legacy-bridge 并发 / lock 防死锁(C-2 / I-5)', () => {
   let dir: string;
@@ -36,11 +33,7 @@ describe('legacy-bridge 并发 / lock 防死锁(C-2 / I-5)', () => {
     const releaseArchive = await acquireLockByPath(dir, 'archive', 'archive.lock');
     // archive 内 sync-check 不调 acquireLockByPath legacy-bridge.lock
     // legacy-bridge.lock 仍可被独立 map / resolve 持有
-    const releaseMap = await acquireLockByPath(
-      dir,
-      'legacy-bridge-map',
-      'legacy-bridge.lock',
-    );
+    const releaseMap = await acquireLockByPath(dir, 'legacy-bridge-map', 'legacy-bridge.lock');
     await releaseArchive();
     await releaseMap();
   });

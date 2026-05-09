@@ -124,10 +124,7 @@ describe('legacy-bridge/resolve.resolveSyncState', () => {
   });
 
   it('全 ack 文件 → 写回成功', async () => {
-    writeFileSync(
-      join(dir, 'legacy-sync-state', 'add-x.yaml'),
-      stringifyYaml(baseFile),
-    );
+    writeFileSync(join(dir, 'legacy-sync-state', 'add-x.yaml'), stringifyYaml(baseFile));
     const r = await resolveSyncState(dir, 'add-x');
     expect(r.change_id).toBe('add-x');
   });
@@ -137,10 +134,7 @@ describe('legacy-bridge/resolve.resolveSyncState', () => {
       ...baseFile,
       diffs: [{ ...baseFile.diffs[0]!, status: 'pending' }],
     };
-    writeFileSync(
-      join(dir, 'legacy-sync-state', 'add-x.yaml'),
-      stringifyYaml(file),
-    );
+    writeFileSync(join(dir, 'legacy-sync-state', 'add-x.yaml'), stringifyYaml(file));
     try {
       await resolveSyncState(dir, 'add-x');
       throw new Error('should have thrown');

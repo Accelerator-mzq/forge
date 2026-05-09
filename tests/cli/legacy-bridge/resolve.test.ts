@@ -22,14 +22,21 @@ describe('forge legacy-bridge resolve (CLI)', () => {
         change_id: 'add-x',
         generated_at: '2026-05-05T00:00:00Z',
         diffs: [
-          { id: 1, severity: 'critical', anchor_path: 'a.md', description: 'd1', status: 'resolved-by-doc-update' },
+          {
+            id: 1,
+            severity: 'critical',
+            anchor_path: 'a.md',
+            description: 'd1',
+            status: 'resolved-by-doc-update',
+          },
         ],
       }),
     );
     const cwd = process.cwd();
     try {
       process.chdir(tmp);
-      const { buildLegacyBridgeCommand } = await import('../../../src/cli/commands/legacy-bridge.js');
+      const { buildLegacyBridgeCommand } =
+        await import('../../../src/cli/commands/legacy-bridge.js');
       const cmd = buildLegacyBridgeCommand();
       const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
       const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
@@ -54,14 +61,21 @@ describe('forge legacy-bridge resolve (CLI)', () => {
         change_id: 'add-x',
         generated_at: '2026-05-05T00:00:00Z',
         diffs: [
-          { id: 1, severity: 'critical', anchor_path: 'a.md', description: 'd1', status: 'pending' },
+          {
+            id: 1,
+            severity: 'critical',
+            anchor_path: 'a.md',
+            description: 'd1',
+            status: 'pending',
+          },
         ],
       }),
     );
     const cwd = process.cwd();
     try {
       process.chdir(tmp);
-      const { buildLegacyBridgeCommand } = await import('../../../src/cli/commands/legacy-bridge.js');
+      const { buildLegacyBridgeCommand } =
+        await import('../../../src/cli/commands/legacy-bridge.js');
       const cmd = buildLegacyBridgeCommand();
       const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
       const errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -86,14 +100,21 @@ describe('forge legacy-bridge resolve (CLI)', () => {
         change_id: 'add-x',
         generated_at: '2026-05-05T00:00:00Z',
         diffs: [
-          { id: 1, severity: 'critical', anchor_path: 'a.md', description: 'd1', status: 'random-string' },
+          {
+            id: 1,
+            severity: 'critical',
+            anchor_path: 'a.md',
+            description: 'd1',
+            status: 'random-string',
+          },
         ],
       }),
     );
     const cwd = process.cwd();
     try {
       process.chdir(tmp);
-      const { buildLegacyBridgeCommand } = await import('../../../src/cli/commands/legacy-bridge.js');
+      const { buildLegacyBridgeCommand } =
+        await import('../../../src/cli/commands/legacy-bridge.js');
       const cmd = buildLegacyBridgeCommand();
       const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
       const errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);

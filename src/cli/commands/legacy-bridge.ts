@@ -480,19 +480,23 @@ export function buildLegacyBridgeCommand(): Command {
         // 写 markdown + yaml 双栈
         const stateDir = join(forgeRoot, 'legacy-sync-state');
         await mkdir(stateDir, { recursive: true });
-        await writeFile(join(stateDir, `${changeId}.md`), renderDiffMarkdown(out.syncState), 'utf8');
+        await writeFile(
+          join(stateDir, `${changeId}.md`),
+          renderDiffMarkdown(out.syncState),
+          'utf8',
+        );
         await writeFile(join(stateDir, `${changeId}.yaml`), renderDiffYaml(out.syncState), 'utf8');
 
         const counts = out.syncState.diffs.length;
         const critPending = hasCriticalPending(out.syncState);
-        console.log(
-          `⚠ ${counts} 项老文档可能需更新 — 详见 forge/legacy-sync-state/${changeId}.md`,
-        );
+        console.log(`⚠ ${counts} 项老文档可能需更新 — 详见 forge/legacy-sync-state/${changeId}.md`);
 
         // hash 过期 warn(决策 §4.3)
         for (const h of out.hashChecks) {
           if (h.state === 'stale') {
-            console.warn(`⚠ anchor ${h.anchor.path} 已改动(用户改了 docs/legacy/);复写产物可能脱节`);
+            console.warn(
+              `⚠ anchor ${h.anchor.path} 已改动(用户改了 docs/legacy/);复写产物可能脱节`,
+            );
           }
         }
 

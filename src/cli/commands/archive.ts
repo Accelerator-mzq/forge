@@ -145,10 +145,16 @@ export function buildArchiveCommand(): Command {
         archiveRelease = await acquireLock(forgeRoot, 'archive');
 
         // Plan 7 PREFLIGHT(spec §2.5 line 183-204):acquireLock 之后、archive 严格门禁(marker check)之前。
-        // 设计意图:用户立即拿到 sync-state 报告,不被 marker 失败遮蔽 — marker fail + sync critical
-        // 共存时,先写 sync-state.{md,yaml},user 跑 resolve 后再撞 marker check。
+        // 设计意图:用户立即拿到 sync-state 报告,不被 marker 失败遮蔽。
         // 决策 #23:复用 archive.lock,不再 acquire legacy-bridge.lock。
-        await runArchivePreflight(forgeRoot, changeId);
+        // preflight 不再 process.exit,改返 PreflightResult,caller 在 try 块内手动 release+exit
+        // 与 marker check 现有 inline-release convention 一致(避免 process.exit 跳过 finally 致锁残留)
+        const preflightResult = await runArchivePreflight(forgeRoot, changeId);
+        if (preflightResult.kind !== 'ok') {
+          console.error(preflightResult.message);
+          await archiveRelease();
+          process.exit(2);
+        }
 
         const changeDir = join(forgeRoot, 'changes', changeId);
         const verifyPath = join(changeDir, '.verify-passed');
@@ -373,36 +379,55 @@ async function restoreSpecsFromBackup(backupDir: string, currentSpecsDir: string
 }
 
 /**
+ * preflight 结果 union — caller 在 try 块内根据 kind 手动 release + exit,
+ * 与 archive.ts 现有"business-rule fail 处理"convention 一致(line 154 / 160 等)。
+ *
+ * kind 'ok':可继续 archive(graceful skip 或 全过)
+ * kind 'ack-missing' / 'critical-pending':caller 应 await release + exit 2
+ */
+export type PreflightResult =
+  | { kind: 'ok' }
+  | { kind: 'ack-missing'; message: string }
+  | { kind: 'critical-pending'; criticalCount: number; message: string };
+
+/**
  * Plan 7 §2.5:archive preflight — enforce_sync=true 时阻塞 critical 差异。
  *
- * Graceful skip 路径(全部走"不阻塞、return"):
+ * Graceful skip 路径(全部返 {kind:'ok'}):
  *   1. forge/config.yaml 不存在
  *   2. legacy-anchors.yaml 不存在
  *   3. legacy_bridge.allow_llm_calls != true
  *   4. legacy_bridge.enforce_sync != true
  *
- * 走 LLM 路径时,任何 ack 失败都退出(给用户提示);
- * sync-state 写入 forge/legacy-sync-state/<change-id>.{md,yaml};
- * 含 critical pending → exit 2(business-rule-fail)。
+ * 走 LLM 路径时:
+ *   - ack 不就绪 → 返 {kind:'ack-missing'}
+ *   - 含 critical pending → sync-state 已写后返 {kind:'critical-pending'}
+ *   - 全过 → 返 {kind:'ok'}
+ *
+ * **不再调 process.exit / console.error**:caller(archive 命令)负责打印消息 +
+ * release archive.lock + exit,避免本函数内 process.exit 跳过 caller finally
+ * 导致 archive.lock 文件残留。
  */
-export async function runArchivePreflight(forgeRoot: string, changeId: string): Promise<void> {
+export async function runArchivePreflight(
+  forgeRoot: string,
+  changeId: string,
+): Promise<PreflightResult> {
   const configPath = join(forgeRoot, 'config.yaml');
-  if (!existsSync(configPath)) return;
+  if (!existsSync(configPath)) return { kind: 'ok' };
   const config = parseYaml(await readFile(configPath, 'utf8')) as ForgeConfig;
 
   // §2.5:仅当 legacy-anchors.yaml 存在 AND allow_llm_calls=true AND enforce_sync=true 时进入 preflight
   const anchors = await loadAnchorsFile(forgeRoot).catch(() => null);
-  if (!anchors) return;
-  if (!config.legacy_bridge?.allow_llm_calls) return;
-  if (!config.legacy_bridge?.enforce_sync) return;
+  if (!anchors) return { kind: 'ok' };
+  if (!config.legacy_bridge?.allow_llm_calls) return { kind: 'ok' };
+  if (!config.legacy_bridge?.enforce_sync) return { kind: 'ok' };
 
   const ack = await checkAck(forgeRoot, config, anchors);
   if (!ack.ok) {
-    console.error(
-      `legacy_bridge.enforce_sync=true 但 ack 未就绪:${ack.reason};请先跑 forge legacy-bridge --acknowledge-data-transfer`,
-    );
-    process.exit(2);
-    return;
+    return {
+      kind: 'ack-missing',
+      message: `legacy_bridge.enforce_sync=true 但 ack 未就绪:${ack.reason};请先跑 forge legacy-bridge --acknowledge-data-transfer`,
+    };
   }
 
   // 拼 change context(同 sync-check 命令)
@@ -461,12 +486,19 @@ export async function runArchivePreflight(forgeRoot: string, changeId: string): 
   );
 
   if (hasCriticalPending(out.syncState)) {
-    console.error(
-      `✗ ${out.syncState.diffs.filter((d) => d.severity === 'critical' && d.status === 'pending').length} 项 critical 差异未 resolve;\n` +
+    const criticalCount = out.syncState.diffs.filter(
+      (d) => d.severity === 'critical' && d.status === 'pending',
+    ).length;
+    return {
+      kind: 'critical-pending',
+      criticalCount,
+      message:
+        `✗ ${criticalCount} 项 critical 差异未 resolve;\n` +
         `跑 forge legacy-bridge resolve ${changeId} 后重试,或在 forge/legacy-sync-state/${changeId}.yaml 标 ack`,
-    );
-    process.exit(2);
+    };
   }
+
+  return { kind: 'ok' };
 }
 
 /**

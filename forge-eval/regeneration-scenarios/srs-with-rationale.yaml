@@ -1,0 +1,23 @@
+id: srs-with-rationale
+description: 含历史背景段(2023 P0 事故),验证背景被保留
+model: claude-sonnet-4-6
+role: requirements
+input_anchors:
+  - role: requirements
+    path: fixtures/srs-with-rationale.md
+    authoritative: true
+key_facts:
+  - text: 'Idempotency-Key 头部强制'
+    section: '§1'
+    critical: true
+  - text: '2023 P0 事故触发本约束'
+    section: '§1 rationale'
+    critical: false
+  - text: '退款 7 天窗口'
+    section: '§2'
+    critical: true
+  - text: '与法务客服协商一致'
+    section: '§2 rationale'
+    critical: false
+regeneration_threshold: 0.9
+critical_must_preserve: 1.0

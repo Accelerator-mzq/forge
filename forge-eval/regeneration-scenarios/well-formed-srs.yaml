@@ -7,35 +7,35 @@ input_anchors:
     path: fixtures/well-formed-srs.md
     authoritative: true
 key_facts:
-  - text: "Order 表 user_id 字段非空"
-    section: "§2.1"
+  - text: 'Order 表 user_id 字段非空'
+    section: '§2.1'
     critical: true
-  - text: "amount 必须 > 0"
-    section: "§2.1"
+  - text: 'amount 必须 > 0'
+    section: '§2.1'
     critical: true
-  - text: "status 字段枚举:pending / paid / shipped / refunded"
-    section: "§2.1"
+  - text: 'status 字段枚举:pending / paid / shipped / refunded'
+    section: '§2.1'
     critical: false
-  - text: "Payment 表 transaction_id 唯一索引"
-    section: "§2.2"
+  - text: 'Payment 表 transaction_id 唯一索引'
+    section: '§2.2'
     critical: true
-  - text: "支付时间精确到毫秒(timestamp(3))"
-    section: "§2.2"
+  - text: '支付时间精确到毫秒(timestamp(3))'
+    section: '§2.2'
     critical: false
-  - text: "支付接口必须使用 Idempotency-Key 头部"
-    section: "§3.1"
+  - text: '支付接口必须使用 Idempotency-Key 头部'
+    section: '§3.1'
     critical: true
-  - text: "Idempotency-Key 24 小时去重窗口"
-    section: "§3.1"
+  - text: 'Idempotency-Key 24 小时去重窗口'
+    section: '§3.1'
     critical: false
-  - text: "退款必须在 7 天内发起"
-    section: "§3.2"
+  - text: '退款必须在 7 天内发起'
+    section: '§3.2'
     critical: true
-  - text: "信用卡号不得存储,只能存 token"
-    section: "§4.1"
+  - text: '信用卡号不得存储,只能存 token'
+    section: '§4.1'
     critical: true
-  - text: "GDPR:用户删除账号 30 天内清除 backup"
-    section: "§4.2"
+  - text: 'GDPR:用户删除账号 30 天内清除 backup'
+    section: '§4.2'
     critical: true
 regeneration_threshold: 0.9
 critical_must_preserve: 1.0

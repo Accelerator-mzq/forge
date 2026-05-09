@@ -12,11 +12,11 @@ redact:
   - literal: ACME-S3-BUCKET-PROD-A12
     name: bucket-id
 key_facts:
-  - text: "所有写操作必须经过审计日志"
-    section: "§3"
+  - text: '所有写操作必须经过审计日志'
+    section: '§3'
     critical: true
-  - text: "INTERNAL-DB-PROD-01 已被 redact 不应出现在复写产物(应替换为 <<REDACTED-N>>)"
-    section: "§1"
+  - text: 'INTERNAL-DB-PROD-01 已被 redact 不应出现在复写产物(应替换为 <<REDACTED-N>>)'
+    section: '§1'
     critical: false
 regeneration_threshold: 0.9
 critical_must_preserve: 1.0

@@ -5,16 +5,16 @@ role: requirements
 input_anchors:
   - role: requirements
     path: fixtures/messy-srs-v1.md
-    authoritative: false  # 历史版,默认不进 LLM
+    authoritative: false # 历史版,默认不进 LLM
   - role: requirements
     path: fixtures/messy-srs-v3.md
     authoritative: true
 key_facts:
-  - text: "Order 表 user_id 非空"
-    section: "§1"
+  - text: 'Order 表 user_id 非空'
+    section: '§1'
     critical: true
-  - text: "强制 Idempotency-Key"
-    section: "§2"
+  - text: '强制 Idempotency-Key'
+    section: '§2'
     critical: true
 regeneration_threshold: 0.9
 critical_must_preserve: 1.0

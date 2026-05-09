@@ -10,8 +10,8 @@ input_anchors:
     path: fixtures/MISSING-FILE.md
     authoritative: true
 key_facts:
-  - text: "Order 表 user_id 字段非空"
-    section: "§2.1"
+  - text: 'Order 表 user_id 字段非空'
+    section: '§2.1'
     critical: true
 regeneration_threshold: 0.9
 critical_must_preserve: 1.0

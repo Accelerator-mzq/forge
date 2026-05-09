@@ -1,0 +1,23 @@
+id: chinese-srs
+description: 中文老文档,验证编码处理
+model: claude-sonnet-4-6
+role: requirements
+input_anchors:
+  - role: requirements
+    path: fixtures/chinese-srs.md
+    authoritative: true
+key_facts:
+  - text: "客户姓名必须非空"
+    section: "§1"
+    critical: true
+  - text: "身份证号必须 18 位"
+    section: "§1"
+    critical: true
+  - text: "敏感信息加密存储"
+    section: "§2"
+    critical: true
+  - text: "操作日志含操作员 ID 与时间戳"
+    section: "§3"
+    critical: true
+regeneration_threshold: 0.9
+critical_must_preserve: 1.0

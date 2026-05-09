@@ -1,6 +1,6 @@
 // forge core library — 公共 API
 
-export const FORGE_VERSION = '0.0.1' as const;
+export const FORGE_VERSION = '0.2.0' as const;
 
 // 重新导出所有 core 模块的公共类型 + 函数
 export * from './core/schema/index.js';

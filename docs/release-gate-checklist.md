@@ -58,12 +58,20 @@ node scripts/release-gate.mjs
 3. 跑 `forge legacy-bridge regenerate --redact-report --dry-run`
 4. **期望(✅)**:stdout 输出 ≥ 3 类规则命中数(aws / github-pat / email)
 
-#### 2.4.3 preflight 阻塞
+#### 2.4.3 preflight 阻塞(**需 ANTHROPIC_API_KEY**)
 
-1. `forge/config.yaml` 加 `legacy_bridge.enforce_sync: true`
-2. 制造 1 条 critical pending diff(手编辑 `forge/legacy-sync-state/<id>.yaml`,severity=critical, status=pending)
-3. 跑 `forge archive add-payment`(假设有此 change)
-4. **期望(✅)**:exit 2,stderr 含 "1 项 critical 差异未 resolve"
+> 当前实现:archive preflight 总是现场调 LLM 跑 sync-check,不读已有 `forge/legacy-sync-state/<id>.yaml`。
+> 所以本 scenario 必须配 ANTHROPIC_API_KEY 真触发 LLM 产生 critical diff,无法用手编辑 yaml 短路。
+> 真 cache 路径(`--use-cached-sync-state` 等)推 v0.3。
+
+1. `forge/config.yaml` 加 `legacy_bridge.enforce_sync: true` + `legacy_bridge.allow_llm_calls: true`
+2. 准备一个真 change:`forge/changes/add-payment/proposal.md` 含与某个 anchor(SRS / HLD)有冲突的语义改动(如新增"支付幂等性"约束,而老 SRS 没写)
+3. 配好 anchors.yaml 指向冲突的老文档,跑 `forge legacy-bridge --acknowledge-data-transfer`
+4. 跑 `forge archive add-payment`(已有合法 .verify-passed + .review-passed)
+5. **期望(✅)**:exit 2,stderr 含 "X 项 critical 差异未 resolve",并产出 `forge/legacy-sync-state/add-payment.{md,yaml}`
+6. 后续 resolve 路径:用户改 yaml status=resolved-by-doc-update / false-positive / skipped → `forge legacy-bridge resolve add-payment` exit 0
+
+**fallback(无 API key 时)**:跑 `pnpm vitest run tests/cli/legacy-bridge/archive-integration.test.ts`,确认 preflight 集成测试全过(LLM mock 返 critical → preflight 阻塞 + sync-state.yaml 写入 + lock 释放,覆盖 §2.4.3 决策路径)。
 
 #### 2.4.4 lock 并发
 

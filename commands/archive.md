@@ -10,8 +10,10 @@ You are about to handle `/forge:archive $ARGUMENTS`.
 本命令是 CLI 的薄包装。直接执行:
 
 ```bash
-forge archive $ARGUMENTS
+node "${CLAUDE_PLUGIN_ROOT}/scripts/run-forge.mjs" archive $ARGUMENTS
 ```
+
+(plugin helper 内部 spawn npx 拉 forge CLI,避开 v0.2 P1 全局 PATH 问题。OpenCode/Codex 路径下 commands.md 不可用,走 skill 内嵌路径 — 见 Plan 3 Task 3.3 + skills/finishing-a-development-branch/SKILL.md。)
 
 ## CLI 行为说明(给 AI 理解,不要重复实现)
 

@@ -10,7 +10,7 @@ You are about to handle `/forge:verify $ARGUMENTS`.
 ## 步骤
 
 1. **必须调用 `forge:verification-before-completion` skill**(证据先于声称的纪律)。
-2. 跑 `forge validate <change-id>`(CLI),拿到 validate 结果。
+2. 跑 `node "${CLAUDE_PLUGIN_ROOT}/scripts/run-forge.mjs" validate <change-id>`(plugin helper 内部 spawn npx 拉 forge CLI;Tier 1 Claude Code 路径下 `${CLAUDE_PLUGIN_ROOT}` 由 Claude Code 注入;OpenCode/Codex 路径不可用 commands.md,走 skill 内嵌路径见 Plan 3 Task 3.3),拿到 validate 结果。
 3. **若 validate 失败**:
    - 根据失败项构造 verify-failed YAML(`forge/changes/<id>/.verify-failed`)
    - YAML schema:

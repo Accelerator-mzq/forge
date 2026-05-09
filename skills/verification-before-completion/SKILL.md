@@ -144,6 +144,28 @@ From 24 failure memories:
 - Implications of success
 - ANY communication suggesting completion/correctness
 
+## forge strict gate step (Tier 2/3 OpenCode/Codex 路径用,Plan 0a 实测 Variant B PASS)
+
+**仅 OpenCode + Codex 路径**(Tier 1 Claude Code 路径走 commands.md `/forge:verify` 调 helper)。
+
+When user says "verify" / "/forge:verify" / "完成验证" or similar, you **MUST** execute:
+
+```bash
+node "${FORGE_HELPER}" validate <change-id>
+```
+
+(`FORGE_HELPER` 解析见 forge:writing-plans skill 末尾 "CLI validation step" 段)
+
+**Result handling**:
+
+- exit 0 → forge CLI 自动写 `forge/changes/<id>/.verify-passed`(YAML schema + tasks_hash + content_hash + pass=true);report "verify PASS"
+- exit 非零 → forge CLI 自动:
+  1. 写 `forge/changes/<id>/.verify-failed`(YAML schema + fake_completions 列表)
+  2. **append 修复 task** 到 `forge/changes/<id>/tasks.md`(每 fake_completion 一条 `- [ ] verify-fix-N: ...`)
+  3. **不修改原已勾 task**(spec §3.3 不变量 2)
+
+  Tell user "Verify FAIL,请处理 verify-fix-\* 新 tasks 后重跑 verify"
+
 ## The Bottom Line
 
 **No shortcuts for verification.**

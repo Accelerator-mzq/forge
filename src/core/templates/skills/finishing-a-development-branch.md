@@ -222,3 +222,30 @@ forge 路径下,这一步发生在 `/forge:archive` 之后(archive 已做产物�
 **Pairs with:**
 
 - **forge:using-git-worktrees** - Cleans up worktree created by that skill
+
+---
+
+## forge archive step (Tier 2/3 OpenCode/Codex 路径用,Plan 0a 实测 Variant B PASS)
+
+**仅 OpenCode + Codex 路径**(Tier 1 Claude Code 路径走 commands.md `/forge:archive` 调 helper)。
+
+When user says "archive" / "/forge:archive" / "完成归档" or similar, **after** finishing branch tasks(merge / clean / etc),you **MUST** execute:
+
+```bash
+node "${FORGE_HELPER}" archive <change-id>
+```
+
+(`FORGE_HELPER` 解析见 forge:writing-plans skill 末尾 "CLI validation step" 段)
+
+forge CLI 内部严格门禁(spec §3.4):
+
+- `.verify-passed` 存在 + tasks_hash 匹配
+- `.review-passed` 存在 + content_hash 匹配 + git.diff_hash 匹配
+- specs sync(internal-only,不可绕过)
+
+**Result handling**:
+
+- exit 0 → mv 到 `forge/changes/archive/<date>-<id>/`,Tell user "Archive PASS"
+- exit 非零 → 报 stderr,**不**重试,提示用户跑缺失 step(`/forge:verify` 或 `/forge:review`)
+
+**严格门禁不可绕过 — 不要主动加 `--force`**(那是给 maintainer 紧急 escape hatch 用的,不是 AI 自主决策范畴)。

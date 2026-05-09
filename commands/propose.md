@@ -24,7 +24,7 @@ You are about to handle `/forge:propose $ARGUMENTS`.
    - `design.md` — H1 标题 + 技术方案 + 数据模型 + 接口设计(可短,但 H1 必须有)
    - `tasks.md` — checkbox 任务列表,粒度 2-5 分钟一步,采用 forge:writing-plans skill 的 task 结构
 5. **若有 `--from-draft`**:把 draft 移到 `forge/drafts/.consumed/<name>.md`(filesystem chmod 444 只读)。
-6. 跑 `forge validate <change-id>` 确认 4 件套完整。**若 validate 失败,根据错误回去补,不要把不完整产物留下**。
+6. 跑 `node "${CLAUDE_PLUGIN_ROOT}/scripts/run-forge.mjs" validate <change-id>` 确认 4 件套完整(plugin helper 内部 spawn npx 拉 forge CLI,避开 v0.2 P1 全局 PATH 问题;若 helper 不可用 — 例如 OpenCode/Codex 路径下 `${CLAUDE_PLUGIN_ROOT}` 未定义 — 改用 skill 内嵌 fenced bash 调 helper,见 Plan 3 Task 3.3)。**若 validate 失败,根据错误回去补,不要把不完整产物留下**。
 
 ## 禁止行为
 

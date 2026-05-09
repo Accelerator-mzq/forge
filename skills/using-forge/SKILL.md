@@ -1,5 +1,5 @@
 ---
-name: forge:using-forge
+name: using-forge
 description: Use when starting any conversation - establishes how to find and use forge skills, requiring Skill tool invocation before ANY response including clarifying questions
 ---
 

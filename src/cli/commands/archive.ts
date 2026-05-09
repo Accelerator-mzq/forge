@@ -143,6 +143,13 @@ export function buildArchiveCommand(): Command {
       let archiveRelease: (() => Promise<void>) | undefined;
       try {
         archiveRelease = await acquireLock(forgeRoot, 'archive');
+
+        // Plan 7 PREFLIGHT(spec §2.5 line 183-204):acquireLock 之后、archive 严格门禁(marker check)之前。
+        // 设计意图:用户立即拿到 sync-state 报告,不被 marker 失败遮蔽 — marker fail + sync critical
+        // 共存时,先写 sync-state.{md,yaml},user 跑 resolve 后再撞 marker check。
+        // 决策 #23:复用 archive.lock,不再 acquire legacy-bridge.lock。
+        await runArchivePreflight(forgeRoot, changeId);
+
         const changeDir = join(forgeRoot, 'changes', changeId);
         const verifyPath = join(changeDir, '.verify-passed');
         const reviewPath = join(changeDir, '.review-passed');
@@ -308,11 +315,6 @@ export function buildArchiveCommand(): Command {
           await archiveRelease();
           process.exit(2);
         }
-
-        // 步骤 4.5:Plan 7 brownfield preflight(enforce_sync=true 时阻塞 critical)
-        // 偏离 plan:plan 说"acquireLock 之后第一行",但 LLM 调用昂贵;放在 marker 全过之后更经济。
-        // 决策 #23:复用 archive.lock,不再 acquire legacy-bridge.lock
-        await runArchivePreflight(forgeRoot, changeId);
 
         // 步骤 5:调 archiveTransaction(Move→Sync)
         const archiveDate = new Date().toISOString().slice(0, 10); // YYYY-MM-DD

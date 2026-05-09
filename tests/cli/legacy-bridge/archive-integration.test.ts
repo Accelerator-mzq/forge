@@ -127,4 +127,37 @@ describe('forge archive 集成 brownfield preflight + post-archive', () => {
       process.chdir(cwd);
     }
   });
+
+  // Regression(spec §2.5):marker 未创建 + sync 含 critical 时,preflight 必须先于 marker check 跑,
+  // sync-state 文件应已写入 — 让用户立即看到 sync 报告,不被 marker 失败遮蔽。
+  // 此 case 覆盖 PR #17 偏离 2 的根因场景(原代码把 preflight 放在 marker 之后,marker fail 会
+  // 直接 exit 而 sync-state 永不生成,与 spec §2.5 line 183-204 的流程图位置不符)。
+  it('marker fail + sync critical → sync-state 文件先于 marker exit 写入(spec §2.5)', async () => {
+    // setup 已配 enforce_sync + ack + LLM mock 返 critical;
+    // 关键:不创建 .verify-passed 和 .review-passed marker → 走原 archive 命令会 marker exit 2。
+    // 期望:sync-state.yaml 已写(说明 preflight 跑过),即便随后 marker check exit。
+    const cwd = process.cwd();
+    try {
+      process.chdir(tmp);
+      const { buildArchiveCommand } = await import('../../../src/cli/commands/archive.js');
+      const cmd = buildArchiveCommand();
+      const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      try {
+        await cmd.parseAsync(['node', 'forge', 'add-payment']).catch(() => undefined);
+        // 关键断言:sync-state 文件存在 → preflight 在 marker check 之前已跑
+        expect(existsSync(join(tmp, 'forge', 'legacy-sync-state', 'add-payment.yaml'))).toBe(true);
+        expect(existsSync(join(tmp, 'forge', 'legacy-sync-state', 'add-payment.md'))).toBe(true);
+        // exit 被调过(critical preflight 或 marker check)— spec 期望先 critical exit 2
+        expect(exitSpy).toHaveBeenCalledWith(2);
+        // critical 提示应出现(证明 preflight 跑到了 critical 检测)
+        expect(errSpy.mock.calls.flat().join('\n')).toContain('critical 差异未 resolve');
+      } finally {
+        exitSpy.mockRestore();
+        errSpy.mockRestore();
+      }
+    } finally {
+      process.chdir(cwd);
+    }
+  });
 });

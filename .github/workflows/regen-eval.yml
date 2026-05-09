@@ -1,0 +1,57 @@
+# Regeneration Eval Workflow — Plan 7 Phase E
+# spec §5.1:weekly + PR(若改 regenerator.ts / quality-judge.ts) + 手动
+# ANTHROPIC_API_KEY 通过 GitHub Secrets 注入
+
+name: regen-eval
+
+on:
+  pull_request:
+    paths:
+      - 'src/core/legacy-bridge/regenerator.ts'
+      - 'src/core/legacy-bridge/quality-judge.ts'
+      - 'forge-eval/regeneration-runner.ts'
+      - 'forge-eval/regeneration-types.ts'
+      - 'forge-eval/regeneration-scenarios/**'
+  schedule:
+    - cron: '0 8 * * 0' # 周日 UTC 8am(同 skill-eval cadence)
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: '单 scenario id(可选,默认全跑)'
+        required: false
+        type: string
+
+jobs:
+  regen-eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.19.0
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Run regen-eval
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -n "${{ inputs.scenario }}" ]; then
+            pnpm eval-regen:scenario --scenario "${{ inputs.scenario }}"
+          else
+            pnpm eval-regen
+          fi
+
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: regen-report
+          path: forge-eval/regen-report.md

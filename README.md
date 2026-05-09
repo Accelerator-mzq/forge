@@ -62,6 +62,9 @@ pnpm dlx @accelerator-mzq/forge init --harness claude
 - 自动化 skill eval 在 weekly + PR cadence 跑
 - `npm publish` 工件已通过本地 release gate(`scripts/release-gate.mjs`)
 
+> **真实交互式 Claude Code 会话 fixture 测试发现 4 项缺陷**(架构级 + deploy 级 + 模板级)。详见 [`docs/v0.2-known-limitations.md`](docs/v0.2-known-limitations.md)。
+> **v0.3 plugin migration** 是恢复 "AI auto-bootstrap 工作流" 价值主张的路径,spec 设计待启动。
+
 ## Plan 7 进度
 
 Phase 7(brownfield onboarding)完成:

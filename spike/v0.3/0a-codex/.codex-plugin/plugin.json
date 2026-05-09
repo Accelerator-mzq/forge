@@ -1,0 +1,13 @@
+{
+  "name": "test",
+  "version": "0.0.1",
+  "description": "throwaway Codex plugin for forge v0.3 protocol spike (Plan 0a.2)",
+  "author": { "name": "msc" },
+  "license": "MIT",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Test Spike",
+    "category": "Coding",
+    "capabilities": ["Interactive", "Read", "Write"]
+  }
+}

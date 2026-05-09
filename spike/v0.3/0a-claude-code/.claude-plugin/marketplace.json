@@ -1,0 +1,14 @@
+{
+  "name": "test-spike",
+  "description": "throwaway marketplace for forge v0.3 spike",
+  "owner": { "name": "msc" },
+  "plugins": [
+    {
+      "name": "test",
+      "description": "throwaway protocol spike plugin",
+      "version": "0.0.1",
+      "source": "./",
+      "author": { "name": "msc" }
+    }
+  ]
+}

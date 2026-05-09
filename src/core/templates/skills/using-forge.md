@@ -106,7 +106,27 @@ The skill itself tells you which.
 
 Instructions say WHAT, not HOW. "Add X" or "Fix Y" doesn't mean skip workflows.
 
+## v0.3 plugin 协议状态(Plan 0a + Plan 0b.1 实测,2026-05-09)
+
+forge 在三 harness 下的协议支持:
+
+| Tier | Harness     | skill auto-trigger | `/forge:*` slash commands | CLI 调用形态                                                 |
+| ---- | ----------- | ------------------ | ------------------------- | ------------------------------------------------------------ |
+| 1    | Claude Code | ✅ 全 PASS         | ✅ 全 PASS                | commands.md 调 `${CLAUDE_PLUGIN_ROOT}/scripts/run-forge.mjs` |
+| 2    | OpenCode    | ✅ PASS            | ❌ FAIL(plugin 不支持)    | skill 文本内嵌 fenced bash + must-execute 调 helper          |
+| 3    | Codex       | ✅ PASS            | ❌ FAIL(plugin 不支持)    | 同上                                                         |
+
+**OpenCode + Codex 用户提示**:即使 `/forge:*` 不可用,brainstorming / writing-plans / verify 等 skill **会按 description 自动触发**,你只需:
+
+- 输入模糊需求 → AI 自动 invoke `forge:brainstorming`
+- 输入 "完成验证 / verify" → AI 自动 invoke `forge:verification-before-completion`
+- 等等
+
+跟 Claude Code 体验一致,只是没有 `/forge:propose` 这种"显式入口"按钮。
+
 ## forge slash commands(本 bootstrap 携带的 6 个工作流入口)
+
+**触发 prerequisites**:Tier 1 Claude Code 路径下可用;Tier 2/3 OpenCode/Codex 路径下不可用(实测 FAIL,见上表)— 改为 skill auto-trigger 等价路径。
 
 触发以下任一命令时,会自动调起对应 skill 链:
 

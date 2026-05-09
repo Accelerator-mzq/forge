@@ -1,6 +1,21 @@
-# Forge Harness 安装与配置
+# Forge Harness 安装与配置(v0.2 形态,**v0.3 deprecated**)
 
-v0.1 支持 Claude Code 与 Codex 两个 harness(Phase 0.5 spike 结果,详 [spike/RESULTS.md](../spike/RESULTS.md))。OpenCode 推 v0.2(需要 plugin 实现自动注入)。
+⚠️ **本文档描述 v0.1 / v0.2 `forge init` 路径**,已被 v0.3 plugin 形态替代。新项目请改用:
+
+- [installation.md](installation.md) — v0.3 plugin 路径入口(三 harness)
+- [claude-install.md](claude-install.md) — Tier 1 Claude Code(全功能)
+- [opencode-install.md](opencode-install.md) — Tier 2 OpenCode(PARTIAL_SHIP)
+- [codex-install.md](codex-install.md) — Tier 3 Codex(PARTIAL_SHIP)
+
+老项目(已跑过 `forge init`)升级:[migration/v0.2-to-v0.3.md](migration/v0.2-to-v0.3.md)。
+
+v0.4 完全移除 `forge init` 后本文档归档。
+
+---
+
+## Legacy(v0.1 / v0.2 形态,仅参考)
+
+v0.1 支持 Claude Code 与 Codex 两个 harness(Phase 0.5 spike 结果,详 [spike/RESULTS.md](../spike/RESULTS.md))。OpenCode 推 v0.3(plugin 实现自动注入,Plan 0a.3 实测 PASS)。
 
 ## Claude Code
 

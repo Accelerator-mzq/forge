@@ -8,6 +8,61 @@ All notable changes to this project will be documented in this file.
 
 (暂无)
 
+## [0.3.0] - 2026-05-10
+
+### Major changes — Plugin migration(7 决策叠加 fusion-design 21 条)
+
+22. **v0.3 范围**:三 harness plugin 化 + P2/P3 模板修复 + v0.2→v0.3 升级路径
+23. **分发渠道**:自建 git marketplace(forge 仓库根 `.claude-plugin/marketplace.json`)
+24. **CLI 双轨**:主 plugin commands.md 调 `node ${CLAUDE_PLUGIN_ROOT}/scripts/run-forge.mjs` helper(spawn `npx -y --package @accelerator-mzq/forge@^0.3 -- forge ...`);bundled plugin 变体内 vendor `dist/`(air-gapped,仅 Claude Code)
+25. **三 harness manifest**:Claude Code = `.claude-plugin/{plugin.json, marketplace.json}`;Codex = `.codex-plugin/plugin.json` + `~/.agents/skills/<plugin>` symlink;OpenCode = `.opencode/plugins/forge.js`(default export)
+26. **skills/commands 重构**:skills/+ commands/ 提到根仓库;`scripts/copy-templates.mjs` 反向同步(根 → src/core/templates/ + dist/);Plan 1 frontmatter 去 `forge:` 前缀(plugin namespace 隐含)
+27. **升级路径**:`forge upgrade` 命令 5 阶段事务(SCAN → SHOW DIFF → ASK → STASH → VERIFY → COMMIT)+ `--recover` 24h 内可还原 + `--gc` 清理过期
+28. **Phase 0.5 两阶段重跑**:Plan 0a 协议 spike(throwaway plugin 验证三 harness 加载协议)+ Plan 0b full fixture spike(forge 真业务回归);三 harness 全 unblock,无 DEFER
+
+### Added — Plugin scaffold(Plan 1)
+
+- `.claude-plugin/{plugin.json, marketplace.json}` Claude Code plugin + 自建 marketplace
+- `.codex-plugin/plugin.json` Codex plugin manifest
+- `.opencode/plugins/forge.js` OpenCode plugin(default export,Plan 0a.3 实测 PASS)
+- `hooks/{hooks.json, run-hook.cmd, session-start}` SessionStart hook(fork superpowers,纯 bash escape_for_json + printf,无 python3 依赖)
+- `skills/<name>/SKILL.md` 12 个移到根(plugin source of truth)
+- `commands/<name>.md` 6 个移到根
+
+### Added — CLI(Plan 4)
+
+- `forge upgrade` 命令 + 三 adapter `LegacyDetector` 接口
+- 5 阶段事务化(`src/cli/commands/upgrade.ts`):ASK 阶段前完全只读;`forge/` 产物 100% 不动;STASH/VERIFY 失败原子回滚
+- `--recover` 24h 内还原 + hash 校验 + 反向 mv;`--gc` 删 >24h 过期 stash
+- 6 集成测全 PASS(`tests/cli/upgrade.test.ts`)
+
+### Added — Helper + bundled(Plan 3 + 5)
+
+- `scripts/run-forge.mjs` plugin helper(spawn npx + Windows `npx.cmd` 兼容 + error 事件 fallback)
+- `scripts/build-bundled-plugin.mjs` bundled plugin build 脚本(仅 Claude Code 形态;patch run-forge.mjs 为离线变体;tar `--force-local` 兼容 Windows GNU tar)
+
+### Fixed — v0.2 fixture 缺陷(P0/P1/P2/P3 全修)
+
+- **P0 skill auto-trigger 完全失效**:plugin 路径下 skills 真进 auto-trigger 池(Plan 0a.1.4 + 0b.1 实测 PASS)
+- **P1 forge CLI 不在全局 PATH**:plugin commands.md / skill 文本调 helper,helper 内 npx 拉 forge,无需全局装(Plan 3)
+- **P2 brainstorming silent commit**:skill 加 git base preflight,空 repo / 无 `.gitignore` 主动询问(Plan 2 Task 2.1)
+- **P3 tasks.md 过度生成(511/1378 行)**:writing-plans 加 scale-aware mode + `light_threshold` config(默认 200,允许 50-2000),trivial change 走 light mode 1-2 task ~80 行(Plan 2 Task 2.2)
+
+### Changed
+
+- `forge init` 标记 deprecated(stderr 警告,v0.4 移除)
+- skills frontmatter `name:` 去 `forge:` 前缀(plugin namespace 隐含;reverse-sync 脚本写入 src/core/templates 时加回前缀给 legacy `forge init` 用)
+- `using-forge` skill 红旗清单更新 — 加 v0.3 plugin 协议状态表(Tier 1 ENABLE / Tier 2/3 PARTIAL_SHIP)+ OpenCode/Codex 用户提示(skill auto-trigger 等价 `/forge:*` 入口)
+- `commands/{verify,archive,propose}.md` 调 `${CLAUDE_PLUGIN_ROOT}/scripts/run-forge.mjs`(避开 P1)
+- `skills/{writing-plans,verification-before-completion,finishing-a-development-branch}/SKILL.md` 末尾加 fenced bash + must-execute 段(给 OpenCode + Codex 用,plugin commands 不可注册时的替代路径)
+- `docs/release-gate-checklist.md` 加 §3 v0.3 段(§3.1-3.6,6 项验证)
+
+### Acknowledgments
+
+Plan 0a spike 经 Codex 5 轮 + opus subagent 1 轮独立 review,共修 64 条问题,11 条作为 known-issues 列在 plan 末尾(实测中无一触发)。
+
+完整 spike 实测:[`spike/v0.3/0a-summary.md`](spike/v0.3/0a-summary.md)。
+
 ## [0.2.0] - 2026-05-XX
 
 ### Added(brownfield onboarding)

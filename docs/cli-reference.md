@@ -1,10 +1,58 @@
 # Forge CLI Reference
 
-5 个公开命令:`init` / `update` / `config` / `validate` / `archive`。
+> v0.3 共 7 个公开命令:`forge init / upgrade / validate / archive / config / update / legacy-bridge`。`forge init` 标记 deprecated(v0.4 移除),新项目改用 plugin install。
 
-## `forge init`
+## `forge upgrade`(v0.3 新增)
 
-初始化 forge 到当前目录:检测 / 选择 harness、铺 skills + commands、创建 `forge/` 骨架。
+清理 v0.2 legacy harness adapter 产物(`.claude/skills/forge-*/` + `.claude/commands/forge/` + `.agents/skills/forge-*/` + `.agents/commands/forge/`),5 阶段事务化(SCAN → SHOW DIFF → ASK → STASH → VERIFY → COMMIT)。**`forge/` 产物 100% 不动**(drafts/changes/specs/config 全保留)。
+
+### 选项
+
+- `--dry-run` — SHOW DIFF 列清单,不 STASH(预览模式)
+- `--recover` — 24h 内还原最新 stash 到原位 + 删 stash + 验 hash
+- `--gc` — 删除超过 24h 的过期 stash 目录
+
+### 行为
+
+不传 flag 时走主流程:
+
+1. **SCAN**(纯只读):扫 v0.2 legacy 路径 + 算每文件 sha256
+2. **SHOW DIFF**(纯只读):stdout 列清单 + hash + 提示 "forge/ 产物 100% 不动"
+3. **ASK**:`Delete these legacy artifacts? [y/N]`(stdin 等用户输入)
+4. **STASH**:`<project>/.forge-upgrade-stash-<ts>/` + `.manifest.json`(每 mv 失败立刻反向 mv 回原位)
+5. **VERIFY**:重读 stash 内容验 hash 与 SCAN 一致(失败立刻反向回滚)
+6. **COMMIT**:不删 stash 24h(给用户冷却期)+ 输出 plugin install 指引
+
+### 退出码
+
+- 0 = 成功(包括 ASK N 的 graceful exit)
+- 1 = STASH 或 VERIFY 失败(自动反向回滚 + 报错)
+
+### 例子
+
+```bash
+# 主流程
+forge upgrade
+# 预览模式
+forge upgrade --dry-run
+# 24h 内反悔
+forge upgrade --recover
+# 清理过期 stash
+forge upgrade --gc
+```
+
+详见 [v0.2 → v0.3 升级 walkthrough](migration/v0.2-to-v0.3.md)。
+
+---
+
+
+v0.3 共 7 个公开命令:`init`(**deprecated**)/ `upgrade` / `update` / `config` / `validate` / `archive` / `legacy-bridge`。新项目改用 plugin install,`forge init` v0.4 移除。
+
+## `forge init`(deprecated v0.3,v0.4 移除)
+
+⚠️ **已 deprecated**:v0.3 stderr 打 warning。新项目改用 plugin install([安装文档](installation.md));老项目升级跑 [`forge upgrade`](#forge-upgrade)。
+
+仍保留功能(legacy 兼容窗口):初始化 forge 到当前目录:检测 / 选择 harness、铺 skills + commands、创建 `forge/` 骨架。
 
 ```
 forge init [--harness <list>] [--force]

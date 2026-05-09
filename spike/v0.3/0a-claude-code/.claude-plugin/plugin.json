@@ -1,0 +1,7 @@
+{
+  "name": "test",
+  "version": "0.0.1",
+  "description": "throwaway plugin for forge v0.3 protocol spike (Plan 0a.1)",
+  "author": { "name": "msc" },
+  "license": "MIT"
+}

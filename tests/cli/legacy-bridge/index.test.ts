@@ -59,7 +59,8 @@ describe('forge legacy-bridge index (CLI)', () => {
     const cwd = process.cwd();
     try {
       process.chdir(tmp);
-      const { buildLegacyBridgeCommand } = await import('../../../src/cli/commands/legacy-bridge.js');
+      const { buildLegacyBridgeCommand } =
+        await import('../../../src/cli/commands/legacy-bridge.js');
       const cmd = buildLegacyBridgeCommand();
       const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
       try {

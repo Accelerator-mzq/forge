@@ -98,9 +98,7 @@ async function readPreview(path: string): Promise<string> {
 }
 
 /** 拼 LLM prompt:让 LLM 给一批文件分类 role */
-function buildMapperPrompt(
-  fileEntries: Array<{ path: string; preview: string }>,
-): string {
+function buildMapperPrompt(fileEntries: Array<{ path: string; preview: string }>): string {
   return `你是一名文档资产分类员。对下面每个文件,判断其属于哪种 brownfield 角色。
 
 # 角色定义
@@ -151,10 +149,7 @@ function parseMapperResponse(
 }
 
 /** 跑 mapping(LLM 推测) */
-export async function runMapper(
-  client: MapperClient,
-  input: MapperInput,
-): Promise<MapperOutput> {
+export async function runMapper(client: MapperClient, input: MapperInput): Promise<MapperOutput> {
   const { projectRoot } = input;
   const docsPaths = input.docsPaths ?? DEFAULT_DOCS_PATHS;
 
@@ -185,7 +180,11 @@ export async function runMapper(
   }
 
   // 调 LLM
-  let classifications: Array<{ path: string; role: LegacyAnchorRole | 'unmatched'; modules?: string[] }>;
+  let classifications: Array<{
+    path: string;
+    role: LegacyAnchorRole | 'unmatched';
+    modules?: string[];
+  }>;
   if (entries.length === 0) {
     classifications = [];
   } else {
@@ -256,7 +255,9 @@ function renderMapperOverview(file: LegacyAnchorsFile, unmatched: string[]): str
   const lines: string[] = [];
   lines.push('# Legacy Anchors Draft 概览');
   lines.push('');
-  lines.push('LLM 自动扫描 + 推测的 anchor 草稿。请审改 yaml 后跑 `mv legacy-anchors-draft.yaml legacy-anchors.yaml`。');
+  lines.push(
+    'LLM 自动扫描 + 推测的 anchor 草稿。请审改 yaml 后跑 `mv legacy-anchors-draft.yaml legacy-anchors.yaml`。',
+  );
   lines.push('');
   lines.push('## Anchors by role');
   const byRole: Record<string, LegacyAnchor[]> = {};
@@ -270,7 +271,9 @@ function renderMapperOverview(file: LegacyAnchorsFile, unmatched: string[]): str
     lines.push('');
     for (const a of anchors) {
       const auth = a.authoritative ? ' **(authoritative)**' : '';
-      lines.push(`- \`${a.path}\`${auth}${a.modules?.length ? ` modules: ${a.modules.join(', ')}` : ''}`);
+      lines.push(
+        `- \`${a.path}\`${auth}${a.modules?.length ? ` modules: ${a.modules.join(', ')}` : ''}`,
+      );
     }
     lines.push('');
   }

@@ -83,7 +83,10 @@ ${chunk}`;
 const METADATA_ONLY_INDEX_ROLES = new Set(['acceptance-report']);
 
 /** 跑单 anchor 的索引 */
-export async function indexAnchor(client: IndexerClient, anchor: LegacyAnchor): Promise<IndexEntry> {
+export async function indexAnchor(
+  client: IndexerClient,
+  anchor: LegacyAnchor,
+): Promise<IndexEntry> {
   // P7-03 修复:acceptance-report 走 metadata-only(spec §7 line 909 / 决策 #8 / I-8)
   // 仅读文件名 + frontmatter(若有),不读全文不发 LLM
   if (METADATA_ONLY_INDEX_ROLES.has(anchor.role)) {
@@ -146,7 +149,10 @@ export function renderIndexMarkdown(entries: IndexEntry[]): string {
 /** 摘要长度容差校验(spec §5.4 indexer) */
 export function isSummaryWithinTolerance(summary: string): boolean {
   const len = summary.length;
-  return len >= SUMMARY_TARGET_LEN - SUMMARY_TOLERANCE * 2 && len <= SUMMARY_TARGET_LEN + SUMMARY_TOLERANCE * 4;
+  return (
+    len >= SUMMARY_TARGET_LEN - SUMMARY_TOLERANCE * 2 &&
+    len <= SUMMARY_TARGET_LEN + SUMMARY_TOLERANCE * 4
+  );
 }
 
 /** P7-03 修复:metadata-only 索引(不发 LLM,只读文件名 + 可选 frontmatter)

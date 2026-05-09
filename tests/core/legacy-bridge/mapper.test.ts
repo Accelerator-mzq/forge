@@ -5,16 +5,21 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { runMapper, writeMapperDraft, type MapperClient } from '../../../src/core/legacy-bridge/mapper.js';
+import {
+  runMapper,
+  writeMapperDraft,
+  type MapperClient,
+} from '../../../src/core/legacy-bridge/mapper.js';
 import { parse as parseYaml } from 'yaml';
 import type { LegacyAnchorsFile } from '../../../src/core/legacy-bridge/types.js';
 
 function makeMockMapper(jsonText: string): MapperClient {
   return {
     messages: {
-      create: async () => ({
-        content: [{ type: 'text', text: jsonText }],
-      }) as never,
+      create: async () =>
+        ({
+          content: [{ type: 'text', text: jsonText }],
+        }) as never,
     },
   };
 }
@@ -66,7 +71,12 @@ describe('legacy-bridge/mapper', () => {
     const existing: LegacyAnchorsFile = {
       schema: 'forge-legacy-anchor/v1',
       anchors: [
-        { role: 'requirements', path: 'docs/SRS.md', authoritative: true, modules: ['user-edited'] },
+        {
+          role: 'requirements',
+          path: 'docs/SRS.md',
+          authoritative: true,
+          modules: ['user-edited'],
+        },
       ],
     };
     const mock = makeMockMapper(
@@ -98,9 +108,7 @@ describe('legacy-bridge/mapper', () => {
 
   it('writeMapperDraft 落盘 yaml + md', async () => {
     mkdirSync(join(tmp, 'forge'), { recursive: true });
-    const mock = makeMockMapper(
-      JSON.stringify([{ path: 'docs/SRS.md', role: 'requirements' }]),
-    );
+    const mock = makeMockMapper(JSON.stringify([{ path: 'docs/SRS.md', role: 'requirements' }]));
     const r = await runMapper(mock, { projectRoot: tmp, mode: 'overwrite' });
     const { yamlPath, mdPath } = await writeMapperDraft(join(tmp, 'forge'), r);
     const { readFileSync, existsSync } = await import('node:fs');

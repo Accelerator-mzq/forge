@@ -44,7 +44,11 @@ import {
 import { computeAnchorHash } from '../../core/legacy-bridge/hash-anchor.js';
 import { readAnchorFile } from '../../core/legacy-bridge/encoding.js';
 import { runMapper, writeMapperDraft, type MapperClient } from '../../core/legacy-bridge/mapper.js';
-import { buildIndex, renderIndexMarkdown, type IndexerClient } from '../../core/legacy-bridge/indexer.js';
+import {
+  buildIndex,
+  renderIndexMarkdown,
+  type IndexerClient,
+} from '../../core/legacy-bridge/indexer.js';
 import { FORGE_VERSION } from '../../index.js';
 import type { ForgeConfig } from '../../core/schema/types.js';
 import type { LegacyAnchorRole, RegenQualityFile } from '../../core/legacy-bridge/types.js';
@@ -476,16 +480,8 @@ export function buildLegacyBridgeCommand(): Command {
       let releaseLb: (() => Promise<void>) | undefined;
       let releaseArchive: (() => Promise<void>) | undefined;
       try {
-        releaseArchive = await acquireLockByPath(
-          forgeRoot,
-          'legacy-bridge-index',
-          'archive.lock',
-        );
-        releaseLb = await acquireLockByPath(
-          forgeRoot,
-          'legacy-bridge-index',
-          'legacy-bridge.lock',
-        );
+        releaseArchive = await acquireLockByPath(forgeRoot, 'legacy-bridge-index', 'archive.lock');
+        releaseLb = await acquireLockByPath(forgeRoot, 'legacy-bridge-index', 'legacy-bridge.lock');
       } catch (err) {
         if (err instanceof LockHeldError) {
           console.error(`✗ ${err.message}`);

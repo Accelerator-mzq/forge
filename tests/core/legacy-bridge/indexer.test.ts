@@ -20,9 +20,10 @@ const FIXTURE_DIR = join(__dirname, '../../fixtures/legacy-bridge');
 function makeMockIndexer(text: string): IndexerClient {
   return {
     messages: {
-      create: async () => ({
-        content: [{ type: 'text', text }],
-      }) as never,
+      create: async () =>
+        ({
+          content: [{ type: 'text', text }],
+        }) as never,
     },
   };
 }
@@ -43,7 +44,9 @@ describe('legacy-bridge/indexer', () => {
   });
 
   it('indexAnchor happy path → IndexEntry', async () => {
-    const mock = makeMockIndexer('本文档定义订单管理系统的需求规格,涵盖支付幂等性、退款规则、用户隐私等核心约束。');
+    const mock = makeMockIndexer(
+      '本文档定义订单管理系统的需求规格,涵盖支付幂等性、退款规则、用户隐私等核心约束。',
+    );
     const anchor: LegacyAnchor = {
       role: 'requirements',
       path: join(FIXTURE_DIR, 'chinese-anchor/需求规格说明书.md'),

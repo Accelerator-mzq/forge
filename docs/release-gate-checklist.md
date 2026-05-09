@@ -39,6 +39,66 @@ node scripts/release-gate.mjs
 
 文件路径变为 `.agents/skills/forge-*/SKILL.md`(共享 Claude Agent SDK 约定)而非 `.claude/`。
 
+### 2.4 Brownfield Acceptance(v0.2 新增)
+
+**v0.2 必须跑 7 个 brownfield scenario。任一失败不发版。**
+
+#### 2.4.1 opt-in 流程
+
+1. 起空目录 `mkdir /tmp/forge-bf-1 && cd $_ && git init`
+2. `pnpm dlx @accelerator-mzq/forge init --harness claude`
+3. 不在 `forge/config.yaml` 加 `legacy_bridge.allow_llm_calls`
+4. 跑 `forge legacy-bridge regenerate`
+5. **期望(✅)**:exit 1 + 提示 "legacy-bridge 命令需要发送数据到 Anthropic API"
+
+#### 2.4.2 redact 真生效
+
+1. 写 `docs/legacy/secret-srs.md`,含 `<<aws-example-placeholder>>` + `ghp_aaaaaaaa...` + `foo@example.com`
+2. 配 anchors.yaml + 启用 LLM(`forge legacy-bridge --acknowledge-data-transfer`)
+3. 跑 `forge legacy-bridge regenerate --redact-report --dry-run`
+4. **期望(✅)**:stdout 输出 ≥ 3 类规则命中数(aws / github-pat / email)
+
+#### 2.4.3 preflight 阻塞
+
+1. `forge/config.yaml` 加 `legacy_bridge.enforce_sync: true`
+2. 制造 1 条 critical pending diff(手编辑 `forge/legacy-sync-state/<id>.yaml`,severity=critical, status=pending)
+3. 跑 `forge archive add-payment`(假设有此 change)
+4. **期望(✅)**:exit 2,stderr 含 "1 项 critical 差异未 resolve"
+
+#### 2.4.4 lock 并发
+
+1. 终端 A:`forge legacy-bridge regenerate &`(后台)
+2. 终端 B 立即:`forge archive add-x`
+3. **期望(✅)**:终端 B exit 5,stderr 含 "another forge archive is in progress"
+4. 终端 A 跑完后,终端 B 重跑应正常
+
+#### 2.4.5 多 harness skill smoke 不退化
+
+跑 §2.1 + §2.2 的 Claude Code + Codex acceptance test 各一次。
+**期望(✅)**:Plan 4 e2e brainstorming 逻辑无变化。
+
+#### 2.4.6 Excel 解析
+
+1. 准备多 sheet `.xlsx`(用 `tests/fixtures/legacy-bridge/_make-excel-fixture.mjs` 生成 fixture)
+2. 配 anchors.yaml `path: ./test.xlsx, sheet: TestCases`
+3. 跑 `forge legacy-bridge regenerate --role system-tests --dry-run`
+4. **期望(✅)**:exit 0,无 ExcelParseError
+
+#### 2.4.7 disclaimer 含 license
+
+1. 跑 `forge legacy-bridge regenerate`(配好 anchors)
+2. cat `forge/docs/regenerated/SRS.md`
+3. **期望(✅)**:frontmatter 含 `license: derived-from-source` + 顶部 disclaimer 含 "此文档由 forge 自动生成"
+
+#### 失败处理
+
+任一不满足:
+
+- 不发版
+- GitHub Issue 标 `release-gate-fail` + `brownfield`
+- 检查最近 PR 是否动了 `src/core/legacy-bridge/` 或 `forge-eval/regeneration-*`
+- 修复 → 重跑全套 release gate
+
 ### 2.3 失败处理
 
 任一 harness 不满足上述期望:

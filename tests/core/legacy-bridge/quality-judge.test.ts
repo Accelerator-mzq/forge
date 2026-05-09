@@ -78,6 +78,26 @@ describe('legacy-bridge/quality-judge.stratifiedSample', () => {
     expect(bigSampled).toBeGreaterThan(smallSampled);
     expect(smallSampled).toBeGreaterThanOrEqual(1);
   });
+
+  it('章节数 > remaining 时 sampled 不超 total(I-1 回归)', () => {
+    // 5 章 × 1 nc + total=3 → 章节数 5 > remaining 3,放弃"每章至少 1",按比例
+    const facts = Array.from({ length: 5 }, (_, i) => ({
+      text: `nc-${i}`,
+      section: `§${i}`,
+      critical: false,
+    }));
+    const r = stratifiedSample({ allFacts: facts, total: 3 });
+    expect(r.sampled.length).toBeLessThanOrEqual(3);
+    // 应有未覆盖章节(章节数 > sampled 数)
+    expect(r.uncoveredSections.length).toBeGreaterThan(0);
+  });
+
+  it('I-2 修复:补 quota 不会无限循环(每章封顶 facts.length)', () => {
+    // critical 0 + nc 1 章 1 fact + total 100 → remaining 100;算法应只抽 1 不卡死
+    const facts = [{ text: 'only', section: '§a', critical: false }];
+    const r = stratifiedSample({ allFacts: facts, total: 100 });
+    expect(r.sampled).toHaveLength(1);
+  });
 });
 
 describe('legacy-bridge/quality-judge.parseFactJudgeResponse', () => {

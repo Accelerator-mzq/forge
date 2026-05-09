@@ -73,21 +73,34 @@ export function stratifiedSample(input: SamplingInput): SamplingOutput {
   // 各章 quota 计算
   const sectionEntries = Array.from(bySection.entries()); // [name, facts][]
   const quotas = new Map<string, number>();
+  // I-1 修:章节数 > remaining 时,Math.max(1) 强制最少 1 会让 sampled 超 total
+  // canEnforceMinOne=true(章节数 ≤ remaining):每章至少 1 不超 total
+  // canEnforceMinOne=false(章节数 > remaining):放弃"每章至少 1"承诺,按比例分(可能 0)
+  //   后续 I-1 修复 trade-off:大文档章节多但 total 小,会有章节 quota=0 落入 uncoveredSections
+  const canEnforceMinOne = bySection.size <= remaining;
   for (const [name, facts] of sectionEntries) {
     const proportionalQuota = Math.floor((facts.length / totalNonCriticalCount) * remaining);
-    quotas.set(name, Math.max(1, proportionalQuota));
+    quotas.set(name, canEnforceMinOne ? Math.max(1, proportionalQuota) : proportionalQuota);
   }
-  // 总 quota 校正(向下取整后总和可能 < remaining,从最大章补)
+  // 总 quota 校正(向下取整后总和可能 < remaining,从最大章补;最多补到 remaining)
+  // I-2 修:简化为单循环 break,删除 dead modulo 条件(永真,误导)
   let totalQuota = Array.from(quotas.values()).reduce((a, b) => a + b, 0);
   if (totalQuota < remaining) {
-    // 按 facts 数从大到小补
+    // 按 facts 数从大到小补;每章最多补到 facts.length(不超章节本身能给的 fact 数)
     const sortedByCount = sectionEntries.slice().sort((a, b) => b[1].length - a[1].length);
-    let i = 0;
-    while (totalQuota < remaining && i < sortedByCount.length) {
-      const name = sortedByCount[i]![0];
-      quotas.set(name, (quotas.get(name) ?? 0) + 1);
-      totalQuota += 1;
-      i = (i + 1) % sortedByCount.length;
+    // 多轮补:每轮按章节大小给每章最多 +1,直到 totalQuota >= remaining 或所有章节已饱和
+    let progressed = true;
+    while (totalQuota < remaining && progressed) {
+      progressed = false;
+      for (const [name, facts] of sortedByCount) {
+        if (totalQuota >= remaining) break;
+        const cur = quotas.get(name) ?? 0;
+        if (cur < facts.length) {
+          quotas.set(name, cur + 1);
+          totalQuota += 1;
+          progressed = true;
+        }
+      }
     }
   }
 
@@ -207,10 +220,20 @@ ${originalText}
     messages: [{ role: 'user', content: prompt }],
   });
   const text = extractText(result);
+  // I-3 修:LLM 偶尔违反 prompt 输出 ```json ... ``` fence;先剥再 parse
+  // 失败时 console.warn 原始 text 头 200 字,方便用户诊断 LLM 输出问题
+  const cleanText = text
+    .trim()
+    .replace(/^```(?:json|JSON)?\r?\n/, '')
+    .replace(/\r?\n```\s*$/, '')
+    .trim();
   let parsed: unknown;
   try {
-    parsed = JSON.parse(text.trim());
+    parsed = JSON.parse(cleanText);
   } catch {
+    console.warn(
+      `[quality-judge] LLM extractFacts 输出非合法 JSON;返回空 facts(quality-judge 此 role 跳过)。原文(head 200):\n${text.slice(0, 200)}`,
+    );
     return [];
   }
   if (!Array.isArray(parsed)) return [];
@@ -242,13 +265,19 @@ export function parseFactJudgeResponse(text: string, fact: KeyFact): FactJudgeRe
   return { fact, state, reasoning };
 }
 
-/** 跑全部 sampled facts 的判定 + 计算 QualityResult */
+/** 跑全部 sampled facts 的判定 + 计算 QualityResult。
+ *  注:Promise.all 不 wrap try/catch — 单条 judgeSingleFact API 失败(网络 / 429)时整个 reject;
+ *  caller(CLI 层)需自行 wrap try/catch 并归类到 .partial 路径。
+ */
 export async function judgeAllFacts(
   client: JudgeClient,
   regeneratedBody: string,
   sampling: SamplingOutput,
   threshold: number = DEFAULT_FIDELITY_THRESHOLD,
 ): Promise<QualityResult> {
+  // TODO(v0.3):Anthropic API rate-limit 防护 — 30 条 fact 全并发可能触发 429
+  // (Tier-1 RPM ~50)。CLI 层加 --concurrency flag,p-limit 包裹。
+  // 当前 v0.2 acceptable:30 并发在 1 秒内瞬时,实际多数路径分散在 judge 时间内。
   const judged = await Promise.all(
     sampling.sampled.map((f) => judgeSingleFact(client, regeneratedBody, f)),
   );

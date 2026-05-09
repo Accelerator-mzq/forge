@@ -1,0 +1,14 @@
+{
+  "name": "forge",
+  "version": "0.3.0",
+  "description": "Spec-driven workflow + skills for Codex CLI",
+  "author": { "name": "msc" },
+  "license": "MIT",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Forge",
+    "shortDescription": "Spec-driven workflow + behavior-shaping skills for Codex",
+    "category": "Coding",
+    "capabilities": ["Interactive", "Read", "Write"]
+  }
+}

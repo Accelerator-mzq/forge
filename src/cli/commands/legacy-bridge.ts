@@ -43,6 +43,12 @@ import {
 } from '../../core/legacy-bridge/budget.js';
 import { computeAnchorHash } from '../../core/legacy-bridge/hash-anchor.js';
 import { readAnchorFile } from '../../core/legacy-bridge/encoding.js';
+import { runMapper, writeMapperDraft, type MapperClient } from '../../core/legacy-bridge/mapper.js';
+import {
+  buildIndex,
+  renderIndexMarkdown,
+  type IndexerClient,
+} from '../../core/legacy-bridge/indexer.js';
 import { FORGE_VERSION } from '../../index.js';
 import type { ForgeConfig } from '../../core/schema/types.js';
 import type { LegacyAnchorRole, RegenQualityFile } from '../../core/legacy-bridge/types.js';
@@ -123,11 +129,87 @@ export function buildLegacyBridgeCommand(): Command {
     .option('--overwrite', '全量重生成(覆盖用户改动,需用户确认)')
     .option('--docs-paths <paths>', '逗号分隔的额外 docs 目录(默认扫 docs/ doc/ document/)')
     .option('--redact-report', '输出每条 redact 规则的命中数(决策 #20)')
-    .action(async () => {
-      // Phase A 骨架,后续 Phase D Task D3 替换为真实实现
-      console.error('forge legacy-bridge map:Phase D 待替换骨架');
-      process.exit(LB_EXIT_GENERAL_ERROR);
-    });
+    .action(
+      async (opts: {
+        merge?: boolean;
+        overwrite?: boolean;
+        docsPaths?: string;
+        redactReport?: boolean;
+      }) => {
+        const projectRoot = process.cwd();
+        const forgeRoot = join(projectRoot, 'forge');
+        const configPath = join(forgeRoot, 'config.yaml');
+        if (!existsSync(configPath)) {
+          console.error('forge/config.yaml 不存在,先跑 forge init');
+          process.exit(LB_EXIT_GENERAL_ERROR);
+        }
+        const config = parseYaml(await readFile(configPath, 'utf8')) as ForgeConfig;
+        const existingAnchors = await loadAnchorsFile(forgeRoot).catch(() => null);
+
+        // mode 决策(M-2):--overwrite 优先;否则 merge(默认)
+        const mode: 'merge' | 'overwrite' = opts.overwrite ? 'overwrite' : 'merge';
+        if (mode === 'overwrite' && existingAnchors) {
+          console.warn(
+            '⚠ --overwrite 将覆盖现有 legacy-anchors.yaml(用户审过的部分会丢);确认请按 Enter,Ctrl-C 取消',
+          );
+          if (process.stdout.isTTY) {
+            await new Promise<void>((resolve) => process.stdin.once('data', () => resolve()));
+          }
+        }
+
+        // ack 检查(决策 #22 LLM opt-in)
+        const ack = await checkAck(forgeRoot, config, existingAnchors);
+        if (!ack.ok) {
+          console.error(renderOptinPrompt(ack.reason, ack.customerDataPaths));
+          process.exit(LB_EXIT_GENERAL_ERROR);
+        }
+
+        // 锁
+        let release: (() => Promise<void>) | undefined;
+        try {
+          release = await acquireLockByPath(forgeRoot, 'legacy-bridge-map', 'legacy-bridge.lock');
+        } catch (err) {
+          if (err instanceof LockHeldError) {
+            console.error(`✗ ${err.message}`);
+            process.exit(LB_EXIT_LOCK_HELD);
+          }
+          throw err;
+        }
+
+        try {
+          // 动态加载 forge-eval/load-env(同 regenerate / sync-check 子命令)
+          const evalLoadEnvPath = new URL('../../../forge-eval/load-env.js', import.meta.url).href;
+          const { loadEnv } = (await import(/* @vite-ignore */ evalLoadEnvPath)) as {
+            loadEnv: () => { anthropicApiKey: string };
+          };
+          const { anthropicApiKey } = loadEnv();
+          // Anthropic overload signature 与 MapperClient 单签名接口不兼容,需 double-cast
+          const client = new Anthropic({ apiKey: anthropicApiKey }) as unknown as MapperClient;
+          const docsPaths = opts.docsPaths
+            ? opts.docsPaths.split(',').map((s) => s.trim())
+            : undefined;
+          const out = await runMapper(client, {
+            projectRoot,
+            docsPaths,
+            scanSrc: true,
+            mode,
+            existing: existingAnchors ?? undefined,
+          });
+          const { yamlPath, mdPath } = await writeMapperDraft(forgeRoot, out);
+          console.log(`✓ wrote ${yamlPath}`);
+          console.log(`✓ wrote ${mdPath}`);
+          console.log(
+            `   新增 ${out.newAnchors.length} 个 anchor(merge 保留 ${out.preservedAnchors.length});unmatched ${out.unmatched.length} 个文件需用户审`,
+          );
+          console.log(
+            '下一步:审改 legacy-anchors-draft.yaml 后跑 mv legacy-anchors-draft.yaml legacy-anchors.yaml',
+          );
+          process.exit(LB_EXIT_OK);
+        } finally {
+          if (release) await release();
+        }
+      },
+    );
 
   cmd
     .command('regenerate')
@@ -369,10 +451,64 @@ export function buildLegacyBridgeCommand(): Command {
     .command('index')
     .description('为每个 anchor 生成 ~100 字 LLM 摘要(决策 #14 Layer 2)')
     .option('--yes', '非 TTY 必须显式 ack')
-    .action(async () => {
-      // Phase A 骨架,后续 Phase D Task D3 替换为真实实现
-      console.error('forge legacy-bridge index:Phase D 待替换骨架');
-      process.exit(LB_EXIT_GENERAL_ERROR);
+    .action(async (_opts: { yes?: boolean }) => {
+      const forgeRoot = join(process.cwd(), 'forge');
+      const configPath = join(forgeRoot, 'config.yaml');
+      if (!existsSync(configPath)) {
+        console.error('forge/config.yaml 不存在,先跑 forge init');
+        process.exit(LB_EXIT_GENERAL_ERROR);
+      }
+      const config = parseYaml(await readFile(configPath, 'utf8')) as ForgeConfig;
+      const anchors = await loadAnchorsFile(forgeRoot).catch((err) => {
+        if (err instanceof LegacyAnchorsError) {
+          console.error(`✗ ${err.message}`);
+          process.exit(LB_EXIT_GENERAL_ERROR);
+        }
+        throw err;
+      });
+      if (!anchors) {
+        console.error('✗ legacy-anchors.yaml 不存在;先跑 forge legacy-bridge map 生成 draft');
+        process.exit(LB_EXIT_GENERAL_ERROR);
+      }
+      const ack = await checkAck(forgeRoot, config, anchors);
+      if (!ack.ok) {
+        console.error(renderOptinPrompt(ack.reason, ack.customerDataPaths));
+        process.exit(LB_EXIT_GENERAL_ERROR);
+      }
+
+      // 锁(同 regenerate:archive + legacy-bridge 双锁)
+      let releaseLb: (() => Promise<void>) | undefined;
+      let releaseArchive: (() => Promise<void>) | undefined;
+      try {
+        releaseArchive = await acquireLockByPath(forgeRoot, 'legacy-bridge-index', 'archive.lock');
+        releaseLb = await acquireLockByPath(forgeRoot, 'legacy-bridge-index', 'legacy-bridge.lock');
+      } catch (err) {
+        if (err instanceof LockHeldError) {
+          console.error(`✗ ${err.message}`);
+          process.exit(LB_EXIT_LOCK_HELD);
+        }
+        throw err;
+      }
+
+      try {
+        const evalLoadEnvPath = new URL('../../../forge-eval/load-env.js', import.meta.url).href;
+        const { loadEnv } = (await import(/* @vite-ignore */ evalLoadEnvPath)) as {
+          loadEnv: () => { anthropicApiKey: string };
+        };
+        const { anthropicApiKey } = loadEnv();
+        // double-cast 同 mapper 子命令
+        const client = new Anthropic({ apiKey: anthropicApiKey }) as unknown as IndexerClient;
+        const entries = await buildIndex(client, anchors);
+        const md = renderIndexMarkdown(entries);
+        const indexPath = join(forgeRoot, 'docs', 'index.md');
+        await mkdir(join(forgeRoot, 'docs'), { recursive: true });
+        await writeFile(indexPath, md, 'utf8');
+        console.log(`✓ wrote ${indexPath} (${entries.length} entries)`);
+        process.exit(LB_EXIT_OK);
+      } finally {
+        if (releaseLb) await releaseLb();
+        if (releaseArchive) await releaseArchive();
+      }
     });
 
   cmd

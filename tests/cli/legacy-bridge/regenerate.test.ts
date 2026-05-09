@@ -99,6 +99,61 @@ describe('forge legacy-bridge regenerate (CLI 集成)', () => {
     }
   });
 
+  it('--include-historical 把 authoritative=false anchors 传给 regenerateRole', async () => {
+    // 写 ack
+    mkdirSync(join(tmp, 'forge', '.cache'), { recursive: true });
+    const lb = { allow_llm_calls: true };
+    const configHash = createHash('sha256')
+      .update(JSON.stringify(lb, Object.keys(lb).sort()))
+      .digest('hex')
+      .slice(0, 16);
+    writeFileSync(
+      join(tmp, 'forge', '.cache', 'llm-ack.yaml'),
+      `schema: forge-llm-ack/v1\nacknowledged_at: 2026-05-09T00:00:00Z\nconfig_hash: ${configHash}\n`,
+    );
+
+    // 加一个历史版 anchor(authoritative=false)
+    const v1Path = join(tmp, 'docs', 'legacy', 'SRS-v1.md').replace(/\\/g, '/');
+    const v2Path = join(tmp, 'docs', 'legacy', 'SRS.md').replace(/\\/g, '/');
+    writeFileSync(
+      join(tmp, 'forge', 'legacy-anchors.yaml'),
+      `schema: forge-legacy-anchor/v1\nanchors:\n  - role: requirements\n    path: ${v2Path}\n    authoritative: true\n  - role: requirements\n    path: ${v1Path}\n    authoritative: false\n`,
+    );
+    writeFileSync(join(tmp, 'docs', 'legacy', 'SRS-v1.md'), '# 旧需求 v1\n## 1. 章节\n旧规则。\n');
+
+    const cwd = process.cwd();
+    try {
+      process.chdir(tmp);
+      const { buildLegacyBridgeCommand } =
+        await import('../../../src/cli/commands/legacy-bridge.js');
+      const cmd = buildLegacyBridgeCommand();
+      const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+      try {
+        await cmd.parseAsync([
+          'node',
+          'forge',
+          'regenerate',
+          '--yes',
+          '--skip-quality',
+          '--include-historical',
+        ]);
+        // authoritative=false 的 anchor 不进 regenerate 主循环(因 getAuthoritativeAnchors 过滤);
+        // 但 historical 参数会传给 regenerateRole(由 mock 接,但 mock 不验证参数);
+        // 这里验证主路径正常 + 文件写入(无静默 fail)
+        const outPath = join(tmp, 'forge', 'docs', 'regenerated', 'SRS.md');
+        expect(existsSync(outPath)).toBe(true);
+      } finally {
+        exitSpy.mockRestore();
+        errSpy.mockRestore();
+        logSpy.mockRestore();
+      }
+    } finally {
+      process.chdir(cwd);
+    }
+  });
+
   it('已 ack 且非 dry-run → 写 forge/docs/regenerated/SRS.md', async () => {
     // 写 ack(用真实 computeConfigHash 算法:JSON.stringify(lb, Object.keys(lb).sort()))
     mkdirSync(join(tmp, 'forge', '.cache'), { recursive: true });

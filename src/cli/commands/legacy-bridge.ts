@@ -39,6 +39,8 @@ import { readAnchorFile } from '../../core/legacy-bridge/encoding.js';
 import { FORGE_VERSION } from '../../index.js';
 import type { ForgeConfig } from '../../core/schema/types.js';
 import type { LegacyAnchorRole, RegenQualityFile } from '../../core/legacy-bridge/types.js';
+import type { RegenerateClient } from '../../core/legacy-bridge/regenerator.js';
+import type { JudgeClient } from '../../core/legacy-bridge/quality-judge.js';
 
 /** 5 子命令通用退出码,与 forge 现有约定一致(spec §4.6) */
 export const LB_EXIT_OK = 0;
@@ -236,9 +238,9 @@ export function buildLegacyBridgeCommand(): Command {
           };
           const { anthropicApiKey } = loadEnv();
           // RegenerateClient / JudgeClient 结构相同;Anthropic overload signature 与单签名接口不兼容,需 double-cast
-          type AnyClient = import('../../core/legacy-bridge/regenerator.js').RegenerateClient &
-            import('../../core/legacy-bridge/quality-judge.js').JudgeClient;
-          const client = new Anthropic({ apiKey: anthropicApiKey }) as unknown as AnyClient;
+          const client = new Anthropic({
+            apiKey: anthropicApiKey,
+          }) as unknown as RegenerateClient & JudgeClient;
 
           const regenLicense = config.legacy_bridge?.regen_license ?? 'derived-from-source';
           const docsDir = join(forgeRoot, 'docs', 'regenerated');
@@ -249,10 +251,18 @@ export function buildLegacyBridgeCommand(): Command {
 
           for (const anchor of authoritativeAnchors) {
             console.log(`→ regenerating role=${anchor.role} (model=claude-sonnet-4-6)`);
+            // I-3 修:--include-historical 时收集同 role 的 authoritative=false anchors 作背景输入
+            const historical = opts.includeHistorical
+              ? (anchors.anchors ?? []).filter(
+                  (a) => a.role === anchor.role && a.authoritative === false,
+                )
+              : undefined;
+
             const out = await regenerateRole(
               {
                 role: anchor.role,
                 authoritative: anchor,
+                historical,
                 forgeVersion: FORGE_VERSION,
                 regenLicense,
                 globalRedactRules: anchors.redact,
@@ -324,6 +334,8 @@ export function buildLegacyBridgeCommand(): Command {
           console.log(`✓ legacy-anchors.yaml hash + last_regenerated 已更新`);
 
           // P7-02 修复:任一 role 不达标 → exit 2(决策 #16 / spec §3.1 line 339,无 retry)
+          // 注:process.exit 在 try 块内调用,但 finally 仍会跑(Node 行为);
+          // anyQualityFailed 路径锁释放由 finally 负责(release 函数 idempotent,二次 rm 不存在文件不抛)
           if (anyQualityFailed) {
             process.exit(LB_EXIT_BUSINESS_RULE_FAIL);
           }
@@ -331,7 +343,7 @@ export function buildLegacyBridgeCommand(): Command {
           // 捕获 RegenOutputError / 其他;先释放锁再抛
           if (err instanceof RegenOutputError) {
             console.error(`✗ ${err.message}`);
-            // 释放锁 + exit 2;finally 块仍会再次释放(idempotent — releaseLb/Archive 检查 existsSync)
+            // 释放锁并设 undefined → finally 块因此跳过重复释放(避免 idempotent 依赖)
             if (releaseLb) await releaseLb();
             if (releaseArchive) await releaseArchive();
             releaseLb = undefined;

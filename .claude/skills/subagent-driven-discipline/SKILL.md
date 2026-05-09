@@ -7,7 +7,7 @@ metadata:
   author: forgeue project (extracted to generic)
   version: "1.0-generic"
   scenario_subtype_count: 28
-  case_study_count: 2
+  case_study_count: 3
   retrospect_protocol: trigger-type-matrix(5 types × per-type intensity)
 ---
 
@@ -624,6 +624,92 @@ git update-ref refs/heads/<wrong-branch> <prior-base-sha>
 
 ---
 
+### Case 03: forge-repo / Plan 7 Phase B3 / quality-judge 分层抽样 + CLI regenerate
+
+**Date**:2026-05-09
+**Trigger Type**:Type 1(3-stage full retrospect)
+**Project context**:TS/Node monorepo,Plan 7 Phase B3 落 2 task(quality-judge.ts 抽样器 + CLI regenerate 子命令填实);B3.2 跨 8 模块 wire(ack/budget/lock/regenerator/quality-judge/hash-anchor/encoding/loadEnv)
+
+**Subagent dispatch**:
+| Subagent | Scenario subtype(§1.X.Y)| Model | $cost | Verdict |
+|---|---|---|---|---|
+| **controller pre-dispatch signature check** | direct | controller(opus)| ~$0 | 8 模块 import 真签名核查 — 全 OK,无 latent bug;但 plan inline `from '../../../forge-eval/load-env.js'` 在 src/ rootDir=src 边界外,**未抓到此 latent bug**(Lesson 7) |
+| B3.1 implementer | §1.1.1 Mechanical(plan inline 完整) | haiku | ~$0.10 | DONE |
+| B3.1 spec_reviewer | §1.2.1 string matching | sonnet | ~$0.10 | ✅ |
+| B3.1 code_quality_reviewer | §1.3.4 runtime correctness(抽样算法 + Promise.all) | sonnet | ~$0.30 | ⚠️ 3 Important + 5 Minor(I-1 章节数>remaining quota 超 / I-2 dead modulo / I-3 LLM fence silent) |
+| B3.1 round 2 implementer | §1.1.1 Mechanical | haiku | ~$0.10 | DONE — 修 5 fix |
+| B3.1 round 2 re-review | §1.2.2 structural | haiku(light)| ~$0.05 | ✅ |
+| B3.2 implementer | §1.1.3 Multi-file integration(8 模块 wire) | sonnet | ~$0.40 | DONE_WITH_CONCERNS — 报告 3 self-finding(plan rootDir 越界 / Anthropic overload / 测试简化 --skip-quality) |
+| B3.2 spec_reviewer | §1.2.4 acceptance(复杂业务规则) | sonnet | ~$0.15 | ✅ with notes |
+| B3.2 code_quality_reviewer | §1.3.4 runtime + multi-file integration risks | sonnet | ~$0.50 | ⚠️ 3 Important + 5 Minor(I-3 --include-historical 死代码 / I-1 注释 / M-3 注释错) |
+| B3.2 round 2 implementer | §1.1.3 Multi-file integration | sonnet | ~$0.30 | DONE — 修 4 fix |
+| B3.2 round 2 re-review | §1.2.2 structural | haiku(light)| ~$0.05 | ✅ |
+| Phase final reviewer | cross-task | sonnet | ~$0.50 | ⚠️ Ready with notes(C-1 forge-eval prod build 失效是 release 前阻塞,非 PR 阻塞) |
+
+**Real issues caught / failed**:
+| Issue | Severity | Caught by | Scenario subtype 验证 |
+|---|---|---|---|
+| **Plan inline 静态 import `forge-eval/load-env.js` 跨 `tsconfig.rootDir=src` 边界 → typecheck fail** | **Critical(plan latent bug 必修)**| B3.2 implementer self-review(typecheck 必败) | **NEW pattern D** — controller pre-dispatch 签名核查只看 export 真签名,**未查 tsconfig rootDir 跨包边界**;此类 bug Sonnet implementer 在写代码时被 typecheck 立即抓到自修(用 dynamic import + new URL workaround) |
+| **Plan inline 假设 Anthropic SDK 类直接传 RegenerateClient/JudgeClient(类型不兼容,SDK 是重载函数)** | Critical(typecheck blocker) | B3.2 implementer | §1.3.4 — Sonnet implementer 用 `as unknown as AnyClient` double-cast 自修;Mechanical haiku 大概率被卡 |
+| Plan B2.3 测试 fixture computeConfigHash 假设错(plan 用 `JSON.stringify(..., ['allow_llm_calls'])` vs 真算法 `Object.keys(lb).sort()`)| Important | B3.2 implementer | implementer 在跑测试时 ack 不通过 → 看 ack.ts 源码 → 发现真算法 → 修 fixture |
+| **stratifiedSample 章节数 > remaining 时 `Math.max(1)` 强制每章 1 → sampled 超 total 承诺** | Important(plan inline 设计 bug)| B3.1 sonnet code_quality(实测 5 章 × 1 nc + total=4 → sampled=5 > 4)| §1.3.4 — sonnet runtime correctness 兜底 |
+| stratifiedSample dead modulo 条件 `i < sortedByCount.length` 永真 + 语义不清 | Important(maintainability)| B3.1 sonnet code_quality(reading 算法发现) | §1.3.3 |
+| extractFactsFromOriginal 不剥 ```json``` fence → JSON.parse 静默失败 → 返 [] → CLI quality-judge silent skip → passed=true 错误结论 | Important(silent failure 可观察 quality 错误)| B3.1 sonnet code_quality | §1.3.4 |
+| **`--include-historical` flag 声明但 action 完全不用 → silent no-op** | **Important(用户可见 silent)**| B3.2 sonnet code_quality | §1.3.4 — 不只 spec 路径 verify,还查 option 与 action 引用一致性 |
+| RegenOutputError catch 注释错(说"finally 仍会再次释放"但实际 undefined 已跳过) | Minor(misleading 注释)| B3.2 sonnet code_quality | §1.3.1 |
+| spec_reviewer **未抓**到 `--include-historical` 死代码(spec 路径全 PASS,但 reviewer 默认 spec 引用即 = 实现引用) | Important(spec_reviewer 范围) | controller cross-verify code_quality reviewer 后认 | **§2.2 spec-reviewer prompt 需扩**:除 import / signature / commit message,还该 grep flag 实际引用次数 |
+| B3.2 implementer 测试简化用 `--skip-quality`(plan 测试 `--yes` 不含 skip-quality;implementer 加 skip 避 mock 复杂)| Minor(test scope reduction;CLI 集成层未覆盖默认 quality 路径) | B3.2 spec_reviewer notes | 决策:acceptable — quality-judge 路径已有 unit 16 fence 覆盖;CLI 集成层用 skip 简化;Phase F E2E 补 happy-path quality |
+| **C-1 forge-eval/load-env.js 动态 import 在 prod build dist/ 不含 forge-eval → ERR_MODULE_NOT_FOUND** | **Phase F release 前必须修**(spike 期 vi.mock 透明) | Phase final reviewer | **NEW pattern E** — dynamic import workaround 绕 typecheck 但不绕 prod build runtime;留 release 前 follow-up |
+
+**Lesson**(reinforce / new pattern / 边界 refinement):
+
+1. **NEW pattern D — controller pre-dispatch signature check 不能只看 export,还要看 build/runtime 边界**
+   - B2 的 hash-anchor 已实证 plan inline 用错 `computeContentHash` 函数签名(参数类型);controller pre-dispatch 抓到。
+   - B3.2 的 plan inline `from '../../../forge-eval/load-env.js'` 函数 export 真存在,签名也对 — 但 `tsconfig.rootDir=src` 限制 src/ 内不可跨包静态 import,跨包 import 必 typecheck fail。这是 **buildconfig 级 latent bug**,不是 export-level。
+   - controller 当时 grep `loadEnv` export 存在 → 通过签名核;但**未读 tsconfig.json 看 rootDir / include 限制**。
+   - **修复 §3 cross-scenario discipline**:dispatch B-tier(`§1.1.3 Multi-file integration`)前,controller 必须 read 当前 `tsconfig.json` `rootDir / include / exclude` 段;若 plan inline 跨包(import path 含 `../../../` 或类似)+ 跨 rootDir 边界 → 标 NEEDS_REWRITE 给 implementer 提供 workaround 或 plan 先调 build config。
+   - 加 `§6 Pattern catalog` 行(see below)。
+
+2. **REINFORCE — Plan inline latent bug 模式累计 7 次**(Case 01: 1 / Case 02: 4 / Case 03: 3+);Sonnet code_quality + Sonnet implementer 兜底机制有效
+   - B3.1 stratifiedSample quota 超(plan 算法设计 bug)→ Sonnet code_quality 兜底
+   - B3.1 dead modulo(plan 实现细节 bug)→ Sonnet code_quality 兜底
+   - B3.1 extractFacts fence(plan 假设 LLM 100% 守 prompt,真不会)→ Sonnet code_quality 兜底
+   - B3.2 plan inline rootDir 越界(plan 静态 import)→ Sonnet implementer 自修(dynamic import workaround)
+   - B3.2 plan inline Anthropic SDK 类型不兼容(plan 假设 client 直传 RegenerateClient)→ Sonnet implementer 自修(double-cast)
+   - B3.2 plan inline 测试 fixture computeConfigHash 算法假设错 → Sonnet implementer 自修
+   - **强化 §1.1.3 Multi-file integration**:choose Sonnet 是 mandatory,因为多模块 wire 时 plan inline 几乎必含 latent bug;Sonnet implementer 自带 self-fix 能力是关键(Haiku Mechanical 在此场景大概率 BLOCKED)。
+
+3. **NEW pattern F — `--option` flag 死代码(spec_reviewer 漏)**
+   - B3.2 `--include-historical` declared 但 action 完全不用,silent no-op。
+   - spec_reviewer 看 imports + signatures + commit message 全 PASS — **但未 grep flag 实际引用次数**。
+   - code_quality reviewer 兜底抓到。
+   - **修订 §2.2 spec-reviewer playbook**:涉及 CLI flag/option 的 spec verify,Pre-verified Data 段 controller 应跑 `grep -c "opts\\.<flagName>" <action-file>` 给 reviewer;若 grep 返 0 则 reviewer 标 missing implementation。或 §1.2.4 acceptance reviewer 显式增加"flag 在 action 内被引用"verify 项。
+
+4. **NEW pattern E — Dynamic import workaround 可绕 typecheck,但留 prod build 风险**
+   - B3.2 用 `new URL(..., import.meta.url).href` + `await import()` workaround 跨 rootDir 边界;dev/test(vi.mock 透明)通过,但 prod build dist/ 不含 forge-eval/ → ERR_MODULE_NOT_FOUND
+   - 类似 monkey patch / SDK 类型 cast — 解决短期问题但留下 release-time 风险。Phase final reviewer 必须捕到此类 spike workaround 标 release 前 follow-up
+   - **§3 cross-scenario discipline 加 "spike workaround tracker"**:任何 dynamic import / `as unknown as` cast / `// @ts-ignore` / `/* @vite-ignore */` 等 escape hatch — Phase final reviewer 必报告 + PR description 必标 release 前 follow-up
+
+5. **REINFORCE — implementer 测试断言 silent 降级 Pattern B 第 2 次出现**(Case 02 Lesson 2 + Case 03 B3.2 `--skip-quality`)
+   - B3.2 round 1 implementer 给第 3 fence 加 `--skip-quality` 简化(plan 测试本来 `--yes` 不带);自报 self-finding,理由"避 mock 复杂"
+   - **与 Case 02 Pattern B 区别**:Pattern B 是 silent 改 assertion(`>0` → `>=0` 永真);本次是 silent 改 test scope(加 flag 跳过路径)
+   - 决策:作为 self-reported finding 在合理范围(quality-judge 路径已有 16 unit fence 覆盖,集成层不强求重复) — 但**应 spec_reviewer 当场报 with notes,而非 controller cross-verify 后才发现**
+   - **修订 §2.2 spec-reviewer playbook**:Pre-verified Data 段对比 plan test code vs 实际 test code,任何 flag/assertion 增减 → 标 spec compliant with notes(severity Low / informational)
+
+6. **REINFORCE — controller cross-verify reviewer 实测验证模式**(Case 02 Lesson 3 重现)
+   - B3.1 sonnet code_quality 报"`Math.max(1, proportionalQuota)` 在 5 章 × 1 nc + total=4 时 sampled=5 > 4" — controller 对照算法逻辑核 → 真;接受 fix
+   - B3.2 sonnet code_quality 报"`forge-eval/load-env.js` 路径 prod 失效" — controller `cat tsconfig.json` 看 rootDir + include → 真;C-1 标 release 前 follow-up
+   - B3.2 sonnet code_quality 报"gray-matter false positive `---\n\n# 标题`" 这是 B2.4 模式;B3 不重现因 frontmatter 检测已修
+   - **强化 §3.2**:reviewer 实测 / 反例 验证 claim 可信度高;controller 对照算法 + buildconfig + sister 文件后接受
+
+**Cost vs all-Opus alternative**:
+- 实际:4 implementer × 2 round(haiku/sonnet 各)+ 6 reviewer(sonnet ~$0.10-0.50)+ final reviewer ~$0.50 + retrospect ~$0.50 ≈ **$3.20**
+- 全 Opus 假设:4 implementer + 6 reviewer + final + retrospect ≈ **$15-25**
+- 节省 ratio:~80%
+- 质量:2 task 全 commit + 全量 399 + 1 skipped + PR #16 已开 + final ⚠️ ready with notes(C-1 forge-eval 留 Phase F follow-up)
+
+---
+
 ## §6 Pattern Catalog(failure mode → scenario subtype + recovery)
 
 | Subagent failure mode | Root cause(scenario subtype 误配)| Prevention | Recovery |
@@ -640,6 +726,9 @@ git update-ref refs/heads/<wrong-branch> <prior-base-sha>
 | **Prettier(或同类 formatter)normalize 破坏 binary / 行尾敏感 fixture(see §5 Case 02 Pattern A)** | `.prettierignore` 缺 fixture 路径排除;`.gitattributes` 不阻止 formatter 处理(formatter 按 file extension 判断,.md 默认进 prettier) | `.prettierignore` 显式加 fixture 目录(`tests/fixtures/<scope>/`);chore commit 单独提;dispatch implementer prompt 加注 "若跑 pnpm format 后 fixture 字节变化 → 走 .prettierignore" | `git restore <fixture>` 还原 + `.prettierignore` 加排除 + chore commit;controller cross-verify `xxd <fixture>` 确认字节符合预期 |
 | **Implementer 测试断言 silent 降级(`>0` 改 `>=0` 永真;see §5 Case 02 Pattern B)** | fixture/环境不符 plan 假设时 implementer 优先降级 assertion 让测试通过,而非 BLOCKED 报告;§2.1 prompt "When Stuck" 缺测试断言降级 = BLOCKED 的明确约束 | §2.1 implementer prompt "When Stuck" 段强化:**测试 assertion 降级 = BLOCKED 状态**,不可静默接受;Self-review checklist 加"是否有 assertion 从 plan 原样改为永真断言?有 → BLOCKED" | controller cross-verify implementer self-review 报告中的 Observation;若发现 `>=0` / `not.toThrow()` 永真断言 → inline fix 改回真断言 + 加 fixture/parameter 让真命中 |
 | **`spec-reviewer` 路径 hallucinate(假设根目录 vs 子目录路径;see §5 Case 02 Pattern C)** | §1.2.1 string matching reviewer 在多目录 / scoped fixture 时假设默认根;Pre-verified Data 段未显式标完整路径让 reviewer 推 | §2.2 spec-reviewer prompt:涉及子目录 fixture 时,Pre-verified Data 段显式标完整路径(`tests/fixtures/<scope>/<file>`),不要让 reviewer 自己推 | controller cross-verify reviewer 引用的路径(实际 `cat <path>` 看是否真不存在);若是 reviewer 错路径,override verdict 标 false positive |
+| **Plan inline 跨 build/runtime 边界(rootDir / outDir / package boundary)— controller pre-dispatch signature check 漏(see §5 Case 03 Pattern D)**| controller 只 grep export + signature,**未读 tsconfig.json `rootDir/include/exclude` 看 import path 是否跨边界**;此类 latent bug typecheck 立刻抓但不在 controller 视野 | §1.1.3 Multi-file integration dispatch 前 mandatory step:**read tsconfig.json + 检查 plan inline import path 是否跨 rootDir(典型征兆:含 `../../../` + 跨包名)** → 跨边界 → 标 NEEDS_REWRITE 给 implementer dynamic import workaround 或调 build 配置 | Sonnet implementer 自修(dynamic import + new URL workaround;但留 prod build 风险 — see Pattern E) |
+| **CLI flag/option 死代码(option declared 但 action 不引用 → silent no-op;see §5 Case 03 Pattern F)**| §1.2.x spec_reviewer 只看 imports + signature + commit,未 grep flag 在 action 内引用次数 | controller pre-dispatch 跑 `grep -c "opts\\.<flagName>" <action-file>` 给 spec-reviewer;§1.2.4 acceptance reviewer 加"flag 实际被 action 引用"verify 项 | code_quality reviewer 兜底抓到;round 2 implementer 实现 flag 的真实逻辑 |
+| **Spike workaround 留 prod build 风险(dynamic import / `as unknown as` / `// @ts-ignore` / `/* @vite-ignore */` 解 typecheck 但不解 runtime;see §5 Case 03 Pattern E)**| 短期 unblock 但 dist/ build 不含跨包源 → ERR_MODULE_NOT_FOUND / runtime type error | Phase final reviewer **必扫**所有 escape hatch(grep `as unknown as / @ts-ignore / @vite-ignore / await import\\(`)→ PR description 必标 "release 前 follow-up: <issue>";不阻塞 PR merge 但记入 Phase F gate | Phase F release 前修(迁移到 src/ 内 / 改 build script 复制 / 改正式 env 加载) |
 
 ---
 

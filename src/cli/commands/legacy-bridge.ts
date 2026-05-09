@@ -3,13 +3,44 @@
 // spec §2.1 子命令一览 + 决策 #22 LLM opt-in 流程
 
 import { Command } from 'commander';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { parse as parseYaml } from 'yaml';
-import { writeAck } from '../../core/legacy-bridge/ack.js';
-import { loadAnchorsFile } from '../../core/legacy-bridge/anchors.js';
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
+import Anthropic from '@anthropic-ai/sdk';
+import { acquireLockByPath, LockHeldError } from '../../core/archive/lock.js';
+import {
+  loadAnchorsFile,
+  getAuthoritativeAnchors,
+  LegacyAnchorsError,
+} from '../../core/legacy-bridge/anchors.js';
+import { writeAck, checkAck, renderOptinPrompt } from '../../core/legacy-bridge/ack.js';
+import { formatRedactReport } from '../../core/legacy-bridge/redact.js';
+import {
+  regenerateRole,
+  REGEN_FILENAMES,
+  RegenOutputError,
+  METADATA_ONLY_ROLES,
+} from '../../core/legacy-bridge/regenerator.js';
+import {
+  stratifiedSample,
+  judgeAllFacts,
+  formatQualityReport,
+  extractFactsFromOriginal,
+} from '../../core/legacy-bridge/quality-judge.js';
+import {
+  estimateRegenerateCost,
+  REGEN_WARN_USD,
+  checkBudgetGate,
+  countdown,
+} from '../../core/legacy-bridge/budget.js';
+import { computeAnchorHash } from '../../core/legacy-bridge/hash-anchor.js';
+import { readAnchorFile } from '../../core/legacy-bridge/encoding.js';
+import { FORGE_VERSION } from '../../index.js';
 import type { ForgeConfig } from '../../core/schema/types.js';
+import type { LegacyAnchorRole, RegenQualityFile } from '../../core/legacy-bridge/types.js';
+import type { RegenerateClient } from '../../core/legacy-bridge/regenerator.js';
+import type { JudgeClient } from '../../core/legacy-bridge/quality-judge.js';
 
 /** 5 子命令通用退出码,与 forge 现有约定一致(spec §4.6) */
 export const LB_EXIT_OK = 0;
@@ -99,12 +130,233 @@ export function buildLegacyBridgeCommand(): Command {
     .option('--include-historical', '把 authoritative=false 历史版作背景(默认关)')
     .option('--redact-report', '输出每条 redact 规则的命中数')
     .option('--yes', '非 TTY 必须显式 ack 高 cost 才继续(M-4)')
-    .option('--skip-quality', '跳过 quality-judge 双 LLM 抽样(P7-02 默认跑)')
-    .action(async () => {
-      // Phase A 骨架,后续 Phase B3.2 Task 替换为真实实现
-      console.error('forge legacy-bridge regenerate:Phase B2/B3 待替换骨架');
-      process.exit(LB_EXIT_GENERAL_ERROR);
-    });
+    .option('--skip-quality', '跳过 quality-judge 双 LLM 抽样(性能 / 调试用;P7-02 默认跑)')
+    .action(
+      async (opts: {
+        role?: LegacyAnchorRole;
+        dryRun?: boolean;
+        includeHistorical?: boolean;
+        redactReport?: boolean;
+        yes?: boolean;
+        skipQuality?: boolean;
+      }) => {
+        const forgeRoot = join(process.cwd(), 'forge');
+        const configPath = join(forgeRoot, 'config.yaml');
+        if (!existsSync(configPath)) {
+          console.error('forge/config.yaml 不存在,先跑 forge init');
+          process.exit(LB_EXIT_GENERAL_ERROR);
+        }
+        let config: ForgeConfig;
+        try {
+          config = parseYaml(await readFile(configPath, 'utf8')) as ForgeConfig;
+        } catch (e) {
+          console.error(`forge/config.yaml 格式错误:${(e as Error).message}`);
+          process.exit(LB_EXIT_GENERAL_ERROR);
+        }
+        const anchors = await loadAnchorsFile(forgeRoot).catch((err) => {
+          if (err instanceof LegacyAnchorsError) {
+            console.error(`✗ ${err.message}`);
+            process.exit(LB_EXIT_GENERAL_ERROR);
+          }
+          throw err;
+        });
+        if (!anchors) {
+          console.error(
+            '✗ legacy-anchors.yaml 不存在;请先跑 forge legacy-bridge map 生成 draft 后审改',
+          );
+          process.exit(LB_EXIT_GENERAL_ERROR);
+        }
+
+        // ack 检查(决策 #22)
+        const ackResult = await checkAck(forgeRoot, config, anchors);
+        if (!ackResult.ok) {
+          console.error(renderOptinPrompt(ackResult.reason, ackResult.customerDataPaths));
+          process.exit(LB_EXIT_GENERAL_ERROR);
+        }
+
+        // 估算 cost + budget gate
+        // P7-03 修复:过滤掉 metadata-only role(spec §7 line 909)
+        const authoritativeAnchors = getAuthoritativeAnchors(anchors)
+          .filter((a) => !METADATA_ONLY_ROLES.includes(a.role))
+          .filter((a) => !opts.role || a.role === opts.role);
+        if (authoritativeAnchors.length === 0) {
+          console.error(
+            opts.role
+              ? `✗ role '${opts.role}' 在 legacy-anchors.yaml 无 authoritative anchor`
+              : '✗ legacy-anchors.yaml 无任何 authoritative=true 的 anchor',
+          );
+          process.exit(LB_EXIT_GENERAL_ERROR);
+        }
+        const estimated = estimateRegenerateCost(authoritativeAnchors.length);
+        const gate = checkBudgetGate(estimated, REGEN_WARN_USD, opts.yes ?? false);
+        console.error(gate.message);
+        if (!gate.proceed) {
+          process.exit(gate.exitCode);
+        }
+        if (gate.requiresCountdown && !opts.dryRun) {
+          await countdown(5);
+        }
+
+        if (opts.dryRun) {
+          // §4.4 dry-run:不调 LLM
+          for (const a of authoritativeAnchors) {
+            console.log(`[dry-run] role=${a.role} path=${a.path}`);
+          }
+          process.exit(LB_EXIT_OK);
+        }
+
+        // 锁(决策 #23):同时获 archive.lock + legacy-bridge.lock,顺序固定
+        let releaseArchive: (() => Promise<void>) | undefined;
+        let releaseLb: (() => Promise<void>) | undefined;
+        try {
+          releaseArchive = await acquireLockByPath(
+            forgeRoot,
+            'legacy-bridge-regenerate',
+            'archive.lock',
+          );
+          releaseLb = await acquireLockByPath(
+            forgeRoot,
+            'legacy-bridge-regenerate',
+            'legacy-bridge.lock',
+          );
+        } catch (err) {
+          if (err instanceof LockHeldError) {
+            console.error(`✗ ${err.message}`);
+            // I-fix:即使一把已 acquired,catch 路径要释放它
+            if (releaseArchive) await releaseArchive();
+            process.exit(LB_EXIT_LOCK_HELD);
+          }
+          throw err;
+        }
+
+        try {
+          // 运行时动态加载 forge-eval/load-env(避免 src/ rootDir 静态分析边界限制;
+          // 使用 Function constructor 跳过 TS static import trace)
+          const evalLoadEnvPath = new URL('../../../forge-eval/load-env.js', import.meta.url).href;
+          const { loadEnv } = (await import(/* @vite-ignore */ evalLoadEnvPath)) as {
+            loadEnv: () => { anthropicApiKey: string };
+          };
+          const { anthropicApiKey } = loadEnv();
+          // RegenerateClient / JudgeClient 结构相同;Anthropic overload signature 与单签名接口不兼容,需 double-cast
+          const client = new Anthropic({
+            apiKey: anthropicApiKey,
+          }) as unknown as RegenerateClient & JudgeClient;
+
+          const regenLicense = config.legacy_bridge?.regen_license ?? 'derived-from-source';
+          const docsDir = join(forgeRoot, 'docs', 'regenerated');
+          await mkdir(docsDir, { recursive: true });
+
+          // P7-02 修复:跨 role 汇总 quality 状态;循环结束后统一 exit 2(决策 #16:无 retry)
+          let anyQualityFailed = false;
+
+          for (const anchor of authoritativeAnchors) {
+            console.log(`→ regenerating role=${anchor.role} (model=claude-sonnet-4-6)`);
+            // I-3 修:--include-historical 时收集同 role 的 authoritative=false anchors 作背景输入
+            const historical = opts.includeHistorical
+              ? (anchors.anchors ?? []).filter(
+                  (a) => a.role === anchor.role && a.authoritative === false,
+                )
+              : undefined;
+
+            const out = await regenerateRole(
+              {
+                role: anchor.role,
+                authoritative: anchor,
+                historical,
+                forgeVersion: FORGE_VERSION,
+                regenLicense,
+                globalRedactRules: anchors.redact,
+              },
+              client,
+            );
+
+            if (opts.redactReport) {
+              console.log(formatRedactReport(out.redactReport));
+            }
+
+            // P7-02 修复:regenerate 内置双 LLM 抽样验证(spec §3.1 line 336-339 / 决策 #16)
+            // 默认走 quality-judge;--skip-quality 时跳过(性能 / 调试用)
+            const outPath = join(docsDir, REGEN_FILENAMES[anchor.role]);
+            const partialPath = `${outPath}.partial`;
+            const qualityYamlPath = `${outPath}.partial.yaml`;
+            if (!opts.skipQuality) {
+              const originalText = (await readAnchorFile(anchor.path)).text;
+              console.log(`→ extracting key facts from ${anchor.path} (model B)`);
+              const facts = await extractFactsFromOriginal(client, originalText);
+              if (facts.length === 0) {
+                console.warn(
+                  `⚠ 无法从原文抽取 key facts(LLM 输出非合法 JSON);quality-judge 跳过此 role`,
+                );
+              } else {
+                const sampling = stratifiedSample({ allFacts: facts });
+                const quality = await judgeAllFacts(client, out.body, sampling);
+                if (!quality.passed) {
+                  anyQualityFailed = true;
+                  // 写 .partial + quality YAML(spec §4.3 不变量)
+                  await writeFile(partialPath, out.fullMarkdown, 'utf8');
+                  const qualityFile: RegenQualityFile = {
+                    schema: 'forge-regen-quality/v1',
+                    role: anchor.role,
+                    generated_at: new Date().toISOString(),
+                    result: quality,
+                  };
+                  await writeFile(qualityYamlPath, stringifyYaml(qualityFile), 'utf8');
+                  console.error(
+                    `✗ role=${anchor.role} 保真率不达标:total=${(quality.total_rate * 100).toFixed(1)}%, critical=${(quality.critical_rate * 100).toFixed(1)}%`,
+                  );
+                  console.error(formatQualityReport(anchor.role, quality));
+                  console.error(
+                    `✗ 已写 ${partialPath} 与 ${qualityYamlPath};用户决策:接受 .partial / 重写 prompt 重跑 / 手补`,
+                  );
+                  // 不立即 exit,完成所有 role 后统一 exit 2(决策 #16:无 retry)
+                  continue;
+                }
+                console.log(
+                  `✓ quality 达标:total=${(quality.total_rate * 100).toFixed(1)}%, critical=${(quality.critical_rate * 100).toFixed(1)}%`,
+                );
+              }
+            }
+
+            // 写产物
+            await writeFile(outPath, out.fullMarkdown, 'utf8');
+            console.log(
+              `✓ wrote ${outPath} (${out.tokensUsed} tokens, ~$${out.estimatedCost.toFixed(3)})`,
+            );
+
+            // 更新 anchor 的 hash + last_regenerated(写回 yaml)
+            const hash = await computeAnchorHash(anchor.path);
+            anchor.hash = hash ?? anchor.hash;
+            anchor.last_regenerated = new Date().toISOString();
+          }
+
+          // 写回 anchors.yaml(更新 hash + last_regenerated)
+          await writeFile(join(forgeRoot, 'legacy-anchors.yaml'), stringifyYaml(anchors), 'utf8');
+          console.log(`✓ legacy-anchors.yaml hash + last_regenerated 已更新`);
+
+          // P7-02 修复:任一 role 不达标 → exit 2(决策 #16 / spec §3.1 line 339,无 retry)
+          // 注:process.exit 在 try 块内调用,但 finally 仍会跑(Node 行为);
+          // anyQualityFailed 路径锁释放由 finally 负责(release 函数 idempotent,二次 rm 不存在文件不抛)
+          if (anyQualityFailed) {
+            process.exit(LB_EXIT_BUSINESS_RULE_FAIL);
+          }
+        } catch (err) {
+          // 捕获 RegenOutputError / 其他;先释放锁再抛
+          if (err instanceof RegenOutputError) {
+            console.error(`✗ ${err.message}`);
+            // 释放锁并设 undefined → finally 块因此跳过重复释放(避免 idempotent 依赖)
+            if (releaseLb) await releaseLb();
+            if (releaseArchive) await releaseArchive();
+            releaseLb = undefined;
+            releaseArchive = undefined;
+            process.exit(LB_EXIT_BUSINESS_RULE_FAIL);
+          }
+          throw err;
+        } finally {
+          if (releaseLb) await releaseLb();
+          if (releaseArchive) await releaseArchive();
+        }
+      },
+    );
 
   cmd
     .command('index')

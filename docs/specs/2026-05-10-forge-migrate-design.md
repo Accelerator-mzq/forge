@@ -1,12 +1,23 @@
 # Forge Migrate(openspec / superpowers 项目搬运)设计文档
 
 - **作者**:msc(由 Claude Opus 4.7 协助 brainstorming)
-- **日期**:2026-05-10
+- **日期**:2026-05-10(v2 — 经 Codex 对抗性审查 + 内部代码核实修订)
 - **状态**:草案,待用户审阅
 - **关联**:
   - 主 spec [`2026-05-04-forge-fusion-design.md`](2026-05-04-forge-fusion-design.md)(forge 工作目录契约 + skill/command 体系)
   - v0.3 plugin 设计 [`2026-05-09-v0.3-plugin-migration-design.md`](2026-05-09-v0.3-plugin-migration-design.md)(plugin 形态)
-  - brownfield 设计 [`2026-05-05-brownfield-onboarding-design.md`](2026-05-05-brownfield-onboarding-design.md)(legacy-bridge 工具复用)
+  - brownfield 设计 [`2026-05-05-brownfield-onboarding-design.md`](2026-05-05-brownfield-onboarding-design.md)(legacy-bridge 工具复用边界)
+
+**v1 → v2 修订摘要**(对照 codex 40 条审查 + 7 条代码核实):
+
+- M9 复用边界收紧:**不反向调** legacy-bridge 的 ack/budget/quality(brownfield 硬编码、文案 / 公式 / 原文假设全部不兼容);只复用 `redact.ts`;migrate 写专属 `ack/budget/quality`
+- M10 transformer 升级 markdown-aware(fenced code block 状态机 + 表格 cell 跳过);不再纯字符串正则
+- 新增 M13:archive 落点强制 validate 通过,缺件不允许进 archive 子目录
+- 新增 M14:trace journal 模式(每步 fsync;crash 可基于已写 trace 反向回滚)
+- 新增 M15:quality 空 facts 不视为通过 + source-bundle 策略(superpowers 缺件场景的原文构造)
+- 新增 M16:bundled plugin 默认 `--regenerate` 自动退化为 `--no-regenerate`
+- 多处规则细化:中文冒号修(`[:|:]` 错→`[:：]`)、tasks 三层编号支持、git keyword 严格化、slug 安全归一化、archive 单 task 阈值
+- scope 重估:8.5 工日 → 14 工日
 
 ---
 
@@ -16,16 +27,20 @@
 | --- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | M1  | 场景定位                      | **搬运用户已有项目仓库**(`openspec/` 或 `docs/superpowers/{specs,plans}/`)→ forge 工作目录;不做"双读 fallback",不做"上游同步追新"                                                                    |
 | M2  | superpowers 源含义            | 用户仓库被 superpowers plugin 用过的产物(`docs/superpowers/specs/<date>-<topic>-design.md` + `docs/superpowers/plans/<date>-<topic>-plan.md`)                                                          |
-| M3  | 迁移类型(双档)              | 默认走纯结构搬运 + transformer;`--regenerate` 调 LLM 补缺件。**两源默认都开 `--regenerate`**(经实测两源都缺关键件,关默认体验差);`--no-regenerate` 反向关闭                                            |
+| M3  | 迁移类型(双档)              | 默认 `--regenerate`(LLM 补缺件);`--no-regenerate` 走纯结构 + transformer + `[needs-fix]` 标记                                                                                                          |
 | M4  | CLI 入口                      | 独立 `forge migrate <source>`(不扩 `legacy-bridge`,语义不混)                                                                                                                                         |
-| M5  | superpowers 落点              | design+plan 配对包成 `forge/changes/<slug>/{design.md, tasks.md}`;**不写 placeholder**;缺 proposal/specs 由 `--regenerate` 补,关闭则 `[needs-fix]`                                                    |
-| M6  | 已归档判定                    | 交互确认表 + 自动推测(plan checkbox 完成度 ≥ 95% **或** `git log` commit msg 含 close/complete/done/finish/archive 关键词);非交互模式用推测默认值                                                     |
-| M7  | 目标冲突                      | 默认 merge,同名加 `--imported` 后缀(再撞则递增 `--imported-2`);`--force` 旧目标先 mv 到 `.forge-trash/<ts>/` 留 24h 兜底                                                                              |
-| M8  | 源处理                        | 默认 cp 不动源(源目录原样保留);写 `forge/migrate-report.md` + `forge/migrate-trace.json` + 输出 `git rm -r <source>/` cleanup 建议                                                                    |
-| M9  | LLM 复用                      | 反向调 `src/core/legacy-bridge/{ack,budget,redact,quality-judge}` 工具函数(不扩 legacy-bridge 命令);ack token 写 `.forge-ack/migrate-<ts>.ack`                                                        |
-| M10 | 内容格式 transformer          | source adapter 加 `transform(content, kind) -> string`,纯字符串规则;OpenSpec 处理 H4→H2 Scenario / list 前缀 / Why-What rename / tasks 标号;superpowers 处理 `**Step N**:` → `task-N: ` / 中→英冒号 |
-| M11 | validate 后处理               | transform 后跑对应 `validateXxx`,**通过标 `[ok]`,失败标 `[needs-fix: <字段> <消息>]`,不阻塞**;`--regenerate` 路径在 transform+validate 之后接管缺件 + `[needs-fix]` 件                                |
-| M12 | rollback                      | 本 spec **不实现** `forge migrate --rollback` 子命令;`migrate-trace.json` 结构留好供 v0.x 后续扩展                                                                                                     |
+| M5  | superpowers 落点              | design+plan 配对包成 `forge/changes/<slug>/{design.md, tasks.md}`;**不写 placeholder**;缺件由 `--regenerate` 补,关闭则 `[needs-fix]`(**与 M13 协调**:archive 落点不接受残缺)                       |
+| M6  | 已归档判定                    | 推测 + 交互;**git keyword 用 word boundary + 文件路径或 slug 共同命中**(反 false-positive);`mtime` 仅在非 git 仓库展示为弱提示,不参与默认分类                                                       |
+| M7  | 目标冲突                      | 默认 merge,同名加 `--imported` 后缀(撞则递增 `--imported-2..99`,99 全占整次 abort);`--force` 旧目标先 mv 到 `forge/.forge-trash/<ts>/` 留 24h 兜底;**冲突在 plan 阶段全锁定,copy 阶段再撞触发整体 rollback** |
+| M8  | 源处理                        | 默认 cp 不动源;写 `forge/migrate-report.md` + `forge/migrate-trace.json`(journal 模式)+ 输出 `git rm -r <source>/` cleanup 建议                                                                       |
+| M9  | LLM 复用边界(**v2 修订**)   | **只复用 `legacy-bridge/redact.ts`**(字符串处理无 brownfield 耦合);ack / budget / quality 给 migrate 写**专属包装**(`src/core/migrate/{ack,budget,quality}.ts`);`legacy-bridge/lock.ts:LockMode` union 加 `'migrate'` mode + `LockHeldError` 文案泛化 |
+| M10 | content transformer(**v2 修订**)| **markdown-aware**:逐行扫描 + fenced code block 状态机 + table-row(`| ... |`)跳过;`parse/markdown.ts` 现有 ATX section 切分配合;**不再纯字符串正则**                                                  |
+| M11 | validate 后处理               | transform 后跑对应 `validateXxx`,通过标 `[ok]`,失败标 `[needs-fix: <字段> <消息>]`,**不阻塞 cp**;`--regenerate` 路径在 transform+validate 后接管缺件 + `[needs-fix]` 件                                |
+| M12 | rollback                      | 本 spec **不实现** `forge migrate --rollback` 子命令;`migrate-trace.json` v1 schema 留好供后续 PR                                                                                                       |
+| **M13(新)** | archive 落点完整性约束 | archive 落点(`forge/changes/archive/<n>/`)**强制 validate 通过 + 无 [needs-fix] 残留**;推测 archive 但缺件 → `--regenerate` 开则补,失败/拒绝 → **降级 active + warn**;archive 永不带 placeholder/partial |
+| **M14(新)** | trace journal 模式      | `migrate-trace.json` 每步 fsync 写入(不到流程末尾才写);crash/SIGINT 时基于已写 trace 反向回滚;LLM 调用用 `AbortController` + `interrupted` flag,SIGINT 后写盘前二次检查                              |
+| **M15(新)** | quality 空 facts + source-bundle | LLM 抽 facts JSON 解析失败或返回空 → 标 `[regen:quality-fail]`,**不视为通过**(防 v1 假阳性);**source-bundle 策略**:从零生成 proposal/specs 时,`originalText = design.md + tasks.md` 拼接喂 `extractFactsFromOriginal` |
+| **M16(新)** | bundled plugin 默认行为 | bundled plugin(无 LLM SDK)默认 `--regenerate` **自动退化为 `--no-regenerate`** + warn 提示;不在 bundled 中等同主 plugin 行为                                                                            |
 
 ---
 
@@ -36,11 +51,15 @@
 ```
 src/core/migrate/                       ← ★ NEW
 ├── index.ts                            ← 对外导出 + runMigrate(主流程编排)
-├── types.ts                            ← MigrateSource 接口、ScanResult、ClassificationPlan、CopyOp、MigrateReport 等
-├── conflict.ts                         ← 同名加 `--imported` 后缀递增 + `--force` trash 路径
-├── archive-detect.ts                   ← 已归档推测引擎(checkbox 完成度 + git log close/done 关键词)
-├── report.ts                           ← migrate-report.md / migrate-trace.json 生成器
-├── regenerate.ts                       ← --regenerate 路径,反向调 legacy-bridge 工具
+├── types.ts                            ← MigrateSource 接口、ScanResult、ClassificationPlan、CopyOp、MigrateReport、ArtifactKind 等
+├── conflict.ts                         ← 同名 --imported 后缀递增 + --force trash 路径 + plan 阶段全锁定
+├── archive-detect.ts                   ← 推测引擎(checkbox + git log 严格 keyword + word boundary + slug 共同命中)
+├── markdown-aware.ts                   ← ★ NEW:逐行扫描 + fenced code block 状态机 + table-row 跳过(供 sources/* 复用)
+├── report.ts                           ← migrate-report.md / migrate-trace.json 生成器(journal 写入)
+├── ack.ts                              ← ★ NEW:migrate 专属 opt-in prompt + ack 文件读写(.forge-ack/migrate-<ts>.yaml)
+├── budget.ts                           ← ★ NEW:migrate 专属 cost 估算(按件长度 + token 数,不用 brownfield 4-role 公式)
+├── quality.ts                          ← ★ NEW:source-bundle 抽 facts + judge 空 facts 强制 fail
+├── regenerate.ts                       ← --regenerate 主流程:复用 redact + 调本模块 ack/budget/quality
 └── sources/
     ├── index.ts                        ← registry: 'openspec' | 'superpowers' → MigrateSource
     ├── openspec.ts                     ← OpenSpecSource(同构映射 + transformer)
@@ -49,49 +68,29 @@ src/core/migrate/                       ← ★ NEW
 src/cli/commands/
 └── migrate.ts                          ← ★ NEW:commander 子命令骨架,解析参数 → 调 runMigrate
 
-tests/migrate/                          ← ★ NEW
-├── archive-detect.test.ts              ← 推测引擎纯函数测
-├── conflict.test.ts                    ← 同名后缀递增 + trash 路径
-├── report.test.ts                      ← report 渲染快照
-├── openspec.test.ts                    ← OpenSpec fixture 集成测
-├── superpowers.test.ts                 ← superpowers fixture 集成测
-└── regenerate.test.ts                  ← mocked Anthropic SDK 集成测
+src/core/archive/lock.ts                ← ★ 改:LockMode union 加 'migrate';LockHeldError 文案泛化(不再写死 archive)
+src/core/parse/markdown.ts              ← 复用现有 parseMarkdown(ATX section)
 
+tests/migrate/                          ← ★ NEW:单元 + 集成测,详 §4
 tests/cli/migrate.test.ts               ← ★ NEW:CLI 端到端
-tests/fixtures/migrate/                 ← ★ NEW:四套 fixture 树(详见 §4.2)
+tests/fixtures/migrate/                 ← ★ NEW:四套 fixture 树(详 §4.2,加覆盖 markdown-aware 反例)
 ```
 
 ### 1.2 `MigrateSource` 接口契约
 
-两个 source adapter 实现同一接口;新增第三方源(magic、claude-flow 等)只需加新 adapter,不改主流程:
-
 ```ts
 // src/core/migrate/types.ts
 export interface MigrateSource {
-  /** source 标识,用于 CLI 参数 + report 标记 */
   readonly id: 'openspec' | 'superpowers';
-
-  /** 1. 检测 cwd 是否有该源,返回检测结果 + 完整源根路径 */
   detect(cwd: string): Promise<DetectResult>;
-
-  /** 2. 扫描所有源产物,返回原始清单(尚未分类) */
   scan(rootPath: string): Promise<ScanResult>;
-
-  /** 3. 推测每条产物归类:active / archive / draft / spec / skip
-   *  - 内部调 archive-detect 的 git+checkbox 推测
-   *  - ctx 提供 git client、cwd、用户参数(--archive-list 等) */
   classify(scan: ScanResult, ctx: ClassifyCtx): Promise<ClassificationPlan>;
-
-  /** 4. 把 plan 翻译成具体 copy 操作(cp + 可选 rename)
-   *  - 不在此处写盘,只产 op 列表给 runMigrate 顺序执行 */
   prepareCopy(plan: ClassificationPlan, target: string): CopyOp[];
 
-  /** 5. 内容格式 transformer,纯字符串规则
-   *  - kind:'spec' | 'proposal' | 'tasks' | 'design' | 'config' | 'draft'
-   *  - 实现细节见 §2.5(OpenSpec)与 §2.6(superpowers) */
+  /** markdown-aware transformer:走 markdown-aware.ts 提供的 walker(逐行 + fenced state) */
   transform(content: string, kind: ArtifactKind): string;
 
-  /** 6.(--regenerate 时用)产出每个 change 缺哪些件,供 regenerate.ts 调 LLM 补 */
+  /** --regenerate 时枚举每个 change 缺哪些件;source-bundle 策略由 quality.ts 用 */
   listMissingArtifacts(change: PlannedChange): MissingArtifact[];
 }
 ```
@@ -106,78 +105,96 @@ forge migrate <source> [options]
 
 选项
   --no-regenerate      不调 LLM,只走 transformer;失败件标 [needs-fix],不阻塞 cp
-                       (默认 --regenerate 开启,触发 ack/budget gate)
-  --dry-run            只扫描 + 出 plan + 写 report,不动文件
-  --force              冲突时旧目标 mv 到 .forge-trash/<ts>/(留 24h 兜底)再覆盖
-  --archive-list <f>   显式指定哪些 slug 进 archive,跳过自动推测(覆盖 --no-interactive 默认)
+                       (默认 --regenerate 开启,触发 ack/budget gate;bundled plugin 自动退化为本模式 + warn)
+  --dry-run            只扫描 + 出 plan + 输出报告到 stdout / stderr,**不写 forge/ 任何文件**
+  --force              冲突时旧目标 mv 到 forge/.forge-trash/<ts>/(留 24h 兜底)再覆盖
+  --archive-list <f>   显式指定哪些 slug 进 archive,跳过自动推测
   --no-interactive     跳过 active/archive 交互确认表,全用推测默认值
-  --redact-rules <f>   --regenerate 时附加自定义 redact 规则(沿用 legacy-bridge 格式)
+  --redact-rules <f>   --regenerate 时附加自定义 redact 规则(沿用 legacy-bridge `redact.ts` 格式)
 ```
 
-CLI 子命令骨架 `src/cli/commands/migrate.ts` 用 commander,只做参数校验 + 错误码映射,主流程 `runMigrate(source, opts)` 在 `src/core/migrate/index.ts`。
-
-### 1.4 主流程伪码
+### 1.4 主流程伪码(v2:加 LockMode 'migrate' / forge 初始化 / journal trace / AbortController / archive 降级)
 
 ```
 runMigrate(sourceId, opts):
   source = sources[sourceId]
   detect = source.detect(cwd)
-  if !detect.found:                                # 见 §3 错误矩阵
-    error('source not found at <expected-path>')
+  if !detect.found:
+    error('source <id> not found at <expected-path>')   # exit 2
 
-  acquireLock('forge/.migrate.lock')               # 复用 legacy-bridge lock
+  # M9 修订:LockMode 'migrate' 已扩展;此前不存在 forge/ 时必须先建最小 .cache 目录
+  ensureForgeBootstrap(cwd)        # mkdir -p forge/.cache forge/.forge-trash forge/.forge-ack
+  acquireLockByPath(forgeRoot, 'migrate', 'migrate.lock')
+
+  # 注:detect 阶段不再因"另一源也存在"abort;source 已显式给定时只 warn 提示
+  if anotherSourceAlsoFound:
+    warn('also found <other-source>; not migrating it (rerun with that source if needed)')
+
+  abortController = new AbortController()
+  process.on('SIGINT', () => { abortController.abort(); journalSigint() })
+
   try:
     scan = source.scan(detect.rootPath)
-    plan = source.classify(scan, ctx)
-    conflicts = conflict.check(plan, target='forge/')
-    report.printPlan(plan, conflicts)              # 终端打印推测表
+    if scan.isEmpty:                   # M codex #15:零产物 abort
+      error('source has no migratable artifacts')   # exit 2
+
+    plan = source.classify(scan, ctx)  # 内部含 archive-detect(严格 keyword + word boundary)
+    plan = applySafetyRules(plan)      # slug 安全归一化(禁 .. / . / 保留名);archive 阈值边界检查
+    conflicts = conflict.check(plan, target='forge/')   # 全锁定:plan 阶段计算所有 --imported-N
+    report.printPlan(plan, conflicts)
 
     if !opts.noInteractive:
-      plan = askUserConfirm(plan, conflicts)       # 交互改 active/archive/draft/skip + 解决冲突
+      plan = askUserConfirm(plan, conflicts)
 
-    # 默认 --regenerate(M3):两源都默认开
     regenEnabled = !opts.noRegenerate
+    if isBundled() && regenEnabled:    # M16
+      warn('bundled plugin: --regenerate not available, falling back to --no-regenerate')
+      regenEnabled = false
+
     if regenEnabled:
       missing = listAllMissing(plan, source)
-      cost = budget.estimateRegenerateCost(missing)
-      ackOk = ackOptin(cost)                       # ack 流程,沿用 legacy-bridge ack
+      cost = budget.estimateMigrateCost(missing)        # migrate 专属公式
+      ackOk = ack.optin(cost, source.id)                # migrate 专属 prompt
       if !ackOk:
-        regenEnabled = false                       # 用户拒绝 → 退化纯结构搬运
+        regenEnabled = false                            # 退化纯结构;exit 0
+
+    # M13:archive 落点完整性约束 — 推测 archive 但缺件
+    plan = enforceArchiveIntegrity(plan, regenEnabled)
+      # 若 regenEnabled=false 且 archive 件缺 proposal/specs:降级该 change 为 active + warn
 
     if opts.dryRun:
-      report.write()
+      report.toStdout()                # 不写盘
       return
 
     ops = source.prepareCopy(plan, target='forge/')
-
-    onSigInt(rollbackCp(ops.donesoFar))            # Ctrl+C 回滚
+    journal = trace.openJournal('forge/migrate-trace.json')   # M14:每步 fsync
 
     for op in ops:
       try:
         rawContent = read(op.source)
         transformed = source.transform(rawContent, op.kind)
         write(op.target, transformed)
-        ops.donesoFar.push(op)
+        journal.append(op)               # 立即 fsync
         validateResult = validate(op.target, op.kind)
         if validateResult.ok:
           report.mark(op, '[ok]')
         else:
           report.mark(op, '[needs-fix: ' + validateResult.message + ']')
       except IOErr:
-        rollbackCp(ops.donesoFar)                  # 原子失败回滚已写
-        error('cp failed at ' + op.target)
+        rollback(journal)               # 反向 rm 已写;源不动
+        error('cp failed at ' + op.target)   # exit 5
+      except ConflictAtCopyTime:        # M7:plan 阶段没看到的并发冲突
+        rollback(journal)
+        error('concurrent conflict; rerun migrate after resolving')   # exit 4
 
     if regenEnabled:
-      regenerate.run({
-        plan,
-        source,
-        ackToken,
-        redactRules: opts.redactRules,
-      })                                           # 内部 redact → SDK 调用 → quality-judge
+      regenerate.run({ plan, source, ack, abortController })
+      # 内部:redact → SDK(传 abortController.signal)→ quality.judge(空 facts → fail)
+      # M14 SIGINT:abort 后写盘前 if (abortController.signal.aborted) return; .partial 残留
 
-    report.write('forge/migrate-report.md')        # 见 §3.3 格式
-    trace.write('forge/migrate-trace.json')
-    printCleanupHints(source.id)                   # 'git rm -r openspec/' 等
+    report.write('forge/migrate-report.md')   # 失败降级:磁盘满时尽力 stderr
+    journal.close()
+    printCleanupHints(source.id)
   finally:
     releaseLock()
 ```
@@ -190,233 +207,220 @@ runMigrate(sourceId, opts):
 
 | 源                                       | 目标                                          | 备注                                                         |
 | ---------------------------------------- | --------------------------------------------- | ------------------------------------------------------------ |
-| `openspec/specs/<n>/spec.md`             | `forge/specs/<n>/spec.md`                     | 整目录 cp,保留 spec.md 单文件;**transform 见 §2.5**          |
-| `openspec/changes/<n>/`(非 archive)      | `forge/changes/<n>/`                          | active change;含 `proposal.md` / `tasks.md` / `design.md` / `specs/` 子目录;**transform 各件按 kind** |
-| `openspec/changes/archive/<n>/`          | `forge/changes/archive/<n>/`                  | OpenSpec 已有 `changes/archive/` 子目录约定                  |
-| `openspec/explorations/<x>`              | `forge/drafts/<x>`                            | exploration 当 forge draft;不 transform(forge drafts 无 schema)|
-| `openspec/config.yaml`                   | 见 §2.3                                       | 合并策略单独说                                                |
+| `openspec/specs/<n>/spec.md`             | `forge/specs/<n>/spec.md`                     | 整目录 cp;**transform 见 §2.5**(markdown-aware)             |
+| `openspec/changes/<n>/`(非 archive)      | `forge/changes/<n>/`                          | active change;含 `proposal.md` / `tasks.md` / `design.md` / `specs/` 子目录 |
+| `openspec/changes/archive/<n>/`          | `forge/changes/archive/<n>/`                  | OpenSpec 已有 `changes/archive/` 子目录约定;**遵守 M13**     |
+| `openspec/explorations/<x>`              | `forge/drafts/<x>`                            | exploration 当 forge draft;不 transform                      |
+| `openspec/config.yaml`                   | 见 §2.3                                       |                                                               |
 
 ### 2.2 superpowers 源 — 配对 + slug 推断
 
-**输入**:
-- `docs/superpowers/specs/<date>-<topic>-design.md`
-- `docs/superpowers/plans/<date>-<topic>-plan.md`
-
 **配对算法**(`SuperpowersSource.scan`):
-1. 读 `docs/superpowers/specs/` 全部 `*-design.md`,提取 pairing key = 文件名去 `-design.md` 后缀(如 `2026-04-15-add-auth-flow`)
-2. 同样读 `plans/` 全部 `*-plan.md`,提取 pairing key
-3. 同 key 两边都有 → design+plan 配对
-4. 只在 specs/ 出现 → design-only(无 tasks.md)
-5. 只在 plans/ 出现 → plan-only(无 design.md)
-6. **change-id 取 `<topic>` 部分**(date 部分丢进 trace meta,不进 id);例:`2026-04-15-add-auth-flow` → change-id `add-auth-flow`
+1. 读 `docs/superpowers/specs/` 全部 `*-design.md`,提取 pairing key = 文件名 anchored 去 `/-design\.md$/` 后缀(**严格末尾匹配**,反 codex #14:`2026-04-15-design-system-design.md` → key `2026-04-15-design-system`)
+2. 同样读 `plans/` 全部 `*-plan.md`,锚定 `/-plan\.md$/`
+3. 文件名不匹配后缀(如 `feature-design-v2.md`)→ 标 `unrecognized`,plan 表显式列出让用户决定
+4. 同 key 两边都有 → design+plan 配对
+5. 只在 specs/ 出现 → design-only;只在 plans/ 出现 → plan-only
+6. **change-id 取 `<topic>` 部分 + 安全归一化**(禁 `..`、`.`、保留名 `.forge-trash` / `.forge-ack` / `archive` / `.cache`;命中保留名 → 标 `unsafe-slug`,跳过 + report 警告)
+7. date 部分丢进 trace meta 不进 id
 
-**已归档推测**(`archive-detect.ts`):
-- 信号 1(强):plan.md 的 `[x]` checkbox 完成度 ≥ 95%
-- 信号 2(强):`git log -- <plan.md path>` commit msg 含 close/complete/done/finish/archive 关键词(case-insensitive)
-- 信号 3(弱):plan.md `mtime` ≥ 30 天(只在前两都不明确时参考)
-- 推荐结果:
-  - 信号 1 OR 信号 2 命中 → 推荐 archive
-  - 都不命中 → 推荐 active
-- report 表显示推测原因(`plan 14/14 [x], git: 1 close-commit` 这种字面信号串)
+**已归档推测**(`archive-detect.ts`,v2 严格化):
+| 信号 | 内容 | 强度 |
+|------|------|------|
+| 1 | plan.md `[x]` 完成度 ≥ 95% **且 task 总数 ≥ 3**(防单 task 100% 误归)| 强 |
+| 2 | `git log --follow -- <plan.md path>` commit msg 含 **word-boundary**(`\b(close|complete|done|finish|archive|ship)\b`)**且 commit message 也含该 plan 的 slug 或文件路径片段** | 强 |
+| 3(展示)| plan.md `mtime` ≥ 30 天 | **仅展示,不参与默认分类**(codex #19:git clone 后 mtime 失真) |
+| 4(可选标记)| plan.md 内含特殊 marker 如 `<!-- forge:archived -->`(用户手动标记) | 强,优先级最高 |
 
-**落点表**(用户最终确认后):
-| 用户确认                    | 目标                                                                    |
-| --------------------------- | ----------------------------------------------------------------------- |
-| active                      | `forge/changes/<topic>/{design.md, tasks.md}`(有几个写几个,不写 placeholder)|
-| archive                     | `forge/changes/archive/<topic>/{design.md, tasks.md}`                   |
-| draft                       | `forge/drafts/<date>-<topic>-design.md` + `forge/drafts/<date>-<topic>-plan.md`(扁平保留)|
-| skip                        | 不动                                                                    |
+推荐:信号 1 OR 信号 2 命中(且无 critical-task-pending,见下)→ archive;否则 active。
+**critical-task-pending 检查**:plan.md 中含 `<!-- critical: <task-id> -->` 标记的 task 若未勾 `[x]` → 哪怕 95% 完成也不推 archive(codex #17)。
 
-注:`plan.md` mv 时改名 `tasks.md`,内容**走 transformer**(见 §2.6)。
+**落点表**:
+| 用户确认 | 目标                                                                    |
+| -------- | ----------------------------------------------------------------------- |
+| active   | `forge/changes/<topic>/{design.md, tasks.md}`(有几个写几个,不写 placeholder)|
+| archive  | `forge/changes/archive/<topic>/{design.md, tasks.md, proposal.md, specs/}`(**M13 强制完整**;不完整时按 enforceArchiveIntegrity 降级) |
+| draft    | `forge/drafts/<date>-<topic>-design.md` + `forge/drafts/<date>-<topic>-plan.md`(扁平保留)|
+| skip     | 不动                                                                    |
+
+**空目录处理**(codex #15):若 `docs/superpowers/specs/` 与 `plans/` 都无可识别文件 → exit 2 + 提示 "源目录无可迁移文件,确认路径或 source 类型"。
 
 ### 2.3 OpenSpec config.yaml 合并策略
 
-| 场景                                | 处理                                                                                  |
-| ----------------------------------- | ------------------------------------------------------------------------------------- |
-| `forge/config.yaml` 不存在          | 直接 cp + 在文件头加注释 `# imported from openspec/config.yaml @ <ISO ts>`            |
-| `forge/config.yaml` 存在            | **不自动 merge**(schema 可能不兼容);写到 `forge/config.yaml.imported`;report 提示用户手动 review/合并 |
+| 场景                                      | 处理                                                                                                                          |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `forge/config.yaml` 不存在                | 直接 cp + 加注释 `# imported from openspec/config.yaml @ <ts>`                                                                |
+| `forge/config.yaml` 存在,`forge/config.yaml.imported` 不存在 | 不自动 merge;写到 `forge/config.yaml.imported`;report 提示手动 review                                                |
+| `forge/config.yaml.imported` 也已存在(codex #38)| 升级后缀 `forge/config.yaml.imported-2..99`;99 全占 → exit 4 + 提示用户清理                                                |
 
-理由:openspec config.yaml 的 `rules.{specs,tasks,design}` 字段与 forge 同名,但内容形式可能不同(openspec 是行内列表,forge 也是行内列表但 wording 不同);自动合并风险大,留给用户手动操作。
+### 2.4 冲突处理(v2 加 plan 阶段全锁定 + copy 时撞冲突回滚)
 
-### 2.4 冲突处理
+| 场景                                                                     | 处理                                                                                                                              |
+| ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| `forge/<path>` 已存在(非 `--force`)                                     | 目标改名加 `--imported` 后缀;**plan 阶段全锁定**(在 ASK 阶段就把所有 `--imported-N` 名分配定下并记入 plan)                           |
+| `--imported-N` 撞至 99                                                   | 取消整次 migrate;exit 4                                                                                                            |
+| `--force`                                                                | 旧目标先 mv 到 `forge/.forge-trash/<ts>/<path>`;`forge/.forge-trash/` parent 由 `ensureForgeBootstrap` 在主流程开头建好           |
+| **copy 阶段撞 plan 阶段未预期的冲突**(并发进程在 plan 后写 forge/) | journal rollback 已写件 + 释放 lock + exit 4 提示重跑                                                                              |
+| `.forge-trash/` 24h 之外的旧条目                                         | `forge migrate --gc`(stub,后续 PR 实现);**不自动清理**                                                                            |
 
-| 场景                                                                | 处理                                                                                                  |
-| ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `forge/<path>` 已存在(非 `--force`)                                | 目标改名加 `--imported` 后缀(`add-foo` → `add-foo--imported`)                                        |
-| `--imported` 后缀也已被占                                           | 升级 `--imported-2`,递增直到唯一(测得 `--imported-99` 即取消整次 migrate,极端 case)                |
-| `--force`                                                           | 旧目标先 mv 到 `forge/.forge-trash/<ts>/<path>`(不删,留 24h 兜底,沿用 forge upgrade STASH 风格);再写新内容 |
-| `.forge-trash/` 内 24h 之外的旧条目                                 | `forge migrate --gc` 显式清理(本 spec 留 stub,实现可在 v0.x 后续 PR);**不自动清理**                  |
+### 2.5 OpenSpec content transformer(v2 markdown-aware)
 
-### 2.5 OpenSpec content transformer 规则
+**统一前置:fenced code block + table-row 状态机**(`markdown-aware.ts`):
 
-**spec.md**(冲突最严重的件):
+```ts
+// markdown-aware.ts 伪码:逐行扫描,产 LineCtx { inFenced: boolean, isTableRow: boolean }
+// transformer 规则只在 !inFenced && !isTableRow 时执行;否则原样保留
+walkLines(content, (line, ctx, replace) => {
+  if (ctx.inFenced) return; // 代码块内不动
+  if (ctx.isTableRow) return; // 表格 cell 不动
+  // 在此跑各 source 的规则
+});
+```
 
-| 规则                                                                  | 正则 / 替换                                                       |
-| --------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| 去 `### Requirement: <name>` 包装层(把内部 H4 Scenario 提到 H2)    | 删除所有 `^### Requirement:.*$` 行(保留下方内容,因为 H4 Scenario 会在下一步升到 H2)|
-| `#### Scenario: <id>` → `## Scenario: <id>`                           | `^#### Scenario:` → `## Scenario:`                                |
-| `- **WHEN** <text>` → `**When** <text>`(去 list 前缀 + 标题大小写)  | `^(\s*)- \*\*WHEN\*\*\s+(.+)$` → `$1**When** $2`                  |
-| `- **THEN** <text>` → `**Then** <text>`                               | `^(\s*)- \*\*THEN\*\*\s+(.+)$` → `$1**Then** $2`                  |
-| `- **GIVEN** <text>` → `**Given** <text>`(若有)                     | `^(\s*)- \*\*GIVEN\*\*\s+(.+)$` → `$1**Given** $2`                |
-| `- **AND** <text>` / `- **BUT** <text>` 同上                         | 类推                                                              |
+`inFenced` 检测:行 trim 后以 ``` 或 ~~~ 开头 → toggle;`isTableRow`:行 trim 后以 `|` 开头且至少 2 个 `|`。
 
-**注意**:Given 子句缺(隐式)时 transformer **不补**;forge `validateSpec` 会报 `missing Given` → 单 scenario 标 `[needs-fix: missing Given]`,该件其他 scenario 仍可能通过。
+**spec.md** 规则(v2):
+
+| 规则                                                                                  | 处理                                                                                                                                                              |
+| ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `### Requirement: <name>` 处理(codex #6)                                            | **不直接删**;改为 `## Requirement: <name>`(forge `parseSpec` 不识别这层但允许其存在,不影响 `## Scenario:` 抽取);Description/Notes 段落保留为 Requirement 子内容 |
+| `#### Scenario: <id>` → `## Scenario: <id>`                                           | line replace,只在 !fenced && !table 行                                                                                                                            |
+| `- **WHEN** <text>` → `**When** <text>`(去 list 前缀 + 标题大小写)                  | 同上                                                                                                                                                              |
+| `- **THEN** / GIVEN / AND / BUT** <text>` → 同上                                      | 同上                                                                                                                                                              |
+| **多行 list 续行处理**(codex #7)                                                    | 遇到 `- **WHEN** ... \n  续行内容` 时,把续行(以 2+ 空格缩进 + 非 `-` 起始)合并到上一句,转换后产生单行 `**When** <line1> <line2>`(中间空格连接)              |
+| Given 子句缺                                                                          | transformer 不补;`validateSpec` 报 `missing Given` → 该 scenario 标 `[needs-fix]`;非阻塞                                                                          |
 
 **proposal.md**:
 
-| 规则                                                                | 正则 / 替换                          |
-| ------------------------------------------------------------------- | ------------------------------------ |
-| `## Problem` → `## Why`                                             | `^## Problem$` → `## Why`            |
-| `## Proposed Solution` → `## What`                                  | `^## Proposed Solution$` → `## What` |
-| 其他章节(`## User Experience` / `## Migration Path` 等)保留      | 不动(forge 允许额外章节)            |
+| 规则                                                                | 处理                                            |
+| ------------------------------------------------------------------- | ----------------------------------------------- |
+| `## Problem` → `## Why`                                             | line replace,只在 !fenced 行                   |
+| `## Proposed Solution` → `## What`                                  | 同上                                            |
+| 其他章节(`## User Experience` / `## Migration Path` 等)          | 不动(forge 允许额外章节)                       |
 
-**tasks.md**:
+**tasks.md**(v2 支持三层编号):
 
-| 规则                                                                | 正则 / 替换                                                            |
-| ------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `- [ ] N. <text>` → `- [ ] task-N: <text>`(数字编号补 `task-` 前缀 + 加冒号)| `^(\s*)- \[([ x])\] (\d+(?:\.\d+)?)\. (.+)$` → `$1- [$2] task-$3: $4`(`.` 进 task-id 时换 `-`)|
-| 数字+点号格式不在(如 `- [ ] some prose`)                           | 不动,落 `[needs-fix]`                                                |
+| 规则                                                                                           | 处理                                                                          |
+| ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `- [ ] N(.M(.K)?)?\.\s+<text>` → `- [ ] task-N(-M(-K)?)?: <text>`(三层支持,`.` → `-`)        | 正则 `^(\s*)- \[([ x])\] (\d+(?:\.\d+){0,2})\.\s+(.+)$`,捕获组替换           |
+| `- [ ] <prose 无数字编号>`                                                                     | 不动 → 落 `[needs-fix]`                                                       |
 
-**design.md**:不 transform(forge 只 parse 不 validate;`parseDesign` 不抛即可)。
+**design.md**:不 transform(v2 修订:`parseDesign` 不抛错也不 validate,见 §2.7)。
 
-**specs/<area>.md** 在 changes/<n>/specs/ 下的 delta:同 `spec.md` 规则。
+**specs/<area>.md**:同 spec.md 规则。
 
-### 2.6 superpowers content transformer 规则
+### 2.6 superpowers content transformer(v2 修中文冒号 + 三层 + slug)
 
 **plan.md → tasks.md**(实证 forge 自己 docs/plans/ 内 plan 格式 = `- [ ] **Step N**:`):
 
-| 规则                                                                                  | 正则 / 替换                                                                            |
-| ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `- [ ] **Step N**[:|:]<text>` → `- [ ] task-N: <text>`(去加粗、统一标号、中→英冒号) | `^(\s*)- \[([ x])\] \*\*[Ss]tep (\d+(?:\.\d+)?)\*\*[:|:]\s*(.+)$` → `$1- [$2] task-$3: $4`|
-| 嵌套 `**Step 1.1**` 的点号 → `-`                                                      | task-id 内 `\d+\.\d+` → `\d+-\d+`(在上一步替换时同步处理)                            |
-| 大小写无关("step"、"Step"、"STEP" 都吃)                                              | 正则 flag `i`                                                                          |
-| H1 title(`# Plan 1 — ...`)保留                                                       | forge tasks parser 也要 H1                                                             |
-| 描述里的中文冒号 / 标点保留                                                           | 只换 task-id 后那一个                                                                  |
+| 规则                                                                                                | 处理                                                                                              |
+| --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `- [ ] **Step N(.M(.K)?)?**[\s]*[:]\s*<text>` → `- [ ] task-N(-M(-K)?)?: <text>`(三层 + 中英冒号) | 正则 `^(\s*)- \[([ x])\] \*\*[Ss][Tt][Ee][Pp]\s+(\d+(?:\.\d+){0,2})\*\*[\s]*[:：]\s*(.+)$` → `$1- [$2] task-$3: $4`;`$3` 的 `.` 全替 `-` |
+| 大小写无关                                                                                          | 正则字符类显式覆盖 `[Ss][Tt][Ee][Pp]`(避免 `i` flag 与代码块状态机冲突)                          |
+| **中文冒号 `:` 修复**(codex #10/#11)                                                              | 字符类 `[:：]`(中文 `:` U+FF1A + 英文 `:` U+003A);**不再 `[:|:]`**(那是 `|` 字面量,错的)        |
+| H1 title 保留                                                                                       | forge tasks parser 也要 H1                                                                        |
+| **嵌套层级语义降级**(codex #12)                                                                   | `Step 1` 与 `Step 1.1` 转换后是扁平 `task-1` 与 `task-1-1`;forge tasks parser 不识别父子关系;**接受降级**,文档说明 |
 
-**design.md**:直接搬,不 transform(forge 只 parse 不 validate);唯一保险:无 H1 时不补 → 让 `parseDesign` 抛 → 标 `[needs-fix]`。
+**design.md**:直接搬,无 transform;`parseDesign` 不抛错(见 §2.7)。
 
-**proposal.md / specs/<area>.md**:**superpowers 没产这两件**,transformer 无东西可转;留给 `--regenerate` 路径调 LLM 补(见 §2.8),关闭则 report 标 `[needs-fix: missing proposal]` / `[needs-fix: missing specs]`。
+**proposal.md / specs/<area>.md**:**superpowers 没产**;`--regenerate` 路径补;关闭则 `[needs-fix: missing proposal]` / `[needs-fix: missing specs]`。
 
-### 2.7 validate 后处理
+### 2.7 design.md 校验明示(codex #28)
 
-每个件 cp + transform 写盘后:
-1. 按 kind 调对应 forge validator(`validateProposal` / `validateSpec` / `validateTasks` / `parseDesign`)
-2. 通过 → report 标 `[ok]`
-3. 失败 → report 标 `[needs-fix: <field>: <message>]`,**不阻塞**,继续下一件
+forge 现状:
+- `parse/design.ts:parseDesign` 不抛错,无 H1 时返空 title
+- `validate/change.ts` 对 design 只做 `void parseDesign(text)` — 不抛即认为通过
 
-**关键**:`[needs-fix]` 标记**不让 cp 失败**(目标文件已写到位),只是后续 `forge archive` 会拒绝走 archive 流程的提醒。用户两条出路:
-- 手工编辑目标文件直到 validate 通过
-- 重跑 `forge migrate <source> --regenerate`(LLM 补内容到合规)
+本 spec 行为:
+- migrate 后**不强制 design.md 有 H1**(forge 当前 validate 也不要求);transformer 不补 H1
+- 若 v0.x 后续 forge 加 `validateDesign`(强制 H1),migrate 直接走它的输出
+- v1 那条"无 H1 → parseDesign 抛 → [needs-fix]" 删除(本来就不抛)
 
-### 2.8 `--regenerate`(默认开)路径
-
-只在两源都默认开;用户加 `--no-regenerate` 才关。
+### 2.8 `--regenerate`(默认开,v2 自实现 ack/budget/quality)
 
 **触发件**:
 - superpowers 配对 active/archive change → 必触发(几乎都缺 proposal + specs)
-- OpenSpec change → 仅当 transform 后跑 validate 失败时触发(几乎都通过)
-- OpenSpec spec.md 缺 Given 子句 → 触发(LLM 补 Given 子句,不重写整 spec)
+- OpenSpec change / spec → 仅当 transform 后 validate 失败时触发
+- OpenSpec spec.md 缺 Given 子句 → 触发(LLM 补 Given,不重写整 spec)
 
-**流程**(沿用 legacy-bridge):
-1. `listAllMissing(plan, source)` → 列出所有缺件 + 待补字段
-2. `budget.estimateRegenerateCost(missing)` → 估 token 数 + USD
-3. 终端打印估价;若 ≥ `REGEN_WARN_USD` 阈值,二次确认
-4. `ack.renderOptinPrompt(...)` → 用户输入 ack token → 写 `.forge-ack/migrate-<ts>.ack`
-5. 对每件:
-   - `redact(content, rules)` → 跑默认 + 自定义规则(沿用 legacy-bridge `redact.ts`)
-   - 调 Anthropic SDK 生成 markdown(model 沿用 forge config.yaml `llm.model`)
-   - `quality-judge.extractFactsFromOriginal(originalContent)` + `judgeAllFacts(generated)` → critical 全抽 + 章节比例抽
-   - 通过 → 写到目标(覆盖原 [needs-fix] 件)+ report 标 `[regen:ok]`
-   - 失败 → 写 `<target>.partial-<artifact>.md` + report 标 `[regen:quality-fail]`(原 [needs-fix] 件保留)
+**流程**(v2 — 不反向调 legacy-bridge ack/budget/quality):
+1. `listAllMissing(plan, source)` → 列所有缺件 + 待补字段
+2. `budget.estimateMigrateCost(missing)`(`src/core/migrate/budget.ts`)
+   - 公式按件长度 + token 估算:`Σ (input_tokens(src_bundle) + output_tokens(target_artifact)) * model_rate`
+   - **不**用 brownfield 4-role 公式
+3. 终端打印估价;≥ `MIGRATE_WARN_USD`(默认 $5;独立常量)二次确认
+4. `ack.optin(cost, sourceId)`(`src/core/migrate/ack.ts`)
+   - 渲染 migrate 专属 prompt(明示传输内容:`<source>` 下原文 + 生成目标说明;不写"docs/legacy/ 老文档"等 brownfield 文案)
+   - 用户输入 ack token → 写 `forge/.forge-ack/migrate-<ts>.yaml`(独立路径,不挤 `.cache/llm-ack.yaml`)
+5. **复用** `legacy-bridge/redact.ts:redact` + `DEFAULT_REDACT_RULES` + `--redact-rules` 用户附加(redact 字符串处理无 brownfield 耦合)
+6. 对每件:
+   - **source-bundle 构造**(M15):
+     - OpenSpec 已有件 → `originalText = 该件原文`
+     - superpowers 缺件(从零生成 proposal/specs)→ `originalText = design.md + "\n---\n" + tasks.md`(拼接两件当 origin)
+   - 调 Anthropic SDK(传 `abortController.signal`)生成 markdown
+   - `quality.extractFacts(originalText, n=30)`(`src/core/migrate/quality.ts`)
+     - 包装 legacy-bridge `extractFactsFromOriginal`,但**空数组返回不再静默通过**:
+       - 空 facts → `report.mark(op, '[regen:quality-fail: empty-facts]')` + 写 `.partial`
+   - `quality.judgeAll(generated, facts)` → 通过 → 落地;失败 → `.partial-<artifact>.md` + 标
+7. **AbortController 路径**(M14):写盘前 `if (abortController.signal.aborted) return; .partial 残留`;LLM 请求若已发出,Anthropic SDK 调用通过 `AbortSignal` 取消(SDK 支持)
 
-**用户拒绝 ack**:`regenEnabled = false`,流程退化纯结构搬运 + transformer + [needs-fix] 标记;不抛错,exit 0。
+**用户拒绝 ack**:`regenEnabled = false`;退化纯结构搬运 + transformer + `[needs-fix]`;exit 0。
+
+**dry-run + regenerate 互斥**:`--dry-run` 时 regenerate 不执行(估价仍打印),走 stdout 报告。
 
 ---
 
 ## 3. 错误处理
 
-### 3.1 阶段化失败矩阵
+### 3.1 阶段化失败矩阵(v2 增删)
 
-| 阶段             | 失败场景                                          | 处理策略                                                                                                                              | exit code |
-| ---------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | --------- |
-| **detect**       | 指定 source 目录不存在                            | 报错 + 列 cwd 找到的源(若有,提示用户改参数)+ 退出                                                                                  | 2         |
-| **detect**       | 同时找到 openspec/ 与 docs/superpowers/           | **不自动选**,要求显式 `<source>`;退出                                                                                                | 2         |
-| **detect**       | source 部分存在(只 specs/ 缺 changes/)         | warn + 当作 partial source 继续 scan                                                                                                  | 0         |
-| **scan**         | yaml parse 失败(openspec/config.yaml)          | warn + 跳过 config.yaml 合并,其他产物继续                                                                                            | 0         |
-| **scan**         | 文件读权限失败                                    | 单文件失败 → warn + plan 标 `[skip:read-fail]`,**不中断**                                                                            | 0         |
-| **scan**         | superpowers 文件名无 date-topic 结构              | 单文件归类 `unrecognized`,plan 表显式列出让用户决定                                                                                   | 0         |
-| **classify**     | 不在 git 仓库内                                   | git 信号失效;只用 checkbox + mtime 推测;report 标 `[git:not-available]`                                                              | 0         |
-| **classify**     | plan.md 没 checkbox                               | checkbox 信号失效;只用 git + mtime;若都无 → 默认 active                                                                              | 0         |
-| **classify**     | 同 slug 多 date 重复出现(superpowers)         | 全列出来让用户挑,report 标 `[ambiguous-slug]`                                                                                        | 0         |
-| **conflict**     | `--imported-2..99` 全占                           | 取消整次 migrate,提示用户清理或手动操作                                                                                               | 4         |
-| **conflict**     | 全部产物冲突且 `--no-interactive`                 | 输出冲突清单 + 建议 `--force` 或手动清,**中止**                                                                                      | 4         |
-| **transform**    | 单件 transformer 抛错(理论不该,纯字符串规则)  | warn + 落原内容 + 标 `[transform-error]`,继续                                                                                        | 0         |
-| **validate**     | transform 后 validate 失败                        | 标 `[needs-fix: ...]`,**不阻塞**;若 `--regenerate` 开,后续 regenerate 阶段接管                                                       | 0         |
-| **copy**         | cp 中途 IO 失败(磁盘满 / 权限)                  | **原子回滚**:已 cp 的全删(用 trace 反向);源完整;不留半残 forge/                                                                  | 5         |
-| **regenerate**   | ack 用户拒绝 / 输错 token                         | regenEnabled=false,流程退化;report 标 `[regen:declined]`;exit 0                                                                     | 0         |
-| **regenerate**   | budget 超阈值且用户取消                           | 同上                                                                                                                                  | 0         |
-| **regenerate**   | Anthropic SDK 网络 / API 错误                     | 单件失败 → 写 `.partial-<artifact>.md` + 标 `[regen:network-error]`,**继续下一件**                                                    | 0         |
-| **regenerate**   | quality-judge 抽样失败                            | 同上,标 `[regen:quality-fail]`,文件保留为 `.partial`                                                                                 | 0         |
-| **regenerate**   | 生成的 markdown 不符合 forge validate             | 标 `[regen:invalid-format]`,文件保留为 `.partial`                                                                                     | 0         |
-| **report**       | 磁盘满写不了 forge/migrate-report.md              | stderr 输出完整 plan + trace JSON 内容,提示重定向到文件                                                                              | 5         |
+| 阶段             | 失败场景                                          | 处理                                                                                                                | exit code |
+| ---------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | --------- |
+| **detect**       | 指定 source 目录不存在                            | 报错 + 列 cwd 找到的源(若有,提示用户改参数)                                                                       | 2         |
+| **detect**       | source 部分存在(只 specs/ 缺 changes/)         | warn + 当作 partial source 继续 scan                                                                                | 0         |
+| **detect**       | ~~同时找两源退出~~(v2 删除)                    | source 显式给定时不 abort;只 warn 提示另一源未迁移                                                                  | 0         |
+| **scan**         | source 全空(零产物,codex #15)                   | exit 2 + 提示"无可迁移文件,确认路径或 source 类型"                                                                  | 2         |
+| **scan**         | yaml parse 失败(openspec/config.yaml)          | warn + 跳过 config.yaml 合并,其他产物继续                                                                          | 0         |
+| **scan**         | 文件读权限失败                                    | 单文件 warn + plan 标 `[skip:read-fail]`,**不中断**                                                                | 0         |
+| **scan**         | superpowers 文件名无 design/plan 后缀锚定         | 单文件归类 `unrecognized`,plan 表显式列出                                                                           | 0         |
+| **classify**     | 不在 git 仓库内                                   | 信号 2 失效;只用信号 1(checkbox)+ 信号 4(marker);信号 3(mtime)只展示不参与默认                                | 0         |
+| **classify**     | plan.md 没 checkbox                               | 信号 1 失效;若 git/marker 也无 → 默认 active                                                                        | 0         |
+| **classify**     | 同 slug 多 date 重复(superpowers)              | report 标 `[ambiguous-slug]` + 用户挑                                                                              | 0         |
+| **classify**     | slug 命中保留名 / 含 `..`(codex #39)             | 标 `[unsafe-slug]`,**跳过该件**;非阻塞                                                                            | 0         |
+| **conflict**     | `--imported-99` 全占                              | 取消整次 migrate                                                                                                    | 4         |
+| **conflict**     | 全冲突且 `--no-interactive`                       | 输出冲突清单 + 建议 `--force` 或手动清,**中止**                                                                    | 4         |
+| **conflict**     | copy 阶段撞 plan 阶段未预期冲突(M7)             | journal rollback + 释放 lock + 提示重跑                                                                            | 4         |
+| **transform**    | 单件 transformer 抛错(理论不应,纯字符串规则)   | warn + 落原内容 + 标 `[transform-error]`,继续                                                                       | 0         |
+| **validate**     | transform 后 validate 失败                        | 标 `[needs-fix: ...]`,**不阻塞**;`--regenerate` 开则后续接管                                                       | 0         |
+| **archive 完整性(M13)** | 推测 archive 但缺件且 regen 关闭 / 失败  | 降级 active + warn;archive 落点永不带 `[needs-fix]` / `.partial`                                                   | 0         |
+| **copy**         | cp 中途 IO 失败(磁盘满 / 权限)                  | journal rollback;源完整;不留半残 forge/                                                                          | 5         |
+| **regenerate**   | ack 用户拒绝 / 输错 token                         | regenEnabled=false 退化;report 标 `[regen:declined]`                                                              | 0         |
+| **regenerate**   | budget 超阈值且用户取消                           | 同上                                                                                                                | 0         |
+| **regenerate**   | Anthropic SDK 网络 / API 错误                     | 单件 `.partial-<artifact>.md` + 标 `[regen:network-error]`,继续下一件                                              | 0         |
+| **regenerate**   | quality 抽 facts 空 / JSON 解析失败(M15)        | 标 `[regen:quality-fail: empty-facts]`,**不视为通过**,文件保留为 `.partial`                                       | 0         |
+| **regenerate**   | quality judge 抽样保真率不达标                    | 标 `[regen:quality-fail: low-fidelity]`,文件保留为 `.partial`                                                      | 0         |
+| **regenerate**   | 生成 markdown 不符合 forge validate              | 标 `[regen:invalid-format]`,`.partial` 保留                                                                        | 0         |
+| **regenerate**   | SIGINT(M14)                                      | abortController.abort();已发请求若 Anthropic SDK 支持 AbortSignal 则取消;否则进程退出 promise 仍 resolve;**写盘前二次检查 aborted flag**,跳过写;`.partial` 残留 | 0  |
+| **report**       | 磁盘满写不了 forge/migrate-report.md              | **降级**:不再承诺"必出";尽力 stderr 输出完整 plan + trace JSON 内容                                               | 5         |
 
-### 3.2 三个不变量
+### 3.2 三个不变量(v2 修订)
 
-1. **源目录绝不动**(默认 cp 不 mv,任何阶段失败都不影响源)
-2. **forge/ 半残禁止**:cp 阶段失败必须原子回滚;`regenerate` 阶段失败允许 `.partial-<artifact>.md` 残留(因为 cp 已成功,regenerate 是增量增强)
-3. **report 必出**:除非磁盘彻底坏,否则一定写出 report;report 是后续手工 cleanup / 重跑 / 排查的唯一权威
+1. **源目录绝不动**(默认 cp 不 mv)
+2. **forge/ 半残禁止**:cp 阶段失败必须 journal rollback;regenerate 阶段失败允许 `.partial` 残留;**archive 子目录永远完整**(M13)
+3. **report 尽力输出**:磁盘正常时写到 `forge/migrate-report.md`;磁盘满 / IO 失败时降级为 stderr 输出 trace JSON
 
 ### 3.3 锁与中断
 
-- 复用 forge 现有 `acquireLockByPath`(legacy-bridge 在用),锁文件 `forge/.migrate.lock`,持锁整 runMigrate 生命周期
-- `LockHeldError` 文案沿用 legacy-bridge 风格(提示用户 `--gc` 或检查并发进程)
-- `SIGINT`(Ctrl+C):
-  - cp 阶段:已 cp 的回滚(捕 SIGINT 跑 trace 反向 rm)
-  - regenerate 阶段:停在当前件,已写 `.partial` 保留;report 标 `[regen:interrupted]`
-  - 所有阶段都释放 lock
+- **LockMode 'migrate' 已扩展**(codex #21);改 `src/core/archive/lock.ts:LockMode` union + `LockHeldError` 文案泛化为"another forge operation is in progress (mode: <mode>)"
+- 锁文件 `forge/.cache/migrate.lock`(注:复用 `.cache/` 与 `archive.lock` / `legacy-bridge.lock` 同 dir)
+- SIGINT:
+  - cp 阶段:journal rollback + 释放 lock
+  - regenerate 阶段:abortController + 写盘前二次检查;`.partial` 残留
+- 锁残留(进程 crash):`acquireLockByPath` 现有 stale-pid 检测自动处理
 
 ### 3.4 report 与 trace 格式
 
-**`forge/migrate-report.md`**(人读):
-
-```markdown
-# Migration Report — <source> @ 2026-05-10T14:32:00Z
-
-## Summary
-- Source: openspec(rootPath: /abs/path/openspec/)
-- Mode: regenerate=on(LLM gate accepted)| structural-only | dry-run
-- Total scanned: 54
-- Classified: active=23, archive=18, draft=3, skipped=10
-- Conflicts: 2(全部 rename --imported)
-- validate 通过率: 41/44(标 [ok]),3 件 [needs-fix],regenerate 后补 2 件 [regen:ok],1 件 [regen:quality-fail]
-
-## Plan
-| Source path                                    | Target path                          | Class    | Conflict   | Validate              |
-| ---------------------------------------------- | ------------------------------------ | -------- | ---------- | --------------------- |
-| openspec/specs/auth/spec.md                    | forge/specs/auth/spec.md             | spec     |            | [ok]                  |
-| openspec/changes/add-foo/proposal.md           | forge/changes/add-foo/proposal.md    | active   |            | [ok]                  |
-| openspec/changes/archive/old-x/proposal.md     | forge/changes/archive/old-x/...      | archive  |            | [ok]                  |
-| (sp) docs/.../2026-04-add-auth-design.md       | forge/changes/add-auth/design.md     | active   |            | [ok]                  |
-| (sp) docs/.../2026-04-add-auth-plan.md         | forge/changes/add-auth/tasks.md      | active   |            | [needs-fix: nested]   |
-| (sp) [missing] proposal.md                     | forge/changes/add-auth/proposal.md   | active   |            | [regen:ok]            |
-| ...                                                                                                                                                  |
-
-## Conflicts
-- forge/changes/add-foo/ exists → renamed to forge/changes/add-foo--imported/
-- forge/specs/cache/ exists → renamed to forge/specs/cache--imported/
-
-## Cleanup suggestions
-After review you may run:
-  git rm -r openspec/
-
-或者(superpowers):
-  git rm -r docs/superpowers/{specs,plans}/
-
-## Source-meta
-Each migrated file maps to source-path in `migrate-trace.json`(同目录).
-```
-
-**`forge/migrate-trace.json`**(机器读):
+**`forge/migrate-trace.json`** v1 schema(M14:journal 模式):
 
 ```json
 {
@@ -432,25 +436,23 @@ Each migrated file maps to source-path in `migrate-trace.json`(同目录).
       "kind": "spec",
       "transform": ["h4-to-h2-scenario", "list-prefix-strip"],
       "validate": "ok",
-      "regen": null
-    },
-    {
-      "from": null,
-      "to": "forge/changes/add-auth/proposal.md",
-      "kind": "proposal",
-      "transform": [],
-      "validate": "ok",
-      "regen": { "model": "claude-opus-4-7", "facts": 14, "passed": 14 }
+      "regen": null,
+      "writtenAt": "2026-05-10T14:32:01.123Z"
     }
   ],
   "conflicts": [
     { "target": "forge/changes/add-foo/", "rename": "forge/changes/add-foo--imported/" }
   ],
+  "downgrades": [
+    { "change": "feature-x", "from": "archive", "to": "active", "reason": "M13: missing proposal" }
+  ],
   "cleanupHint": "git rm -r openspec/"
 }
 ```
 
-`migrate-trace.json` 结构 v1 保留,后续 `forge migrate --rollback` 子命令(M12 列为 NOT 实现)可基于此反向操作。
+journal 写入:每个 op 完成后立即 `fs.writeSync(fd) + fs.fsyncSync(fd)`(append 模式下重写整 ops 数组太重 — 实施时用 NDJSON 行式 + 末态再 reformat 为合法 JSON,见 P4)。crash/SIGINT 后基于 NDJSON 行做反向 rollback。
+
+**`forge/migrate-report.md`**(人读;格式同 v1 + 加 downgrades 段)
 
 ---
 
@@ -458,148 +460,159 @@ Each migrated file maps to source-path in `migrate-trace.json`(同目录).
 
 ### 4.1 测试分层
 
-| 层     | 文件                                  | 用途                                                                                                  |
-| ------ | ------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| 单元   | `tests/migrate/archive-detect.test.ts` | 推测引擎纯函数测;mock fs(读 plan.md checkbox)+ mock git(commit msg)+ mtime 三信号组合矩阵         |
-| 单元   | `tests/migrate/conflict.test.ts`      | 同名后缀递增(`--imported` → `--imported-2`);`--force` 跑 trash 路径;trash 路径 24h 过期不自动清    |
-| 单元   | `tests/migrate/report.test.ts`        | report.md / trace.json 渲染快照;summary 计数正确;cleanup hint 按源切分                              |
-| 单元   | `tests/migrate/sources/openspec.test.ts` | OpenSpec transform 规则 6 条全覆盖(H4→H2、list 前缀去掉、Why-What rename、tasks 数字编号转 task-N、Given 缺保留)|
-| 单元   | `tests/migrate/sources/superpowers.test.ts` | superpowers transform 规则:`**Step N**:` → `task-N: `;嵌套 `**Step 1.1**` → `task-1-1`;中→英冒号;大小写不敏感|
-| 集成   | `tests/migrate/openspec.test.ts`      | 用 `tests/fixtures/migrate/openspec-minimal/` 跑 runMigrate(`--no-regenerate`)→ 断言 forge/ 树 + report 计数 |
-| 集成   | `tests/migrate/superpowers.test.ts`   | `tests/fixtures/migrate/superpowers-minimal/` + git fixture 跑 runMigrate → active/archive/draft 落点正确;[needs-fix] 件准确 |
-| 集成   | `tests/migrate/regenerate.test.ts`    | mocked Anthropic SDK + 真 redact / quality-judge / ack / budget;断言 .partial 件残留 + 成功件落地       |
-| CLI    | `tests/cli/migrate.test.ts`           | commander 子命令端到端;断言 exit code(2/4/5/0)+ stdout 关键 token + dry-run 不写 forge/                                       |
+| 层     | 文件                                       | 用途                                                                                                  |
+| ------ | ------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| 单元   | `tests/migrate/markdown-aware.test.ts`     | walker 状态机:fenced code block 识别(```、~~~、缩进 4 空格 indent block);table-row 识别;嵌套 fence  |
+| 单元   | `tests/migrate/archive-detect.test.ts`     | 信号 1(checkbox + 总数 ≥ 3)、信号 2(word-boundary + slug 共同命中)、信号 4(marker);git fixture     |
+| 单元   | `tests/migrate/conflict.test.ts`           | `--imported-N` 递增 plan 阶段全锁定;copy 阶段撞冲突 rollback;`--force` trash;config.yaml.imported-N    |
+| 单元   | `tests/migrate/report.test.ts`             | report.md / trace.json journal 写入;downgrades 段;summary 计数                                      |
+| 单元   | `tests/migrate/sources/openspec.test.ts`   | OpenSpec transform 全规则(包含代码块跳过 / 表格跳过 / 多行 list 续行 / 三层 task)                    |
+| 单元   | `tests/migrate/sources/superpowers.test.ts` | superpowers transform:`Step 1` + `Step 1.1` 同存;中文冒号 `：`;`STEP` 大写;slug 安全归一化         |
+| 单元   | `tests/migrate/ack.test.ts`                | migrate 专属 prompt 文案不含 brownfield 字串;ack 写到 `.forge-ack/migrate-<ts>.yaml`                |
+| 单元   | `tests/migrate/budget.test.ts`             | migrate cost 估算(按件长度 + token);MIGRATE_WARN_USD 阈值                                          |
+| 单元   | `tests/migrate/quality.test.ts`            | 空 facts → fail(M15);source-bundle 拼接;judge 多轮 mock                                            |
+| 集成   | `tests/migrate/openspec.test.ts`           | OpenSpec fixture(`--no-regenerate`);断言 archive 件 validate 全通过;含 [needs-fix] 件不进 archive   |
+| 集成   | `tests/migrate/superpowers.test.ts`        | superpowers fixture + git;active/archive/draft 落点;archive 缺件降级 active 行为(M13)              |
+| 集成   | `tests/migrate/regenerate.test.ts`         | mock SDK 全链路:extractFacts → 30 judge calls → 空 facts → AbortController 中断                     |
+| CLI    | `tests/cli/migrate.test.ts`                | exit code(0/2/4/5);dry-run 不写 forge/;bundled 自动退化 warn                                        |
 
-### 4.2 Fixture 树
+### 4.2 Fixture 树(v2 加覆盖反例)
 
 ```
 tests/fixtures/migrate/
 ├── openspec-minimal/                            # 给 openspec.test 用
 │   └── openspec/
-│       ├── specs/foo/spec.md                    # Has H4 Scenario + list-prefix WHEN/THEN
-│       ├── changes/add-bar/{proposal.md, tasks.md, design.md}    # Why → Problem; tasks 数字编号
-│       ├── changes/archive/old-baz/{proposal.md, tasks.md}
+│       ├── specs/
+│       │   ├── foo/spec.md                      # H4 Scenario + list-prefix WHEN/THEN(基础)
+│       │   ├── bar/spec.md                      # ★ 含代码块内 #### Scenario 示例(测 fenced 跳过)
+│       │   └── baz/spec.md                      # ★ 表格列出 step;Description 段在 Requirement 下;多行 WHEN 续行
+│       ├── changes/
+│       │   ├── add-bar/{proposal.md, tasks.md, design.md}    # Why → Problem;tasks 数字编号
+│       │   ├── three-level/tasks.md             # ★ 三层编号 1.2.3.
+│       │   └── archive/old-baz/{proposal.md, tasks.md, design.md, specs/x.md}  # 完整 archive
 │       ├── explorations/idea-x.md
 │       └── config.yaml
-├── superpowers-minimal/                         # 给 superpowers.test 用
+├── superpowers-minimal/
 │   ├── docs/superpowers/
 │   │   ├── specs/2026-01-01-add-auth-design.md
 │   │   ├── specs/2026-04-01-cleanup-deps-design.md
-│   │   ├── plans/2026-01-01-add-auth-plan.md         # 全 [x],含 **Step 1.1** 嵌套
-│   │   ├── plans/2026-04-01-cleanup-deps-plan.md     # 部分 [x]
-│   │   └── plans/2026-03-01-orphan-plan.md           # plan-only
-│   └── .git/                                    # 提前 git init + 几个 commit:
-│                                                #   "feat: implement auth flow"
-│                                                #   "close add-auth: ship feature"  ← 关键词触发 archive
-├── conflict-existing/                           # 给 conflict.test 用
+│   │   ├── plans/2026-01-01-add-auth-plan.md          # 全 [x],3+ tasks,含 **Step 1.1** 嵌套 + 中文冒号
+│   │   ├── plans/2026-04-01-cleanup-deps-plan.md      # 部分 [x]
+│   │   ├── plans/2026-03-01-orphan-plan.md            # plan-only;**STEP 1**(大写测)
+│   │   └── plans/2026-02-01-single-task-plan.md       # ★ 1 task 100% 完成 → 不应自动 archive(< 3 tasks)
+│   └── .git/                                  # commits:
+│                                              #   "feat: implement add-auth" -- docs/superpowers/plans/2026-01-01-add-auth-plan.md
+│                                              #   "close add-auth: ship feature"  ← 命中 word-boundary + slug
+│                                              #   "docs: close-out the meeting notes"  ← 不应误命中(无 slug)
+├── conflict-existing/
 │   ├── openspec/changes/add-bar/proposal.md
-│   └── forge/changes/add-bar/proposal.md        # 已存在 → 触发 --imported
-└── regen-mocked/                                # 给 regenerate.test 用
-    └── docs/superpowers/{specs,plans}/          # 配对 + 缺 proposal/specs,触发 --regenerate
+│   ├── forge/changes/add-bar/proposal.md       # 触发 --imported
+│   └── forge/changes/add-bar--imported/proposal.md  # 触发 --imported-2
+├── unsafe-slug/                                # ★ NEW
+│   └── docs/superpowers/specs/2026-01-01-..-design.md   # 命中 .. 保留 → unsafe-slug
+└── regen-mocked/
+    └── docs/superpowers/{specs,plans}/         # 配对 + 缺 proposal/specs 触发 --regenerate
 ```
 
-### 4.3 关键断言点(集成测)
+### 4.3 关键断言点
 
 **OpenSpec 集成测**(`--no-regenerate`):
-- `forge/specs/foo/spec.md` 存在;内容含 `## Scenario:`(transform 后);**Given 缺的 scenario** 报 `[needs-fix: missing Given]`
-- `forge/changes/add-bar/proposal.md` 含 `## Why` + `## What`(rename 后);validate `[ok]`
-- `forge/changes/archive/old-baz/` 在 archive 子目录(不在 active);其内文件 transform 后 validate 至少 1 件 [ok]
-- `forge/drafts/idea-x.md` 存在,内容未被 transform
-- `forge/migrate-report.md` 包含 plan 表 + cleanup 建议
-- `forge/migrate-trace.json` 反向映射齐;trace.ops 与 cp 实际一致
+- archive 件全 [ok](M13);任一 [needs-fix] 件不在 archive 子目录
+- 代码块内 `#### Scenario` 字串保留原样(transformer 没改)
+- 多行 WHEN 续行合并到单 `**When**` 行
+- 三层编号 `1.2.3.` → `task-1-2-3:`
+- `forge/migrate-trace.json` journal 模式:模拟 IO 失败后,trace 含已写部分 + rollback 记录
 
 **superpowers 集成测**(`--no-regenerate`):
-- `add-auth` 进 archive(plan 全 [x] + git commit 含 close)
-- `cleanup-deps` 进 active(checkbox 不全 + 无 close commit)
-- `orphan` 进 active 且 `tasks.md` 存在但 `design.md` 不存在(不写 placeholder)
-- `tasks.md` 内含 `task-1: `、`task-1-1: `(嵌套);不含 `**Step` 残留;不含中文冒号
-- 推测表打印含信号原因(`plan 14/14 [x], git: 1 close-commit`);快照测
-- 三个 active change **均**带 `[needs-fix: missing proposal]` + `[needs-fix: missing specs]`
+- `add-auth`(plan 全 [x] + git slug+close commit)→ 推测 archive,但缺 proposal/specs → **降级 active + warn**(M13);trace 含 downgrades 段
+- `cleanup-deps` → active
+- `orphan` → active 且 design 缺(只 tasks)
+- `single-task`(1 task 100%)→ active(< 3 tasks 阈值)
+- `..-design.md` → unsafe-slug skip
+- tasks.md 含 `task-1: `、`task-1-1: `(嵌套);中文冒号已转英文;`STEP` 转 `task-`
 
 **conflict 集成测**:
-- 跑两次同源 → 第二次目标改 `add-bar--imported/`,第三次改 `add-bar--imported-2/`;trace.conflicts 全记录
-- `--force` → 旧目标进 `forge/.forge-trash/<ts>/`,新目标覆盖
+- 跑两次 → 第二次 add-bar→add-bar--imported,第三次 → add-bar--imported-2
+- `--force` → 旧目标进 `forge/.forge-trash/<ts>/`
+- `forge/config.yaml.imported` 已存在 → 升级 `.imported-2`
 
-**regenerate 集成测**(`tests/migrate/regenerate.test.ts`):
-- 注入两个 mock Anthropic response:一个 quality-judge 通过、一个不过
-- 断言成功件 `proposal.md` 落地;失败件 `.partial-proposal.md` 残留 + report 标 `[regen:quality-fail]`
-- 跑 budget 估价 → 终端 stdout 含 `Estimated cost: $...`
-- 用户拒绝 ack(注入 stdin "no")→ regenEnabled=false,流程退化;exit 0
+**regenerate 集成测**:
+- mock 4 阶段 SDK call:extractFacts(2 件)+ 60 judge calls(2 件 × 30 facts);第二件 extractFacts 返空 → 第二件 `[regen:quality-fail: empty-facts]` + .partial
+- AbortController 中断:第 30 个 judge 时发 SIGINT;abortController.signal.aborted=true;后续写盘跳过
+- bundled mode(env 变量模拟)→ warn + 退化 --no-regenerate
 
 ### 4.4 CI 兼容
 
-- 所有 fixture 用 `path.join` 拼路径(forge cross-platform 约束)
-- `vitest.global-setup.ts` 加 hook:对每个 fixture 跑 `git init` + 写预设 commit(测 git log 信号)
-- `pnpm format:check` 必跑;tests/ 走 prettier(reference MEMORY:`feedback_local_verification_format`)
-- `pnpm test -- tests/migrate/` 全绿
-- 覆盖率门槛:`archive-detect.ts ≥ 90%`,`conflict.ts ≥ 85%`;集成测保证 cli 主路径 OK,不强求覆盖率
+- 所有 fixture 用 `path.join`
+- `vitest.global-setup.ts` 加 hook:对每个 fixture 跑 `git init` + 写预设 commit
+- `pnpm format:check` 必跑
+- 覆盖率门槛:`archive-detect.ts ≥ 90%`、`markdown-aware.ts ≥ 90%`、`conflict.ts ≥ 85%`、`quality.ts ≥ 85%`
 
 ---
 
 ## 5. 复用与新增模块清单
 
-### 5.1 反向调用 legacy-bridge(M9)
+### 5.1 复用边界(v2 收紧:只复用 redact + 扩 lock)
 
-migrate 不扩 `legacy-bridge` 命令,而是从 `src/core/migrate/regenerate.ts` 反向 import legacy-bridge 工具函数:
+| legacy-bridge / archive 模块 | migrate 用途 | 修改 |
+|------------------------------|--------------|------|
+| `legacy-bridge/redact.ts:redact + DEFAULT_REDACT_RULES + RedactReport + formatRedactReport` | --regenerate 跑 redact;字符串处理无 brownfield 耦合 | 不改 |
+| `archive/lock.ts:acquireLockByPath` | 锁 `forge/.cache/migrate.lock` | **改**:`LockMode` union 加 `'migrate'`;`LockHeldError` 文案泛化为 "another forge operation is in progress (pid <p>, mode <m>, started <t>)" |
+| `parse/markdown.ts:parseMarkdown` | 复用 ATX section 切分(non-fenced) | 不改;`markdown-aware.ts` 在其上加状态机 |
 
-| legacy-bridge 模块                              | migrate 用途                                                        |
-| ----------------------------------------------- | ------------------------------------------------------------------- |
-| `legacy-bridge/ack.ts:renderOptinPrompt + writeAck + checkAck` | LLM opt-in 文案 + ack token 写读;ack 文件路径改为 `.forge-ack/migrate-<ts>.ack` |
-| `legacy-bridge/budget.ts:estimateRegenerateCost + checkBudgetGate + REGEN_WARN_USD + countdown` | LLM 成本估算 + 阈值二次确认                                          |
-| `legacy-bridge/redact.ts:redact + formatRedactReport`        | --regenerate 时跑 redact 规则;report 含 `--redact-report` 命中数      |
-| `legacy-bridge/quality-judge.ts:extractFactsFromOriginal + judgeAllFacts + stratifiedSample + formatQualityReport` | 抽样验证 LLM 生成内容                                                |
-| `archive/lock.ts:acquireLockByPath + LockHeldError`         | 锁 forge/.migrate.lock;沿用 legacy-bridge 锁顺序                     |
+**不复用**(v1 那条全反向调路径删除):
+- `legacy-bridge/ack.ts` — 路径硬编码 `.cache/llm-ack.yaml`、文案 brownfield(codex #23/#24)
+- `legacy-bridge/budget.ts:estimateRegenerateCost` — 签名 `anchorCount` + 4-role 公式硬编码(codex #25)
+- `legacy-bridge/quality-judge.ts:extractFactsFromOriginal/judgeAllFacts` — 空 facts 假通过(codex #27)+ 假设有原文(codex #26)
 
-**保持 legacy-bridge 命令本身不动**:`forge legacy-bridge` 仍是 brownfield 老锚点(SRS/HLD/LLD)迁移命令,语义不混。
+migrate 自实现版本见 §5.2。
 
 ### 5.2 新增模块清单
 
-| 路径                                         | 内容                                                                                                                |
-| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `src/core/migrate/index.ts`                  | `runMigrate(sourceId, opts)` 主流程编排                                                                              |
-| `src/core/migrate/types.ts`                  | `MigrateSource` 接口、`ScanResult`、`ClassificationPlan`、`CopyOp`、`MigrateReport`、`ArtifactKind` 等              |
-| `src/core/migrate/conflict.ts`               | 同名 `--imported` 后缀递增;`--force` 跑 trash 路径(`forge/.forge-trash/<ts>/`)                                       |
-| `src/core/migrate/archive-detect.ts`         | 推测引擎:checkbox 完成度 + git log close-keyword + mtime 信号合成                                                    |
-| `src/core/migrate/report.ts`                 | report.md / trace.json 渲染                                                                                          |
-| `src/core/migrate/regenerate.ts`             | --regenerate 路径;反向调 legacy-bridge ack/budget/redact/quality-judge                                              |
-| `src/core/migrate/sources/openspec.ts`       | `OpenSpecSource` 实现 MigrateSource;§2.1 目录映射 + §2.5 transformer 规则                                            |
-| `src/core/migrate/sources/superpowers.ts`    | `SuperpowersSource` 实现 MigrateSource;§2.2 配对 + §2.6 transformer 规则                                              |
-| `src/core/migrate/sources/index.ts`          | source registry: `'openspec'` / `'superpowers'` → MigrateSource                                                     |
-| `src/cli/commands/migrate.ts`                | commander 子命令骨架,参数解析 + 错误码映射                                                                          |
+| 路径                                                     | 内容                                                                                                            |
+| -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `src/core/migrate/index.ts`                              | `runMigrate(sourceId, opts)` 主流程编排                                                                          |
+| `src/core/migrate/types.ts`                              | `MigrateSource` 接口、`ScanResult`、`ClassificationPlan`、`CopyOp`、`MigrateReport`、`ArtifactKind` 等           |
+| `src/core/migrate/conflict.ts`                           | 同名 `--imported-N` 递增 plan 阶段全锁定;copy 阶段撞冲突 rollback;`--force` trash;config.yaml.imported-N         |
+| `src/core/migrate/archive-detect.ts`                     | 推测引擎;严格 keyword + word boundary + slug 共同命中;critical-task-pending 检查                                 |
+| `src/core/migrate/markdown-aware.ts`                     | walker:逐行扫描 + fenced code block 状态机 + table-row 跳过                                                       |
+| `src/core/migrate/report.ts`                             | report.md / trace.json journal 写入(NDJSON 行式 + 末态 reformat)                                                |
+| `src/core/migrate/ack.ts`                                | migrate 专属 opt-in prompt + ack 文件读写(`forge/.forge-ack/migrate-<ts>.yaml`)                                  |
+| `src/core/migrate/budget.ts`                             | migrate 专属 cost 估算(按件长度 + token,不用 brownfield 4-role 公式);MIGRATE_WARN_USD = $5                    |
+| `src/core/migrate/quality.ts`                            | source-bundle 抽 facts(superpowers 缺件场景拼接 design + tasks);空 facts → 强制 fail                            |
+| `src/core/migrate/regenerate.ts`                         | --regenerate 主流程;调本模块 ack/budget/quality;复用 redact;AbortController 串通                                |
+| `src/core/migrate/sources/openspec.ts`                   | OpenSpecSource;§2.1 目录映射 + §2.5 transformer(走 markdown-aware.ts walker)                                    |
+| `src/core/migrate/sources/superpowers.ts`                | SuperpowersSource;§2.2 配对 + §2.6 transformer(走 markdown-aware.ts walker)                                      |
+| `src/core/migrate/sources/index.ts`                      | source registry                                                                                                  |
+| `src/cli/commands/migrate.ts`                            | commander 子命令骨架                                                                                              |
 
 ### 5.3 改动模块清单
 
-| 路径                          | 改动                                                                          |
-| ----------------------------- | ----------------------------------------------------------------------------- |
-| `src/cli/index.ts`            | 注册 `migrate` 子命令(import buildMigrateCommand)                            |
-| `src/index.ts` 或顶层 export | 公开 `runMigrate`(供 plugin commands.md 后续可能调用)                        |
+| 路径                                | 改动                                                                                          |
+| ----------------------------------- | --------------------------------------------------------------------------------------------- |
+| `src/core/archive/lock.ts`          | LockMode union 加 `'migrate'`;LockHeldError 文案泛化(line 29 改"another forge operation...") |
+| `src/cli/index.ts`                  | 注册 `migrate` 子命令                                                                          |
+| `src/index.ts` 顶层 export         | 公开 `runMigrate`(供 plugin commands.md 后续可能调用)                                         |
 
 ---
 
 ## 6. 用户视角文档
 
-### 6.1 README 加段(简版)
+### 6.1 README 加段(简版,与 v1 同)
 
 ```md
 ## 从已有项目搬过来
 
-如果你的项目已经在用 [OpenSpec](https://github.com/Fission-AI/OpenSpec) 或装过 [superpowers](https://github.com/obra/superpowers) plugin,跑 `forge migrate <source>` 一键搬到 forge 工作目录:
-
-\`\`\`bash
-# OpenSpec 项目
 forge migrate openspec       # 默认 --regenerate(LLM 补缺件,会显示估价)
-
-# superpowers 用户产物(docs/superpowers/{specs,plans}/)
 forge migrate superpowers    # 同上;design+plan 配对成 forge change
-\`\`\`
 
-加 `--no-regenerate` 跳过 LLM,只搬结构 + 跑 transformer;失败件标 `[needs-fix]`。
-\`\`\`
+加 --no-regenerate 跳过 LLM,只搬结构 + 跑 markdown-aware transformer;失败件标 [needs-fix]。
+注:bundled plugin 中 --regenerate 不可用,自动退化为 --no-regenerate。
 ```
 
-### 6.2 `docs/migration/from-openspec.md` 与 `docs/migration/from-superpowers.md`
+### 6.2 `docs/migration/from-openspec.md` + `docs/migration/from-superpowers.md`
 
-详细文档:迁移前要做啥、估价怎么读、`[needs-fix]` 怎么补、cleanup 建议;~每篇 ≤ 300 行。
+详细文档:迁移前要做啥、估价怎么读、`[needs-fix]` 怎么补、cleanup 建议、archive 降级机制(M13)、bundled 限制(M16);~每篇 ≤ 350 行。
 
 ---
 
@@ -607,45 +620,46 @@ forge migrate superpowers    # 同上;design+plan 配对成 forge change
 
 ### 7.1 风险
 
-| 风险                                                                                       | 缓解                                                                                          |
-| ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
-| transformer 规则覆盖不全(用户某 OpenSpec 项目用了 transformer 没考虑的格式变体)            | 单元测覆盖已知 6 条 + 文档说明"未覆盖会标 `[needs-fix]`";后续 PR 增量加规则                  |
-| LLM regenerate 成本超预期(大项目几十个 change)                                            | budget gate 二次确认;report 单独列 regenerate 成本;用户加 `--no-regenerate` 退化            |
-| 用户在源仓库正在 forge brainstorm/propose 同时跑 migrate                                  | `forge/.migrate.lock` 防并发;但用户**手动**编辑 forge/ 文件 + 同时跑 migrate 仍可能撞 — 不防 |
-| superpowers 配对算法对边角文件名(`-design-v2.md`、奇怪 slug)失效                       | `[ambiguous-slug]` / `unrecognized` 标记 + report 列出让用户决定;非阻塞                       |
-| migrate 跑完后用户跑 `forge archive` 失败(因 [needs-fix] 件)                              | 文档明示;archive 错误信息引导用户重跑 migrate --regenerate 或手补                            |
+| 风险                                                                                                | 缓解                                                                                                                |
+| --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| markdown-aware walker 对未知 markdown 变体(如 setext heading `===`)处理不全                        | walker 只识别 ATX heading + fenced code + table;其他保留原样;单元测覆盖已知 + spec 说明 unknown 变体 best-effort  |
+| LLM regenerate 成本超预期                                                                           | budget gate 二次确认;MIGRATE_WARN_USD 阈值 $5;`--no-regenerate` 退化                                                |
+| Anthropic SDK AbortSignal 实际取消能力依赖 SDK 版本                                                  | 写盘前二次检查 abortController.signal.aborted;最坏情况 LLM 已生成内容被丢                                          |
+| superpowers 配对算法对边角文件名(`feature-design-v2.md`、奇怪 slug)失效                          | unrecognized 列出让用户决定;非阻塞                                                                                  |
+| migrate 跑完后用户跑 `forge archive` 失败(因 [needs-fix] 件)                                       | 文档明示;archive 错误信息引导重跑 migrate --regenerate 或手补                                                       |
+| transformer 转换层级语义降级(`Step 1` 与 `Step 1.1` 扁平 task-1 / task-1-1)                       | 接受降级;文档与 fixture 测明示                                                                                       |
 
 ### 7.2 未决项 / NOT 实现
 
-- **M12** `forge migrate --rollback`:trace.json 结构留好,实现挪到后续 PR
-- **M7** `.forge-trash/` 24h 之外的 GC:`forge migrate --gc` stub,实现挪到后续 PR
-- 第三方源(magic、claude-flow)适配:接口已抽象,新增 adapter 即可,本 spec 不实现
-- bundled plugin(decision #24)路径下的 migrate:bundled 不带 LLM SDK,`--regenerate` 在 bundled 中应自动退化为 `--no-regenerate` + warn(需在 §3 错误矩阵补一条;v0.x 实现时再加)
+- **M12** `forge migrate --rollback`:trace.json schema 留好,后续 PR 实现
+- **M7** `.forge-trash/` 24h GC:`forge migrate --gc` stub
+- 第三方源(magic、claude-flow):接口已抽象,加新 adapter 即可
+- 高级 archive 推测:LLM 介入推测(读 plan / git log)— 现阶段纯启发式
 
 ### 7.3 与 forge upgrade 的关系
 
 `forge upgrade`(v0.2 → v0.3 自升级)与 `forge migrate`(框架→forge 搬运)**完全独立**:
 - upgrade 处理 forge 自身版本演进的 STASH + 5 阶段事务
 - migrate 处理外部框架产物搬入,默认 cp 不动源,半残禁止
-- 两者不共用代码(锁机制共用 `acquireLockByPath`,但锁文件不同)
-- 若用户既要 upgrade 又要 migrate,推荐顺序:**先 upgrade(forge 自身到位)→ 再 migrate(搬入外部产物)**
+- 两者不共用代码;锁机制都用 `acquireLockByPath` 但不同 mode + 不同 lock 文件
+- 推荐顺序:**先 upgrade(forge 自身到位)→ 再 migrate(搬入外部产物)**
 
 ---
 
-## 8. 实施路线图(初稿,具体由 writing-plans 产出)
+## 8. 实施路线图(v2 重估,8.5 → 14 工日)
 
-| 阶段 | 内容                                                                                            | 估算工作量 |
-| ---- | ----------------------------------------------------------------------------------------------- | ---------- |
-| P1   | 骨架:types.ts + sources/{index,openspec,superpowers}.ts 空实现 + cli/migrate.ts + 单测占位      | 1 day      |
-| P2   | OpenSpecSource 完整(scan + classify + prepareCopy + transform);单元测 + 集成测                 | 2 days     |
-| P3   | SuperpowersSource 完整(配对 + archive-detect + transform);单元测 + 集成测                      | 2 days     |
-| P4   | conflict.ts + report.ts + lock 接入;集成测覆盖冲突场景                                          | 1 day      |
-| P5   | regenerate.ts 反向调 legacy-bridge;mocked SDK 集成测                                            | 1.5 days   |
-| P6   | CLI 端到端测;README + docs/migration/from-*.md 撰写                                            | 0.5 day    |
-| P7   | release-gate-checklist 加 §4 v0.4 段;CHANGELOG 写迁移说明                                       | 0.5 day    |
+| 阶段 | 内容                                                                                                                | 估算工作量 |
+| ---- | ------------------------------------------------------------------------------------------------------------------- | ---------- |
+| P1   | 骨架:types.ts + sources/{index,openspec,superpowers}.ts 空实现 + cli/migrate.ts + 单测占位 + LockMode 扩展         | 1 day      |
+| P2   | OpenSpecSource(scan + classify + prepareCopy + markdown-aware transformer);单元 + 集成测;**含 markdown-aware.ts** | **3 days** |
+| P3   | SuperpowersSource(配对 + slug 安全 + archive-detect 严格化 + transformer);单元 + 集成测                           | **3 days** |
+| P4   | conflict.ts plan 阶段全锁定 + copy 撞冲突 rollback;report.ts journal NDJSON;LockMode 文案改                         | **1.5 day**|
+| P5   | regenerate 完整路径:**ack.ts + budget.ts + quality.ts(source-bundle + 空 facts fail)+ regenerate.ts + AbortController + .partial 写入 + mock 全链路** | **4 days** |
+| P6   | CLI 端到端测;README + docs/migration/from-*.md(含 M13 / M16 说明)                                                  | 1 day      |
+| P7   | release-gate-checklist 加 §4 v0.4 段;CHANGELOG 写迁移说明                                                          | 0.5 day    |
 
-总计:约 **8.5 工日**。版本目标:`v0.4.0`(与 `forge init` 移除同期;若需要可拆分到 `v0.4.0` 给 OpenSpec / `v0.4.1` 给 superpowers + LLM)。
+总计:**14 工日**(原 8.5)。版本目标:`v0.4.0`;若分版本:`v0.4.0` OpenSpec(P1-P2-P4-P6-P7)+ `v0.4.1` superpowers + LLM(P3 + P5)。
 
 ---
 
-**文档结束**。后续由 writing-plans skill 基于本 spec 产 implementation plan;实施过程中若发现规则盲区,回到本 spec 增量补 §2.5 / §2.6 / §3.1。
+**文档结束**。本 v2 已采纳 codex 对抗性审查 + 内部代码核实的全部 37+ 真问题。后续由 writing-plans skill 基于本 spec 产 implementation plan;若实施过程中再发盲区,回到本 spec 增量补 §2.5 / §2.6 / §3.1 / §5.2。

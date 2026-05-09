@@ -147,3 +147,28 @@ ls forge/specs/             # 应有归档 change 留下的 spec 文件
 - `forge update` 报"已被用户修改" → 默认行为(spec §4.2);`forge update --force` 强制覆盖
 
 完整问题清单见 [`docs/cli-reference.md` 的"错误退出码"段](cli-reference.md#错误退出码)。
+
+## 6. 已有老文档项目接入(v0.2 brownfield)
+
+> 适用场景:已有完整 SRS / HLD / 测试用例的项目接入 forge,且老文档不能被替代(合规 / 客户验收 / 审计要求)
+
+完整流程见 [`docs/legacy-bridge.md`](./legacy-bridge.md)。三步初始化:
+
+```bash
+# 1. 启用 LLM 调用(在 forge/config.yaml 加 legacy_bridge.allow_llm_calls: true 后)
+forge legacy-bridge --acknowledge-data-transfer
+
+# 2. 二阶段 mapping
+forge legacy-bridge map
+# 审改 forge/legacy-anchors-draft.yaml 后:
+mv forge/legacy-anchors-draft.yaml forge/legacy-anchors.yaml
+
+# 3. 复写器 + 索引(one-shot)
+forge legacy-bridge regenerate
+forge legacy-bridge index
+```
+
+后续每次 `forge archive` 自动 sync-check;详见手册。
+
+合规场景(enterprise / air-gapped):保持 `allow_llm_calls: false`,
+brownfield 工具 graceful skip,主工作流不变。

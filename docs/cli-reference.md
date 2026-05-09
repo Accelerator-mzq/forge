@@ -124,6 +124,64 @@ forge archive --recover           # 从半完成归档状态恢复
 - 退出 4(状态损坏):看 stderr 诊断,可能要手动 mv archive/ 回 changes/
 - 退出 5(lock 占用):等另一进程结束,或检查 `forge/.cache/archive.lock` 内的 pid 是否真存活,stale lock 会被 forge 自动清
 
+## forge legacy-bridge — Brownfield Onboarding(v0.2)
+
+完整文档:[`docs/legacy-bridge.md`](./legacy-bridge.md)。
+
+### `forge legacy-bridge --acknowledge-data-transfer [--acknowledge-customer-data]`
+
+一次性 ack 数据传输到 Anthropic API(决策 #22 / §9 GDPR)。
+
+| flag                          | 用途                                                  |
+| ----------------------------- | ----------------------------------------------------- |
+| `--acknowledge-data-transfer` | 必选;ack 老文档 + 代码 + 测试用例发往 LLM provider   |
+| `--acknowledge-customer-data` | 当 anchors.yaml 含 contains_customer_data=true 时必加 |
+
+### `forge legacy-bridge map [--merge | --overwrite]`
+
+LLM 扫 docs/+src/ 推测 role,产 anchors-draft.yaml + draft .md 概览。
+
+| flag                   | 用途                                                   |
+| ---------------------- | ------------------------------------------------------ |
+| `--merge`(默认)       | 与已存在 anchors.yaml 合并新发现项,保留用户审过部分   |
+| `--overwrite`          | 全量重生成(覆盖用户改动,需 TTY 确认)                |
+| `--docs-paths <paths>` | 逗号分隔的额外 docs 目录(默认扫 docs/ doc/ document/) |
+| `--redact-report`      | 输出每条 redact 规则的命中数                           |
+
+### `forge legacy-bridge regenerate [--role <r>] [--dry-run] [--include-historical] [--yes]`
+
+复写器:LLM 读 anchors → 规范 SRS/HLD/LLD/system-tests + 双 LLM 抽样验证。
+
+| flag                   | 用途                                          |
+| ---------------------- | --------------------------------------------- |
+| `--role <role>`        | 仅复写指定 role(默认全 4 role)              |
+| `--dry-run`            | 不调 LLM,只估算 cost + 列要扫的文件          |
+| `--include-historical` | 把 authoritative=false 历史版作背景(默认关) |
+| `--redact-report`      | 输出 redact 命中数                            |
+| `--yes`                | 非 TTY 必须显式 ack 高 cost 才继续(M-4)      |
+
+### `forge legacy-bridge index [--yes]`
+
+为每个 authoritative anchor 生成 ~100 字 LLM 摘要 → `forge/docs/index.md`。
+
+### `forge legacy-bridge sync-check [--change-id <id>]`
+
+检测 change 影响的 anchor → 5 档差异报告 → `forge/legacy-sync-state/<id>.{md,yaml}`。
+
+### `forge legacy-bridge resolve <change-id>`
+
+校验 sync-state diffs 全部 ack 后标 resolved。
+
+退出码补充(基础码沿用已有表):
+
+| 码  | brownfield 上下文含义                                       |
+| --- | ----------------------------------------------------------- |
+| 0   | 成功(含 graceful skip:无 anchors / allow_llm_calls=false) |
+| 1   | 配置错(opt-in 未做)/ 参数无效 / status 字段非法           |
+| 2   | critical 未 resolve / 保真率不达标                          |
+| 3   | 复写部分成功(.partial 文件)                               |
+| 5   | archive.lock 或 legacy-bridge.lock 被另一进程持有           |
+
 ## 错误退出码(全命令通用)
 
 | 码  | 含义                       |

@@ -14,7 +14,7 @@
 | 1 | 融合定位 | OpenSpec 作主干(产物 + 归档);superpowers 作武器库(行为纪律);独立项目,不依赖任一边 |
 | 2 | 形态 | npm CLI + 多 harness 适配器(参考 OpenSpec 形态) |
 | 3 | 工作流 | 线性 6 命令流水线(brainstorm → propose → apply → review → verify → archive) |
-| 4 | 支持 harness | **v0.1 = Claude Code + Codex(2 harness)**;OpenCode 推 v0.2 等 plugin(`experimental.chat.messages.transform`)实现。基于 Phase 0.5 spike 实测结果(详见 [`spike/RESULTS.md`](../../spike/RESULTS.md)) |
+| 4 | 支持 harness | **v0.1+v0.2 = Claude Code + Codex(2 harness)**;OpenCode 推 **v0.3** 等 plugin(`experimental.chat.messages.transform`)实现。基于 Phase 0.5 spike 实测结果(详见 [`spike/RESULTS.md`](../../spike/RESULTS.md))。**Plan 7(v0.2 brownfield)未实施 OpenCode adapter**。 |
 | 5 | 移植 superpowers skill | 12 个(见 §2.2) |
 | 6 | 移植 OpenSpec workflow | 4 个公开 + 1 个内部:propose、apply、verify、archive-change(公开 slash 命令);specs-sync(内部模块,仅 archive 内部调用,不公开为 CLI) |
 | 7 | brainstorm 输出形态 | draft → promote(`forge/drafts/` 草稿区,propose 时消费) |
@@ -31,7 +31,7 @@
 | 18 | 三 harness spike 结果 | **已完成**:Claude Code PASS / Codex PASS / OpenCode FAIL(skill 路径只注册工具不自动注入,需写 plugin)→ v0.1 收紧到 2 harness |
 | 19 | review-passed 时机 | 仅当本轮接受意见已实现 + 测试通过 + 无新增 task 时才打 |
 | 20 | LLM 调用边界 | 用户运行时不调;开发期 eval 允许调 Anthropic API,key 走 CI secret |
-| 21 | OpenSpec 迁移工具 | v0.1 不做,v0.2 加 `forge migrate-from-openspec` |
+| 21 | OpenSpec 迁移工具 | v0.1 / v0.2 不做,**v0.3** 加 `forge migrate-from-openspec` |
 
 ---
 
@@ -189,7 +189,7 @@ code_paths:
 - 不在用户运行时写 LLM 调用——所有用户的 AI 行为都通过 harness 发生,forge 不替代 harness 也不直接调 Anthropic API 服务用户。**例外**:forge 自身的开发期 skill eval(§5.5)允许调 Anthropic API,因为这是维护者的测试工具,不在用户路径上。eval 的 `ANTHROPIC_API_KEY` 通过 CI secret 注入,不打包进 npm 发布产物。
 - 不做 web UI(OpenSpec 有 dashboard,v1 不做)
 - 不做 telemetry(隐私 + 工作量)
-- 不做 brownfield onboarding(OpenSpec 的 `/opsx:onboard`,v2 再说)
+- ~~不做 brownfield onboarding~~ — **v0.2 已实现**(对应 OpenSpec 的 `/opsx:onboard`),见 [`docs/specs/2026-05-05-brownfield-onboarding-design.md`](2026-05-05-brownfield-onboarding-design.md)
 - 不做 `bulk-archive` / `continue-change` / `ff-change`(OpenSpec 提供,v2 再说)
 
 ---
@@ -606,13 +606,13 @@ archive 是两步(rename change 目录 + sync specs deltas),需保证半途失�
     退出,不进入 Move 阶段)
 ```
 
-**specs-sync delete 语义推 v0.2**:
+**specs-sync delete 语义推 v0.3**(原 v0.2 范围,因 v0.2 brownfield 工作量已大,推 v0.3):
 
 v0.1 的 specs-sync 模块(`core/specs-sync/`)只支持 `create` 和 `replace` 两种 deltas 操作。spec 中"新增/修改/删除"三种语义里,**delete 语义留给 v0.2 实现**——理由:
 
 - v0.1 的常规工作流是"新增 spec"或"修改既有 spec",删除 spec 极少见(说明该 change 决定撤销某个功能)
 - delete 需要在 changes/<id>/specs/ 用特殊标记表达(如空文件 + frontmatter `deleted: true`),会引入 schema 设计决策
-- v0.1 的 archive 命令调 specs-sync 时,如果 deltas 含 delete operation,直接抛错(`v0.2 not implemented`)
+- v0.1+v0.2 的 archive 命令调 specs-sync 时,如果 deltas 含 delete operation,直接抛错(`v0.3 not implemented`,**保留向后兼容:已发布 v0.1.0 错误信息延续**)
 
 v0.2 加 delete 时会同步更新 spec §3.5 + plan,设计 deletion marker 格式。
 
@@ -1115,7 +1115,7 @@ PR 不通过 eval 不能 merge(branch protection rule)。
 
 - Claude Code:用 superpowers 的 `.claude/skills/` 结构做最小 PoC,验证 `using-forge` bootstrap 在新会话开始就生效(参考 superpowers 仓库公开的 Claude Code 安装文档)
 - Codex:研究 plugin manifest 格式(参考 superpowers 仓库公开的 Codex 适配文档),做最小 PoC
-- OpenCode:参照 superpowers 仓库的 `docs/README.opencode.md` 找出 bootstrap 注入路径,做最小 PoC
+- OpenCode(**v0.3 范围**):参照 superpowers 仓库的 `docs/README.opencode.md` 找出 bootstrap 注入路径,做最小 PoC
 - 每个 harness 跑一次 §5.1 acceptance test 雏形:
   - 输入"我想做个 todo list 应用"
   - 期望:自动触发 brainstorming(不写代码反而开始问问题)
@@ -1179,7 +1179,7 @@ PR 不通过 eval 不能 merge(branch protection rule)。
 
 ### 风险与开放问题
 
-1. **OpenCode 自动注入需 plugin**——Phase 0.5 spike 已确认 OpenCode skill 路径只注册工具不自动 inject。v0.2 通过实现 `experimental.chat.messages.transform` plugin 解决,参考 superpowers `.opencode/plugins/superpowers.js`。v0.1 不支持 OpenCode。
+1. **OpenCode 自动注入需 plugin**——Phase 0.5 spike 已确认 OpenCode skill 路径只注册工具不自动 inject。**v0.3** 通过实现 `experimental.chat.messages.transform` plugin 解决,参考 superpowers `.opencode/plugins/superpowers.js`。v0.1 + v0.2 不支持 OpenCode。
 2. **Multi-turn judge 的稳定性**——LLM-as-judge 在多轮 + 复杂 rubric 下可能波动大,需要 Phase 5 调参
 3. **Skill 文本改名引用同步**——12 个 skill 互相引用,改名时容易漏。需要一个 lint 检查所有 cross-skill reference
 4. **Anthropic 模型版本切换**——v1 锁死 Sonnet 4.6 做 eval baseline,后续 4.7 出来时要重跑全量校准
@@ -1191,7 +1191,7 @@ PR 不通过 eval 不能 merge(branch protection rule)。
 - Web Dashboard(OpenSpec 有,v1 不做)
 - Telemetry(隐私 + 工作量)
 - 多语言 i18n(英文为主,中文注释/文档)
-- Brownfield onboarding(`/opsx:onboard` 等价物,v2)
+- ~~Brownfield onboarding~~ — **v0.2 已实现**,见 [`docs/specs/2026-05-05-brownfield-onboarding-design.md`](2026-05-05-brownfield-onboarding-design.md) + [`docs/plans/2026-05-05-plan-7-brownfield.md`](../plans/2026-05-05-plan-7-brownfield.md)
 - `bulk-archive` / `continue-change` / `ff-change`(OpenSpec 有,v2)
 - `forge migrate-from-openspec`(从 OpenSpec 项目迁移目录,v0.2 加)
 - 自定义 schema(v1 只支持 `spec-driven`,v2 开放扩展)

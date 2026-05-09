@@ -2,6 +2,9 @@
 // 决策 / spec §4.1:Windows 老项目常见 GBK 转 markdown,强制 utf8 读;mojibake 探测仅 dry-run 用
 
 import { readFile } from 'node:fs/promises';
+import { extname } from 'node:path';
+import type { LegacyAnchor } from './types.js';
+import { parseWorkbook, getSheet, sheetToMarkdown, ExcelParseError } from './excel.js';
 
 /** 读文件结果,含原始字节用于 dry-run 时探测疑似编码 */
 export interface ReadAnchorResult {
@@ -13,6 +16,36 @@ export interface ReadAnchorResult {
   hasMojibake: boolean;
   /** 行尾(LF / CRLF) */
   lineEnding: 'LF' | 'CRLF' | 'mixed' | 'none';
+}
+
+/**
+ * 把 anchor 文件读为 LLM 输入文本(支持 .md / .txt / .csv / .xlsx)。
+ *
+ * 路径以 .xlsx 结尾时走 exceljs 解析 + 转 markdown 表格;
+ * 其他扩展名走 readAnchorFile(纯 utf8 文本)。
+ *
+ * spec §6.5 + 决策 §4.1:Excel 含 chart / pivot / formula 等不支持特性时抛 ExcelParseError,
+ * 引导用户在 Excel 另存为 .csv 后改 anchors.yaml。
+ *
+ * 提取自 Plan 7 Phase B(原各 caller 私有 helper),Phase F follow-up 统一公共入口
+ * 让 dry-run / index / regenerate 三个路径走同一逻辑(避免 dry-run 不真 parse Excel)。
+ */
+export async function readAnchorAsText(anchor: LegacyAnchor): Promise<string> {
+  const ext = extname(anchor.path).toLowerCase();
+  if (ext === '.xlsx') {
+    const wb = await parseWorkbook(anchor.path);
+    const sheet = getSheet(wb, anchor.sheet, anchor.path);
+    // 决策 §4.1:chart / pivot / formula 不支持时拒绝运行,引导导出 csv
+    if (sheet.unsupportedFeatures.length > 0) {
+      throw new ExcelParseError(
+        `sheet '${sheet.name}' 含不支持特性(${sheet.unsupportedFeatures.join(', ')});请在 Excel 另存为 .csv 后改 anchors.yaml path 指向 .csv(决策 §4.1)`,
+        anchor.path,
+      );
+    }
+    return sheetToMarkdown(sheet);
+  }
+  const r = await readAnchorFile(anchor.path);
+  return r.text;
 }
 
 /** 强制以 utf8 读老文档(spec §4.1 强制 encoding: utf8) */

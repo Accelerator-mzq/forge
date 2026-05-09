@@ -4,7 +4,7 @@
 // 任一失败 exit 非 0,docs/release-gate-checklist.md 的"自动化部分"调用本脚本
 
 import { execSync } from 'node:child_process';
-import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -49,6 +49,23 @@ try {
   console.error('FAIL: pnpm pack');
   console.error(err.message);
   process.exit(2);
+}
+
+// Plan 7 Phase E:tarball 大小回归(加 exceljs 后 tarball ~490KB 上限,vs Plan 6 ~150KB)
+console.log('\n[size] 校验 tarball 大小不超 1MB(exceljs 引入回归)...');
+try {
+  const tarballSize = statSync(tarballName).size;
+  const sizeMB = tarballSize / 1024 / 1024;
+  console.log(`  → ${tarballName}: ${sizeMB.toFixed(2)} MB`);
+  if (sizeMB > 1.0) {
+    throw new Error(`tarball 大小 ${sizeMB.toFixed(2)} MB 超阈值 1.0 MB`);
+  }
+  console.log('  ✓ tarball 大小 < 1 MB');
+} catch (err) {
+  console.error('FAIL: tarball size check');
+  console.error(err.message);
+  rmSync(tarballName, { force: true });
+  process.exit(1);
 }
 
 // tarball 结构验证(tar -tzf 列内容,过滤 package/ 前缀)
@@ -112,6 +129,17 @@ try {
     );
   }
   console.log(`  → forge --version 输出含 ${expected},OK`);
+
+  // Plan 7 Phase E:验证 brownfield 工件 — legacy-bridge --help 含 5 子命令
+  console.log('\n[brownfield] 验证 legacy-bridge --help 可用 ...');
+  const helpOut = execSync('npx forge legacy-bridge --help', { cwd: dryDir, encoding: 'utf8' });
+  const required = ['map', 'regenerate', 'index', 'sync-check', 'resolve'];
+  for (const sub of required) {
+    if (!helpOut.includes(sub)) {
+      throw new Error(`legacy-bridge --help 输出缺子命令:${sub}`);
+    }
+  }
+  console.log('  ✓ legacy-bridge --help 含 5 子命令');
 } catch (err) {
   console.error('FAIL: dry install');
   console.error(err.message);

@@ -1,0 +1,6 @@
+{
+  "name": "forge-spike-test",
+  "version": "0.0.1",
+  "type": "module",
+  "main": ".opencode/plugins/test.js"
+}

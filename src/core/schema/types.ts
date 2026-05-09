@@ -40,7 +40,28 @@ export interface ForgeConfig {
      */
     provider?: 'anthropic';
   };
+
+  /**
+   * v0.3 P3 修复(spec §2.3 + Plan 2):writing-plans skill 的 scale-aware mode 配置。
+   * trivial change 走 light mode(1-2 task,跳 RED/GREEN/REFACTOR),避免 v0.2 P3 的
+   * "trivial change → 1378 行 tasks.md" 过度生成(Plan 0b.1 实测确认)。
+   */
+  writing_plans?: {
+    /**
+     * trivial change 阈值:proposal.md 行数 < light_threshold → light mode。
+     * 默认 200(由 validateWritingPlansConfig fallback);允许范围 [50, 2000]。
+     * 50 太小会误判普通 change 为 trivial;2000 失去 light mode 意义。
+     * 调用方应以 `??` 取默认值或调 validateWritingPlansConfig 拿 sanitized 值。
+     */
+    light_threshold?: number;
+  };
 }
+
+/**
+ * 默认 light_threshold(P3 修复;调用方 fallback 用)。
+ * 详见 spec §2.3 + Plan 2 Task 2.2。
+ */
+export const DEFAULT_LIGHT_THRESHOLD = 200;
 
 /**
  * 默认 spec-driven schema 的 artifact 列表(决定哪些文件构成一个 change)。

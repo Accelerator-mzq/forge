@@ -5,10 +5,12 @@
 //   forge archive --recover              — 从半完成状态恢复
 
 import { Command } from 'commander';
-import { readFile, rm, rename, readdir, copyFile, mkdir } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { readFile, rm, rename, readdir, copyFile, mkdir, writeFile } from 'node:fs/promises';
+import { existsSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
+import { parse as parseYaml } from 'yaml';
+import Anthropic from '@anthropic-ai/sdk';
 import { parseMarker } from '../../core/markers/index.js';
 import { validateMarkerSchema } from '../../core/validate/index.js';
 import {
@@ -22,6 +24,16 @@ import { acquireLock, LockHeldError } from '../../core/archive/lock.js';
 import { recover } from '../../core/archive/recover.js';
 import { promptRecoverChoice } from '../../core/archive/recover-prompt.js';
 import { applyDeltas } from '../../core/specs-sync/index.js';
+import { loadAnchorsFile } from '../../core/legacy-bridge/anchors.js';
+import { checkAck } from '../../core/legacy-bridge/ack.js';
+import { runSyncCheck, type SyncCheckClient } from '../../core/legacy-bridge/sync-check.js';
+import {
+  renderDiffMarkdown,
+  renderDiffYaml,
+  hasCriticalPending,
+} from '../../core/legacy-bridge/diff-report.js';
+import { readAnchorFile } from '../../core/legacy-bridge/encoding.js';
+import type { ForgeConfig } from '../../core/schema/types.js';
 
 /**
  * 检测当前目录是否真实处于 git 工作树中
@@ -131,6 +143,19 @@ export function buildArchiveCommand(): Command {
       let archiveRelease: (() => Promise<void>) | undefined;
       try {
         archiveRelease = await acquireLock(forgeRoot, 'archive');
+
+        // Plan 7 PREFLIGHT(spec §2.5 line 183-204):acquireLock 之后、archive 严格门禁(marker check)之前。
+        // 设计意图:用户立即拿到 sync-state 报告,不被 marker 失败遮蔽。
+        // 决策 #23:复用 archive.lock,不再 acquire legacy-bridge.lock。
+        // preflight 不再 process.exit,改返 PreflightResult,caller 在 try 块内手动 release+exit
+        // 与 marker check 现有 inline-release convention 一致(避免 process.exit 跳过 finally 致锁残留)
+        const preflightResult = await runArchivePreflight(forgeRoot, changeId);
+        if (preflightResult.kind !== 'ok') {
+          console.error(preflightResult.message);
+          await archiveRelease();
+          process.exit(2);
+        }
+
         const changeDir = join(forgeRoot, 'changes', changeId);
         const verifyPath = join(changeDir, '.verify-passed');
         const reviewPath = join(changeDir, '.review-passed');
@@ -301,6 +326,9 @@ export function buildArchiveCommand(): Command {
         const archiveDate = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
         await archiveTransaction({ forgeRoot, changeId, archiveDate });
 
+        // 步骤 5.5:Plan 7 post-archive hook(enforce_sync=false 时不阻塞,只产报告)
+        await runArchivePostHook(forgeRoot, changeId);
+
         console.log(`✓ archived ${changeId} → changes/archive/${archiveDate}-${changeId}`);
       } catch (err) {
         // exit code 映射 — spec §3.5
@@ -348,4 +376,199 @@ async function restoreSpecsFromBackup(backupDir: string, currentSpecsDir: string
     if (!name.endsWith('.md')) continue;
     await copyFile(join(backupDir, name), join(currentSpecsDir, name));
   }
+}
+
+/**
+ * preflight 结果 union — caller 在 try 块内根据 kind 手动 release + exit,
+ * 与 archive.ts 现有"business-rule fail 处理"convention 一致(line 154 / 160 等)。
+ *
+ * kind 'ok':可继续 archive(graceful skip 或 全过)
+ * kind 'ack-missing' / 'critical-pending':caller 应 await release + exit 2
+ */
+export type PreflightResult =
+  | { kind: 'ok' }
+  | { kind: 'ack-missing'; message: string }
+  | { kind: 'critical-pending'; criticalCount: number; message: string };
+
+/**
+ * Plan 7 §2.5:archive preflight — enforce_sync=true 时阻塞 critical 差异。
+ *
+ * Graceful skip 路径(全部返 {kind:'ok'}):
+ *   1. forge/config.yaml 不存在
+ *   2. legacy-anchors.yaml 不存在
+ *   3. legacy_bridge.allow_llm_calls != true
+ *   4. legacy_bridge.enforce_sync != true
+ *
+ * 走 LLM 路径时:
+ *   - ack 不就绪 → 返 {kind:'ack-missing'}
+ *   - 含 critical pending → sync-state 已写后返 {kind:'critical-pending'}
+ *   - 全过 → 返 {kind:'ok'}
+ *
+ * **不再调 process.exit / console.error**:caller(archive 命令)负责打印消息 +
+ * release archive.lock + exit,避免本函数内 process.exit 跳过 caller finally
+ * 导致 archive.lock 文件残留。
+ */
+export async function runArchivePreflight(
+  forgeRoot: string,
+  changeId: string,
+): Promise<PreflightResult> {
+  const configPath = join(forgeRoot, 'config.yaml');
+  if (!existsSync(configPath)) return { kind: 'ok' };
+  const config = parseYaml(await readFile(configPath, 'utf8')) as ForgeConfig;
+
+  // §2.5:仅当 legacy-anchors.yaml 存在 AND allow_llm_calls=true AND enforce_sync=true 时进入 preflight
+  const anchors = await loadAnchorsFile(forgeRoot).catch(() => null);
+  if (!anchors) return { kind: 'ok' };
+  if (!config.legacy_bridge?.allow_llm_calls) return { kind: 'ok' };
+  if (!config.legacy_bridge?.enforce_sync) return { kind: 'ok' };
+
+  const ack = await checkAck(forgeRoot, config, anchors);
+  if (!ack.ok) {
+    return {
+      kind: 'ack-missing',
+      message: `legacy_bridge.enforce_sync=true 但 ack 未就绪:${ack.reason};请先跑 forge legacy-bridge --acknowledge-data-transfer`,
+    };
+  }
+
+  // 拼 change context(同 sync-check 命令)
+  const changesDir = join(forgeRoot, 'changes', changeId);
+  let changeContext = '';
+  const affectedModules: string[] = [];
+  if (existsSync(join(changesDir, 'proposal.md'))) {
+    changeContext += await readFile(join(changesDir, 'proposal.md'), 'utf8');
+  }
+  const specsDir = join(changesDir, 'specs');
+  if (existsSync(specsDir)) {
+    const files = await readdir(specsDir);
+    for (const f of files) {
+      changeContext += `\n## specs/${f}\n${await readFile(join(specsDir, f), 'utf8')}`;
+      affectedModules.push(f.replace(/\.md$/, ''));
+    }
+  }
+
+  // 跑 sync-check(决策 #23:复用 archive.lock,不再 acquire legacy-bridge.lock)
+  // 运行时动态加载 forge-eval/load-env(避免 src/ rootDir 静态分析边界限制)
+  const evalLoadEnvPath = new URL('../../../forge-eval/load-env.js', import.meta.url).href;
+  const { loadEnv } = (await import(/* @vite-ignore */ evalLoadEnvPath)) as {
+    loadEnv: () => { anthropicApiKey: string };
+  };
+  const { anthropicApiKey } = loadEnv();
+  const client = new Anthropic({ apiKey: anthropicApiKey }) as unknown as SyncCheckClient;
+  const out = await runSyncCheck(
+    client,
+    {
+      changeId,
+      changeContext,
+      affectedModules,
+      anchors,
+      autoResolveCrossAnchor: config.legacy_bridge.auto_resolve_cross_anchor ?? false,
+      mtimeOf: (p) => {
+        try {
+          return Math.floor(statSync(p).mtimeMs / 1000);
+        } catch {
+          return 0;
+        }
+      },
+    },
+    async (path) => (await readAnchorFile(path)).text,
+  );
+
+  await mkdir(join(forgeRoot, 'legacy-sync-state'), { recursive: true });
+  await writeFile(
+    join(forgeRoot, 'legacy-sync-state', `${changeId}.md`),
+    renderDiffMarkdown(out.syncState),
+    'utf8',
+  );
+  await writeFile(
+    join(forgeRoot, 'legacy-sync-state', `${changeId}.yaml`),
+    renderDiffYaml(out.syncState),
+    'utf8',
+  );
+
+  if (hasCriticalPending(out.syncState)) {
+    const criticalCount = out.syncState.diffs.filter(
+      (d) => d.severity === 'critical' && d.status === 'pending',
+    ).length;
+    return {
+      kind: 'critical-pending',
+      criticalCount,
+      message:
+        `✗ ${criticalCount} 项 critical 差异未 resolve;\n` +
+        `跑 forge legacy-bridge resolve ${changeId} 后重试,或在 forge/legacy-sync-state/${changeId}.yaml 标 ack`,
+    };
+  }
+
+  return { kind: 'ok' };
+}
+
+/**
+ * Plan 7 §2.5:post-archive hook — 不阻塞,仅在 enforce_sync=false 时跑(产报告)。
+ * enforce_sync=true 已由 preflight 跑过;graceful skip 路径同 preflight。
+ */
+export async function runArchivePostHook(forgeRoot: string, changeId: string): Promise<void> {
+  const configPath = join(forgeRoot, 'config.yaml');
+  if (!existsSync(configPath)) return;
+  const config = parseYaml(await readFile(configPath, 'utf8')) as ForgeConfig;
+  if (!config.legacy_bridge?.allow_llm_calls) return;
+  if (config.legacy_bridge?.enforce_sync) return; // 已在 preflight 跑过
+  const anchors = await loadAnchorsFile(forgeRoot).catch(() => null);
+  if (!anchors) return;
+  const ack = await checkAck(forgeRoot, config, anchors);
+  if (!ack.ok) return; // ack 不就绪 → graceful skip
+
+  // 跑 sync-check 但不阻塞
+  const changesDir = join(
+    forgeRoot,
+    'changes',
+    'archive',
+    `${new Date().toISOString().slice(0, 10)}-${changeId}`,
+  );
+  const proposalPath = existsSync(join(changesDir, 'proposal.md'))
+    ? join(changesDir, 'proposal.md')
+    : join(forgeRoot, 'changes', changeId, 'proposal.md');
+  let changeContext = '';
+  if (existsSync(proposalPath)) {
+    changeContext = await readFile(proposalPath, 'utf8');
+  }
+  const affectedModules: string[] = [];
+  // 简化:从 changeId 推测 module(占位,真实环境靠 specs/<area>.md)
+  const evalLoadEnvPath = new URL('../../../forge-eval/load-env.js', import.meta.url).href;
+  const { loadEnv } = (await import(/* @vite-ignore */ evalLoadEnvPath)) as {
+    loadEnv: () => { anthropicApiKey: string };
+  };
+  const { anthropicApiKey } = loadEnv();
+  const client = new Anthropic({ apiKey: anthropicApiKey }) as unknown as SyncCheckClient;
+  const out = await runSyncCheck(
+    client,
+    {
+      changeId,
+      changeContext,
+      affectedModules,
+      anchors,
+      autoResolveCrossAnchor: config.legacy_bridge.auto_resolve_cross_anchor ?? false,
+      mtimeOf: (p) => {
+        try {
+          return Math.floor(statSync(p).mtimeMs / 1000);
+        } catch {
+          return 0;
+        }
+      },
+    },
+    async (path) => (await readAnchorFile(path)).text,
+  );
+
+  await mkdir(join(forgeRoot, 'legacy-sync-state'), { recursive: true });
+  await writeFile(
+    join(forgeRoot, 'legacy-sync-state', `${changeId}.md`),
+    renderDiffMarkdown(out.syncState),
+    'utf8',
+  );
+  await writeFile(
+    join(forgeRoot, 'legacy-sync-state', `${changeId}.yaml`),
+    renderDiffYaml(out.syncState),
+    'utf8',
+  );
+  console.log(
+    `⚠ ${out.syncState.diffs.length} 项老文档可能需更新,详见 forge/legacy-sync-state/${changeId}.md`,
+  );
 }

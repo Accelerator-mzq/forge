@@ -25,6 +25,19 @@ export function buildInitCommand(): Command {
     .action(async (opts: { harness: string; force?: boolean }) => {
       const cwd = process.cwd();
 
+      // v0.3 Plan 4 — deprecation warning(stderr,不影响 stdout 主流程)
+      console.error(`
+⚠️  WARNING: 'forge init' is deprecated in v0.3.
+
+The plugin-based path is the new way:
+  /plugin marketplace add Accelerator-mzq/forge
+  /plugin install forge@accelerator-mzq-forge
+
+Existing v0.2 projects: run 'forge upgrade' to clean legacy adapter artifacts.
+
+'forge init' will be removed in v0.4. Continuing for legacy support...
+`);
+
       // 步骤 1:检测项目里有哪些 harness
       const detections = await detectAll(cwd);
 

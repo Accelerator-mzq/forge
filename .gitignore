@@ -1,6 +1,7 @@
 # 实施阶段会用到的常见 ignore — 当前设计阶段先放好
 node_modules/
 dist/
+dist-bundled/
 build/
 *.log
 .DS_Store

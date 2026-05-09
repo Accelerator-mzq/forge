@@ -39,6 +39,74 @@ node scripts/release-gate.mjs
 
 文件路径变为 `.agents/skills/forge-*/SKILL.md`(共享 Claude Agent SDK 约定)而非 `.claude/`。
 
+### 2.4 Brownfield Acceptance(v0.2 新增)
+
+**v0.2 必须跑 7 个 brownfield scenario。任一失败不发版。**
+
+#### 2.4.1 opt-in 流程
+
+1. 起空目录 `mkdir /tmp/forge-bf-1 && cd $_ && git init`
+2. `pnpm dlx @accelerator-mzq/forge init --harness claude`
+3. 不在 `forge/config.yaml` 加 `legacy_bridge.allow_llm_calls`
+4. 跑 `forge legacy-bridge regenerate`
+5. **期望(✅)**:exit 1 + 提示 "legacy-bridge 命令需要发送数据到 Anthropic API"
+
+#### 2.4.2 redact 真生效
+
+1. 写 `docs/legacy/secret-srs.md`,含 `<<aws-example-placeholder>>` + `ghp_aaaaaaaa...` + `foo@example.com`
+2. 配 anchors.yaml + 启用 LLM(`forge legacy-bridge --acknowledge-data-transfer`)
+3. 跑 `forge legacy-bridge regenerate --redact-report --dry-run`
+4. **期望(✅)**:stdout 输出 ≥ 3 类规则命中数(aws / github-pat / email)
+
+#### 2.4.3 preflight 阻塞(**需 ANTHROPIC_API_KEY**)
+
+> 当前实现:archive preflight 总是现场调 LLM 跑 sync-check,不读已有 `forge/legacy-sync-state/<id>.yaml`。
+> 所以本 scenario 必须配 ANTHROPIC_API_KEY 真触发 LLM 产生 critical diff,无法用手编辑 yaml 短路。
+> 真 cache 路径(`--use-cached-sync-state` 等)推 v0.3。
+
+1. `forge/config.yaml` 加 `legacy_bridge.enforce_sync: true` + `legacy_bridge.allow_llm_calls: true`
+2. 准备一个真 change:`forge/changes/add-payment/proposal.md` 含与某个 anchor(SRS / HLD)有冲突的语义改动(如新增"支付幂等性"约束,而老 SRS 没写)
+3. 配好 anchors.yaml 指向冲突的老文档,跑 `forge legacy-bridge --acknowledge-data-transfer`
+4. 跑 `forge archive add-payment`(已有合法 .verify-passed + .review-passed)
+5. **期望(✅)**:exit 2,stderr 含 "X 项 critical 差异未 resolve",并产出 `forge/legacy-sync-state/add-payment.{md,yaml}`
+6. 后续 resolve 路径:用户改 yaml status=resolved-by-doc-update / false-positive / skipped → `forge legacy-bridge resolve add-payment` exit 0
+
+**fallback(无 API key 时)**:跑 `pnpm vitest run tests/cli/legacy-bridge/archive-integration.test.ts`,确认 preflight 集成测试全过(LLM mock 返 critical → preflight 阻塞 + sync-state.yaml 写入 + lock 释放,覆盖 §2.4.3 决策路径)。
+
+#### 2.4.4 lock 并发
+
+1. 终端 A:`forge legacy-bridge regenerate &`(后台)
+2. 终端 B 立即:`forge archive add-x`
+3. **期望(✅)**:终端 B exit 5,stderr 含 "another forge archive is in progress"
+4. 终端 A 跑完后,终端 B 重跑应正常
+
+#### 2.4.5 多 harness skill smoke 不退化
+
+跑 §2.1 + §2.2 的 Claude Code + Codex acceptance test 各一次。
+**期望(✅)**:Plan 4 e2e brainstorming 逻辑无变化。
+
+#### 2.4.6 Excel 解析
+
+1. 准备多 sheet `.xlsx`(用 `tests/fixtures/legacy-bridge/_make-excel-fixture.mjs` 生成 fixture)
+2. 配 anchors.yaml `path: ./test.xlsx, sheet: TestCases`
+3. 跑 `forge legacy-bridge regenerate --role system-tests --dry-run`
+4. **期望(✅)**:exit 0,无 ExcelParseError
+
+#### 2.4.7 disclaimer 含 license
+
+1. 跑 `forge legacy-bridge regenerate`(配好 anchors)
+2. cat `forge/docs/regenerated/SRS.md`
+3. **期望(✅)**:frontmatter 含 `license: derived-from-source` + 顶部 disclaimer 含 "此文档由 forge 自动生成"
+
+#### 失败处理
+
+任一不满足:
+
+- 不发版
+- GitHub Issue 标 `release-gate-fail` + `brownfield`
+- 检查最近 PR 是否动了 `src/core/legacy-bridge/` 或 `forge-eval/regeneration-*`
+- 修复 → 重跑全套 release gate
+
 ### 2.3 失败处理
 
 任一 harness 不满足上述期望:
@@ -81,3 +149,65 @@ ls .claude/skills/    # 应见 12 个 forge-*/
 ```
 
 任一不通过 → 立即在 GitHub Issues 开 issue,考虑 unpublish(`npm unpublish` 仅在发版 72 小时内可用)+ patch release。
+
+---
+
+## §3 v0.3 Plugin Migration release gate(2026-05 加)
+
+v0.3 新增 6 项验证(Plan 0a + Plan 5 落地)。release v0.3.0 前必须 evidence 全归档到 `release-gate-evidence/v0.3/`。
+
+### §3.1 Plugin install fresh path(三 harness)
+
+- [ ] **Tier 1 Claude Code**(必)
+  - [ ] 准备 fresh fixture 项目(`mkdir /tmp/forge-fresh-claude && cd $_ && git init -q`)
+  - [ ] session 内 `/plugin marketplace add Accelerator-mzq/forge` + `/plugin install forge@accelerator-mzq-forge` + `/reload-plugins`
+  - [ ] 重启 session,输入 "我想做个 todo list" → AI 自动 invoke `Skill(forge:brainstorming)` + 走完 brainstorming 流程
+  - [ ] Evidence:`release-gate-evidence/v0.3/claude-fresh-install.transcript.md`
+- [ ] **Tier 2 OpenCode**(若 Tier 2 启用,Plan 0a.3 PASS 后必)
+  - [ ] 配 `~/.config/opencode/opencode.json` plugin 数组(file: 协议指本地或 git+https URL)
+  - [ ] 重启 OpenCode 验证 `'experimental.chat.messages.transform'` hook 注入 + skill auto-trigger
+  - [ ] Evidence:`release-gate-evidence/v0.3/opencode-fresh-install.transcript.md`
+- [ ] **Tier 3 Codex**(若 Tier 3 启用,Plan 0a.2 PASS 后必)
+  - [ ] clone forge → symlink `~/.agents/skills/forge` → `npm i -g @accelerator-mzq/forge@^0.3` → 重启 Codex
+  - [ ] 输入 "我想做 X" → AI 自动 invoke skill(Plan 0a.2 实测 PASS)
+  - [ ] Evidence:`release-gate-evidence/v0.3/codex-fresh-install.transcript.md`
+
+### §3.2 forge upgrade from v0.2 fixture
+
+- [ ] 准备 v0.2 完整 fixture:`npm i v0.2 forge` + `forge init --harness claude` + 假 `forge/changes/<id>/` 内容
+- [ ] 跑 `forge upgrade`,选 y → STASH 完成 + plugin install 指引输出
+- [ ] 验 `forge/` 目录 0 损失(diff 前后)
+- [ ] 24h 内跑 `forge upgrade --recover` → 全部回原位 + 验 hash
+- [ ] 重新 `forge upgrade` y + 装 plugin → 完整工作流跑通
+- [ ] Evidence:`release-gate-evidence/v0.3/upgrade-from-v0.2.transcript.md`
+
+### §3.3 bundled plugin 断网装 + 跑通 happy path(Tier 1 only)
+
+- [ ] 跑 `node scripts/build-bundled-plugin.mjs` 产 `dist-bundled/forge-bundled-v<version>.tgz`
+- [ ] 验证 tarball 大小合理(0.2-7 MB,含 dist/)
+- [ ] 解压验证内容:含 `.claude-plugin/` + `dist/` + patched `scripts/run-forge.mjs`(spawn node + dist/cli/index.js,无 npx 引用);**不含** `.codex-plugin/` plugin manifest 与 `.opencode/plugins/`(bundled 仅 Claude Code,Plan 5 已实测)
+- [ ] 断网,在另一 fixture 项目 `/plugin install --from-tarball <path>` → 重启验证 brainstorming auto-trigger + helper 调本地 dist/(无 npx + 无网)
+- [ ] Evidence:`release-gate-evidence/v0.3/bundled-offline-install.transcript.md`
+
+### §3.4 SessionStart hook fail 时 fallback
+
+- [ ] 模拟 hook 不可执行:`chmod -x ~/.claude/plugins/cache/.../hooks/session-start`(具体路径看用户 cache)
+- [ ] 重启 session,验证 fallback — system prompt 无 using-forge,但 plugin skills 仍进 auto-trigger 池(brainstorming auto-trigger 仍 work,Plan 0a 实测过的双层防护)
+- [ ] Evidence:`release-gate-evidence/v0.3/hook-failure-fallback.transcript.md`
+
+### §3.5 npx 拉 forge 0.3 with 用户机已有 forge 0.2 全局
+
+- [ ] `npm i -g @accelerator-mzq/forge@0.2.0`(模拟旧版)
+- [ ] plugin v0.3 commands.md 调 helper → helper 内 `--package @accelerator-mzq/forge@^0.3` semver 解析 → 拉新版 + 报警老版本 + 退出非零
+- [ ] Evidence:`release-gate-evidence/v0.3/npx-version-mismatch.warn.log`
+
+### §3.6 命令矩阵明确(spec §8 验收 #3)
+
+- [ ] `forge init`(deprecated,stderr 警告 + 不阻塞 — Plan 4 Task 4.5 落地)
+- [ ] `forge upgrade`(v0.3 新增,Plan 4 Task 4.3-4.4)
+- [ ] `forge validate` / `forge archive` / `forge config` / `forge update` / `forge legacy-bridge`(原)
+- [ ] 共 7 个公开命令,跑 `forge --help` 验证全列出
+
+### v0.3 release 阻塞门禁
+
+§3.1 Tier 1 + §3.2 + §3.3 + §3.6 必须 PASS;§3.1 Tier 2/3 + §3.4 + §3.5 PASS 才启用对应能力。任一阻塞项 FAIL → 退回相应 Plan 修。

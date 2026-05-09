@@ -1,10 +1,58 @@
 # Forge CLI Reference
 
-5 个公开命令:`init` / `update` / `config` / `validate` / `archive`。
+> v0.3 共 7 个公开命令:`forge init / upgrade / validate / archive / config / update / legacy-bridge`。`forge init` 标记 deprecated(v0.4 移除),新项目改用 plugin install。
 
-## `forge init`
+## `forge upgrade`(v0.3 新增)
 
-初始化 forge 到当前目录:检测 / 选择 harness、铺 skills + commands、创建 `forge/` 骨架。
+清理 v0.2 legacy harness adapter 产物(`.claude/skills/forge-*/` + `.claude/commands/forge/` + `.agents/skills/forge-*/` + `.agents/commands/forge/`),5 阶段事务化(SCAN → SHOW DIFF → ASK → STASH → VERIFY → COMMIT)。**`forge/` 产物 100% 不动**(drafts/changes/specs/config 全保留)。
+
+### 选项
+
+- `--dry-run` — SHOW DIFF 列清单,不 STASH(预览模式)
+- `--recover` — 24h 内还原最新 stash 到原位 + 删 stash + 验 hash
+- `--gc` — 删除超过 24h 的过期 stash 目录
+
+### 行为
+
+不传 flag 时走主流程:
+
+1. **SCAN**(纯只读):扫 v0.2 legacy 路径 + 算每文件 sha256
+2. **SHOW DIFF**(纯只读):stdout 列清单 + hash + 提示 "forge/ 产物 100% 不动"
+3. **ASK**:`Delete these legacy artifacts? [y/N]`(stdin 等用户输入)
+4. **STASH**:`<project>/.forge-upgrade-stash-<ts>/` + `.manifest.json`(每 mv 失败立刻反向 mv 回原位)
+5. **VERIFY**:重读 stash 内容验 hash 与 SCAN 一致(失败立刻反向回滚)
+6. **COMMIT**:不删 stash 24h(给用户冷却期)+ 输出 plugin install 指引
+
+### 退出码
+
+- 0 = 成功(包括 ASK N 的 graceful exit)
+- 1 = STASH 或 VERIFY 失败(自动反向回滚 + 报错)
+
+### 例子
+
+```bash
+# 主流程
+forge upgrade
+# 预览模式
+forge upgrade --dry-run
+# 24h 内反悔
+forge upgrade --recover
+# 清理过期 stash
+forge upgrade --gc
+```
+
+详见 [v0.2 → v0.3 升级 walkthrough](migration/v0.2-to-v0.3.md)。
+
+---
+
+
+v0.3 共 7 个公开命令:`init`(**deprecated**)/ `upgrade` / `update` / `config` / `validate` / `archive` / `legacy-bridge`。新项目改用 plugin install,`forge init` v0.4 移除。
+
+## `forge init`(deprecated v0.3,v0.4 移除)
+
+⚠️ **已 deprecated**:v0.3 stderr 打 warning。新项目改用 plugin install([安装文档](installation.md));老项目升级跑 [`forge upgrade`](#forge-upgrade)。
+
+仍保留功能(legacy 兼容窗口):初始化 forge 到当前目录:检测 / 选择 harness、铺 skills + commands、创建 `forge/` 骨架。
 
 ```
 forge init [--harness <list>] [--force]
@@ -123,6 +171,64 @@ forge archive --recover           # 从半完成归档状态恢复
 - 退出 3(回滚失败):按打印的 backup 路径手动恢复 `forge/specs/`,然后 `forge archive --recover` 检查
 - 退出 4(状态损坏):看 stderr 诊断,可能要手动 mv archive/ 回 changes/
 - 退出 5(lock 占用):等另一进程结束,或检查 `forge/.cache/archive.lock` 内的 pid 是否真存活,stale lock 会被 forge 自动清
+
+## forge legacy-bridge — Brownfield Onboarding(v0.2)
+
+完整文档:[`docs/legacy-bridge.md`](./legacy-bridge.md)。
+
+### `forge legacy-bridge --acknowledge-data-transfer [--acknowledge-customer-data]`
+
+一次性 ack 数据传输到 Anthropic API(决策 #22 / §9 GDPR)。
+
+| flag                          | 用途                                                  |
+| ----------------------------- | ----------------------------------------------------- |
+| `--acknowledge-data-transfer` | 必选;ack 老文档 + 代码 + 测试用例发往 LLM provider   |
+| `--acknowledge-customer-data` | 当 anchors.yaml 含 contains_customer_data=true 时必加 |
+
+### `forge legacy-bridge map [--merge | --overwrite]`
+
+LLM 扫 docs/+src/ 推测 role,产 anchors-draft.yaml + draft .md 概览。
+
+| flag                   | 用途                                                   |
+| ---------------------- | ------------------------------------------------------ |
+| `--merge`(默认)       | 与已存在 anchors.yaml 合并新发现项,保留用户审过部分   |
+| `--overwrite`          | 全量重生成(覆盖用户改动,需 TTY 确认)                |
+| `--docs-paths <paths>` | 逗号分隔的额外 docs 目录(默认扫 docs/ doc/ document/) |
+| `--redact-report`      | 输出每条 redact 规则的命中数                           |
+
+### `forge legacy-bridge regenerate [--role <r>] [--dry-run] [--include-historical] [--yes]`
+
+复写器:LLM 读 anchors → 规范 SRS/HLD/LLD/system-tests + 双 LLM 抽样验证。
+
+| flag                   | 用途                                          |
+| ---------------------- | --------------------------------------------- |
+| `--role <role>`        | 仅复写指定 role(默认全 4 role)              |
+| `--dry-run`            | 不调 LLM,只估算 cost + 列要扫的文件          |
+| `--include-historical` | 把 authoritative=false 历史版作背景(默认关) |
+| `--redact-report`      | 输出 redact 命中数                            |
+| `--yes`                | 非 TTY 必须显式 ack 高 cost 才继续(M-4)      |
+
+### `forge legacy-bridge index [--yes]`
+
+为每个 authoritative anchor 生成 ~100 字 LLM 摘要 → `forge/docs/index.md`。
+
+### `forge legacy-bridge sync-check [--change-id <id>]`
+
+检测 change 影响的 anchor → 5 档差异报告 → `forge/legacy-sync-state/<id>.{md,yaml}`。
+
+### `forge legacy-bridge resolve <change-id>`
+
+校验 sync-state diffs 全部 ack 后标 resolved。
+
+退出码补充(基础码沿用已有表):
+
+| 码  | brownfield 上下文含义                                       |
+| --- | ----------------------------------------------------------- |
+| 0   | 成功(含 graceful skip:无 anchors / allow_llm_calls=false) |
+| 1   | 配置错(opt-in 未做)/ 参数无效 / status 字段非法           |
+| 2   | critical 未 resolve / 保真率不达标                          |
+| 3   | 复写部分成功(.partial 文件)                               |
+| 5   | archive.lock 或 legacy-bridge.lock 被另一进程持有           |
 
 ## 错误退出码(全命令通用)
 

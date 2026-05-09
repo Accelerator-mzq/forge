@@ -1,25 +1,25 @@
 // 复写 eval scenario runner — Plan 7 Phase E
 // spec §5.1:跑真 LLM,分层抽样验证保真率;复用 Plan 5 forge-eval 基础设施
 
-import Anthropic from '@anthropic-ai/sdk';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
-import { regenerateRole } from '../src/core/legacy-bridge/regenerator.js';
+import { regenerateRole, type RegenerateClient } from '../src/core/legacy-bridge/regenerator.js';
 import {
   stratifiedSample,
   judgeAllFacts,
   formatQualityReport,
   DEFAULT_FIDELITY_THRESHOLD,
+  type JudgeClient,
 } from '../src/core/legacy-bridge/quality-judge.js';
 import type { LegacyAnchor } from '../src/core/legacy-bridge/types.js';
-import type {
-  RegenScenario,
-  RegenScenarioResult,
-  RegenRunSummary,
-} from './regeneration-types.js';
+import type { RegenScenario, RegenScenarioResult, RegenRunSummary } from './regeneration-types.js';
+
+// Anthropic SDK 的 messages.create 是 overload(stream true/false 分支),与单签名接口不直接兼容;
+// runner 调用 regenerateRole + judgeAllFacts 都需要单签名接口,统一用交集类型(同 legacy-bridge.ts:332 模式)
+export type RegenRunnerClient = RegenerateClient & JudgeClient;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCENARIOS_DIR = join(__dirname, 'regeneration-scenarios');
@@ -47,7 +47,11 @@ export function validateScenario(scenario: RegenScenario, ctx: string): void {
     throw new Error(`${ctx}: key_facts 为空`);
   }
   for (const f of scenario.key_facts) {
-    if (typeof f.text !== 'string' || typeof f.section !== 'string' || typeof f.critical !== 'boolean') {
+    if (
+      typeof f.text !== 'string' ||
+      typeof f.section !== 'string' ||
+      typeof f.critical !== 'boolean'
+    ) {
       throw new Error(`${ctx}: key_fact 缺字段`);
     }
   }
@@ -55,7 +59,7 @@ export function validateScenario(scenario: RegenScenario, ctx: string): void {
 
 /** 单 scenario 跑(真 LLM) */
 export async function runRegenScenario(
-  client: Anthropic,
+  client: RegenRunnerClient,
   scenario: RegenScenario,
 ): Promise<RegenScenarioResult> {
   // 取 authoritative anchor
@@ -137,7 +141,7 @@ export async function runRegenScenario(
 
 /** 跑全部 scenario */
 export async function runAllRegenScenarios(
-  client: Anthropic,
+  client: RegenRunnerClient,
   scenarioIds: string[],
 ): Promise<RegenRunSummary> {
   const results: RegenScenarioResult[] = [];
@@ -145,7 +149,9 @@ export async function runAllRegenScenarios(
     const scenario = await loadRegenScenario(id);
     const r = await runRegenScenario(client, scenario);
     results.push(r);
-    console.log(`[${id}] passed=${r.passed} total_rate=${(r.qualityResult.total_rate * 100).toFixed(1)}%`);
+    console.log(
+      `[${id}] passed=${r.passed} total_rate=${(r.qualityResult.total_rate * 100).toFixed(1)}%`,
+    );
   }
   const totalCost = results.reduce((sum, r) => sum + r.totalCost, 0);
   return {

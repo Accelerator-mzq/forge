@@ -7,7 +7,11 @@ import { readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadEnv } from './load-env.js';
-import { runAllRegenScenarios, writeRegenReport } from './regeneration-runner.js';
+import {
+  runAllRegenScenarios,
+  writeRegenReport,
+  type RegenRunnerClient,
+} from './regeneration-runner.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCENARIOS_DIR = join(__dirname, 'regeneration-scenarios');
@@ -39,7 +43,8 @@ function listAllScenarios(): string[] {
 async function main(): Promise<void> {
   const opts = parseArgs(process.argv.slice(2));
   const { anthropicApiKey } = loadEnv();
-  const client = new Anthropic({ apiKey: anthropicApiKey });
+  // Anthropic overload signature 与单签名接口不兼容,需 double-cast(同 src/cli/commands/legacy-bridge.ts:332)
+  const client = new Anthropic({ apiKey: anthropicApiKey }) as unknown as RegenRunnerClient;
 
   const scenarioIds = opts.scenario ? [opts.scenario] : listAllScenarios();
   console.log(`Running ${scenarioIds.length} scenario(s):${scenarioIds.join(', ')}`);

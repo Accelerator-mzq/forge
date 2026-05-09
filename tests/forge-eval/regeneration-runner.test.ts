@@ -4,11 +4,11 @@ import {
   validateScenario,
   runRegenScenario,
   buildRegenReport,
+  type RegenRunnerClient,
 } from '../../forge-eval/regeneration-runner.js';
 import type { RegenScenario, RegenRunSummary } from '../../forge-eval/regeneration-types.js';
-import type Anthropic from '@anthropic-ai/sdk';
 
-function makeMockClient(regeneratedBody: string, judgeAlwaysPreserved = true): Anthropic {
+function makeMockClient(regeneratedBody: string, judgeAlwaysPreserved = true): RegenRunnerClient {
   let callCount = 0;
   return {
     messages: {
@@ -16,16 +16,19 @@ function makeMockClient(regeneratedBody: string, judgeAlwaysPreserved = true): A
         callCount += 1;
         // 第 1 次 call:regenerator(返复写正文)
         // 后续 calls:judge(返 preserved)
-        const text = callCount === 1
-          ? regeneratedBody
-          : (judgeAlwaysPreserved ? 'preserved\nok' : 'lost\n找不到');
+        const text =
+          callCount === 1
+            ? regeneratedBody
+            : judgeAlwaysPreserved
+              ? 'preserved\nok'
+              : 'lost\n找不到';
         return {
           content: [{ type: 'text', text }],
           usage: { input_tokens: 1000, output_tokens: 500 },
         };
       },
     },
-  } as unknown as Anthropic;
+  } as unknown as RegenRunnerClient;
 }
 
 describe('forge-eval/regeneration-runner', () => {

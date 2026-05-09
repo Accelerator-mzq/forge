@@ -2,9 +2,7 @@
 // 每 anchor ~100 字 LLM 摘要;大文件(> 30KB)分块输入,合并摘要
 
 import Anthropic from '@anthropic-ai/sdk';
-import { extname } from 'node:path';
-import { readAnchorFile } from './encoding.js';
-import { parseWorkbook, getSheet, sheetToMarkdown } from './excel.js';
+import { readAnchorAsText } from './encoding.js';
 import { redact } from './redact.js';
 import type { LegacyAnchor, LegacyAnchorsFile } from './types.js';
 
@@ -30,17 +28,6 @@ const SUMMARY_TARGET_LEN = 100;
 const SUMMARY_TOLERANCE = 20;
 /** 大文件分块阈值(单 chunk) */
 const CHUNK_THRESHOLD_BYTES = 30 * 1024;
-
-/** 取 anchor 文本(支持 md / xlsx) */
-async function readAnchorText(anchor: LegacyAnchor): Promise<string> {
-  const ext = extname(anchor.path).toLowerCase();
-  if (ext === '.xlsx') {
-    const wb = await parseWorkbook(anchor.path);
-    const sheet = getSheet(wb, anchor.sheet, anchor.path);
-    return sheetToMarkdown(sheet);
-  }
-  return (await readAnchorFile(anchor.path)).text;
-}
 
 /** 把长文本分块(按段落边界,不在中间断) */
 export function chunkText(text: string, maxChunkBytes: number = CHUNK_THRESHOLD_BYTES): string[] {
@@ -92,7 +79,7 @@ export async function indexAnchor(
   if (METADATA_ONLY_INDEX_ROLES.has(anchor.role)) {
     return await indexAnchorMetadataOnly(anchor);
   }
-  const text = await readAnchorText(anchor);
+  const text = await readAnchorAsText(anchor);
   // redact 敏感数据后再发 LLM
   const masked = redact(text).redactedText;
   const inputBytes = Buffer.byteLength(masked, 'utf8');

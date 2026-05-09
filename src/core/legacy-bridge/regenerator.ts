@@ -5,9 +5,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import matter from 'gray-matter';
 import type { LegacyAnchor, LegacyAnchorRole, LegacyAnchorsFile } from './types.js';
 import { redact, type RedactReport } from './redact.js';
-import { readAnchorFile } from './encoding.js';
-import { parseWorkbook, getSheet, sheetToMarkdown, ExcelParseError } from './excel.js';
-import { extname } from 'node:path';
+import { readAnchorAsText } from './encoding.js';
 
 /** 复写参数 */
 export interface RegenerateInput {
@@ -75,25 +73,6 @@ export const REGEN_FILENAMES: Record<LegacyAnchorRole, string> = {
 
 /** P7-03 修复:metadata-only 角色集合(不发 LLM,不复写) */
 export const METADATA_ONLY_ROLES: ReadonlyArray<LegacyAnchorRole> = ['acceptance-report'];
-
-/** 把 anchor 文件读为 LLM 输入文本(支持 .md / .txt / .csv / .xlsx) */
-async function readAnchorAsText(anchor: LegacyAnchor): Promise<string> {
-  const ext = extname(anchor.path).toLowerCase();
-  if (ext === '.xlsx') {
-    const wb = await parseWorkbook(anchor.path);
-    const sheet = getSheet(wb, anchor.sheet, anchor.path);
-    // P7-09 修复:决策 §4.1 line 502 — chart/pivot/formula 不支持时拒绝运行,引导导出 csv
-    if (sheet.unsupportedFeatures.length > 0) {
-      throw new ExcelParseError(
-        `sheet '${sheet.name}' 含不支持特性(${sheet.unsupportedFeatures.join(', ')});请在 Excel 另存为 .csv 后改 anchors.yaml path 指向 .csv(决策 §4.1)`,
-        anchor.path,
-      );
-    }
-    return sheetToMarkdown(sheet);
-  }
-  const r = await readAnchorFile(anchor.path);
-  return r.text;
-}
 
 /** 拼 LLM prompt(决策 #14:复写规范化版本) */
 function buildRegeneratePrompt(

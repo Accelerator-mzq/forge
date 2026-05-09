@@ -15,7 +15,7 @@ import {
   LegacyAnchorsError,
 } from '../../core/legacy-bridge/anchors.js';
 import { writeAck, checkAck, renderOptinPrompt } from '../../core/legacy-bridge/ack.js';
-import { formatRedactReport } from '../../core/legacy-bridge/redact.js';
+import { formatRedactReport, redact, type RedactReport } from '../../core/legacy-bridge/redact.js';
 import { runSyncCheck, type SyncCheckClient } from '../../core/legacy-bridge/sync-check.js';
 import {
   renderDiffMarkdown,
@@ -42,7 +42,7 @@ import {
   countdown,
 } from '../../core/legacy-bridge/budget.js';
 import { computeAnchorHash } from '../../core/legacy-bridge/hash-anchor.js';
-import { readAnchorFile } from '../../core/legacy-bridge/encoding.js';
+import { readAnchorFile, readAnchorAsText } from '../../core/legacy-bridge/encoding.js';
 import { runMapper, writeMapperDraft, type MapperClient } from '../../core/legacy-bridge/mapper.js';
 import {
   buildIndex,
@@ -287,9 +287,31 @@ export function buildLegacyBridgeCommand(): Command {
         }
 
         if (opts.dryRun) {
-          // §4.4 dry-run:不调 LLM
+          // §4.4 dry-run:不调 LLM,但会真读 anchor + 跑 redact;
+          // Phase F follow-up:让 --dry-run --redact-report 可独立验证 redact 规则真生效
+          // (release-gate-checklist §2.4.2 期望的输出路径)
+          // xlsx 路径走 readAnchorAsText 真过 exceljs 解析;不支持特性时抛 ExcelParseError
+          // 让 §2.4.6 也能在不调 LLM 的前提下端到端验证 Excel 解析
+          // 全局 redact 规则 = anchors 文件级 redact + 每 anchor 自身 redact(redact() 内部合并)
+          const globalRules = anchors.redact ?? [];
+          // 累加汇总每 anchor 的命中数(redactedText 在 dry-run 不需要,仅占位)
+          const totalReport: RedactReport = {
+            hitsByRule: {},
+            totalReplacements: 0,
+            redactedText: '',
+          };
           for (const a of authoritativeAnchors) {
             console.log(`[dry-run] role=${a.role} path=${a.path}`);
+            const text = await readAnchorAsText(a);
+            const customRules = [...globalRules, ...(a.redact ?? [])];
+            const report = redact(text, customRules);
+            for (const [name, count] of Object.entries(report.hitsByRule)) {
+              totalReport.hitsByRule[name] = (totalReport.hitsByRule[name] ?? 0) + count;
+            }
+            totalReport.totalReplacements += report.totalReplacements;
+          }
+          if (opts.redactReport) {
+            console.log(formatRedactReport(totalReport));
           }
           process.exit(LB_EXIT_OK);
         }

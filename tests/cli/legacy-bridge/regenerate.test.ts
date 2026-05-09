@@ -76,6 +76,40 @@ describe('forge legacy-bridge regenerate (CLI 集成)', () => {
     }
   });
 
+  it('--dry-run --redact-report 输出含命中数(Phase F follow-up:dry-run 真跑 redact)', async () => {
+    // 替换默认 fixture 为含 secret 的版本(命中 email + github-pat 规则)
+    writeFileSync(
+      join(tmp, 'docs', 'legacy', 'SRS.md'),
+      '# SRS\n联系邮箱: foo@example.com\ngithub-pat: ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n',
+    );
+    const cwd = process.cwd();
+    try {
+      process.chdir(tmp);
+      const { buildLegacyBridgeCommand } =
+        await import('../../../src/cli/commands/legacy-bridge.js');
+      const cmd = buildLegacyBridgeCommand();
+      const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      try {
+        await cmd.parseAsync(['node', 'forge', 'regenerate', '--dry-run', '--redact-report']);
+        expect(exitSpy).toHaveBeenCalledWith(0);
+        const allLogs = logSpy.mock.calls.flat().join('\n');
+        // 期望:[redact] email + [redact] github-pat 都出现且各 ≥ 1 命中
+        expect(allLogs).toMatch(/\[redact\]\s+email\s+1 命中/);
+        expect(allLogs).toMatch(/\[redact\]\s+github-pat\s+1 命中/);
+        // total: 至少 2 项 mask
+        expect(allLogs).toMatch(/total: \d+ 项已 mask/);
+      } finally {
+        exitSpy.mockRestore();
+        logSpy.mockRestore();
+        errSpy.mockRestore();
+      }
+    } finally {
+      process.chdir(cwd);
+    }
+  });
+
   it('未 ack → 退 1 + 提示 --acknowledge-data-transfer', async () => {
     const cwd = process.cwd();
     try {

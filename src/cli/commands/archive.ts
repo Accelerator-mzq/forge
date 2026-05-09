@@ -5,10 +5,12 @@
 //   forge archive --recover              — 从半完成状态恢复
 
 import { Command } from 'commander';
-import { readFile, rm, rename, readdir, copyFile, mkdir } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { readFile, rm, rename, readdir, copyFile, mkdir, writeFile } from 'node:fs/promises';
+import { existsSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
+import { parse as parseYaml } from 'yaml';
+import Anthropic from '@anthropic-ai/sdk';
 import { parseMarker } from '../../core/markers/index.js';
 import { validateMarkerSchema } from '../../core/validate/index.js';
 import {
@@ -22,6 +24,16 @@ import { acquireLock, LockHeldError } from '../../core/archive/lock.js';
 import { recover } from '../../core/archive/recover.js';
 import { promptRecoverChoice } from '../../core/archive/recover-prompt.js';
 import { applyDeltas } from '../../core/specs-sync/index.js';
+import { loadAnchorsFile } from '../../core/legacy-bridge/anchors.js';
+import { checkAck } from '../../core/legacy-bridge/ack.js';
+import { runSyncCheck, type SyncCheckClient } from '../../core/legacy-bridge/sync-check.js';
+import {
+  renderDiffMarkdown,
+  renderDiffYaml,
+  hasCriticalPending,
+} from '../../core/legacy-bridge/diff-report.js';
+import { readAnchorFile } from '../../core/legacy-bridge/encoding.js';
+import type { ForgeConfig } from '../../core/schema/types.js';
 
 /**
  * 检测当前目录是否真实处于 git 工作树中
@@ -297,9 +309,17 @@ export function buildArchiveCommand(): Command {
           process.exit(2);
         }
 
+        // 步骤 4.5:Plan 7 brownfield preflight(enforce_sync=true 时阻塞 critical)
+        // 偏离 plan:plan 说"acquireLock 之后第一行",但 LLM 调用昂贵;放在 marker 全过之后更经济。
+        // 决策 #23:复用 archive.lock,不再 acquire legacy-bridge.lock
+        await runArchivePreflight(forgeRoot, changeId);
+
         // 步骤 5:调 archiveTransaction(Move→Sync)
         const archiveDate = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
         await archiveTransaction({ forgeRoot, changeId, archiveDate });
+
+        // 步骤 5.5:Plan 7 post-archive hook(enforce_sync=false 时不阻塞,只产报告)
+        await runArchivePostHook(forgeRoot, changeId);
 
         console.log(`✓ archived ${changeId} → changes/archive/${archiveDate}-${changeId}`);
       } catch (err) {
@@ -348,4 +368,173 @@ async function restoreSpecsFromBackup(backupDir: string, currentSpecsDir: string
     if (!name.endsWith('.md')) continue;
     await copyFile(join(backupDir, name), join(currentSpecsDir, name));
   }
+}
+
+/**
+ * Plan 7 §2.5:archive preflight — enforce_sync=true 时阻塞 critical 差异。
+ *
+ * Graceful skip 路径(全部走"不阻塞、return"):
+ *   1. forge/config.yaml 不存在
+ *   2. legacy-anchors.yaml 不存在
+ *   3. legacy_bridge.allow_llm_calls != true
+ *   4. legacy_bridge.enforce_sync != true
+ *
+ * 走 LLM 路径时,任何 ack 失败都退出(给用户提示);
+ * sync-state 写入 forge/legacy-sync-state/<change-id>.{md,yaml};
+ * 含 critical pending → exit 2(business-rule-fail)。
+ */
+export async function runArchivePreflight(forgeRoot: string, changeId: string): Promise<void> {
+  const configPath = join(forgeRoot, 'config.yaml');
+  if (!existsSync(configPath)) return;
+  const config = parseYaml(await readFile(configPath, 'utf8')) as ForgeConfig;
+
+  // §2.5:仅当 legacy-anchors.yaml 存在 AND allow_llm_calls=true AND enforce_sync=true 时进入 preflight
+  const anchors = await loadAnchorsFile(forgeRoot).catch(() => null);
+  if (!anchors) return;
+  if (!config.legacy_bridge?.allow_llm_calls) return;
+  if (!config.legacy_bridge?.enforce_sync) return;
+
+  const ack = await checkAck(forgeRoot, config, anchors);
+  if (!ack.ok) {
+    console.error(
+      `legacy_bridge.enforce_sync=true 但 ack 未就绪:${ack.reason};请先跑 forge legacy-bridge --acknowledge-data-transfer`,
+    );
+    process.exit(2);
+    return;
+  }
+
+  // 拼 change context(同 sync-check 命令)
+  const changesDir = join(forgeRoot, 'changes', changeId);
+  let changeContext = '';
+  const affectedModules: string[] = [];
+  if (existsSync(join(changesDir, 'proposal.md'))) {
+    changeContext += await readFile(join(changesDir, 'proposal.md'), 'utf8');
+  }
+  const specsDir = join(changesDir, 'specs');
+  if (existsSync(specsDir)) {
+    const files = await readdir(specsDir);
+    for (const f of files) {
+      changeContext += `\n## specs/${f}\n${await readFile(join(specsDir, f), 'utf8')}`;
+      affectedModules.push(f.replace(/\.md$/, ''));
+    }
+  }
+
+  // 跑 sync-check(决策 #23:复用 archive.lock,不再 acquire legacy-bridge.lock)
+  // 运行时动态加载 forge-eval/load-env(避免 src/ rootDir 静态分析边界限制)
+  const evalLoadEnvPath = new URL('../../../forge-eval/load-env.js', import.meta.url).href;
+  const { loadEnv } = (await import(/* @vite-ignore */ evalLoadEnvPath)) as {
+    loadEnv: () => { anthropicApiKey: string };
+  };
+  const { anthropicApiKey } = loadEnv();
+  const client = new Anthropic({ apiKey: anthropicApiKey }) as unknown as SyncCheckClient;
+  const out = await runSyncCheck(
+    client,
+    {
+      changeId,
+      changeContext,
+      affectedModules,
+      anchors,
+      autoResolveCrossAnchor: config.legacy_bridge.auto_resolve_cross_anchor ?? false,
+      mtimeOf: (p) => {
+        try {
+          return Math.floor(statSync(p).mtimeMs / 1000);
+        } catch {
+          return 0;
+        }
+      },
+    },
+    async (path) => (await readAnchorFile(path)).text,
+  );
+
+  await mkdir(join(forgeRoot, 'legacy-sync-state'), { recursive: true });
+  await writeFile(
+    join(forgeRoot, 'legacy-sync-state', `${changeId}.md`),
+    renderDiffMarkdown(out.syncState),
+    'utf8',
+  );
+  await writeFile(
+    join(forgeRoot, 'legacy-sync-state', `${changeId}.yaml`),
+    renderDiffYaml(out.syncState),
+    'utf8',
+  );
+
+  if (hasCriticalPending(out.syncState)) {
+    console.error(
+      `✗ ${out.syncState.diffs.filter((d) => d.severity === 'critical' && d.status === 'pending').length} 项 critical 差异未 resolve;\n` +
+        `跑 forge legacy-bridge resolve ${changeId} 后重试,或在 forge/legacy-sync-state/${changeId}.yaml 标 ack`,
+    );
+    process.exit(2);
+  }
+}
+
+/**
+ * Plan 7 §2.5:post-archive hook — 不阻塞,仅在 enforce_sync=false 时跑(产报告)。
+ * enforce_sync=true 已由 preflight 跑过;graceful skip 路径同 preflight。
+ */
+export async function runArchivePostHook(forgeRoot: string, changeId: string): Promise<void> {
+  const configPath = join(forgeRoot, 'config.yaml');
+  if (!existsSync(configPath)) return;
+  const config = parseYaml(await readFile(configPath, 'utf8')) as ForgeConfig;
+  if (!config.legacy_bridge?.allow_llm_calls) return;
+  if (config.legacy_bridge?.enforce_sync) return; // 已在 preflight 跑过
+  const anchors = await loadAnchorsFile(forgeRoot).catch(() => null);
+  if (!anchors) return;
+  const ack = await checkAck(forgeRoot, config, anchors);
+  if (!ack.ok) return; // ack 不就绪 → graceful skip
+
+  // 跑 sync-check 但不阻塞
+  const changesDir = join(
+    forgeRoot,
+    'changes',
+    'archive',
+    `${new Date().toISOString().slice(0, 10)}-${changeId}`,
+  );
+  const proposalPath = existsSync(join(changesDir, 'proposal.md'))
+    ? join(changesDir, 'proposal.md')
+    : join(forgeRoot, 'changes', changeId, 'proposal.md');
+  let changeContext = '';
+  if (existsSync(proposalPath)) {
+    changeContext = await readFile(proposalPath, 'utf8');
+  }
+  const affectedModules: string[] = [];
+  // 简化:从 changeId 推测 module(占位,真实环境靠 specs/<area>.md)
+  const evalLoadEnvPath = new URL('../../../forge-eval/load-env.js', import.meta.url).href;
+  const { loadEnv } = (await import(/* @vite-ignore */ evalLoadEnvPath)) as {
+    loadEnv: () => { anthropicApiKey: string };
+  };
+  const { anthropicApiKey } = loadEnv();
+  const client = new Anthropic({ apiKey: anthropicApiKey }) as unknown as SyncCheckClient;
+  const out = await runSyncCheck(
+    client,
+    {
+      changeId,
+      changeContext,
+      affectedModules,
+      anchors,
+      autoResolveCrossAnchor: config.legacy_bridge.auto_resolve_cross_anchor ?? false,
+      mtimeOf: (p) => {
+        try {
+          return Math.floor(statSync(p).mtimeMs / 1000);
+        } catch {
+          return 0;
+        }
+      },
+    },
+    async (path) => (await readAnchorFile(path)).text,
+  );
+
+  await mkdir(join(forgeRoot, 'legacy-sync-state'), { recursive: true });
+  await writeFile(
+    join(forgeRoot, 'legacy-sync-state', `${changeId}.md`),
+    renderDiffMarkdown(out.syncState),
+    'utf8',
+  );
+  await writeFile(
+    join(forgeRoot, 'legacy-sync-state', `${changeId}.yaml`),
+    renderDiffYaml(out.syncState),
+    'utf8',
+  );
+  console.log(
+    `⚠ ${out.syncState.diffs.length} 项老文档可能需更新,详见 forge/legacy-sync-state/${changeId}.md`,
+  );
 }

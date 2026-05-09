@@ -148,7 +148,41 @@ ls forge/specs/             # 应有归档 change 留下的 spec 文件
 
 完整问题清单见 [`docs/cli-reference.md` 的"错误退出码"段](cli-reference.md#错误退出码)。
 
-## 6. 已有老文档项目接入(v0.2 brownfield)
+## 与 superpowers plugin 共存(常见问题)
+
+forge 的 12 个 skill 是从 [superpowers](https://github.com/obra/superpowers) MIT 移植 + 命名空间改名(`superpowers:` → `forge:`,见 `LICENSE-THIRD-PARTY.md`)。所以**装了 superpowers plugin 的 Claude Code 会话同时跑 forge 项目时,会看到两组同主题 skill 共存**:
+
+| 维度                                                          | 冲突? |
+| ------------------------------------------------------------- | ------ |
+| 安装路径(项目级 `.claude/` vs 用户级 `~/.claude/plugins/`)  | ❌ 不冲突 |
+| skill 名(`forge:brainstorming` vs `superpowers:brainstorming`) | ❌ 命名空间隔离 |
+| slash 命令(forge 6 个 `/forge:*` vs superpowers 不带命令)   | ❌ 不冲突 |
+
+**但行为可能重叠**:你说"我想做个 todo list 应用"时,Claude 看到两个 brainstorming skill 都"1% 可能匹配",可能优先 invoke `superpowers:brainstorming`(plugin auto-load 抢先注册)→ 走完引导但**不写 `forge/drafts/<date>-<topic>.md`** → 下一步 `/forge:propose --from-draft <name>` 找不到 draft。
+
+### 两种解决方案
+
+**A. 显式用 `/forge:*` slash 命令触发(推荐)**
+
+`/forge:brainstorm` 等命令直接调 `forge:*` skill,优先级高于 skill auto-trigger,绕过 superpowers 抢跑:
+
+```bash
+# 在 Claude Code 会话里,不说"我想做 X",而是显式打:
+/forge:brainstorm
+# AI 在 forge:brainstorming 引导下提问 + 写 forge/drafts/<date>-<topic>.md
+```
+
+**B. 跑 forge 项目时通过 `/plugins` 暂时关掉 superpowers**
+
+forge 12 个 skill 内容跟 superpowers 几乎相同(同源 MIT 移植),关掉 superpowers 不会损失能力,只剩 `forge:*` 命名空间,Claude 不会困惑。
+
+```
+# 在 Claude Code 会话里:
+/plugins
+# 选择 superpowers plugin → disable for this session
+```
+
+## 7. 已有老文档项目接入(v0.2 brownfield)
 
 > 适用场景:已有完整 SRS / HLD / 测试用例的项目接入 forge,且老文档不能被替代(合规 / 客户验收 / 审计要求)
 

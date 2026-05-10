@@ -1,0 +1,3 @@
+- [ ] 1. Design Bar API
+- [ ] 2. Implement Bar service
+- [x] 3. Write Bar tests

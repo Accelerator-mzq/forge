@@ -71,7 +71,9 @@ export async function readTrace(dir: string): Promise<MigrateTrace | null> {
         // 容忍最后一行 truncate(crash 中途写入)
       }
     }
-    // 重建时 source meta 只有 ops;其余字段留空
+    // 注意:.ndjson 行只含 TraceOp 字段,不含 source/sourceRoot/ts/cleanupHint 等 meta;
+    // 此处用占位值('openspec' / '' 等),P5 crash 恢复若需要这些 meta,应从 opts/detect 重新传入
+    // 而非依赖 readTrace 的 ndjson 重建路径。
     return {
       version: 1,
       source: 'openspec' as SourceId,

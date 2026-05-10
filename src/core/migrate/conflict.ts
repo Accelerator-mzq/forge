@@ -8,12 +8,12 @@ import { join, dirname, basename } from 'node:path';
 import type { CopyOp } from './types.js';
 
 // 上限 99(spec §2.4):撞至 --imported-99 全占即 abort
-const MAX_IMPORTED = 99;
+const DEFAULT_MAX_IMPORTED = 99;
 
 // --imported-N 全占时 throw
 export class ConflictExhausted extends Error {
   constructor(public readonly target: string) {
-    super(`--imported-1..${MAX_IMPORTED} 全占;无法分配新名:${target}`);
+    super(`--imported-1..${DEFAULT_MAX_IMPORTED} 全占;无法分配新名:${target}`);
     this.name = 'ConflictExhausted';
   }
 }
@@ -82,7 +82,7 @@ export async function resolveConflicts(
       continue;
     }
 
-    // 非 --force 或 reserved 冲突:递增 --imported-N 找空位
+    // 非 --force 或 reserved 冲突:递增 --imported-N 找空位(用默认 MAX=99)
     const newTarget = findFreeImportedSlot(op.target, reservedTargets);
     reservedTargets.add(newTarget);
     conflicts.push({ original: op.target, renamed: newTarget });
@@ -101,9 +101,16 @@ export async function resolveConflicts(
  *   → /forge/changes/add-bar--imported/proposal.md
  *   → /forge/changes/add-bar--imported-2/proposal.md(N=2)
  *
- * 撞至 MAX_IMPORTED → throw ConflictExhausted。
+ * 撞至 maxImported → throw ConflictExhausted。
+ *
+ * export 用于测试:传入小 maxImported(如 2)可快速触发 ConflictExhausted 而无需 mkdir 99 次。
+ * resolveConflicts 内部调用时使用默认值 DEFAULT_MAX_IMPORTED(=99),行为不变。
  */
-function findFreeImportedSlot(target: string, reserved: Set<string>): string {
+export function findFreeImportedSlot(
+  target: string,
+  reserved: Set<string>,
+  maxImported = DEFAULT_MAX_IMPORTED,
+): string {
   const dir = dirname(target);
   const file = basename(target);
   // 兼容 unix(/) 和 windows(\) 两种分隔符
@@ -111,7 +118,7 @@ function findFreeImportedSlot(target: string, reserved: Set<string>): string {
   const lastDir = dirParts[dirParts.length - 1];
   if (!lastDir) throw new Error(`unexpected target without parent dir: ${target}`);
 
-  for (let n = 1; n <= MAX_IMPORTED; n++) {
+  for (let n = 1; n <= maxImported; n++) {
     // n=1 用 '--imported',n>=2 用 '--imported-N'
     const suffix = n === 1 ? '--imported' : `--imported-${n}`;
     // 重组:去除末段,加上末段+suffix,再 native join + file

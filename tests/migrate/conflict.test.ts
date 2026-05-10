@@ -4,7 +4,11 @@ import { mkdtemp, mkdir, writeFile, rm, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { resolveConflicts, ConflictExhausted } from '../../src/core/migrate/conflict.js';
+import {
+  resolveConflicts,
+  ConflictExhausted,
+  findFreeImportedSlot,
+} from '../../src/core/migrate/conflict.js';
 import type { CopyOp } from '../../src/core/migrate/types.js';
 
 describe('resolveConflicts — plan 阶段全锁定', () => {
@@ -117,5 +121,45 @@ describe('resolveConflicts — plan 阶段全锁定', () => {
     expect(e.name).toBe('ConflictExhausted');
     expect(e.target).toBe('/some/target');
     expect(e.message).toContain('全占');
+  });
+});
+
+// I-4:findFreeImportedSlot 导出后测真实 ConflictExhausted 触发路径
+// 传 maxImported=2 避免 99 次 mkdir,精确测 throw 上限逻辑
+describe('findFreeImportedSlot — export + maxImported 参数', () => {
+  it('maxImported=2 + 2 个 slot 全占 → throw ConflictExhausted', async () => {
+    const tmp = await mkdtemp(join(tmpdir(), 'forge-exhaust-'));
+    try {
+      // slot 1(--imported) + slot 2(--imported-2) 均已存在
+      await mkdir(join(tmp, 'forge/changes/add-bar'), { recursive: true });
+      await writeFile(join(tmp, 'forge/changes/add-bar/proposal.md'), 'a');
+      await mkdir(join(tmp, 'forge/changes/add-bar--imported'), { recursive: true });
+      await writeFile(join(tmp, 'forge/changes/add-bar--imported/proposal.md'), 'b');
+      await mkdir(join(tmp, 'forge/changes/add-bar--imported-2'), { recursive: true });
+      await writeFile(join(tmp, 'forge/changes/add-bar--imported-2/proposal.md'), 'c');
+
+      const target = join(tmp, 'forge/changes/add-bar/proposal.md');
+      // maxImported=2:N=1 和 N=2 都在磁盘 → 触发 ConflictExhausted
+      expect(() => findFreeImportedSlot(target, new Set(), 2)).toThrow(ConflictExhausted);
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('maxImported=2 + 只有 slot 1 占 → 返回 slot 2 路径(不 throw)', async () => {
+    const tmp = await mkdtemp(join(tmpdir(), 'forge-exhaust-'));
+    try {
+      await mkdir(join(tmp, 'forge/changes/add-bar'), { recursive: true });
+      await writeFile(join(tmp, 'forge/changes/add-bar/proposal.md'), 'a');
+      await mkdir(join(tmp, 'forge/changes/add-bar--imported'), { recursive: true });
+      await writeFile(join(tmp, 'forge/changes/add-bar--imported/proposal.md'), 'b');
+      // slot 2(--imported-2)尚未存在 → 应返回该路径
+
+      const target = join(tmp, 'forge/changes/add-bar/proposal.md');
+      const result = findFreeImportedSlot(target, new Set(), 2);
+      expect(result).toContain('add-bar--imported-2');
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
   });
 });

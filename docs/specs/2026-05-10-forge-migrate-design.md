@@ -59,7 +59,57 @@
 
 ## 1. 顶层架构
 
-### 1.1 模块组织
+### 1.1 Bridge 架构(分层而非集中 IR)
+
+> 本节回答常见质疑:**两源格式不同,migrate 凭什么能转?有没有中间 IR?**
+>
+> v4 答案:**有 4 层分层 bridge,无集中 IR**(集中 IR 在两源共性少时是过度抽象)。
+
+```
+源仓库(openspec/ 或 docs/superpowers/)
+                ↓
+┌──────────────────────────────────────────────────────────────────┐
+│ Layer 1 — markdown 结构 bridge(公共底层)                       │
+│   markdown-aware.ts walker(§2.5 + §5.2)                        │
+│   逐行扫描 + fenced code state + table-row 跳过 + 自切 section  │
+│   两源共用,无 source 知识,只识 markdown 结构                    │
+└──────────────────────────────────────────────────────────────────┘
+                ↓
+┌──────────────────────────────────────────────────────────────────┐
+│ Layer 2 — source 专属规则(形态归一)                            │
+│   sources/openspec.ts(§2.5):#### Scenario → ##;Problem → Why │
+│   sources/superpowers.ts(§2.6):**Step N**: → task-N:           │
+│   仅在 !fenced && !table 行执行;走 Layer 1 walker 喂 LineCtx     │
+└──────────────────────────────────────────────────────────────────┘
+                ↓
+┌──────────────────────────────────────────────────────────────────┐
+│ Layer 3 — forge target schema(de facto IR)                     │
+│   proposal: # title + ## Why + ## What                          │
+│   spec: ## Scenario + **Given/When/Then**                       │
+│   tasks: - [ ] task-N: text                                      │
+│   两源 transform 后形态完全相同 → forge validate/archive 不区分源 │
+└──────────────────────────────────────────────────────────────────┘
+                ↓(--regenerate 路径才走 Layer 4)
+┌──────────────────────────────────────────────────────────────────┐
+│ Layer 4 — facts 语义 bridge(LLM 路径)                          │
+│   quality.ts(§5.2):三套 prompt 把不同源内容抽成统一 facts      │
+│   - extractMotivationFacts(design)→ 用于校验生成 proposal      │
+│   - extractBehaviorFacts(tasks)→ 用于校验生成 specs/<area>     │
+│   - extractFacts(content)→ openspec 已有件原文                 │
+│   judge 阶段不区分源,统一按 fidelity threshold 判定             │
+└──────────────────────────────────────────────────────────────────┘
+                ↓
+forge/(目标产物,不带源标记)
+```
+
+**为什么不引入"集中 IR"**:
+- 两源差异点几乎不重叠(openspec 改章节层级,superpowers 改 task-id 格式),IR 收益小
+- IR schema 设计费劲,设计错了 source→IR + IR→forge 双路径都受影响
+- 现阶段只 2 源,加 IR 是过度抽象
+
+**第三方源(magic / claude-flow)如何接入**:实现 `MigrateSource` 接口(§1.3)— 新增 `sources/<id>.ts`,复用 Layer 1 / 3 / 4,只写自己的 Layer 2 规则,不改主流程。
+
+### 1.2 模块组织
 
 ```
 src/core/migrate/                       ← ★ NEW
@@ -89,7 +139,7 @@ tests/cli/migrate.test.ts               ← ★ NEW:CLI 端到端
 tests/fixtures/migrate/                 ← ★ NEW:四套 fixture 树(详 §4.2,加覆盖 markdown-aware 反例)
 ```
 
-### 1.2 `MigrateSource` 接口契约
+### 1.3 `MigrateSource` 接口契约
 
 ```ts
 // src/core/migrate/types.ts
@@ -108,7 +158,7 @@ export interface MigrateSource {
 }
 ```
 
-### 1.3 CLI 形态
+### 1.4 CLI 形态
 
 ```
 forge migrate <source> [options]
@@ -126,7 +176,7 @@ forge migrate <source> [options]
   --redact-rules <f>   --regenerate 时附加自定义 redact 规则(沿用 legacy-bridge `redact.ts` 格式)
 ```
 
-### 1.4 主流程伪码(v2:加 LockMode 'migrate' / forge 初始化 / journal trace / AbortController / archive 降级)
+### 1.5 主流程伪码(v2:加 LockMode 'migrate' / forge 初始化 / journal trace / AbortController / archive 降级)
 
 ```
 runMigrate(sourceId, opts):

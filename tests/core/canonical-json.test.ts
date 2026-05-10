@@ -22,7 +22,12 @@ describe('canonical-json', () => {
   });
 
   it('handles nested objects + arrays', () => {
-    const obj = { items: [{ b: 2, a: 1 }, { d: 4, c: 3 }] };
+    const obj = {
+      items: [
+        { b: 2, a: 1 },
+        { d: 4, c: 3 },
+      ],
+    };
     const expected = '{"items":[{"a":1,"b":2},{"c":3,"d":4}]}';
     expect(canonicalize(obj)).toBe(expected);
   });

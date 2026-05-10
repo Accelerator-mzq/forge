@@ -12,3 +12,4 @@ export * from './core/markers/index.js';
 export * from './core/specs-sync/index.js';
 export * from './core/templates/index.js';
 export * from './core/bootstrap/index.js';
+export * from './core/migrate/index.js';

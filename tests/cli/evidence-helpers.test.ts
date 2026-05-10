@@ -138,6 +138,34 @@ describe('forge evidence record-tdd', () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it('record-tdd rejects invalid --expected-failures JSON with exit 2', () => {
+    const root = setupChange();
+    try {
+      // 故意传入语法非法的 JSON 字符串,期望 exit 2 + stderr 提示
+      const result = runCli(
+        [
+          'evidence',
+          'record-tdd',
+          'test-change',
+          '--task',
+          'tasks.md#task-1',
+          '--red-commit',
+          'abc',
+          '--green-commit',
+          'def',
+          '--expected-failures',
+          '[invalid json',
+        ],
+        root,
+      );
+      // exit 2 与 invalid scope 错误路径一致(不是 commander 兜底的 exit 1)
+      expect(result.exitCode).toBe(2);
+      expect(result.stderr).toMatch(/Invalid --expected-failures/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 // ─── 测试套件:record-verify ─────────────────────────────────────────────────

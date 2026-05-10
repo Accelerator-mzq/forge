@@ -74,6 +74,21 @@ export function buildEvidenceCommand(): Command {
         // 计算 changeRoot:相对于当前工作目录
         const changeRoot = resolve(process.cwd(), 'forge', 'changes', changeId);
 
+        // 解析可选 --expected-failures(JSON 字符串)
+        // 与 record-verify 的 invalid scope 错误路径保持一致:解析失败 exit 2 + stderr 提示
+        // 不再让 JSON.parse 异常冒泡到 commander parseAsync catch(否则会变成 exit 1)
+        let expectedFailures: unknown[] = [];
+        if (opts.expectedFailures) {
+          try {
+            expectedFailures = JSON.parse(opts.expectedFailures) as unknown[];
+          } catch (e) {
+            process.stderr.write(
+              `Invalid --expected-failures JSON: ${e instanceof Error ? e.message : String(e)}\n`,
+            );
+            process.exit(2);
+          }
+        }
+
         // 构建用于哈希计算的 payload 对象(不是 marker,仅用于内容寻址)
         // TODO(9g): write process_evidence.tdd_event_chain[i] to marker
         const payload = {
@@ -82,8 +97,7 @@ export function buildEvidenceCommand(): Command {
           task_ref: opts.task,
           red_commit: opts.redCommit,
           green_commit: opts.greenCommit,
-          // --expected-failures 是可选 JSON 字符串,缺省时为空数组
-          expected_failures: opts.expectedFailures ? JSON.parse(opts.expectedFailures) : [],
+          expected_failures: expectedFailures,
         };
 
         // 使用 JCS canonical hash 确保跨平台确定性

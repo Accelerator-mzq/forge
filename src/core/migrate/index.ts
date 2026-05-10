@@ -1,13 +1,16 @@
 // src/core/migrate/index.ts
-// runMigrate 主流程 — Plan 8a Task 1.6(框架)+ 后续 phase 填实
-// 对应 spec §1.5 主流程伪码 v4
+// runMigrate 主流程 — Plan 8a Task 1.6(框架)+ Task 4.7 cp 三步走集成
+// 对应 spec §1.5 主流程伪码 v4 + §3.1 错误矩阵 + §3.4 trace
 
 import { acquireLockByPath, LockHeldError } from '../archive/lock.js';
-import { mkdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { existsSync } from 'node:fs';
+import { mkdir, rename, readFile, writeFile, unlink } from 'node:fs/promises';
+import { join, dirname } from 'node:path';
 import { execSync } from 'node:child_process';
 import { getSource } from './sources/index.js';
-import type { MigrateOptions, ClassifyCtx } from './types.js';
+import { resolveConflicts } from './conflict.js';
+import { Journal, finalizeAndRename, writeReportMd } from './report.js';
+import type { MigrateOptions, ClassifyCtx, TraceOp, MigrateTrace } from './types.js';
 
 export { getSource };
 export type { MigrateOptions, MigrateSource, SourceId } from './types.js';
@@ -82,8 +85,91 @@ export async function runMigrate(opts: MigrateOptions): Promise<number> {
       return 0;
     }
 
-    // P4 / P5 实施 conflict / cp / regenerate / report
-    throw new Error('runMigrate copy / regenerate path not implemented (plan-8d / plan-8e)');
+    // missingPreview 早算(B3 修订);P5 用于 archive 完整性检查
+    const missingPreview = source.listMissingArtifacts(plan);
+    console.log(
+      `[migrate] scanned ${scan.files.length} files, missing-preview: ${missingPreview.length}`,
+    );
+
+    // 准备 ops + plan 阶段全锁定 conflict
+    const targetForge = join(cwd, 'forge');
+    const rawOps = source.prepareCopy(plan, targetForge);
+    const conflictResult = await resolveConflicts(rawOps, {
+      force: opts.force ?? false,
+      forgeRoot: targetForge,
+    });
+
+    // 打开 journal(append 模式,crash 时半完成 ops 可被 readTrace 重建)
+    const journalPath = join(targetForge, 'migrate-trace.json.ndjson');
+    await mkdir(targetForge, { recursive: true });
+    const journal = await Journal.open(journalPath);
+
+    const ts = new Date().toISOString();
+    const traceOps: TraceOp[] = [];
+
+    try {
+      for (const op of conflictResult.ops) {
+        // 步骤 1:journal pending(crash 后 rollback 知道清 .tmp)
+        const pendingEntry: TraceOp = {
+          from: op.source,
+          to: op.target,
+          kind: op.kind,
+          transform: [],
+          validate: 'pending',
+          regen: null,
+          writtenAt: ts,
+          status: 'pending',
+        };
+        await journal.append(pendingEntry);
+
+        // 步骤 2a:读源 + transform + 写 .tmp
+        let transformed = '';
+        if (op.source) {
+          const raw = await readFile(op.source, 'utf8');
+          transformed = source.transform(raw, op.kind);
+        }
+        const tmpTarget = op.target + '.tmp';
+        await mkdir(dirname(op.target), { recursive: true });
+        await writeFile(tmpTarget, transformed, 'utf8');
+
+        // 步骤 2b:fs.rename .tmp → 真目标(POSIX 原子)
+        await rename(tmpTarget, op.target);
+
+        // 步骤 3:journal committed
+        const committedEntry: TraceOp = {
+          ...pendingEntry,
+          validate: 'ok', // P5 实施真实 validate;此处占位 'ok'
+          status: 'committed',
+        };
+        await journal.append(committedEntry);
+        traceOps.push(committedEntry);
+      }
+
+      // 末态 rename:journal close → finalizeAndRename → writeReportMd
+      await journal.close();
+      const finalTrace: MigrateTrace = {
+        version: 1,
+        source: source.id,
+        sourceRoot: detect.rootPath!,
+        ts,
+        ops: traceOps,
+        conflicts: conflictResult.conflicts.map((c) => ({ target: c.original, rename: c.renamed })),
+        downgrades: [], // P5 Task 5.16 加
+        cleanupHint:
+          source.id === 'openspec'
+            ? 'git rm -r openspec/'
+            : 'git rm -r docs/superpowers/{specs,plans}/',
+      };
+      await finalizeAndRename(targetForge, finalTrace);
+      await writeReportMd(targetForge, finalTrace);
+
+      return 0;
+    } catch (err) {
+      // rollback:基于 journal NDJSON 反向 rm committed + 清残留 .tmp
+      await journal.close().catch(() => {});
+      await rollbackFromJournal(journalPath);
+      throw err;
+    }
   } catch (err) {
     if (err instanceof LockHeldError) {
       // P1 Task 1.7 在 CLI 入口提供友好文案;此处再次兜底友好化(spec §3.3 v4)
@@ -103,4 +189,33 @@ async function ensureForgeBootstrap(cwd: string): Promise<void> {
   await mkdir(join(cwd, 'forge', '.cache'), { recursive: true });
   await mkdir(join(cwd, 'forge', '.forge-trash'), { recursive: true });
   await mkdir(join(cwd, 'forge', '.forge-ack'), { recursive: true });
+}
+
+/**
+ * rollback:基于 NDJSON journal 反向 rm 已 committed 文件 + 清残留 .tmp
+ * 源文件不动(只删 target 侧产物)
+ */
+async function rollbackFromJournal(journalPath: string): Promise<void> {
+  if (!existsSync(journalPath)) return;
+  const content = await readFile(journalPath, 'utf8');
+  const committedTargets: string[] = [];
+  const pendingTargets: string[] = [];
+  for (const line of content.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const op = JSON.parse(line) as TraceOp;
+      if (op.status === 'committed') committedTargets.push(op.to);
+      else if (op.status === 'pending') pendingTargets.push(op.to + '.tmp');
+    } catch {
+      // 容忍 truncate(crash 中途)
+    }
+  }
+  // 反向 rm 已 committed(LIFO 顺序)
+  for (const t of committedTargets.reverse()) {
+    if (existsSync(t)) await unlink(t).catch(() => {});
+  }
+  // 清残留 .tmp
+  for (const t of pendingTargets) {
+    if (existsSync(t)) await unlink(t).catch(() => {});
+  }
 }

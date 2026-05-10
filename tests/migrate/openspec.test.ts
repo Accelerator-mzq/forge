@@ -39,8 +39,8 @@ describe('forge migrate openspec — 集成测(--no-regenerate)', () => {
     expect(code).toBe(0);
   });
 
-  // P4 待实施 — 以下 case 当前期望 FAIL,等 P4 cp 路径实施完才会 PASS
-  it.skip('--no-regenerate 实跑后 forge/ 树就位 + transformer 应用 + archive 不残', async () => {
+  // P4 实施 cp 路径后启用
+  it('--no-regenerate 实跑后 forge/ 树就位 + transformer 应用 + archive 不残', async () => {
     const code = await runMigrate({ source: 'openspec', noRegenerate: true });
     expect(code).toBe(0);
     // 1. forge/specs/foo/spec.md 含 ## Scenario(transform 后)

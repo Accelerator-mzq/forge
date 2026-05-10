@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, rm, cp } from 'node:fs/promises';
+import { mkdtemp, rm, cp, readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,7 +32,7 @@ describe('forge migrate superpowers — 集成测(--no-regenerate)', () => {
     expect(code).toBe(0);
   });
 
-  // 等 P4 cp 路径实施完才能跑 — 当前 it.skip 占位
+  // 等 P5 enforceArchiveIntegrity 实施 — archive 缺件降级 active(M13)
   it.skip('add-auth(全 [x] + git slug+close commit) → archive 但缺件降级 active', async () => {
     const code = await runMigrate({
       source: 'superpowers',
@@ -41,20 +42,50 @@ describe('forge migrate superpowers — 集成测(--no-regenerate)', () => {
     expect(code).toBe(4); // M13:archive 缺件 + non-interactive → exit 4
   });
 
-  it.skip('cleanup-deps(部分 [x]) → active', async () => {
-    // P4 cp 后启用
+  it('cleanup-deps(部分 [x]) → active', async () => {
+    // cleanup-deps 有 3 个 step,其中 1 个未完成 → 不满足 archive 条件 → active
+    const code = await runMigrate({ source: 'superpowers', noRegenerate: true });
+    expect(code).toBe(0);
+    // forge/changes/cleanup-deps/{design,tasks}.md 就位(active 路径)
+    expect(existsSync(join(tmp, 'forge/changes/cleanup-deps/design.md'))).toBe(true);
+    expect(existsSync(join(tmp, 'forge/changes/cleanup-deps/tasks.md'))).toBe(true);
+    // tasks.md 含 task- 前缀(transformer 应用 **Step → task-N)
+    const tasks = await readFile(join(tmp, 'forge/changes/cleanup-deps/tasks.md'), 'utf8');
+    expect(tasks).toMatch(/task-/);
   });
 
-  it.skip('single-task(1 task 100%, < 3) → active', async () => {
-    // P4 cp 后启用
+  it('single-task(1 task 100%, < 3) → active', async () => {
+    // single-task 只有 1 个 step → task 数量 < 3,不满足 archive 阈值 → active
+    const code = await runMigrate({ source: 'superpowers', noRegenerate: true });
+    expect(code).toBe(0);
+    // single-task 应在 active 路径(不应被推 archive)
+    expect(existsSync(join(tmp, 'forge/changes/single-task/tasks.md'))).toBe(true);
+    expect(existsSync(join(tmp, 'forge/changes/archive/single-task'))).toBe(false);
   });
 
-  it.skip('orphan(plan-only) → active 且 design 缺', async () => {
-    // P4 cp 后启用
+  it('orphan(plan-only) → active 且 design 缺', async () => {
+    // orphan 只有 plan,无对应 design → active,design.md 缺
+    const code = await runMigrate({ source: 'superpowers', noRegenerate: true });
+    expect(code).toBe(0);
+    // tasks.md 存在(plan.md → tasks.md)
+    expect(existsSync(join(tmp, 'forge/changes/orphan/tasks.md'))).toBe(true);
+    // design.md 不存在(orphan 无 design 文件)
+    expect(existsSync(join(tmp, 'forge/changes/orphan/design.md'))).toBe(false);
   });
 
-  it.skip('tasks.md 含 task-1-1: 嵌套;不含 **Step;中文冒号转英文', async () => {
-    // P4 cp 后启用
+  it('add-auth tasks.md 含 task-1-1: 嵌套;不含 **Step;中文冒号转英文', async () => {
+    // add-auth 被 archive-detect 推 archive(全 [x] + git close commit)
+    // P4 阶段无 enforceArchiveIntegrity → 会写到 archive 路径
+    const code = await runMigrate({ source: 'superpowers', noRegenerate: true });
+    expect(code).toBe(0);
+    // archive-detect 推 archive:路径为 forge/changes/archive/add-auth/tasks.md
+    const tasksPath = existsSync(join(tmp, 'forge/changes/archive/add-auth/tasks.md'))
+      ? join(tmp, 'forge/changes/archive/add-auth/tasks.md')
+      : join(tmp, 'forge/changes/add-auth/tasks.md'); // fallback(active 路径)
+    const tasks = await readFile(tasksPath, 'utf8');
+    expect(tasks).toMatch(/task-1-1:/); // 嵌套 step 转换
+    expect(tasks).not.toContain('**Step'); // **Step 消失
+    expect(tasks).not.toContain('：'); // 中文冒号转英文
   });
 });
 

@@ -1,0 +1,81 @@
+// src/core/migrate/index.ts
+// runMigrate 主流程 — Plan 8a Task 1.6(框架)+ 后续 phase 填实
+// 对应 spec §1.5 主流程伪码 v4
+
+import { acquireLockByPath, LockHeldError } from '../archive/lock.js';
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
+import { getSource } from './sources/index.js';
+import type { MigrateOptions, ClassifyCtx } from './types.js';
+
+export { getSource };
+export type { MigrateOptions, MigrateSource, SourceId } from './types.js';
+
+/** runMigrate 主流程编排 */
+export async function runMigrate(opts: MigrateOptions): Promise<number> {
+  const cwd = process.cwd();
+  const source = getSource(opts.source);
+
+  // P1 阶段:detect 调真;后续阶段填实
+  const detect = await source.detect(cwd).catch((err) => {
+    return { found: false, message: (err as Error).message } as const;
+  });
+
+  if (!detect.found) {
+    console.error(`source <${opts.source}> not found: ${detect.message ?? 'unknown reason'}`);
+    return 2;
+  }
+
+  // ensureForgeBootstrap — 此前不存在 forge/ 时建最小 .cache(spec §1.5)
+  await ensureForgeBootstrap(cwd);
+
+  let release: (() => Promise<void>) | undefined;
+  // v4 修订(codex C2):用 process.once 防 listener 累积(测试多次 runMigrate);finally 显式 off 兜底
+  const sigintHandler = () => {
+    console.error('\n[migrate] SIGINT received; rolling back...');
+    process.exit(130);
+  };
+  process.once('SIGINT', sigintHandler);
+
+  try {
+    release = await acquireLockByPath(join(cwd, 'forge'), 'migrate', 'migrate.lock');
+
+    const ctx: ClassifyCtx = {
+      cwd,
+      archiveListPath: opts.archiveList,
+      inGitRepo: false, // P3 实施 git 探测
+    };
+
+    // P2/P3 实施真实 scan/classify
+    const scan = await source.scan(detect.rootPath!);
+    // plan-8d / plan-8e 阶段填实 cp/regen 路径时改为 const plan = await ...
+    await source.classify(scan, ctx);
+
+    if (opts.dryRun) {
+      console.log('[migrate] dry-run: not implemented yet (plan-8d report.printPlan)');
+      console.log(`[migrate] source=${source.id}, scanned ${scan.files.length} files`);
+      return 0;
+    }
+
+    // P4 / P5 实施 conflict / cp / regenerate / report
+    throw new Error('runMigrate copy / regenerate path not implemented (plan-8d / plan-8e)');
+  } catch (err) {
+    if (err instanceof LockHeldError) {
+      // P1 Task 1.7 在 CLI 入口提供友好文案;此处再次兜底友好化(spec §3.3 v4)
+      console.error(
+        `forge migrate is blocked by lock: pid ${err.holder.pid}, mode ${err.holder.mode}, started ${err.holder.started_at}`,
+      );
+      return 1;
+    }
+    throw err;
+  } finally {
+    process.off('SIGINT', sigintHandler); // v4 修订:防 listener 累积(codex C2)
+    if (release) await release();
+  }
+}
+
+async function ensureForgeBootstrap(cwd: string): Promise<void> {
+  await mkdir(join(cwd, 'forge', '.cache'), { recursive: true });
+  await mkdir(join(cwd, 'forge', '.forge-trash'), { recursive: true });
+  await mkdir(join(cwd, 'forge', '.forge-ack'), { recursive: true });
+}

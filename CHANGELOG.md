@@ -8,6 +8,63 @@ All notable changes to this project will be documented in this file.
 
 (暂无)
 
+## [0.4.0] - 2026-05-10
+
+### Major changes — forge migrate(openspec / superpowers 项目搬运)
+
+29. **`forge migrate <source>` 命令**:把外部框架的项目仓库一键搬到 forge 工作目录;两源默认 `--regenerate`(LLM 补缺件,会显示估价 + ack);`--no-regenerate` 走纯结构 + markdown-aware transformer + `[needs-fix]` 标记
+30. **markdown-aware walker**(`src/core/migrate/markdown-aware.ts`):公共 4 层 bridge 的 Layer 1 — 逐行扫描 + fenced code state(` ``` ` / `~~~` 同种 token 收尾)+ table-row 跳过;不识 indented code(known limitation);自切 section 替代 parse/markdown.ts(后者不 fence-aware)
+31. **MigrateSource 接口 + 两 adapter**(openspec / superpowers):统一契约 detect/scan/classify/prepareCopy/transform/listMissingArtifacts;新源接入只需加新 adapter
+32. **archive 完整性约束(M13)**:推测 archive 但缺件 → 必须用户二次确认;`--no-interactive` 模式 abort exit 4(反静默状态变化)
+33. **trace journal NDJSON + 原子 rename(M14)**:三步走 cp(journal pending → write .tmp → rename → committed)+ 末态 fs.rename `.ndjson`→`.json` + reader 优先级算法;crash 可基于 journal 反向 rollback
+34. **facts 目标分桶(M15)**:`extractMotivationFacts(design)` 验 proposal、`extractBehaviorFacts(tasks)` 验 specs、`extractFacts(content)` 给 OpenSpec 已有件;facts < 5 / JSON parse fail / 重复去重;superpowers fidelity 阈值 0.6,OpenSpec 0.9
+35. **bundled plugin 行为(M16)**:bundled + openspec 静默退化 `--no-regenerate`;bundled + superpowers 前置 prompt 让用户确认是否继续(必产 [needs-fix])
+36. **不复用 legacy-bridge ack/budget/quality**:brownfield 硬编码不兼容;migrate 写专属;只复用 `redact.ts`(字符串处理无 brownfield 耦合)+ 扩 `archive/lock.ts:LockMode` union 加 'migrate'(LockHeldError 文案不动以保兼容)
+
+### Added — CLI(P1 + P6)
+
+- `forge migrate <openspec|superpowers>` 主命令 + 8 个选项(--no-regenerate / --dry-run / --force / --archive-list / --no-interactive / --redact-rules)
+- LockHeldError CLI 入口友好 catch:"forge migrate is blocked by lock: ..."(避免用户以为 archive 命令占锁)
+
+### Added — Core(P2-P5)
+
+- `src/core/migrate/`:11 模块 + 全部 type;markdown-aware walker;archive-detect 推测引擎(checkbox + git keyword + word boundary + critical-task-pending);conflict.ts plan 阶段全锁定 + --imported-N 递增 + --force trash;report.ts journal NDJSON;ack/budget/quality 三套自实现;regenerate.ts 主流程 + AbortController + .partial 写入
+
+### Added — Tests + Docs(P6 + P7)
+
+- `tests/migrate/*`(11 个 test 模块)+ `tests/cli/migrate.test.ts` 端到端
+- `tests/fixtures/migrate/{openspec-minimal,superpowers-minimal}/`(含 vitest globalSetup git init)
+- README "从已有项目搬过来" 段
+- `docs/migration/from-openspec.md` + `docs/migration/from-superpowers.md`
+
+### Changed
+
+- `src/core/archive/lock.ts:LockMode` union 加 'migrate'(LockHeldError 文案保持现状,保兼容现有 lock.test.ts)
+- `package.json` dependencies `@anthropic-ai/sdk` 锁 ≥ 0.27.0(AbortSignal 支持;实际项目已用 ^0.93.0)
+
+### Fixed — codex 二轮 + Opus 自检 60+ 条问题全采纳
+
+- M9 复用边界收紧:不反向调 brownfield ack/budget/quality
+- M10 transformer 升级 markdown-aware
+- cp 三步走防孤儿文件
+- LockHeldError 文案兼容现有断言
+- bundled + superpowers 不静默退化
+- archive 完整性不静默降级
+- M14 v4 三步走 + crash 恢复 / M15 facts 目标分桶 / M16 bundled 边界
+
+### Acknowledgments
+
+设计经 codex 对抗性审查 2 轮 + opus subagent 自检 1 轮,共修 60+ 条问题。完整修订链:
+
+- v1 commit 935fed8(初稿)
+- v2 commit ef4187a(codex 一轮 40 + 内部代码核实)
+- v3 commit 4ab68c1(opus 12 + 6 表面解决)
+- v4 commit 5f748b0(codex 二轮 4 阻塞 + 5 关键 major)
+- v4.1 commit 0fd2d8a(加 §1.1 Bridge 架构图)
+
+完整 spec:[`docs/specs/2026-05-10-forge-migrate-design.md`](docs/specs/2026-05-10-forge-migrate-design.md)。
+完整 plan 链:[`docs/plans/2026-05-10-plan-8-forge-migrate-master.md`](docs/plans/2026-05-10-plan-8-forge-migrate-master.md) + plan-8a..g。
+
 ## [0.3.0] - 2026-05-10
 
 ### Major changes — Plugin migration(7 决策叠加 fusion-design 21 条)

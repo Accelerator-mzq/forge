@@ -49,7 +49,15 @@ export async function runMigrate(opts: MigrateOptions): Promise<number> {
     // P2/P3 实施真实 scan/classify
     const scan = await source.scan(detect.rootPath!);
     // plan-8d / plan-8e 阶段填实 cp/regen 路径时改为 const plan = await ...
-    await source.classify(scan, ctx);
+    const plan = await source.classify(scan, ctx);
+
+    // 检查 unsafe-slug ≥ 50% 全局 skip 标记(spec §3.1 — Task 3.8)
+    // 触发时 exit 4
+    const globalSkip = plan.skipped.find((s) => s.source === '__GLOBAL__');
+    if (globalSkip?.reason.includes('unsafe-slug-ratio-too-high')) {
+      console.error(`[migrate] ${globalSkip.reason};请检查 source 文件命名后重跑`);
+      return 4;
+    }
 
     if (opts.dryRun) {
       console.log('[migrate] dry-run: not implemented yet (plan-8d report.printPlan)');

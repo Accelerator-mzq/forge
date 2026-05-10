@@ -315,8 +315,37 @@ export class SuperpowersSource implements MigrateSource {
     });
   }
 
-  listMissingArtifacts(_plan: ClassificationPlan): MissingArtifact[] {
-    // Task 3.7 实施 M15 facts 目标分桶；当前返回空
-    return [];
+  listMissingArtifacts(plan: ClassificationPlan): MissingArtifact[] {
+    // Task 3.7 实施 M15 facts 目标分桶
+    // spec §2.8 / M15 v3：每个 active/archive change 必缺 proposal + specs
+    // proposal 由 facts:design 驱动、specs 由 facts:tasks 驱动
+    const missing: MissingArtifact[] = [];
+
+    for (const c of plan.changes) {
+      // draft 和 skip 不列出缺失 artifact(只处理 active/archive)
+      if (c.classification === 'draft' || c.classification === 'skip') continue;
+
+      // 构建 baseDir：active → forge/changes/<slug>，archive → forge/changes/archive/<slug>
+      const baseDir =
+        c.classification === 'archive'
+          ? `forge/changes/archive/${c.slug}`
+          : `forge/changes/${c.slug}`;
+
+      // superpowers 必缺 proposal + specs(spec §2.6 / §2.8)
+      missing.push({
+        changeSlug: c.slug,
+        kind: 'proposal',
+        targetPath: `${baseDir}/proposal.md`,
+        factsSource: 'design', // M15：proposal 校验 facts 来自 design
+      });
+      missing.push({
+        changeSlug: c.slug,
+        kind: 'specs',
+        targetPath: `${baseDir}/specs/${c.slug}.md`,
+        factsSource: 'tasks', // M15：specs 校验 facts 来自 tasks
+      });
+    }
+
+    return missing;
   }
 }

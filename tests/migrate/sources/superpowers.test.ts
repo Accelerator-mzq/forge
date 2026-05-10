@@ -162,6 +162,89 @@ describe('SuperpowersSource.transform — plan → tasks 规则', () => {
   });
 });
 
+describe('SuperpowersSource.listMissingArtifacts', () => {
+  const src = new SuperpowersSource();
+
+  it('active change → 列出 proposal(facts:design) + specs(facts:tasks)', () => {
+    const plan: ClassificationPlan = {
+      changes: [
+        {
+          slug: 'add-auth',
+          classification: 'active',
+          artifacts: {
+            design: {
+              absPath: '/x/d.md',
+              relPath: 'specs/2026-01-01-add-auth-design.md',
+              kind: 'design',
+              size: 0,
+              mtime: '',
+              encoding: 'utf8',
+            },
+            tasks: {
+              absPath: '/x/p.md',
+              relPath: 'plans/2026-01-01-add-auth-plan.md',
+              kind: 'tasks',
+              size: 0,
+              mtime: '',
+              encoding: 'utf8',
+            },
+          },
+        },
+      ],
+      specs: [],
+      drafts: [],
+      configFiles: [],
+      skipped: [],
+    };
+    const missing = src.listMissingArtifacts(plan);
+    expect(missing).toHaveLength(2);
+    const proposalMiss = missing.find((m) => m.kind === 'proposal');
+    expect(proposalMiss?.targetPath).toBe('forge/changes/add-auth/proposal.md');
+    expect(proposalMiss?.factsSource).toBe('design');
+    const specsMiss = missing.find((m) => m.kind === 'specs');
+    expect(specsMiss?.targetPath).toBe('forge/changes/add-auth/specs/add-auth.md');
+    expect(specsMiss?.factsSource).toBe('tasks');
+  });
+
+  it('archive change → 路径含 archive/', () => {
+    const plan: ClassificationPlan = {
+      changes: [
+        {
+          slug: 'old',
+          classification: 'archive',
+          artifacts: {},
+        },
+      ],
+      specs: [],
+      drafts: [],
+      configFiles: [],
+      skipped: [],
+    };
+    const missing = src.listMissingArtifacts(plan);
+    expect(missing.find((m) => m.kind === 'proposal')?.targetPath).toBe(
+      'forge/changes/archive/old/proposal.md',
+    );
+    expect(missing.find((m) => m.kind === 'specs')?.targetPath).toBe(
+      'forge/changes/archive/old/specs/old.md',
+    );
+  });
+
+  it('draft / skip 不列', () => {
+    const plan: ClassificationPlan = {
+      changes: [
+        { slug: 'd', classification: 'draft', artifacts: {} },
+        { slug: 's', classification: 'skip', artifacts: {} },
+      ],
+      specs: [],
+      drafts: [],
+      configFiles: [],
+      skipped: [],
+    };
+    const missing = src.listMissingArtifacts(plan);
+    expect(missing).toHaveLength(0);
+  });
+});
+
 describe('SuperpowersSource.prepareCopy', () => {
   it('active change → forge/changes/<slug>/{design,tasks}.md', () => {
     const plan: ClassificationPlan = {

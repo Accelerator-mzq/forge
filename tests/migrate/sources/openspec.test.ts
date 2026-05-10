@@ -219,3 +219,34 @@ describe('OpenSpecSource.transform — spec.md 规则', () => {
     expect(out).toContain('## Scenario: real'); // 代码块外转
   });
 });
+
+describe('OpenSpecSource.transform — proposal.md 规则', () => {
+  const src = new OpenSpecSource();
+  it('Problem → Why; Proposed Solution → What', () => {
+    const input = '# Title\n## Problem\nbody\n## Proposed Solution\nsol\n## User Experience\nux\n';
+    const out = src.transform(input, 'proposal');
+    expect(out).toContain('## Why');
+    expect(out).toContain('## What');
+    expect(out).toContain('## User Experience'); // 其他章节保留
+    expect(out).not.toContain('## Problem');
+  });
+});
+
+describe('OpenSpecSource.transform — tasks.md 规则', () => {
+  const src = new OpenSpecSource();
+  it('数字编号 → task-N: / 三层 1.2.3 → task-1-2-3:', () => {
+    const input = '- [ ] 1. First\n- [ ] 1.2. Second\n- [ ] 1.2.3. Third\n- [x] 2. Fourth\n';
+    const out = src.transform(input, 'tasks');
+    expect(out).toContain('- [ ] task-1: First');
+    expect(out).toContain('- [ ] task-1-2: Second');
+    expect(out).toContain('- [ ] task-1-2-3: Third');
+    expect(out).toContain('- [x] task-2: Fourth');
+  });
+
+  it('无数字编号的 prose 行 → 不动(后续标 [needs-fix])', () => {
+    const input = '- [ ] some prose without number\n';
+    const out = src.transform(input, 'tasks');
+    expect(out).toContain('- [ ] some prose without number');
+    expect(out).not.toContain('task-');
+  });
+});

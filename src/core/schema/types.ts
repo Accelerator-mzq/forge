@@ -82,3 +82,6 @@ export const DEFAULT_CODE_EXCLUDE = [
   '**/.review-failed',
   '**/.evidence/**',
 ] as const;
+
+// §3.12.1 Interface Freeze 共享字段 single source of truth — 后续 sub-plan reference 此处
+export * from '../schemas/severity.js';

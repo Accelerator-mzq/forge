@@ -33,6 +33,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.93.0",
+    "canonicalize": "^3.0.0",
     "commander": "^12.1.0",
     "exceljs": "^4.4.0",
     "gray-matter": "^4.0.3",

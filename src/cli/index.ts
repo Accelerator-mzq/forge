@@ -11,6 +11,7 @@ import { buildArchiveCommand } from './commands/archive.js';
 import { buildLegacyBridgeCommand } from './commands/legacy-bridge.js';
 import { buildUpgradeCommand } from './commands/upgrade.js';
 import { buildMigrateCommand } from './commands/migrate.js';
+import { buildAckCommand } from './commands/ack.js';
 
 // 创建主命令
 const program = new Command();
@@ -43,6 +44,9 @@ program.addCommand(buildUpgradeCommand());
 
 // 注册 migrate 子命令(v0.4 — 搬运 OpenSpec / superpowers 项目仓库)
 program.addCommand(buildMigrateCommand());
+
+// 注册 ack 子命令(plan-9a Task 3 — 两步 user 确认协议)
+program.addCommand(buildAckCommand());
 
 // 解析命令行参数,遇到错误时打印并退出
 program.parseAsync(process.argv).catch((err: unknown) => {

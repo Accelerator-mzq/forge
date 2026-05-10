@@ -107,8 +107,99 @@ export class OpenSpecSource implements MigrateSource {
     return { found: true, rootPath: root };
   }
 
-  async scan(_rootPath: string): Promise<ScanResult> {
-    throw new Error('OpenSpecSource.scan not implemented (plan-8b)');
+  async scan(rootPath: string): Promise<ScanResult> {
+    // scan 阶段：枚举源目录产物(specs / changes / explorations / config.yaml)
+    const files: ScannedFile[] = [];
+
+    // 1. specs/<n>/spec.md
+    const specsDir = join(rootPath, 'specs');
+    if (existsSync(specsDir)) {
+      const dirs = await readdir(specsDir, { withFileTypes: true });
+      for (const d of dirs) {
+        if (!d.isDirectory()) continue;
+        const specPath = join(specsDir, d.name, 'spec.md');
+        if (!existsSync(specPath)) continue;
+        const stats = await stat(specPath);
+        const encoding = await detectEncoding(specPath);
+        files.push({
+          absPath: specPath,
+          relPath: join('specs', d.name, 'spec.md'),
+          kind: 'spec',
+          size: stats.size,
+          mtime: stats.mtime.toISOString(),
+          encoding,
+        });
+      }
+    }
+
+    // 2. changes/<n>/(active 与 archive)
+    const changesDir = join(rootPath, 'changes');
+    if (existsSync(changesDir)) {
+      const entries = await readdir(changesDir, { withFileTypes: true });
+      for (const e of entries) {
+        if (!e.isDirectory()) continue;
+        const changeName = e.name;
+        const isArchive = changeName === 'archive';
+        const changeRoot = join(changesDir, changeName);
+
+        if (isArchive) {
+          // archive 子目录：再 readdir 一层
+          const archiveEntries = await readdir(changeRoot, {
+            withFileTypes: true,
+          });
+          for (const ae of archiveEntries) {
+            if (!ae.isDirectory()) continue;
+            await addChangeFiles(
+              join(changeRoot, ae.name),
+              join('changes', 'archive', ae.name),
+              files
+            );
+          }
+        } else {
+          await addChangeFiles(
+            changeRoot,
+            join('changes', changeName),
+            files
+          );
+        }
+      }
+    }
+
+    // 3. explorations/*.md
+    const explorationsDir = join(rootPath, 'explorations');
+    if (existsSync(explorationsDir)) {
+      const entries = await readdir(explorationsDir, { withFileTypes: true });
+      for (const e of entries) {
+        if (e.isDirectory() || !e.name.endsWith('.md')) continue;
+        const absPath = join(explorationsDir, e.name);
+        const stats = await stat(absPath);
+        const encoding = await detectEncoding(absPath);
+        files.push({
+          absPath,
+          relPath: join('explorations', e.name),
+          kind: 'draft',
+          size: stats.size,
+          mtime: stats.mtime.toISOString(),
+          encoding,
+        });
+      }
+    }
+
+    // 4. config.yaml
+    const configPath = join(rootPath, 'config.yaml');
+    if (existsSync(configPath)) {
+      const stats = await stat(configPath);
+      files.push({
+        absPath: configPath,
+        relPath: 'config.yaml',
+        kind: 'config',
+        size: stats.size,
+        mtime: stats.mtime.toISOString(),
+        encoding: await detectEncoding(configPath),
+      });
+    }
+
+    return { isEmpty: files.length === 0, files };
   }
 
   async classify(_scan: ScanResult, _ctx: ClassifyCtx): Promise<ClassificationPlan> {

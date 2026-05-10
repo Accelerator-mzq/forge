@@ -75,6 +75,13 @@ export function buildAckCommand(): Command {
           process.exit(2);
         }
 
+        // --target-severity 仅对 downgrade action 有意义,否则提示忽略(继续执行)
+        if (opts.targetSeverity && opts.action !== 'downgrade') {
+          process.stderr.write(
+            'Warning: --target-severity only applies to action=downgrade, ignored.\n',
+          );
+        }
+
         // 计算 changeRoot:相对于当前工作目录
         const changeRoot = resolve(process.cwd(), 'forge', 'changes', changeId);
 
@@ -131,17 +138,38 @@ export function buildAckCommand(): Command {
         process.exit(2);
       }
 
+      // 多 pending 警告:同一 finding 存在多个 pending 时,提醒用户旧文件未清理
+      if (pending.length > 1) {
+        process.stderr.write(
+          `Warning: ${pending.length} pending found, consuming latest; ${pending.length - 1} older pending(s) remain.\n`,
+        );
+      }
+
       // 取最新的 pending(数组升序,最后一项 = 最新)
       const latest = pending[pending.length - 1]!;
 
       // 读取并解析 pending YAML
+      // YAML 损坏时 exit 2,避免与 propose 的 exit 1 语义混淆
       const rawYaml = await readFile(latest.path, 'utf8');
-      const payload = parseYaml(rawYaml) as {
+      let payload: {
         action: string;
         rationale?: string | null;
         timestamp: string;
         target_severity?: string | null;
       };
+      try {
+        payload = parseYaml(rawYaml) as {
+          action: string;
+          rationale?: string | null;
+          timestamp: string;
+          target_severity?: string | null;
+        };
+      } catch (e) {
+        process.stderr.write(
+          `Malformed pending YAML at ${latest.path}: ${e instanceof Error ? e.message : String(e)}\n`,
+        );
+        process.exit(2);
+      }
 
       // 构建正式 AckEntry(写入 ack-log.jsonl)
       // Windows 兼容:process.env.USER 常为 undefined,用 USERNAME 做 fallback
@@ -191,15 +219,34 @@ export function buildAckCommand(): Command {
         process.exit(2);
       }
 
+      // 多 pending 警告:同一 finding 存在多个 pending 时,提醒用户旧文件未清理
+      if (pending.length > 1) {
+        process.stderr.write(
+          `Warning: ${pending.length} pending found, consuming latest; ${pending.length - 1} older pending(s) remain.\n`,
+        );
+      }
+
       // 取最新 pending
       const latest = pending[pending.length - 1]!;
 
       // 读取 pending YAML(获取原 timestamp 等信息)
+      // YAML 损坏时 exit 2,避免与 propose 的 exit 1 语义混淆
       const rawYaml = await readFile(latest.path, 'utf8');
-      const payload = parseYaml(rawYaml) as {
+      let payload: {
         timestamp: string;
         target_severity?: string | null;
       };
+      try {
+        payload = parseYaml(rawYaml) as {
+          timestamp: string;
+          target_severity?: string | null;
+        };
+      } catch (e) {
+        process.stderr.write(
+          `Malformed pending YAML at ${latest.path}: ${e instanceof Error ? e.message : String(e)}\n`,
+        );
+        process.exit(2);
+      }
 
       // 构建 reject AckEntry
       const rejectEntry: AckEntry = {

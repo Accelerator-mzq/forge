@@ -250,3 +250,103 @@ describe('OpenSpecSource.transform — tasks.md 规则', () => {
     expect(out).not.toContain('task-');
   });
 });
+
+describe('OpenSpecSource.listMissingArtifacts', () => {
+  const src = new OpenSpecSource();
+
+  it('active change 缺 proposal → 列出 proposal kind + 期望路径', () => {
+    const plan: ClassificationPlan = {
+      changes: [
+        {
+          slug: 'add-foo',
+          classification: 'active',
+          artifacts: {
+            tasks: {
+              absPath: '/x/openspec/changes/add-foo/tasks.md',
+              relPath: 'changes/add-foo/tasks.md',
+              kind: 'tasks',
+              size: 0,
+              mtime: '',
+              encoding: 'utf8',
+            },
+          },
+        },
+      ],
+      specs: [],
+      drafts: [],
+      configFiles: [],
+      skipped: [],
+    };
+    const missing = src.listMissingArtifacts(plan);
+    expect(missing).toHaveLength(2); // proposal + specs 都缺
+    expect(missing.find((m) => m.kind === 'proposal')?.targetPath).toBe(
+      'forge/changes/add-foo/proposal.md',
+    );
+    expect(missing.find((m) => m.kind === 'specs')?.targetPath).toBe(
+      'forge/changes/add-foo/specs/add-foo.md',
+    );
+  });
+
+  it('archive change 缺 spec → 路径含 archive/', () => {
+    const plan: ClassificationPlan = {
+      changes: [
+        {
+          slug: 'old-bar',
+          classification: 'archive',
+          artifacts: {
+            proposal: {
+              absPath: '/x/openspec/changes/archive/old-bar/proposal.md',
+              relPath: 'changes/archive/old-bar/proposal.md',
+              kind: 'proposal',
+              size: 0,
+              mtime: '',
+              encoding: 'utf8',
+            },
+          },
+        },
+      ],
+      specs: [],
+      drafts: [],
+      configFiles: [],
+      skipped: [],
+    };
+    const missing = src.listMissingArtifacts(plan);
+    const specMissing = missing.find((m) => m.kind === 'specs');
+    expect(specMissing?.targetPath).toBe('forge/changes/archive/old-bar/specs/old-bar.md');
+  });
+
+  it('change 全件齐 → 不列出', () => {
+    const plan: ClassificationPlan = {
+      changes: [
+        {
+          slug: 'complete',
+          classification: 'active',
+          artifacts: {
+            proposal: {
+              absPath: '/x/p.md',
+              relPath: 'changes/complete/proposal.md',
+              kind: 'proposal',
+              size: 0,
+              mtime: '',
+              encoding: 'utf8',
+            },
+            spec: {
+              absPath: '/x/s.md',
+              relPath: 'changes/complete/specs/x.md',
+              kind: 'spec',
+              size: 0,
+              mtime: '',
+              encoding: 'utf8',
+            },
+          },
+        },
+      ],
+      specs: [],
+      drafts: [],
+      configFiles: [],
+      skipped: [],
+    };
+    const missing = src.listMissingArtifacts(plan);
+    expect(missing).toHaveLength(0);
+  });
+});

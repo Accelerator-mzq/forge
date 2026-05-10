@@ -414,7 +414,29 @@ export class OpenSpecSource implements MigrateSource {
     });
   }
 
-  listMissingArtifacts(_plan: ClassificationPlan): MissingArtifact[] {
-    return []; // OpenSpec 缺件少;P2 / P5 细化
+  listMissingArtifacts(plan: ClassificationPlan): MissingArtifact[] {
+    // 枚举 Plan 中缺件的 artifacts;for each change,检查 proposal + spec(specs) 是否齐全
+    const missing: MissingArtifact[] = [];
+    for (const c of plan.changes) {
+      // 检查 proposal
+      if (!c.artifacts.proposal) {
+        missing.push({
+          changeSlug: c.slug,
+          kind: 'proposal',
+          targetPath: `forge/changes/${c.classification === 'archive' ? 'archive/' : ''}${c.slug}/proposal.md`,
+          factsSource: 'self',
+        });
+      }
+      // 检查 spec 或 specs(artifacts 中 'spec' 字段映射到目标 'specs' 目录)
+      if (!c.artifacts.spec) {
+        missing.push({
+          changeSlug: c.slug,
+          kind: 'specs',
+          targetPath: `forge/changes/${c.classification === 'archive' ? 'archive/' : ''}${c.slug}/specs/${c.slug}.md`,
+          factsSource: 'self',
+        });
+      }
+    }
+    return missing;
   }
 }

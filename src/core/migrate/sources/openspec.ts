@@ -252,7 +252,13 @@ export class OpenSpecSource implements MigrateSource {
           };
           changesMap.set(slug, change);
         }
-        change.artifacts[f.kind] = f;
+        // spec 文件累积到数组(支持多 area.md);其余 kind 单文件赋值
+        if (f.kind === 'spec') {
+          change.artifacts.specs = [...(change.artifacts.specs ?? []), f];
+        } else if (f.kind === 'proposal' || f.kind === 'tasks' || f.kind === 'design') {
+          change.artifacts[f.kind] = f;
+        }
+        // config / draft 的 kind 不进 change.artifacts
         continue;
       }
 
@@ -295,17 +301,30 @@ export class OpenSpecSource implements MigrateSource {
         c.classification === 'archive'
           ? join(target, 'changes', 'archive', c.slug)
           : join(target, 'changes', c.slug);
-      for (const [kind, f] of Object.entries(c.artifacts)) {
+
+      // proposal / tasks / design 单文件各自 kind.md
+      for (const kind of ['proposal', 'tasks', 'design'] as const) {
+        const f = c.artifacts[kind];
         if (!f) continue;
-        const fileName = kind === 'spec' ? f.relPath.split('/').pop()! : `${kind}.md`;
-        const targetPath =
-          kind === 'spec' ? join(baseDir, 'specs', fileName) : join(baseDir, fileName);
         ops.push({
           source: f.absPath,
-          target: targetPath,
-          kind: kind as ArtifactKind,
+          target: join(baseDir, `${kind}.md`),
+          kind,
           changeSlug: c.slug,
         });
+      }
+
+      // specs 多文件:relPath 是 posix slash,split('/').pop() 安全取文件名
+      if (c.artifacts.specs) {
+        for (const f of c.artifacts.specs) {
+          const fileName = f.relPath.split('/').pop() ?? 'spec.md';
+          ops.push({
+            source: f.absPath,
+            target: join(baseDir, 'specs', fileName),
+            kind: 'spec',
+            changeSlug: c.slug,
+          });
+        }
       }
     }
 
@@ -349,10 +368,16 @@ export class OpenSpecSource implements MigrateSource {
 
   // Task 2.6 spec.md 规则:### Requirement → ## Requirement / #### Scenario → ## Scenario / list-prefix WHEN/THEN/GIVEN → **When**/... / 多行续行合并
   private transformSpec(content: string): string {
-    // 第一步:走 walker line replace(### Requirement / #### Scenario / list 前缀)
-    const stage1 = walkLines(content, (line, ctx) => {
-      if (ctx.inFenced || ctx.isTableRow) return;
-      let l = line;
+    // 第一步:单次 walker 收集每行的 (line, ctx) 信息数组,后续 stage 复用
+    const rows: Array<{ line: string; inFenced: boolean; isTableRow: boolean }> = [];
+    walkLines(content, (line, ctx) => {
+      rows.push({ line, inFenced: ctx.inFenced, isTableRow: ctx.isTableRow });
+    });
+
+    // 第二步:stage1 行替换(只在 !inFenced && !isTableRow 行)
+    const stage1Lines = rows.map((r) => {
+      if (r.inFenced || r.isTableRow) return r.line;
+      let l = r.line;
       // ### Requirement → ## Requirement
       l = l.replace(/^### Requirement:/, '## Requirement:');
       // #### Scenario → ## Scenario
@@ -367,18 +392,20 @@ export class OpenSpecSource implements MigrateSource {
       }
       return l;
     });
-    // 第二步:多行续行合并 — 形如 `**When** xxx\n  续行` 的两行,合并空格
-    const lines = stage1.split('\n');
+
+    // 第三步:fence-aware 多行续行合并 — fenced 内不合并(C #1 fix)
     const out: string[] = [];
-    for (let i = 0; i < lines.length; i++) {
-      const cur = lines[i] ?? '';
-      const isStep = /^(\s*)\*\*(When|Then|Given|And|But)\*\*\s/.test(cur);
+    for (let i = 0; i < stage1Lines.length; i++) {
+      const cur = stage1Lines[i] ?? '';
+      const isFenced = rows[i]?.inFenced;
+      const isStep = !isFenced && /^(\s*)\*\*(When|Then|Given|And|But)\*\*\s/.test(cur);
       if (isStep) {
         let merged = cur;
-        // 续行:2+ 空格缩进 + 非 `-` 起始 + 非 heading + 非空
-        while (i + 1 < lines.length) {
-          const next = lines[i + 1] ?? '';
-          if (/^\s{2,}[^-#\s]/.test(next) && next.trim().length > 0) {
+        // 续行:2+ 空格缩进 + 非 `-` 起始 + 非 heading + 非空 + 非 fenced
+        while (i + 1 < stage1Lines.length) {
+          const next = stage1Lines[i + 1] ?? '';
+          const nextFenced = rows[i + 1]?.inFenced;
+          if (!nextFenced && /^\s{2,}[^-#\s]/.test(next) && next.trim().length > 0) {
             merged += ' ' + next.trim();
             i++;
           } else break;
@@ -393,8 +420,9 @@ export class OpenSpecSource implements MigrateSource {
 
   // Task 2.7 proposal.md 规则:## Problem → ## Why / ## Proposed Solution → ## What
   private transformProposal(content: string): string {
+    // 加 isTableRow 检查,与 transformSpec / transformTasks 保持一致(spec §2.5 / Minor 7 fix)
     return walkLines(content, (line, ctx) => {
-      if (ctx.inFenced) return;
+      if (ctx.inFenced || ctx.isTableRow) return;
       if (line === '## Problem') return '## Why';
       if (line === '## Proposed Solution') return '## What';
     });
@@ -427,8 +455,8 @@ export class OpenSpecSource implements MigrateSource {
           factsSource: 'self',
         });
       }
-      // 检查 spec 或 specs(artifacts 中 'spec' 字段映射到目标 'specs' 目录)
-      if (!c.artifacts.spec) {
+      // 检查 specs 数组(改型后 specs 为数组,空或未定义则缺件)
+      if (!c.artifacts.specs || c.artifacts.specs.length === 0) {
         missing.push({
           changeSlug: c.slug,
           kind: 'specs',

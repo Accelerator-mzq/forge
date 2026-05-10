@@ -48,6 +48,15 @@ describe('walkLines — fenced code state', () => {
     });
     expect(visited).toEqual(['## Hello', '## World', '']);
   });
+
+  it('空字符串 input → 不调用回调(I #4 review fixup)', () => {
+    let calls = 0;
+    const out = walkLines('', () => {
+      calls++;
+    });
+    expect(calls).toBe(0);
+    expect(out).toBe('');
+  });
 });
 
 describe('splitSectionsAware — fence-aware section 切分', () => {

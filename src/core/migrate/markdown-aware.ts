@@ -23,6 +23,8 @@ export function walkLines(content: string, cb: WalkCallback): string {
   const normalized = content.replace(/\r\n/g, '\n');
   // BOM 跳过
   const stripped = normalized.charCodeAt(0) === 0xfeff ? normalized.slice(1) : normalized;
+  // 空内容早退:''.split('\n') 返回 [''] 会触发一次回调,语义应零次(I #4 fix)
+  if (stripped.length === 0) return '';
   const lines = stripped.split('\n');
 
   const out: string[] = [];
@@ -43,6 +45,9 @@ export function walkLines(content: string, cb: WalkCallback): string {
 
     // 决定当前行的 inFenced 状态和状态转移
     // 默认继承当前 fenced 状态;开启行/闭合行本身仍算 fenced
+    // 注:plan 参考代码闭合行 inFenced=false,与 plan 测试 2(``` 必须同种 token 收尾)
+    // 期望 visited=[] 直接矛盾(闭合行会进 visited)。修正为开启行 + 闭合行 lineInFenced=true,
+    // 与"fenced 整个范围(开启 + 内容 + 闭合 + 末尾空行)都不暴露给 transform"语义一致。
     let lineInFenced = inFenced;
     if (!inFenced && startsTripleBacktick) {
       // 开启 ``` fence(开启行算 fenced)

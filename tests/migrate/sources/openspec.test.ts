@@ -127,6 +127,34 @@ describe('OpenSpecSource.classify', () => {
     const hasUnsafeSlug = plan.skipped.some((s) => s.reason.includes('unsafe-slug'));
     expect(hasUnsafeSlug).toBe(true);
   });
+
+  it('change 含多 spec 文件 → artifacts.specs 收集所有(I #2 review fixup)', async () => {
+    const scan: ScanResult = {
+      isEmpty: false,
+      files: [
+        {
+          absPath: '/x/openspec/changes/multi/specs/a.md',
+          relPath: 'changes/multi/specs/a.md',
+          kind: 'spec',
+          size: 0,
+          mtime: '',
+          encoding: 'utf8',
+        },
+        {
+          absPath: '/x/openspec/changes/multi/specs/b.md',
+          relPath: 'changes/multi/specs/b.md',
+          kind: 'spec',
+          size: 0,
+          mtime: '',
+          encoding: 'utf8',
+        },
+      ],
+    };
+    const src = new OpenSpecSource();
+    const plan = await src.classify(scan, { cwd: '/x', inGitRepo: false });
+    expect(plan.changes).toHaveLength(1);
+    expect(plan.changes[0]?.artifacts.specs).toHaveLength(2);
+  });
 });
 
 describe('OpenSpecSource.prepareCopy', () => {
@@ -217,6 +245,16 @@ describe('OpenSpecSource.transform — spec.md 规则', () => {
     const out = src.transform(input, 'spec');
     expect(out).toContain('#### Scenario: example'); // 代码块内不动
     expect(out).toContain('## Scenario: real'); // 代码块外转
+  });
+
+  it('fenced 内的 **When** + 续行不合并(C #1 review fixup)', () => {
+    const input =
+      '```\n**When** already formatted\n  continuation in fence\n```\n## Scenario: real\n- **WHEN** outside\n  outside continuation\n';
+    const out = src.transform(input, 'spec');
+    // fenced 内两行原样保留,不合并
+    expect(out).toContain('**When** already formatted\n  continuation in fence');
+    // fenced 外续行仍合并
+    expect(out).toMatch(/\*\*When\*\* outside outside continuation/);
   });
 });
 
@@ -330,14 +368,17 @@ describe('OpenSpecSource.listMissingArtifacts', () => {
               mtime: '',
               encoding: 'utf8',
             },
-            spec: {
-              absPath: '/x/s.md',
-              relPath: 'changes/complete/specs/x.md',
-              kind: 'spec',
-              size: 0,
-              mtime: '',
-              encoding: 'utf8',
-            },
+            // I #2 改型:spec 改为 specs 数组
+            specs: [
+              {
+                absPath: '/x/s.md',
+                relPath: 'changes/complete/specs/x.md',
+                kind: 'spec',
+                size: 0,
+                mtime: '',
+                encoding: 'utf8',
+              },
+            ],
           },
         },
       ],

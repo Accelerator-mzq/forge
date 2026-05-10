@@ -59,13 +59,22 @@ export interface ClassificationPlan {
   skipped: Array<{ source: string; reason: string }>;
 }
 
+/** PlannedChange.artifacts:每 kind 单文件,specs 单独用数组(支持 changes/<n>/specs/ 多 area) */
+export interface PlannedChangeArtifacts {
+  proposal?: ScannedFile;
+  tasks?: ScannedFile;
+  design?: ScannedFile;
+  /** changes/<n>/specs/ 下多个 area.md(spec §2.1 允许) */
+  specs?: ScannedFile[];
+}
+
 export interface PlannedChange {
   slug: string;
   classification: 'active' | 'archive' | 'draft' | 'skip';
   /** classify 推测信号(report 显示) */
   classificationReason?: string;
-  /** 关联的源文件(按 kind 索引) */
-  artifacts: Partial<Record<ArtifactKind, ScannedFile>>;
+  /** 关联的源文件;specs 是数组,其余各 kind 单文件 */
+  artifacts: PlannedChangeArtifacts;
   /** M13:archive 但缺件时 LLM 需补哪些 kind(--regenerate 用) */
   missingArtifacts?: ArtifactKind[];
 }

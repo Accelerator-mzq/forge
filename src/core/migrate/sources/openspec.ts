@@ -292,8 +292,59 @@ export class OpenSpecSource implements MigrateSource {
     };
   }
 
-  prepareCopy(_plan: ClassificationPlan, _target: string): CopyOp[] {
-    throw new Error('OpenSpecSource.prepareCopy not implemented (plan-8b)');
+  prepareCopy(plan: ClassificationPlan, target: string): CopyOp[] {
+    // prepareCopy 阶段：计划 → 具体复制操作
+    const ops: CopyOp[] = [];
+
+    // changes（分 active 与 archive）
+    for (const c of plan.changes) {
+      const baseDir =
+        c.classification === 'archive'
+          ? join(target, 'changes', 'archive', c.slug)
+          : join(target, 'changes', c.slug);
+      for (const [kind, f] of Object.entries(c.artifacts)) {
+        if (!f) continue;
+        const fileName =
+          kind === 'spec' ? f.relPath.split('/').pop()! : `${kind}.md`;
+        const targetPath =
+          kind === 'spec' ? join(baseDir, 'specs', fileName) : join(baseDir, fileName);
+        ops.push({
+          source: f.absPath,
+          target: targetPath,
+          kind: kind as ArtifactKind,
+          changeSlug: c.slug,
+        });
+      }
+    }
+
+    // specs
+    for (const s of plan.specs) {
+      ops.push({
+        source: s.source.absPath,
+        target: join(target, 'specs', s.relPath),
+        kind: 'spec',
+      });
+    }
+
+    // drafts
+    for (const d of plan.drafts) {
+      ops.push({
+        source: d.source.absPath,
+        target: join(target, 'drafts', d.targetName),
+        kind: 'draft',
+      });
+    }
+
+    // config
+    for (const cf of plan.configFiles) {
+      ops.push({
+        source: cf.source.absPath,
+        target: join(target, cf.targetName),
+        kind: 'config',
+      });
+    }
+
+    return ops;
   }
 
   transform(content: string, _kind: ArtifactKind): string {

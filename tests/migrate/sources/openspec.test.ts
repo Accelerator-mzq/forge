@@ -59,6 +59,22 @@ describe('OpenSpecSource.scan', () => {
     expect(r.isEmpty).toBe(true);
     await rm(tmp, { recursive: true, force: true });
   });
+
+  it('scan 产出的 relPath 永远是 posix slash(无反斜杠)', async () => {
+    // 守护:Windows 上 path.join 会产生反斜杠,relPath 必须永远 posix
+    const tmp = await mkdtemp(join(tmpdir(), 'forge-relpath-'));
+    await mkdir(join(tmp, 'openspec', 'specs', 'foo'), { recursive: true });
+    await writeFile(join(tmp, 'openspec', 'specs', 'foo', 'spec.md'), '# Foo\n');
+    await mkdir(join(tmp, 'openspec', 'changes', 'archive', 'old'), { recursive: true });
+    await writeFile(join(tmp, 'openspec', 'changes', 'archive', 'old', 'proposal.md'), '# Old\n');
+
+    const src = new OpenSpecSource();
+    const r = await src.scan(join(tmp, 'openspec'));
+    for (const f of r.files) {
+      expect(f.relPath).not.toContain('\\');
+    }
+    await rm(tmp, { recursive: true, force: true });
+  });
 });
 
 describe('OpenSpecSource.classify', () => {

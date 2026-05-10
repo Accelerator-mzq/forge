@@ -17,16 +17,15 @@ import type {
   PlannedDraft,
   PlannedConfig,
 } from '../types.js';
-import { existsSync } from 'node:fs';
+import { existsSync, promises as fsPromises } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, posix as posixPath } from 'node:path';
 
 // 编码探测：读前 4 字节识别 UTF-8 / BOM / 非 UTF-8
 async function detectEncoding(absPath: string): Promise<'utf8' | 'utf8-bom' | 'non-utf8'> {
   try {
-    const fs = await import('node:fs');
     const buf = Buffer.alloc(4);
-    const fh = await fs.promises.open(absPath, 'r');
+    const fh = await fsPromises.open(absPath, 'r');
     const { bytesRead } = await fh.read(buf, 0, 4, 0);
     await fh.close();
 
@@ -56,7 +55,8 @@ async function addChangeFiles(absDir: string, relDir: string, out: ScannedFile[]
     const stats = await stat(absPath);
     out.push({
       absPath,
-      relPath: join(relDir, name),
+      // relPath 必须 posix slash(逻辑路径 key,classify 阶段会按 '/' 切分)
+      relPath: posixPath.join(relDir, name),
       kind,
       size: stats.size,
       mtime: stats.mtime.toISOString(),
@@ -73,7 +73,8 @@ async function addChangeFiles(absDir: string, relDir: string, out: ScannedFile[]
       const stats = await stat(absPath);
       out.push({
         absPath,
-        relPath: join(relDir, 'specs', e.name),
+        // relPath 必须 posix slash(逻辑路径 key)
+        relPath: posixPath.join(relDir, 'specs', e.name),
         kind: 'spec',
         size: stats.size,
         mtime: stats.mtime.toISOString(),
@@ -125,7 +126,8 @@ export class OpenSpecSource implements MigrateSource {
         const encoding = await detectEncoding(specPath);
         files.push({
           absPath: specPath,
-          relPath: join('specs', d.name, 'spec.md'),
+          // relPath 必须 posix slash(逻辑路径 key)
+          relPath: posixPath.join('specs', d.name, 'spec.md'),
           kind: 'spec',
           size: stats.size,
           mtime: stats.mtime.toISOString(),
@@ -153,12 +155,14 @@ export class OpenSpecSource implements MigrateSource {
             if (!ae.isDirectory()) continue;
             await addChangeFiles(
               join(changeRoot, ae.name),
-              join('changes', 'archive', ae.name),
+              // relDir 走 posix(addChangeFiles 内会继续 posix 拼接)
+              posixPath.join('changes', 'archive', ae.name),
               files,
             );
           }
         } else {
-          await addChangeFiles(changeRoot, join('changes', changeName), files);
+          // relDir 走 posix(addChangeFiles 内会继续 posix 拼接)
+          await addChangeFiles(changeRoot, posixPath.join('changes', changeName), files);
         }
       }
     }
@@ -174,7 +178,8 @@ export class OpenSpecSource implements MigrateSource {
         const encoding = await detectEncoding(absPath);
         files.push({
           absPath,
-          relPath: join('explorations', e.name),
+          // relPath 必须 posix slash(逻辑路径 key)
+          relPath: posixPath.join('explorations', e.name),
           kind: 'draft',
           size: stats.size,
           mtime: stats.mtime.toISOString(),

@@ -20,6 +20,7 @@ import { join, posix as posixPath, basename } from 'node:path';
 import { execSync } from 'node:child_process';
 import { detectEncoding } from '../utils.js';
 import { detectArchive } from '../archive-detect.js';
+import { walkLines } from '../markdown-aware.js';
 
 // 保留 slug 集合 — 这些名字不允许作为 slug
 const RESERVED_SLUGS_SP = new Set(['..', '.', '.cache', '.forge-trash', '.forge-ack', 'archive']);
@@ -279,9 +280,39 @@ export class SuperpowersSource implements MigrateSource {
     return ops;
   }
 
-  transform(content: string, _kind: ArtifactKind): string {
-    // Task 3.6 实施 5 条 transform 规则；当前直接返回
+  transform(content: string, kind: ArtifactKind): string {
+    // Task 3.6 实施 5 条 transform 规则；tasks kind 时执行 plan→tasks 转换
+    if (kind === 'tasks') return this.transformPlan(content);
+    // design kind 不 transform(spec §2.6)
     return content;
+  }
+
+  // 中文注释：处理 **Step N****: → task-N: 的转换规则
+  // 支持 5 条规则：英文冒号、中文冒号、嵌套、大小写不敏感、代码块跳过
+  private transformPlan(content: string): string {
+    return walkLines(content, (line, ctx) => {
+      // inFenced 或 table-row 时不处理
+      if (ctx.inFenced || ctx.isTableRow) return;
+
+      // 匹配 **[Ss][Tt][Ee][Pp] N** + [:：] 的规则
+      // 正则支持：
+      // - 大小写不敏感 STEP/step/Step
+      // - 一至三层数字 \d+(?:\.\d+){0,2}
+      // - 英文冒号 : 和中文冒号 ：都支持
+      const m = line.match(
+        /^(\s*)- \[([ x])\] \*\*[Ss][Tt][Ee][Pp]\s+(\d+(?:\.\d+){0,2})\*\*\s*[:：]\s*(.+)$/,
+      );
+      if (!m) return;
+
+      const indent = m[1] ?? '';
+      const checked = m[2] ?? ' ';
+      const num = m[3] ?? '';
+      const rest = m[4] ?? '';
+
+      // 将点号 . 替换为短横线 - 形成 task-1-1 格式
+      const taskId = `task-${num.replace(/\./g, '-')}`;
+      return `${indent}- [${checked}] ${taskId}: ${rest}`;
+    });
   }
 
   listMissingArtifacts(_plan: ClassificationPlan): MissingArtifact[] {

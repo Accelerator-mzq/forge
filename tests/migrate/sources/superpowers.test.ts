@@ -115,6 +115,53 @@ describe('SuperpowersSource.classify', () => {
   });
 });
 
+describe('SuperpowersSource.transform — plan → tasks 规则', () => {
+  const src = new SuperpowersSource();
+
+  it('**Step N**: → task-N:(英文冒号)', () => {
+    const input = '- [ ] **Step 1**: First\n- [x] **Step 2**: Second\n';
+    const out = src.transform(input, 'tasks');
+    expect(out).toContain('- [ ] task-1: First');
+    expect(out).toContain('- [x] task-2: Second');
+    expect(out).not.toContain('**Step');
+  });
+
+  it('中文冒号 `:` → 英文 `:`', () => {
+    const input = '- [ ] **Step 1**:中文冒号 task\n';
+    const out = src.transform(input, 'tasks');
+    expect(out).toContain('- [ ] task-1: 中文冒号 task');
+  });
+
+  it('**Step 1.1** 嵌套 → task-1-1', () => {
+    const input = '- [ ] **Step 1**: parent\n- [ ] **Step 1.1**: child\n';
+    const out = src.transform(input, 'tasks');
+    expect(out).toContain('task-1: parent');
+    expect(out).toContain('task-1-1: child');
+  });
+
+  it('大小写不敏感 STEP / step / Step', () => {
+    const input = '- [ ] **STEP 1**: upper\n- [ ] **step 2**: lower\n- [ ] **Step 3**: mixed\n';
+    const out = src.transform(input, 'tasks');
+    expect(out).toContain('task-1:');
+    expect(out).toContain('task-2:');
+    expect(out).toContain('task-3:');
+  });
+
+  it('代码块内不动', () => {
+    const input = '```\n- [ ] **Step 1**: example\n```\n- [ ] **Step 2**: real\n';
+    const out = src.transform(input, 'tasks');
+    expect(out).toContain('- [ ] **Step 1**: example'); // 代码块内
+    expect(out).toContain('task-2: real'); // 代码块外
+  });
+
+  it('design kind 不 transform', () => {
+    const input = '- [ ] **Step 1**: should not transform\n';
+    const out = src.transform(input, 'design');
+    expect(out).toContain('- [ ] **Step 1**: should not transform');
+    expect(out).not.toContain('task-');
+  });
+});
+
 describe('SuperpowersSource.prepareCopy', () => {
   it('active change → forge/changes/<slug>/{design,tasks}.md', () => {
     const plan: ClassificationPlan = {

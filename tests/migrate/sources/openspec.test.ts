@@ -1,8 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type {
-  ScanResult,
-  ClassificationPlan,
-} from '../../../src/core/migrate/types.js';
+import type { ScanResult, ClassificationPlan } from '../../../src/core/migrate/types.js';
 import { OpenSpecSource } from '../../../src/core/migrate/sources/openspec.js';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -35,27 +32,12 @@ describe('OpenSpecSource.scan', () => {
     await mkdir(join(tmp, 'openspec', 'specs', 'foo'), { recursive: true });
     await writeFile(join(tmp, 'openspec', 'specs', 'foo', 'spec.md'), '# Foo\n');
     await mkdir(join(tmp, 'openspec', 'changes', 'add-bar'), { recursive: true });
-    await writeFile(
-      join(tmp, 'openspec', 'changes', 'add-bar', 'proposal.md'),
-      '# Bar\n'
-    );
-    await mkdir(
-      join(tmp, 'openspec', 'changes', 'archive', 'old'),
-      { recursive: true }
-    );
-    await writeFile(
-      join(tmp, 'openspec', 'changes', 'archive', 'old', 'proposal.md'),
-      '# Old\n'
-    );
+    await writeFile(join(tmp, 'openspec', 'changes', 'add-bar', 'proposal.md'), '# Bar\n');
+    await mkdir(join(tmp, 'openspec', 'changes', 'archive', 'old'), { recursive: true });
+    await writeFile(join(tmp, 'openspec', 'changes', 'archive', 'old', 'proposal.md'), '# Old\n');
     await mkdir(join(tmp, 'openspec', 'explorations'), { recursive: true });
-    await writeFile(
-      join(tmp, 'openspec', 'explorations', 'idea.md'),
-      '# Idea\n'
-    );
-    await writeFile(
-      join(tmp, 'openspec', 'config.yaml'),
-      'schema: spec-driven\n'
-    );
+    await writeFile(join(tmp, 'openspec', 'explorations', 'idea.md'), '# Idea\n');
+    await writeFile(join(tmp, 'openspec', 'config.yaml'), 'schema: spec-driven\n');
 
     const src = new OpenSpecSource();
     const r = await src.scan(join(tmp, 'openspec'));
@@ -105,12 +87,8 @@ describe('OpenSpecSource.classify', () => {
     const src = new OpenSpecSource();
     const plan = await src.classify(scan, { cwd: '/x', inGitRepo: false });
     expect(plan.changes).toHaveLength(2);
-    expect(plan.changes.find((c) => c.slug === 'add-bar')?.classification).toBe(
-      'active'
-    );
-    expect(plan.changes.find((c) => c.slug === 'old')?.classification).toBe(
-      'archive'
-    );
+    expect(plan.changes.find((c) => c.slug === 'add-bar')?.classification).toBe('active');
+    expect(plan.changes.find((c) => c.slug === 'old')?.classification).toBe('archive');
   });
 
   it('slug 命中保留名 → unsafe-slug skip', async () => {
@@ -130,9 +108,7 @@ describe('OpenSpecSource.classify', () => {
     const src = new OpenSpecSource();
     const plan = await src.classify(scan, { cwd: '/x', inGitRepo: false });
     expect(plan.skipped.length).toBeGreaterThan(0);
-    const hasUnsafeSlug = plan.skipped.some((s) =>
-      s.reason.includes('unsafe-slug')
-    );
+    const hasUnsafeSlug = plan.skipped.some((s) => s.reason.includes('unsafe-slug'));
     expect(hasUnsafeSlug).toBe(true);
   });
 });
@@ -191,9 +167,7 @@ describe('OpenSpecSource.prepareCopy', () => {
     const ops = src.prepareCopy(plan, '/y/forge');
     const targets = ops.map((o) => o.target);
     expect(targets).toContain(join('/y/forge/changes/add-bar/proposal.md'));
-    expect(targets).toContain(
-      join('/y/forge/changes/archive/old/proposal.md')
-    );
+    expect(targets).toContain(join('/y/forge/changes/archive/old/proposal.md'));
     expect(targets).toContain(join('/y/forge/specs/foo/spec.md'));
   });
 });

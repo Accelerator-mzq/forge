@@ -22,9 +22,7 @@ import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
 // 编码探测：读前 4 字节识别 UTF-8 / BOM / 非 UTF-8
-async function detectEncoding(
-  absPath: string
-): Promise<'utf8' | 'utf8-bom' | 'non-utf8'> {
+async function detectEncoding(absPath: string): Promise<'utf8' | 'utf8-bom' | 'non-utf8'> {
   try {
     const fs = await import('node:fs');
     const buf = Buffer.alloc(4);
@@ -32,12 +30,9 @@ async function detectEncoding(
     const { bytesRead } = await fh.read(buf, 0, 4, 0);
     await fh.close();
 
-    if (bytesRead >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf)
-      return 'utf8-bom';
-    if (bytesRead >= 2 && buf[0] === 0xff && buf[1] === 0xfe)
-      return 'non-utf8'; // UTF-16-LE BOM
-    if (bytesRead >= 2 && buf[0] === 0xfe && buf[1] === 0xff)
-      return 'non-utf8'; // UTF-16-BE BOM
+    if (bytesRead >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) return 'utf8-bom';
+    if (bytesRead >= 2 && buf[0] === 0xff && buf[1] === 0xfe) return 'non-utf8'; // UTF-16-LE BOM
+    if (bytesRead >= 2 && buf[0] === 0xfe && buf[1] === 0xff) return 'non-utf8'; // UTF-16-BE BOM
     // 简单启发：含 0x00 字节多半是 UTF-16
     for (let i = 0; i < bytesRead; i++) {
       if (buf[i] === 0x00) return 'non-utf8';
@@ -49,11 +44,7 @@ async function detectEncoding(
 }
 
 // 处理 change 子目录：把 proposal.md / tasks.md / design.md / specs/*.md 加入列表
-async function addChangeFiles(
-  absDir: string,
-  relDir: string,
-  out: ScannedFile[]
-): Promise<void> {
+async function addChangeFiles(absDir: string, relDir: string, out: ScannedFile[]): Promise<void> {
   const SCALAR_FILES: Array<{ name: string; kind: ArtifactKind }> = [
     { name: 'proposal.md', kind: 'proposal' },
     { name: 'tasks.md', kind: 'tasks' },
@@ -163,15 +154,11 @@ export class OpenSpecSource implements MigrateSource {
             await addChangeFiles(
               join(changeRoot, ae.name),
               join('changes', 'archive', ae.name),
-              files
+              files,
             );
           }
         } else {
-          await addChangeFiles(
-            changeRoot,
-            join('changes', changeName),
-            files
-          );
+          await addChangeFiles(changeRoot, join('changes', changeName), files);
         }
       }
     }
@@ -304,8 +291,7 @@ export class OpenSpecSource implements MigrateSource {
           : join(target, 'changes', c.slug);
       for (const [kind, f] of Object.entries(c.artifacts)) {
         if (!f) continue;
-        const fileName =
-          kind === 'spec' ? f.relPath.split('/').pop()! : `${kind}.md`;
+        const fileName = kind === 'spec' ? f.relPath.split('/').pop()! : `${kind}.md`;
         const targetPath =
           kind === 'spec' ? join(baseDir, 'specs', fileName) : join(baseDir, fileName);
         ops.push({

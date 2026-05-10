@@ -78,3 +78,43 @@ describe('SuperpowersSource.scan — 配对算法', () => {
     await rm(tmp, { recursive: true, force: true });
   });
 });
+
+describe('SuperpowersSource.classify', () => {
+  it('paired slug + 全勾 [x] + git close commit → archive', async () => {
+    const tmp = await mkdtemp(join(tmpdir(), 'forge-sp-cls-'));
+    const root = join(tmp, 'docs/superpowers');
+    await mkdir(join(root, 'specs'), { recursive: true });
+    await mkdir(join(root, 'plans'), { recursive: true });
+    await writeFile(join(root, 'specs/2026-01-01-add-auth-design.md'), '# Auth\n');
+    await writeFile(
+      join(root, 'plans/2026-01-01-add-auth-plan.md'),
+      '- [x] task-1: a\n- [x] task-2: b\n- [x] task-3: c\n',
+    );
+
+    const src = new SuperpowersSource();
+    const scan = await src.scan(root);
+    // ctx.inGitRepo=false 让信号 2 失效；依赖信号 1（checkbox 3/3 → archive）
+    const plan = await src.classify(scan, { cwd: tmp, inGitRepo: false });
+    const change = plan.changes.find((c) => c.slug === 'add-auth');
+    expect(change?.classification).toBe('archive');
+    expect(change?.classificationReason).toContain('checkbox 3/3');
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it('unsafe-slug ≥ 50% → skipped 含 __GLOBAL__ 标记', async () => {
+    const tmp = await mkdtemp(join(tmpdir(), 'forge-sp-half-unsafe-'));
+    const root = join(tmp, 'docs/superpowers');
+    await mkdir(join(root, 'specs'), { recursive: true });
+    await writeFile(join(root, 'specs/2026-01-01-..-design.md'), 'X');
+    await writeFile(join(root, 'specs/2026-02-01-good-design.md'), 'Y');
+
+    const src = new SuperpowersSource();
+    const scan = await src.scan(root);
+    const plan = await src.classify(scan, { cwd: tmp, inGitRepo: false });
+    expect(plan.skipped.find((s) => s.source === '__GLOBAL__')).toBeDefined();
+    expect(plan.skipped.find((s) => s.source === '__GLOBAL__')?.reason).toContain(
+      'unsafe-slug-ratio-too-high',
+    );
+    await rm(tmp, { recursive: true, force: true });
+  });
+});

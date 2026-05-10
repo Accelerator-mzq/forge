@@ -92,4 +92,28 @@ describe('ack-log', () => {
     const p = getPendingPath('/root', '7', '2026-05-12T14:30:00.000Z');
     expect(p.replace(/\\\\/g, '/')).toMatch(/pending-acks\/7-2026-05-12T14-30-00\.000Z\.yaml$/);
   });
+
+  it('appendAckLog auto-creates .evidence/ if missing', async () => {
+    // 验证 changeRoot 下没有 .evidence/ 时,appendAckLog 自动创建父目录(Task 3/5 首次写入场景)
+    const t2 = await mkdtemp(path.join(tmpdir(), 'forge-acklog-fresh-'));
+    try {
+      await appendAckLog(t2, {
+        schema: 'forge-ack-log/v1',
+        kind: 'ack',
+        timestamp: '2026-01-01',
+        action: 'ack-warning',
+        change_id: 'c1',
+        finding_id: '1',
+        user: 'u',
+        rationale: null,
+        git_head: null,
+        finding_hash: null,
+        extra: {},
+      });
+      const log = await readFile(path.join(t2, '.evidence/ack-log.jsonl'), 'utf8');
+      expect(log).toMatch(/"kind":"ack"/);
+    } finally {
+      await rm(t2, { recursive: true, force: true });
+    }
+  });
 });

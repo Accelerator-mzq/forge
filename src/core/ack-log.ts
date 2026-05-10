@@ -2,7 +2,7 @@
 // 被 Task 3 ack.ts + Task 5 evidence.ts 同时调用
 // 提供 NDJSON append-only 日志写入 + pending 文件路径管理
 
-import { appendFile, readdir } from 'node:fs/promises';
+import { appendFile, mkdir, readdir } from 'node:fs/promises';
 import path from 'node:path';
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -79,9 +79,13 @@ const PENDING_FILE_RE = /^(\d+)-(.+)\.yaml$/;
  *
  * 路径：<changeRoot>/.evidence/ack-log.jsonl
  * 每条 entry 序列化为一行 JSON,结尾加 '\n'(append-only,不读取已有内容)。
+ * 若 .evidence/ 目录不存在则自动创建(Task 3/5 首次写入的常见场景)。
  */
 export async function appendAckLog(changeRoot: string, entry: AckLogEntry): Promise<void> {
-  const logPath = path.join(changeRoot, ACK_LOG_REL);
+  // 自动创建父目录,避免首次写入时 ENOENT
+  const evidenceDir = path.join(changeRoot, '.evidence');
+  await mkdir(evidenceDir, { recursive: true });
+  const logPath = path.join(evidenceDir, 'ack-log.jsonl');
   // JSON.stringify 不含换行,手动添加 \n 实现 NDJSON 格式
   await appendFile(logPath, JSON.stringify(entry) + '\n', 'utf8');
 }
@@ -141,7 +145,8 @@ export async function listPending(changeRoot: string, findingId?: string): Promi
     // 将文件名中的安全时间戳还原为 ISO 格式(仅用于排序比较,无需实际还原冒号)
     // 因为替换是单调的,字符串排序结果与原始 ISO 时间戳排序结果一致
     items.push({
-      path: path.join(pendingDir, file),
+      // 路径正斜杠规范化,与 getPendingPath 输出一致,避免下游字符串比较失配
+      path: path.join(pendingDir, file).replace(/\\/g, '/'),
       findingId: parsedFindingId,
       timestamp: safeTimestamp, // 保持安全格式,字符串排序等价于时间升序
     });

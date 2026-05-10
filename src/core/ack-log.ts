@@ -11,7 +11,7 @@ import path from 'node:path';
 
 /** ack 操作日志条目(kind='ack') */
 export interface AckEntry {
-  schema: string; // 固定 'forge-ack-log/v1'
+  schema: 'forge-ack-log/v1'; // §3.12.4 接口冻结字面量类型
   kind: 'ack';
   timestamp: string; // ISO 8601 时间戳
   action: string; // 'ack-warning' | 'ack-critical' 等
@@ -26,7 +26,7 @@ export interface AckEntry {
 
 /** evidence helper 操作日志条目(kind='evidence-helper') */
 export interface EvidenceHelperEntry {
-  schema: string; // 固定 'forge-ack-log/v1'
+  schema: 'forge-ack-log/v1'; // §3.12.4 接口冻结字面量类型
   kind: 'evidence-helper';
   timestamp: string; // ISO 8601 时间戳
   helper_name: 'record-tdd' | 'record-verify' | 'record-review';
@@ -47,8 +47,8 @@ export type AckLogEntry = AckEntry | EvidenceHelperEntry;
 
 /** listPending 返回的单条记录 */
 export interface PendingItem {
-  /** 文件绝对路径 */
-  filePath: string;
+  /** 文件绝对路径(plan §7 line 1000 spec 字段名 'path') */
+  path: string;
   /** finding id(从文件名解析) */
   findingId: string;
   /** 时间戳字符串(从文件名解析,冒号已还原) */
@@ -141,7 +141,7 @@ export async function listPending(changeRoot: string, findingId?: string): Promi
     // 将文件名中的安全时间戳还原为 ISO 格式(仅用于排序比较,无需实际还原冒号)
     // 因为替换是单调的,字符串排序结果与原始 ISO 时间戳排序结果一致
     items.push({
-      filePath: path.join(pendingDir, file),
+      path: path.join(pendingDir, file),
       findingId: parsedFindingId,
       timestamp: safeTimestamp, // 保持安全格式,字符串排序等价于时间升序
     });

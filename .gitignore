@@ -10,6 +10,7 @@ Thumbs.db
 # pnpm / npm
 .pnpm-store/
 .npm/
+*.tgz
 
 # editor
 .vscode/

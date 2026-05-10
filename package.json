@@ -1,6 +1,6 @@
 {
   "name": "@accelerator-mzq/forge",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "OpenSpec × superpowers fusion: spec-driven workflow + behavior-shaping skills, packaged as multi-harness CLI",
   "type": "module",
   "engines": {

@@ -92,6 +92,17 @@ async function addChangeFiles(
   }
 }
 
+// 保留的 slug 列表 — classify 阶段跳过这些
+const RESERVED_SLUGS = new Set(['.cache', '.forge-trash', '.forge-ack', 'archive']);
+
+// 判断 slug 是否不安全
+function isUnsafeSlug(slug: string): boolean {
+  if (slug === '..' || slug === '.') return true;
+  if (RESERVED_SLUGS.has(slug)) return true;
+  if (slug.includes('/') || slug.includes('\\')) return true;
+  return false;
+}
+
 export class OpenSpecSource implements MigrateSource {
   readonly id = 'openspec' as const;
 
@@ -202,8 +213,83 @@ export class OpenSpecSource implements MigrateSource {
     return { isEmpty: files.length === 0, files };
   }
 
-  async classify(_scan: ScanResult, _ctx: ClassifyCtx): Promise<ClassificationPlan> {
-    throw new Error('OpenSpecSource.classify not implemented (plan-8b)');
+  async classify(scan: ScanResult, _ctx: ClassifyCtx): Promise<ClassificationPlan> {
+    // classify 阶段：为 scan 结果分类并判定目标位置
+    const changesMap = new Map<string, PlannedChange>();
+    const specs: PlannedSpec[] = [];
+    const drafts: PlannedDraft[] = [];
+    const configFiles: PlannedConfig[] = [];
+    const skipped: ClassificationPlan['skipped'] = [];
+
+    for (const f of scan.files) {
+      // 编码检查：非 UTF-8 直接跳过
+      if (f.encoding === 'non-utf8') {
+        skipped.push({ source: f.relPath, reason: '[skip:encoding-not-utf8]' });
+        continue;
+      }
+
+      // spec 顶层(specs/<n>/spec.md)
+      if (f.kind === 'spec' && f.relPath.startsWith('specs/')) {
+        specs.push({
+          relPath: f.relPath.replace(/^specs\//, ''),
+          source: f,
+        });
+        continue;
+      }
+
+      // change(active 或 archive)
+      if (f.relPath.startsWith('changes/')) {
+        const parts = f.relPath.split('/');
+        const isArchive = parts[1] === 'archive';
+        const slug = isArchive ? parts[2] : parts[1];
+        if (!slug) continue;
+        if (isUnsafeSlug(slug)) {
+          skipped.push({
+            source: f.relPath,
+            reason: `[unsafe-slug: ${slug}]`,
+          });
+          continue;
+        }
+        let change = changesMap.get(slug);
+        if (!change) {
+          change = {
+            slug,
+            classification: isArchive ? 'archive' : 'active',
+            artifacts: {},
+          };
+          changesMap.set(slug, change);
+        }
+        change.artifacts[f.kind] = f;
+        continue;
+      }
+
+      // draft(explorations/)
+      if (f.kind === 'draft') {
+        drafts.push({
+          targetName: f.relPath.replace(/^explorations\//, ''),
+          source: f,
+        });
+        continue;
+      }
+
+      // config.yaml
+      if (f.kind === 'config') {
+        configFiles.push({
+          source: f,
+          strategy: 'fresh',
+          targetName: 'config.yaml',
+        });
+        continue;
+      }
+    }
+
+    return {
+      changes: Array.from(changesMap.values()),
+      specs,
+      drafts,
+      configFiles,
+      skipped,
+    };
   }
 
   prepareCopy(_plan: ClassificationPlan, _target: string): CopyOp[] {

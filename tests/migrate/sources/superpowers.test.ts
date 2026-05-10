@@ -3,11 +3,7 @@ import { SuperpowersSource } from '../../../src/core/migrate/sources/superpowers
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type {
-  ScanResult,
-  ClassificationPlan,
-  ScannedFile,
-} from '../../../src/core/migrate/types.js';
+import type { ClassificationPlan } from '../../../src/core/migrate/types.js';
 
 describe('SuperpowersSource.detect', () => {
   it('found=false 当 docs/superpowers/ 缺', async () => {

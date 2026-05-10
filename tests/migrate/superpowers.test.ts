@@ -91,6 +91,45 @@ describe('forge migrate superpowers — 集成测(--no-regenerate)', () => {
   });
 });
 
+describe('forge migrate superpowers — M16 bundled 探测(Task 5.17)', () => {
+  let tmp: string;
+  let originalCwd: string;
+
+  beforeEach(async () => {
+    tmp = await mkdtemp(join(tmpdir(), 'forge-migrate-sp-bundled-'));
+    await cp(join(__dirname, '../fixtures/migrate/superpowers-minimal'), tmp, { recursive: true });
+    originalCwd = process.cwd();
+    process.chdir(tmp);
+  });
+
+  afterEach(async () => {
+    process.chdir(originalCwd);
+    await rm(tmp, { recursive: true, force: true });
+    // 清理 env(防止测试污染)
+    delete process.env['FORGE_BUNDLED'];
+  });
+
+  it('FORGE_BUNDLED=1 + superpowers + --no-interactive → exit 4(bundled 拒绝静默降级)', async () => {
+    // M16:bundled 环境下 superpowers + no-interactive → 拒绝静默降级 exit 4
+    process.env['FORGE_BUNDLED'] = '1';
+    const code = await runMigrate({
+      source: 'superpowers',
+      noInteractive: true,
+    });
+    expect(code).toBe(4);
+  });
+
+  it('FORGE_BUNDLED=1 + superpowers + 交互(默认 yes) → exit 0(fallback no-regen)', async () => {
+    // M16:bundled + superpowers + 交互模式 → promptYesNo 默认 true → 继续(no-regen)
+    process.env['FORGE_BUNDLED'] = '1';
+    const code = await runMigrate({
+      source: 'superpowers',
+      // noInteractive 不设 → 走 promptYesNo 默认 yes → regenEnabled=false + M13 降级 active → exit 0
+    });
+    expect(code).toBe(0);
+  });
+});
+
 describe('forge migrate superpowers — unsafe-slug ≥ 50% exit 4(Task 3.8 集成测)', () => {
   let tmp: string;
   let originalCwd: string;

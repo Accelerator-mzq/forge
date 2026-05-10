@@ -118,3 +118,81 @@ describe('SuperpowersSource.classify', () => {
     await rm(tmp, { recursive: true, force: true });
   });
 });
+
+describe('SuperpowersSource.prepareCopy', () => {
+  it('active change → forge/changes/<slug>/{design,tasks}.md', () => {
+    const plan: ClassificationPlan = {
+      changes: [
+        {
+          slug: 'add-auth',
+          classification: 'active',
+          artifacts: {
+            design: {
+              absPath: '/x/docs/superpowers/specs/2026-01-01-add-auth-design.md',
+              relPath: 'specs/2026-01-01-add-auth-design.md',
+              kind: 'design',
+              size: 0,
+              mtime: '',
+              encoding: 'utf8',
+            },
+            tasks: {
+              absPath: '/x/docs/superpowers/plans/2026-01-01-add-auth-plan.md',
+              relPath: 'plans/2026-01-01-add-auth-plan.md',
+              kind: 'tasks',
+              size: 0,
+              mtime: '',
+              encoding: 'utf8',
+            },
+          },
+        },
+      ],
+      specs: [],
+      drafts: [],
+      configFiles: [],
+      skipped: [],
+    };
+    const src = new SuperpowersSource();
+    const ops = src.prepareCopy(plan, '/y/forge');
+    const targets = ops.map((o) => o.target);
+    expect(targets).toContain(join('/y/forge/changes/add-auth/design.md'));
+    expect(targets).toContain(join('/y/forge/changes/add-auth/tasks.md'));
+  });
+
+  it('archive change → forge/changes/archive/<slug>/...', () => {
+    const plan: ClassificationPlan = {
+      changes: [
+        {
+          slug: 'old-feature',
+          classification: 'archive',
+          artifacts: {
+            design: {
+              absPath: '/x/d.md',
+              relPath: 'specs/2026-01-01-old-feature-design.md',
+              kind: 'design',
+              size: 0,
+              mtime: '',
+              encoding: 'utf8',
+            },
+            tasks: {
+              absPath: '/x/p.md',
+              relPath: 'plans/2026-01-01-old-feature-plan.md',
+              kind: 'tasks',
+              size: 0,
+              mtime: '',
+              encoding: 'utf8',
+            },
+          },
+        },
+      ],
+      specs: [],
+      drafts: [],
+      configFiles: [],
+      skipped: [],
+    };
+    const src = new SuperpowersSource();
+    const ops = src.prepareCopy(plan, '/y/forge');
+    const targets = ops.map((o) => o.target);
+    expect(targets).toContain(join('/y/forge/changes/archive/old-feature/design.md'));
+    expect(targets).toContain(join('/y/forge/changes/archive/old-feature/tasks.md'));
+  });
+});

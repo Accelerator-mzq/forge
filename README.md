@@ -64,6 +64,29 @@ claude
 - [OpenCode](docs/opencode-install.md)(Tier 2 PARTIAL_SHIP)
 - [Codex](docs/codex-install.md)(Tier 3 PARTIAL_SHIP)
 
+## 从已有项目搬过来(v0.4+)
+
+如果项目已经在用 [OpenSpec](https://github.com/Fission-AI/OpenSpec) 或装过 [superpowers](https://github.com/obra/superpowers) plugin,跑 `forge migrate <source>` 一键搬到 forge 工作目录:
+
+```bash
+# OpenSpec 项目
+forge migrate openspec       # 默认 --regenerate(LLM 补缺件,会显示估价 + ack)
+
+# superpowers 用户产物(docs/superpowers/{specs,plans}/)
+forge migrate superpowers    # 同上;design+plan 配对成 forge change
+```
+
+加 `--no-regenerate` 跳过 LLM,只搬结构 + 跑 markdown-aware transformer;失败件标 `[needs-fix]`(用户后续手补 / 重跑 `--regenerate`)。
+
+详见 [`docs/migration/from-openspec.md`](docs/migration/from-openspec.md) 与 [`docs/migration/from-superpowers.md`](docs/migration/from-superpowers.md)。
+
+注:
+
+- bundled plugin 中 `--regenerate` 不可用 — openspec source **静默退化**为 `--no-regenerate`;
+  superpowers source 因结构必缺 proposal/specs 会**前置 prompt 让你确认**(`--no-interactive` 直接 abort)。
+- archive 落点强制完整(M13):推测 archive 但缺 proposal/specs 且 regen 关闭 → 必须用户二次确认是否降级 active(`--no-interactive` 直接 abort exit 4)。
+- 默认 cp 不动源;migrate 跑完后用户手动 `git rm -r openspec/`(或 `docs/superpowers/{specs,plans}/`)清理。
+
 ## v0.2 → v0.3 升级
 
 详见 [`docs/migration/v0.2-to-v0.3.md`](docs/migration/v0.2-to-v0.3.md)。

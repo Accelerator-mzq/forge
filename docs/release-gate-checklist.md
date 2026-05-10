@@ -211,3 +211,45 @@ v0.3 新增 6 项验证(Plan 0a + Plan 5 落地)。release v0.3.0 前必须 evid
 ### v0.3 release 阻塞门禁
 
 §3.1 Tier 1 + §3.2 + §3.3 + §3.6 必须 PASS;§3.1 Tier 2/3 + §3.4 + §3.5 PASS 才启用对应能力。任一阻塞项 FAIL → 退回相应 Plan 修。
+
+## §4 v0.4 forge migrate 发布门(2026-05-10)
+
+### §4.1 代码 + 测验证
+
+- [ ] `pnpm format:check` 0 error
+- [ ] `pnpm lint` 0 error
+- [ ] `pnpm typecheck` 0 error
+- [ ] `pnpm test` 全 PASS;含 tests/migrate/\* 与 tests/cli/migrate.test.ts
+- [ ] `pnpm build` 0 error;dist/cli/index.js 可调起 `forge migrate --help`
+
+### §4.2 端到端手测
+
+- [ ] 用 `tests/fixtures/migrate/openspec-minimal/` 跑一次完整 `--no-regenerate`,验 forge/ 树就位
+- [ ] 用 `tests/fixtures/migrate/superpowers-minimal/` 跑一次完整 `--no-regenerate`(启 git fixture);验 [needs-fix] 标准
+- [ ] 在真 OpenSpec 项目跑 `forge migrate openspec --regenerate`(可选:开发者本机手测,验 LLM 路径)
+- [ ] 在真 superpowers 项目跑 `forge migrate superpowers --regenerate`(同上)
+
+### §4.3 兼容性
+
+- [ ] `tests/core/archive/lock.test.ts` 旧断言"another forge archive..."仍 PASS(spec §5.1 v3 兼容性约束)
+- [ ] `tests/cli/archive.test.ts` 旧断言仍 PASS
+- [ ] forge upgrade(v0.2 → v0.3)依然跑通;migrate 不影响其工作流(spec §7.3 独立)
+
+### §4.4 文档完整
+
+- [ ] README "从已有项目搬过来" 段加;链接到 docs/migration/
+- [ ] docs/migration/from-openspec.md 完整(前置 + 流程 + transformer + FAQ + cleanup)
+- [ ] docs/migration/from-superpowers.md 含配对算法 + archive 推测 + bundled 限制
+- [ ] CHANGELOG v0.4.0 段写完(本 plan Task 7.2)
+- [ ] design spec 仍 commit 在 docs/specs/(本 release 关联设计源头)
+
+### §4.5 npm 包
+
+- [ ] package.json `version` = `0.4.0`;`bin` 字段保 `forge`
+- [ ] `pnpm pack` 产 tarball;解压检查 dist/cli/commands/migrate.js 在
+- [ ] `pnpm publish --dry-run` 验包内文件清单(forge-repo files 字段)
+
+### §4.6 plugin 形态(若同步发 plugin)
+
+- [ ] commands/migrate.md 已加(若决定 plugin 中也提供 `/forge:migrate`;本 plan 不强制)
+- [ ] bundled plugin tarball(若发):dist/cli/commands/migrate.js 含

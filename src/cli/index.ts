@@ -10,6 +10,7 @@ import { buildUpdateCommand } from './commands/update.js';
 import { buildArchiveCommand } from './commands/archive.js';
 import { buildLegacyBridgeCommand } from './commands/legacy-bridge.js';
 import { buildUpgradeCommand } from './commands/upgrade.js';
+import { buildMigrateCommand } from './commands/migrate.js';
 
 // 创建主命令
 const program = new Command();
@@ -39,6 +40,9 @@ program.addCommand(buildLegacyBridgeCommand());
 
 // 注册 upgrade 子命令(v0.3 Plan 4 — v0.2→v0.3 legacy 清理)
 program.addCommand(buildUpgradeCommand());
+
+// 注册 migrate 子命令(v0.4 — 搬运 OpenSpec / superpowers 项目仓库)
+program.addCommand(buildMigrateCommand());
 
 // 解析命令行参数,遇到错误时打印并退出
 program.parseAsync(process.argv).catch((err: unknown) => {

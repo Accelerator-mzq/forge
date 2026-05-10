@@ -6,6 +6,9 @@ import { existsSync, openSync, closeSync, mkdirSync, constants } from 'node:fs';
 import { join, dirname } from 'node:path';
 
 // 决策 #23:扩展 mode union 支持 legacy-bridge 命令(C-2 / spec §2.6)
+// migrate 命令 v0.4 加(Plan 8a Task 1.1):LockMode union 加 'migrate' 一项
+// LockHeldError 文案不动(保兼容 lock.test.ts:188 / cli/archive.test.ts:516 断言);
+// migrate CLI 入口 catch 后改输出友好文案(见 plan-8a Task 1.7)
 export type LockMode =
   | 'archive'
   | 'recover'
@@ -13,7 +16,8 @@ export type LockMode =
   | 'legacy-bridge-regenerate'
   | 'legacy-bridge-index'
   | 'legacy-bridge-resolve'
-  | 'legacy-bridge-sync-check';
+  | 'legacy-bridge-sync-check'
+  | 'migrate';
 
 /** lock 文件内容结构 */
 interface LockData {
@@ -96,7 +100,9 @@ export async function acquireLockByPath(
  * legacy-bridge 命令应直接调 `acquireLockByPath(forgeRoot, mode, 'legacy-bridge.lock')`(决策 #23)。
  *
  * @param forgeRoot forge 根目录(含 .cache/ 子目录)
- * @param mode      当前操作模式(LockMode union 支持 legacy-bridge-* 是为统一类型,但实际 callsite 应仅传 'archive' / 'recover')
+ * @param mode      当前操作模式(LockMode union 支持 legacy-bridge-* 与 'migrate' 是为统一类型;
+ *                  实际 callsite 应仅传 'archive' / 'recover';
+ *                  legacy-bridge-* 与 'migrate' 走 `acquireLockByPath` 路径)
  * @returns         release 函数(幂等,可多次调用)
  */
 export async function acquireLock(forgeRoot: string, mode: LockMode): Promise<() => Promise<void>> {

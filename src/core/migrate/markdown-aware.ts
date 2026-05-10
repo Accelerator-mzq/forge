@@ -28,9 +28,9 @@ export function walkLines(content: string, cb: WalkCallback): string {
   const out: string[] = [];
   let inFenced = false;
   let fenceToken: '```' | '~~~' | null = null;
-  // 末尾是否有 \n（决定末尾空行的 inFenced 状态）
+  // 末尾是否有 \n(决定末尾空行的 inFenced 状态)
   const endsWithNewline = stripped.length > 0 && stripped[stripped.length - 1] === '\n';
-  // 保存上一行的 inFenced 状态（用于末尾空行的处理）
+  // 保存上一行的 inFenced 状态(用于末尾空行的处理)
   let prevLineInFenced = false;
 
   for (let i = 0; i < lines.length; i++) {
@@ -42,24 +42,25 @@ export function walkLines(content: string, cb: WalkCallback): string {
     const startsTildeTilde = trimmed.startsWith('~~~');
 
     // 决定当前行的 inFenced 状态和状态转移
-    let lineInFenced = inFenced; // 默认继承当前 fenced 状态
+    // 默认继承当前 fenced 状态;开启行/闭合行本身仍算 fenced
+    let lineInFenced = inFenced;
     if (!inFenced && startsTripleBacktick) {
-      // 开启 ``` fence（开启行算 fenced）
+      // 开启 ``` fence(开启行算 fenced)
       lineInFenced = true;
       inFenced = true;
       fenceToken = '```';
     } else if (!inFenced && startsTildeTilde) {
-      // 开启 ~~~ fence（开启行算 fenced）
+      // 开启 ~~~ fence(开启行算 fenced)
       lineInFenced = true;
       inFenced = true;
       fenceToken = '~~~';
     } else if (inFenced && fenceToken === '```' && startsTripleBacktick) {
-      // 关闭 ``` fence（闭合符仍算 fenced）
+      // 关闭 ``` fence(闭合符仍算 fenced)
       lineInFenced = true;
       inFenced = false;
       fenceToken = null;
     } else if (inFenced && fenceToken === '~~~' && startsTildeTilde) {
-      // 关闭 ~~~ fence（闭合符仍算 fenced）
+      // 关闭 ~~~ fence(闭合符仍算 fenced)
       lineInFenced = true;
       inFenced = false;
       fenceToken = null;
@@ -68,7 +69,8 @@ export function walkLines(content: string, cb: WalkCallback): string {
     // table-row 判定:以 `|` 开头且至少 2 个 `|`
     const isTableRow = trimmed.startsWith('|') && (trimmed.match(/\|/g)?.length ?? 0) >= 2;
 
-    // 末尾空行特殊处理:如果末尾是 \n，末尾空行继承上一行的 inFenced 状态
+    // 末尾空行特殊处理:plan 测试 2 隐含语义 — fenced 闭合后末尾空行视为 fenced 内部
+    // (input '```\n...\n```\n' 末尾 \n 产生的空字符串继承上一行的 inFenced 状态)
     const finalLineInFenced =
       i === lines.length - 1 && line === '' && endsWithNewline ? prevLineInFenced : lineInFenced;
 
@@ -96,81 +98,40 @@ export interface AwareSection {
   endLine: number;
 }
 
+/**
+ * fence-aware section 切分(复用 walkLines):防止代码块内 `## Fake` 误切。
+ * 不复用 parse/markdown.ts(其不 fence-aware)。
+ */
 export function splitSectionsAware(content: string): AwareSection[] {
   const sections: AwareSection[] = [];
-  let current: AwareSection | null = null;
+  // 用元组持有当前 section,避开 TS 在闭包回调外无法收窄 null 的限制
+  const state: { current: AwareSection | null } = { current: null };
   const buffer: string[] = [];
 
-  const normalized = content.replace(/\r\n/g, '\n');
-  const stripped = normalized.charCodeAt(0) === 0xfeff ? normalized.slice(1) : normalized;
-  const lines = stripped.split('\n');
-
-  let inFenced = false;
-  let fenceToken: '```' | '~~~' | null = null;
-  // 末尾是否有 \n
-  const endsWithNewline = stripped.length > 0 && stripped[stripped.length - 1] === '\n';
-  // 保存上一行的 inFenced 状态
-  let prevLineInFenced = false;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i] ?? '';
-    const trimmed = line.trim();
-
-    // 检查当前行是否开启或关闭 fence（同 walkLines 逻辑）
-    const startsTripleBacktick = trimmed.startsWith('```');
-    const startsTildeTilde = trimmed.startsWith('~~~');
-
-    // 决定当前行的 inFenced 状态
-    let lineInFenced = inFenced;
-    if (!inFenced && startsTripleBacktick) {
-      lineInFenced = true;
-      inFenced = true;
-      fenceToken = '```';
-    } else if (!inFenced && startsTildeTilde) {
-      lineInFenced = true;
-      inFenced = true;
-      fenceToken = '~~~';
-    } else if (inFenced && fenceToken === '```' && startsTripleBacktick) {
-      lineInFenced = true;
-      inFenced = false;
-      fenceToken = null;
-    } else if (inFenced && fenceToken === '~~~' && startsTildeTilde) {
-      lineInFenced = true;
-      inFenced = false;
-      fenceToken = null;
-    }
-
-    // 末尾空行特殊处理
-    const finalLineInFenced =
-      i === lines.length - 1 && line === '' && endsWithNewline ? prevLineInFenced : lineInFenced;
-
-    // 只在 !finalLineInFenced 行识别 heading(防代码块内 ## Fake 误切)
-    const headingMatch = !finalLineInFenced ? line.match(/^(#{1,6})\s+(.+)$/) : null;
+  walkLines(content, (line, ctx, i) => {
+    // 只在 !inFenced 行识别 heading(防代码块内 ## Fake 误切)
+    const headingMatch = !ctx.inFenced ? line.match(/^(#{1,6})\s+(.+)$/) : null;
     if (headingMatch) {
-      if (current !== null) {
-        current.body = buffer.join('\n');
-        current.endLine = i;
-        sections.push(current);
+      if (state.current !== null) {
+        state.current.body = buffer.join('\n');
+        state.current.endLine = i;
+        sections.push(state.current);
         buffer.length = 0;
       }
-      current = {
-        level: headingMatch[1]!.length,
-        heading: headingMatch[2]!.trim(),
+      state.current = {
+        level: headingMatch[1]?.length ?? 1,
+        heading: headingMatch[2]?.trim() ?? '',
         body: '',
         startLine: i + 1,
         endLine: -1,
       };
-    } else if (current !== null) {
+    } else if (state.current !== null) {
       buffer.push(line);
     }
-
-    prevLineInFenced = lineInFenced;
+  });
+  if (state.current !== null) {
+    state.current.body = buffer.join('\n');
+    sections.push(state.current);
   }
-
-  if (current !== null) {
-    current.body = buffer.join('\n');
-    sections.push(current);
-  }
-
   return sections;
 }

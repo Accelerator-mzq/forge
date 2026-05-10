@@ -32,14 +32,16 @@ describe('forge migrate superpowers — 集成测(--no-regenerate)', () => {
     expect(code).toBe(0);
   });
 
-  // 等 P5 enforceArchiveIntegrity 实施 — archive 缺件降级 active(M13)
-  it.skip('add-auth(全 [x] + git slug+close commit) → archive 但缺件降级 active', async () => {
+  // Task 5.16:enforceArchiveIntegrity 实施后启用(M13 — archive 缺件 + no-interactive → exit 4)
+  it('add-auth(全 [x] + git slug+close commit) → archive 但缺件;--no-interactive → exit 4', async () => {
+    // add-auth 被 archive-detect 推 archive(全 [x] + git close commit)
+    // superpowers 必缺 proposal/specs;--no-interactive + --no-regenerate → M13 abort exit 4
     const code = await runMigrate({
       source: 'superpowers',
       noRegenerate: true,
       noInteractive: true,
     });
-    expect(code).toBe(4); // M13:archive 缺件 + non-interactive → exit 4
+    expect(code).toBe(4);
   });
 
   it('cleanup-deps(部分 [x]) → active', async () => {

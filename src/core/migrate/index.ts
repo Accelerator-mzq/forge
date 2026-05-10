@@ -1,6 +1,7 @@
 // src/core/migrate/index.ts
 // runMigrate 主流程 — Plan 8a Task 1.6(框架)+ Task 4.7 cp 三步走集成
 // 对应 spec §1.5 主流程伪码 v4 + §3.1 错误矩阵 + §3.4 trace
+// Task 5.16:enforceArchiveIntegrity(M13) / Task 5.17:isBundled(M16)
 
 import { acquireLockByPath, LockHeldError } from '../archive/lock.js';
 import { existsSync } from 'node:fs';
@@ -10,7 +11,13 @@ import { execSync } from 'node:child_process';
 import { getSource } from './sources/index.js';
 import { resolveConflicts, ConflictExhausted } from './conflict.js';
 import { Journal, finalizeAndRename, writeReportMd } from './report.js';
-import type { MigrateOptions, ClassifyCtx, TraceOp, MigrateTrace } from './types.js';
+import type {
+  MigrateOptions,
+  ClassifyCtx,
+  TraceOp,
+  MigrateTrace,
+  ClassificationPlan,
+} from './types.js';
 
 export { getSource };
 export type { MigrateOptions, MigrateSource, SourceId } from './types.js';
@@ -69,7 +76,8 @@ export async function runMigrate(opts: MigrateOptions): Promise<number> {
     }
 
     // plan-8d / plan-8e 阶段填实 cp/regen 路径时改为 const plan = await ...
-    const plan = await source.classify(scan, ctx);
+    // Task 5.16:改为 let 以允许 enforceArchiveIntegrity 重写 plan
+    let plan = await source.classify(scan, ctx);
 
     // 检查 unsafe-slug ≥ 50% 全局 skip 标记(spec §3.1 — Task 3.8)
     // 触发时 exit 4
@@ -87,6 +95,46 @@ export async function runMigrate(opts: MigrateOptions): Promise<number> {
 
     // missingPreview 早算(B3 修订);P5 用于 archive 完整性检查
     const missingPreview = source.listMissingArtifacts(plan);
+
+    // Task 5.16:M13 enforceArchiveIntegrity(unsafe-slug 检查通过后、dry-run 后执行)
+    // M16 bundled 探测后 regenEnabled 可能变化,故在 bundled 判断前先计算 regenEnabled 初始值
+    let regenEnabled = !opts.noRegenerate;
+
+    // Task 5.17:M16 bundled 探测(env FORGE_BUNDLED=1 或 CLAUDE_PLUGIN_ROOT 含 'forge-bundled')
+    if (isBundled() && regenEnabled) {
+      if (source.id === 'superpowers') {
+        if (opts.noInteractive) {
+          // bundled + superpowers + --no-interactive:拒绝静默降级,abort exit 4
+          console.error(
+            '[migrate] bundled + superpowers + --no-interactive: refuse to silently degrade',
+          );
+          return 4;
+        }
+        // 交互模式:简化 prompt(P5 简化,实际后续接 readline)
+        const msg = `[migrate] bundled plugin: --regenerate unavailable;此模式将产生 ${missingPreview.length} 个 [needs-fix](superpowers 必缺 proposal/specs)。继续?(默认 yes)`;
+        const ok = await promptYesNo(msg);
+        if (!ok) return 0;
+        regenEnabled = false;
+      } else {
+        // openspec:静默 fallback no-regenerate(spec M16:openspec 多数已有件,可静默)
+        console.warn(
+          '[migrate] bundled: --regenerate unavailable, falling back to --no-regenerate',
+        );
+        regenEnabled = false;
+      }
+    }
+
+    // M13 enforceArchiveIntegrity:用经 M16 更新的 regenEnabled
+    const integrityResult = enforceArchiveIntegrity(
+      plan,
+      regenEnabled,
+      opts.noInteractive ?? false,
+    );
+    if (integrityResult.abort) {
+      return 4;
+    }
+    plan = integrityResult.plan;
+    const downgrades = integrityResult.downgrades;
     console.log(
       `[migrate] scanned ${scan.files.length} files, missing-preview: ${missingPreview.length}`,
     );
@@ -155,7 +203,7 @@ export async function runMigrate(opts: MigrateOptions): Promise<number> {
         ts,
         ops: traceOps,
         conflicts: conflictResult.conflicts.map((c) => ({ target: c.original, rename: c.renamed })),
-        downgrades: [], // P5 Task 5.16 加
+        downgrades, // Task 5.16:enforceArchiveIntegrity 降级记录
         cleanupHint:
           source.id === 'openspec'
             ? 'git rm -r openspec/'
@@ -246,4 +294,82 @@ async function rollbackFromJournal(journalPath: string): Promise<void> {
       });
     }
   }
+}
+
+// ============================================================================
+// Task 5.16:M13 enforceArchiveIntegrity
+// ============================================================================
+
+/**
+ * enforceArchiveIntegrity:archive change 缺 proposal/specs 时:
+ * - regenEnabled:留给 LLM 补,函数不动
+ * - regen 关 + --no-interactive:abort exit 4
+ * - regen 关 + 交互:降级 active(P5 简化:console.warn + 默认降级,不接 readline)
+ */
+function enforceArchiveIntegrity(
+  plan: ClassificationPlan,
+  regenEnabled: boolean,
+  noInteractive: boolean,
+): {
+  plan: ClassificationPlan;
+  downgrades: { change: string; from: string; to: string; reason: string }[];
+  abort: boolean;
+} {
+  const downgrades: { change: string; from: string; to: string; reason: string }[] = [];
+  // shallow clone changes(防 in-place mutation)
+  const changes = plan.changes.map((c) => ({ ...c }));
+
+  for (const c of changes) {
+    if (c.classification !== 'archive') continue;
+    const hasProposal = !!c.artifacts.proposal;
+    const hasSpecs = !!(c.artifacts.specs && c.artifacts.specs.length > 0);
+    if (hasProposal && hasSpecs) continue; // archive 完整 OK
+
+    if (regenEnabled) continue; // 留给 LLM 补;本函数不动
+
+    // regen 关 / 拒绝 → 必须降级或 abort
+    if (noInteractive) {
+      console.error(
+        `[migrate] M13 archive 完整性不可达(change: ${c.slug});--no-interactive 模式 abort`,
+      );
+      return { plan: { ...plan, changes }, downgrades, abort: true };
+    }
+    // 交互模式:简化为 console.warn + 默认降级 active(P5 简化版,实际后续接 readline 或 prompts)
+    console.warn(
+      `[migrate] M13 archive 完整性不可达(change: ${c.slug});默认降级 active(--no-regenerate / 用户拒绝)`,
+    );
+    c.classification = 'active';
+    downgrades.push({
+      change: c.slug,
+      from: 'archive',
+      to: 'active',
+      reason: 'M13: missing proposal/specs;default downgrade(no-regenerate path)',
+    });
+  }
+  return { plan: { ...plan, changes }, downgrades, abort: false };
+}
+
+// ============================================================================
+// Task 5.17:M16 bundled 探测 + promptYesNo
+// ============================================================================
+
+/**
+ * isBundled:检测当前是否运行在 bundled plugin 环境中。
+ * 探测方式:env FORGE_BUNDLED=1 或 CLAUDE_PLUGIN_ROOT 含 'forge-bundled'
+ */
+function isBundled(): boolean {
+  return (
+    process.env['FORGE_BUNDLED'] === '1' ||
+    (process.env['CLAUDE_PLUGIN_ROOT']?.includes('forge-bundled') ?? false)
+  );
+}
+
+/**
+ * promptYesNo:简化 readline yes/no prompt。
+ * P5 简化:console.log + 默认返 true(继续)。
+ * 后续 P6 接真实 readline/prompts 包。
+ */
+async function promptYesNo(message: string): Promise<boolean> {
+  console.log(message);
+  return true;
 }

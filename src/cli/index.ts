@@ -12,6 +12,7 @@ import { buildLegacyBridgeCommand } from './commands/legacy-bridge.js';
 import { buildUpgradeCommand } from './commands/upgrade.js';
 import { buildMigrateCommand } from './commands/migrate.js';
 import { buildAckCommand } from './commands/ack.js';
+import { buildEvidenceCommand } from './commands/evidence.js';
 
 // 创建主命令
 const program = new Command();
@@ -47,6 +48,9 @@ program.addCommand(buildMigrateCommand());
 
 // 注册 ack 子命令(plan-9a Task 3 — 两步 user 确认协议)
 program.addCommand(buildAckCommand());
+
+// 注册 evidence 子命令(plan-9a Task 5 — evidence helper 记录框架)
+program.addCommand(buildEvidenceCommand());
 
 // 解析命令行参数,遇到错误时打印并退出
 program.parseAsync(process.argv).catch((err: unknown) => {

@@ -2,15 +2,20 @@
 // runMigrate 主流程 — Plan 8a Task 1.6(框架)+ Task 4.7 cp 三步走集成
 // 对应 spec §1.5 主流程伪码 v4 + §3.1 错误矩阵 + §3.4 trace
 // Task 5.16:enforceArchiveIntegrity(M13) / Task 5.17:isBundled(M16)
+// P5 final review fixups C1+C2:runRegenerate 接入主流程
 
 import { acquireLockByPath, LockHeldError } from '../archive/lock.js';
 import { existsSync } from 'node:fs';
-import { mkdir, rename, readFile, writeFile, unlink } from 'node:fs/promises';
+import { mkdir, rename, readFile, writeFile, unlink, stat } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { execSync } from 'node:child_process';
+import Anthropic from '@anthropic-ai/sdk';
 import { getSource } from './sources/index.js';
 import { resolveConflicts, ConflictExhausted } from './conflict.js';
 import { Journal, finalizeAndRename, writeReportMd } from './report.js';
+import { runRegenerate } from './regenerate.js';
+import { writeMigrateAck, checkMigrateAck, renderMigratePrompt } from './ack.js';
+import { estimateMigrateCost, MIGRATE_WARN_USD, type MissingArtifactWithLength } from './budget.js';
 import type {
   MigrateOptions,
   ClassifyCtx,
@@ -40,11 +45,17 @@ export async function runMigrate(opts: MigrateOptions): Promise<number> {
   // ensureForgeBootstrap — 此前不存在 forge/ 时建最小 .cache(spec §1.5)
   await ensureForgeBootstrap(cwd);
 
+  // C1 修:abortController 在 runMigrate 顶层创建,sigintHandler 可引用
+  const abortController = new AbortController();
+
   let release: (() => Promise<void>) | undefined;
   // v4 修订(codex C2):用 process.once 防 listener 累积(测试多次 runMigrate);finally 显式 off 兜底
+  // C1 修:先 abort 让 LLM 调用 graceful abort(.partial 写出),再 setTimeout exit 130
   const sigintHandler = () => {
-    console.error('\n[migrate] SIGINT received; rolling back...');
-    process.exit(130);
+    console.error('\n[migrate] SIGINT received; aborting LLM calls + rolling back...');
+    abortController.abort();
+    // 给 async 逻辑 1s 清理时间(写 .partial 等),然后 exit 130
+    setTimeout(() => process.exit(130), 1000);
   };
   process.once('SIGINT', sigintHandler);
 
@@ -191,6 +202,81 @@ export async function runMigrate(opts: MigrateOptions): Promise<number> {
         };
         await journal.append(committedEntry);
         traceOps.push(committedEntry);
+      }
+
+      // cp loop 完成后:regenerate gate(spec §1.5 line 278 — C1 修)
+      if (regenEnabled) {
+        // 1. 构建 missingWithLen:为每件 MissingArtifact 补充 sourceLength(给 budget)
+        const missingWithLen: MissingArtifactWithLength[] = [];
+        for (const m of missingPreview) {
+          let sourceLength = 0;
+          if (m.factsSource === 'design' || m.factsSource === 'tasks') {
+            // design/tasks 路径:从 plan.changes 找对应文件的 size
+            const change = plan.changes.find((c) => c.slug === m.changeSlug);
+            const file = change?.artifacts[m.factsSource as 'design' | 'tasks'];
+            if (file) {
+              sourceLength = file.size;
+            }
+          } else if (m.factsSource === 'self' && m.sourceAbsPath) {
+            // self 路径:stat 取实际文件 size(C2 修后 sourceAbsPath 已填)
+            try {
+              const s = await stat(m.sourceAbsPath);
+              sourceLength = s.size;
+            } catch {
+              sourceLength = 0;
+            }
+          }
+          missingWithLen.push({ ...m, sourceLength });
+        }
+
+        // 2. ack gate:>= MIGRATE_WARN_USD 必须 ack;<$MIGRATE_WARN_USD 默认通过
+        if (missingWithLen.length > 0 && estimateMigrateCost(missingWithLen) >= MIGRATE_WARN_USD) {
+          const estimatedCostUsd = estimateMigrateCost(missingWithLen);
+          // ack 文件 ts key 复用 cp 阶段的 ts(去除非文件名字符)
+          const ackTs = ts.replace(/[:.]/g, '-');
+          const ackResult = await checkMigrateAck(targetForge, ackTs);
+          if (!ackResult.ok) {
+            if (opts.noInteractive) {
+              // --no-interactive 模式:拒绝静默继续,abort exit 4
+              console.error(
+                `[migrate] --regenerate 预估成本 $${estimatedCostUsd.toFixed(2)} >= $${MIGRATE_WARN_USD};--no-interactive 模式拒绝静默继续`,
+              );
+              // cp 件保留(用户重跑可加 ack 再跑);journal 先 close
+              await journal.close().catch(() => {});
+              return 4;
+            }
+            // 交互模式:打印 prompt + 写 ack(P5 简化,不接 readline — 默认通过)
+            console.log(renderMigratePrompt({ source: source.id, estimatedCostUsd }));
+            await writeMigrateAck(targetForge, ackTs, { source: source.id, estimatedCostUsd });
+          }
+        }
+
+        // 3. 实例化 Anthropic client(运行时检查 ANTHROPIC_API_KEY)
+        const apiKey = process.env['ANTHROPIC_API_KEY'];
+        if (!apiKey) {
+          console.warn(
+            '[migrate] --regenerate 需要 ANTHROPIC_API_KEY 环境变量;跳过 regenerate 路径(等同 --no-regenerate)',
+          );
+        } else if (missingWithLen.length > 0) {
+          const client = new Anthropic({ apiKey });
+
+          // 4. 跑 runRegenerate(C1 核心接入)
+          const regenResult = await runRegenerate({
+            source,
+            plan,
+            cwd,
+            abortController,
+            // Anthropic 实例兼容 AnthropicClient 接口
+            client: client as unknown as Parameters<typeof runRegenerate>[0]['client'],
+            appendTraceOp: async (op) => {
+              await journal.append(op);
+              traceOps.push(op);
+            },
+          });
+          console.log(
+            `[migrate] regenerate done: ${regenResult.succeeded} succeeded, ${regenResult.failed} failed (.partial); see migrate-report.md`,
+          );
+        }
       }
 
       // 末态 rename:journal close → writeReportMd → finalizeAndRename

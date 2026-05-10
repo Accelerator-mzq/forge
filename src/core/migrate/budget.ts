@@ -7,12 +7,12 @@ import type { MissingArtifact } from './types.js';
 // $5 USD 警告阈值(spec §1.4 独立常量;不与 brownfield BUDGET_WARN 混)
 export const MIGRATE_WARN_USD = 5;
 
-// 估算公式参数(spec §2.8 步骤 2)
-const APPROX_INPUT_TOKEN_PER_BYTE = 0.5; // ~2 char/token
-const APPROX_OUTPUT_TOKEN_FACTOR = 1.5; // output 是 input 的 150%(migration 生成量较多)
+// 估算公式参数(spec §2.8 步骤 2;I1 修:对齐 plan 参数,原版偏高 2-3 倍误触 MIGRATE_WARN_USD)
+const APPROX_INPUT_TOKEN_PER_BYTE = 0.25; // ~4 char/token(plan 参数)
+const APPROX_OUTPUT_TOKEN_FACTOR = 0.6; // output 是 input 的 60%(plan 参数)
 const SONNET_INPUT_PER_MTOK = 3; // $3 / Mtok
 const SONNET_OUTPUT_PER_MTOK = 15; // $15 / Mtok
-const FACTS_OVERHEAD_TOKENS = 5000; // extractFacts + judgeAll 的额外 token
+const FACTS_OVERHEAD_TOKENS = 2000; // extractFacts + judgeAll 的额外 token(plan 参数)
 
 // MissingArtifact + 源长度(给 budget 估)
 export type MissingArtifactWithLength = MissingArtifact & { sourceLength: number };

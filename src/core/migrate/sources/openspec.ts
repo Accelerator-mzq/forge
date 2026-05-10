@@ -424,24 +424,52 @@ export class OpenSpecSource implements MigrateSource {
 
   listMissingArtifacts(plan: ClassificationPlan): MissingArtifact[] {
     // 枚举 Plan 中缺件的 artifacts;for each change,检查 proposal + spec(specs) 是否齐全
+    // C2 修:用目标分桶(proposal 优先 design,fallback tasks/'self';specs 优先 tasks,fallback design/'self')
     const missing: MissingArtifact[] = [];
     for (const c of plan.changes) {
-      // 检查 proposal
+      const archivePrefix = c.classification === 'archive' ? 'archive/' : '';
+
+      // 检查 proposal — facts source 优先 design,fallback tasks,最后 self(附 sourceAbsPath)
       if (!c.artifacts.proposal) {
+        let factsSource: 'design' | 'tasks' | 'self';
+        let sourceAbsPath: string | undefined;
+        if (c.artifacts.design) {
+          factsSource = 'design';
+        } else if (c.artifacts.tasks) {
+          factsSource = 'tasks';
+        } else {
+          // 都没有 — 用 specs 数组第一个(若有)作 self 路径
+          factsSource = 'self';
+          sourceAbsPath = c.artifacts.specs?.[0]?.absPath;
+        }
         missing.push({
           changeSlug: c.slug,
           kind: 'proposal',
-          targetPath: `forge/changes/${c.classification === 'archive' ? 'archive/' : ''}${c.slug}/proposal.md`,
-          factsSource: 'self',
+          targetPath: `forge/changes/${archivePrefix}${c.slug}/proposal.md`,
+          factsSource,
+          sourceAbsPath,
         });
       }
-      // 检查 specs 数组(改型后 specs 为数组,空或未定义则缺件)
+
+      // 检查 specs 数组 — facts source 优先 tasks,fallback design,最后 self(附 sourceAbsPath)
       if (!c.artifacts.specs || c.artifacts.specs.length === 0) {
+        let factsSource: 'design' | 'tasks' | 'self';
+        let sourceAbsPath: string | undefined;
+        if (c.artifacts.tasks) {
+          factsSource = 'tasks';
+        } else if (c.artifacts.design) {
+          factsSource = 'design';
+        } else {
+          // 都没有 — 用 proposal(若有)作 self 路径
+          factsSource = 'self';
+          sourceAbsPath = c.artifacts.proposal?.absPath;
+        }
         missing.push({
           changeSlug: c.slug,
           kind: 'specs',
-          targetPath: `forge/changes/${c.classification === 'archive' ? 'archive/' : ''}${c.slug}/specs/${c.slug}.md`,
-          factsSource: 'self',
+          targetPath: `forge/changes/${archivePrefix}${c.slug}/specs/${c.slug}.md`,
+          factsSource,
+          sourceAbsPath,
         });
       }
     }

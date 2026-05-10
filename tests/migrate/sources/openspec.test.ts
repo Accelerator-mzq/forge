@@ -390,4 +390,85 @@ describe('OpenSpecSource.listMissingArtifacts', () => {
     const missing = src.listMissingArtifacts(plan);
     expect(missing).toHaveLength(0);
   });
+
+  // C2 修验证:目标分桶逻辑(factsSource 选择 + sourceAbsPath 填充)
+  it('C2 分桶:proposal 缺 + 有 design → factsSource=design', () => {
+    const plan: ClassificationPlan = {
+      changes: [
+        {
+          slug: 'has-design',
+          classification: 'active',
+          artifacts: {
+            design: {
+              absPath: '/x/openspec/changes/has-design/design.md',
+              relPath: 'changes/has-design/design.md',
+              kind: 'design',
+              size: 100,
+              mtime: '',
+              encoding: 'utf8',
+            },
+          },
+        },
+      ],
+      specs: [],
+      drafts: [],
+      configFiles: [],
+      skipped: [],
+    };
+    const missing = src.listMissingArtifacts(plan);
+    const proposalMissing = missing.find((m) => m.kind === 'proposal');
+    expect(proposalMissing?.factsSource).toBe('design');
+    expect(proposalMissing?.sourceAbsPath).toBeUndefined();
+  });
+
+  it('C2 分桶:specs 缺 + 只有 proposal → factsSource=self + sourceAbsPath 指向 proposal', () => {
+    const plan: ClassificationPlan = {
+      changes: [
+        {
+          slug: 'only-proposal',
+          classification: 'active',
+          artifacts: {
+            proposal: {
+              absPath: '/x/openspec/changes/only-proposal/proposal.md',
+              relPath: 'changes/only-proposal/proposal.md',
+              kind: 'proposal',
+              size: 200,
+              mtime: '',
+              encoding: 'utf8',
+            },
+          },
+        },
+      ],
+      specs: [],
+      drafts: [],
+      configFiles: [],
+      skipped: [],
+    };
+    const missing = src.listMissingArtifacts(plan);
+    const specsMissing = missing.find((m) => m.kind === 'specs');
+    expect(specsMissing?.factsSource).toBe('self');
+    expect(specsMissing?.sourceAbsPath).toBe('/x/openspec/changes/only-proposal/proposal.md');
+  });
+
+  it('C2 分桶:全缺 + 无任何 artifacts → factsSource=self + sourceAbsPath=undefined', () => {
+    const plan: ClassificationPlan = {
+      changes: [
+        {
+          slug: 'empty-change',
+          classification: 'active',
+          artifacts: {},
+        },
+      ],
+      specs: [],
+      drafts: [],
+      configFiles: [],
+      skipped: [],
+    };
+    const missing = src.listMissingArtifacts(plan);
+    expect(missing).toHaveLength(2);
+    for (const m of missing) {
+      expect(m.factsSource).toBe('self');
+      expect(m.sourceAbsPath).toBeUndefined();
+    }
+  });
 });

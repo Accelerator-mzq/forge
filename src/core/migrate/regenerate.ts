@@ -134,8 +134,12 @@ async function regenerateOne(
     const tasksFile = findArtifact(ctx.plan, m.changeSlug, 'tasks');
     factsSourceContent = tasksFile ? await readFile(tasksFile.absPath, 'utf8') : '';
   } else {
-    // 'self' 路径:OpenSpec 件本身作为 facts 源(P5 简化,内容由调用方填充或留空)
-    factsSourceContent = '';
+    // 'self' 路径:从 sourceAbsPath 读已有件作 facts 源(C2 修);无 sourceAbsPath 则留空
+    if (m.sourceAbsPath) {
+      factsSourceContent = await readFile(m.sourceAbsPath, 'utf8');
+    } else {
+      factsSourceContent = '';
+    }
   }
 
   // ---- 步骤 2:redact — 使用内置默认规则(DEFAULT_REDACT_RULES 已内置于 redact()) ----

@@ -389,8 +389,9 @@ export async function judgeAll(
 
 /**
  * fidelity threshold:
- * - superpowers 默认 0.6(brownfield 转过来的多噪声,严格阈值会无意义 fail)
- * - openspec 默认 0.9(spec 严格,行为契约期望高保真)
+ * - superpowers 0.6(LLM 生成质量约束;非 brownfield 路径 — superpowers 是专属 plugin 产物,
+ *   与 legacy-bridge brownfield 是不同的迁移源,prompt 不混用;阈值偏松因 plugin 产物结构噪声)
+ * - openspec 0.9(spec 严格,行为契约期望高保真)
  */
 export function getFidelityThreshold(sourceId: SourceId): number {
   return sourceId === 'superpowers' ? 0.6 : 0.9;

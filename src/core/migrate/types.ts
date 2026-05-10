@@ -120,6 +120,8 @@ export interface MissingArtifact {
   targetPath: string;
   /** facts 来源策略(M15 v3 目标分桶) */
   factsSource: 'design' | 'tasks' | 'self';
+  /** 'self' 路径:facts source 文件的绝对路径(spec/proposal 等已有件;C2 修) */
+  sourceAbsPath?: string;
 }
 
 /** classify() 上下文(传给 source.classify 的 ctx) */

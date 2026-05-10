@@ -17,6 +17,7 @@ import type {
   PlannedDraft,
   PlannedConfig,
 } from '../types.js';
+import { walkLines } from '../markdown-aware.js';
 import { existsSync, promises as fsPromises } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import { join, posix as posixPath } from 'node:path';
@@ -338,9 +339,79 @@ export class OpenSpecSource implements MigrateSource {
     return ops;
   }
 
-  transform(content: string, _kind: ArtifactKind): string {
-    // P2 实施 markdown-aware transformer;本骨架原样返回
-    return content;
+  transform(content: string, kind: ArtifactKind): string {
+    // Task 2.6-2.8 实施三套规则 transform
+    if (kind === 'spec') return this.transformSpec(content);
+    if (kind === 'proposal') return this.transformProposal(content);
+    if (kind === 'tasks') return this.transformTasks(content);
+    return content; // design / config / draft 不 transform
+  }
+
+  // Task 2.6 spec.md 规则:### Requirement → ## Requirement / #### Scenario → ## Scenario / list-prefix WHEN/THEN/GIVEN → **When**/... / 多行续行合并
+  private transformSpec(content: string): string {
+    // 第一步:走 walker line replace(### Requirement / #### Scenario / list 前缀)
+    const stage1 = walkLines(content, (line, ctx) => {
+      if (ctx.inFenced || ctx.isTableRow) return;
+      let l = line;
+      // ### Requirement → ## Requirement
+      l = l.replace(/^### Requirement:/, '## Requirement:');
+      // #### Scenario → ## Scenario
+      l = l.replace(/^#### Scenario:/, '## Scenario:');
+      // list-prefix WHEN/THEN/GIVEN/AND/BUT → **When**/**Then**/...
+      const m = l.match(/^(\s*)- \*\*(WHEN|THEN|GIVEN|AND|BUT)\*\*\s+(.+)$/i);
+      if (m) {
+        const [, indent, kw, rest] = m;
+        // 标题大小写:首字母大写,其余小写
+        const titleCase = (kw ?? '').charAt(0).toUpperCase() + (kw ?? '').slice(1).toLowerCase();
+        l = `${indent ?? ''}**${titleCase}** ${rest ?? ''}`;
+      }
+      return l;
+    });
+    // 第二步:多行续行合并 — 形如 `**When** xxx\n  续行` 的两行,合并空格
+    const lines = stage1.split('\n');
+    const out: string[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      const cur = lines[i] ?? '';
+      const isStep = /^(\s*)\*\*(When|Then|Given|And|But)\*\*\s/.test(cur);
+      if (isStep) {
+        let merged = cur;
+        // 续行:2+ 空格缩进 + 非 `-` 起始 + 非 heading + 非空
+        while (i + 1 < lines.length) {
+          const next = lines[i + 1] ?? '';
+          if (/^\s{2,}[^-#\s]/.test(next) && next.trim().length > 0) {
+            merged += ' ' + next.trim();
+            i++;
+          } else break;
+        }
+        out.push(merged);
+      } else {
+        out.push(cur);
+      }
+    }
+    return out.join('\n');
+  }
+
+  // Task 2.7 proposal.md 规则:## Problem → ## Why / ## Proposed Solution → ## What
+  private transformProposal(content: string): string {
+    return walkLines(content, (line, ctx) => {
+      if (ctx.inFenced) return;
+      if (line === '## Problem') return '## Why';
+      if (line === '## Proposed Solution') return '## What';
+    });
+  }
+
+  // Task 2.8 tasks.md 规则:数字编号 → task-N: / 三层 1.2.3 → task-1-2-3:
+  private transformTasks(content: string): string {
+    return walkLines(content, (line, ctx) => {
+      if (ctx.inFenced || ctx.isTableRow) return;
+      // 匹配 `- [x] N.M.K. text` 格式(最多三层编号)
+      const m = line.match(/^(\s*)- \[([ x])\] (\d+(?:\.\d+){0,2})\.\s+(.+)$/);
+      if (!m) return;
+      const [, indent, checked, num, rest] = m;
+      // 将 `1.2.3` 变为 `task-1-2-3`
+      const taskId = `task-${(num ?? '').replace(/\./g, '-')}`;
+      return `${indent ?? ''}- [${checked ?? ' '}] ${taskId}: ${rest ?? ''}`;
+    });
   }
 
   listMissingArtifacts(_plan: ClassificationPlan): MissingArtifact[] {

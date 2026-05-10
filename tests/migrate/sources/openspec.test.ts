@@ -187,3 +187,35 @@ describe('OpenSpecSource.prepareCopy', () => {
     expect(targets).toContain(join('/y/forge/specs/foo/spec.md'));
   });
 });
+
+describe('OpenSpecSource.transform — spec.md 规则', () => {
+  const src = new OpenSpecSource();
+
+  it('### Requirement → ## Requirement(不删除)', () => {
+    const input = '### Requirement: Login\n#### Scenario: x\n';
+    const out = src.transform(input, 'spec');
+    expect(out).toContain('## Requirement: Login');
+    expect(out).toContain('## Scenario: x');
+  });
+
+  it('list-prefix WHEN/THEN/GIVEN 转 **When**/**Then**/**Given**', () => {
+    const input = '## Scenario: x\n- **WHEN** user clicks login\n- **THEN** ok\n';
+    const out = src.transform(input, 'spec');
+    expect(out).toContain('**When** user clicks login');
+    expect(out).toContain('**Then** ok');
+    expect(out).not.toContain('- **WHEN');
+  });
+
+  it('多行 list 续行合并', () => {
+    const input = '- **WHEN** user submits\n  with remember-me enabled\n- **THEN** ok\n';
+    const out = src.transform(input, 'spec');
+    expect(out).toMatch(/\*\*When\*\* user submits with remember-me enabled/);
+  });
+
+  it('代码块内的 #### Scenario / list-WHEN 不变', () => {
+    const input = '```md\n#### Scenario: example\n- **WHEN** demo\n```\n#### Scenario: real\n';
+    const out = src.transform(input, 'spec');
+    expect(out).toContain('#### Scenario: example'); // 代码块内不动
+    expect(out).toContain('## Scenario: real'); // 代码块外转
+  });
+});

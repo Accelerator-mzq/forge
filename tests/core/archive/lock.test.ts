@@ -197,23 +197,29 @@ describe('lock - legacy-bridge mode 扩展(决策 #23)', () => {
 describe("acquireLockByPath - 'migrate' mode", () => {
   it('acquires migrate lock with custom file name', async () => {
     const tmp = await mkdtemp(join(tmpdir(), 'forge-lock-migrate-'));
-    const release = await acquireLockByPath(tmp, 'migrate', 'migrate.lock');
-    const lockPath = join(tmp, '.cache', 'migrate.lock');
-    expect(existsSync(lockPath)).toBe(true);
-    const data = JSON.parse(await readFile(lockPath, 'utf8'));
-    expect(data.mode).toBe('migrate');
-    await release();
-    expect(existsSync(lockPath)).toBe(false);
-    await rm(tmp, { recursive: true, force: true });
+    try {
+      const release = await acquireLockByPath(tmp, 'migrate', 'migrate.lock');
+      const lockPath = join(tmp, '.cache', 'migrate.lock');
+      expect(existsSync(lockPath)).toBe(true);
+      const data = JSON.parse(await readFile(lockPath, 'utf8'));
+      expect(data.mode).toBe('migrate');
+      await release();
+      expect(existsSync(lockPath)).toBe(false);
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
   });
 
   it("LockHeldError 文案保持兼容(不写 'operation',保留 'archive')", async () => {
     const tmp = await mkdtemp(join(tmpdir(), 'forge-lock-migrate-busy-'));
-    const release = await acquireLockByPath(tmp, 'migrate', 'migrate.lock');
-    await expect(acquireLockByPath(tmp, 'migrate', 'migrate.lock')).rejects.toThrow(
-      /another forge archive is in progress.*mode migrate/,
-    );
-    await release();
-    await rm(tmp, { recursive: true, force: true });
+    try {
+      const release = await acquireLockByPath(tmp, 'migrate', 'migrate.lock');
+      await expect(acquireLockByPath(tmp, 'migrate', 'migrate.lock')).rejects.toThrow(
+        /another forge archive is in progress.*mode migrate/,
+      );
+      await release();
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
   });
 });

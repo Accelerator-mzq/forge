@@ -100,7 +100,9 @@ export async function acquireLockByPath(
  * legacy-bridge 命令应直接调 `acquireLockByPath(forgeRoot, mode, 'legacy-bridge.lock')`(决策 #23)。
  *
  * @param forgeRoot forge 根目录(含 .cache/ 子目录)
- * @param mode      当前操作模式(LockMode union 支持 legacy-bridge-* 是为统一类型,但实际 callsite 应仅传 'archive' / 'recover')
+ * @param mode      当前操作模式(LockMode union 支持 legacy-bridge-* 与 'migrate' 是为统一类型;
+ *                  实际 callsite 应仅传 'archive' / 'recover';
+ *                  legacy-bridge-* 与 'migrate' 走 `acquireLockByPath` 路径)
  * @returns         release 函数(幂等,可多次调用)
  */
 export async function acquireLock(forgeRoot: string, mode: LockMode): Promise<() => Promise<void>> {

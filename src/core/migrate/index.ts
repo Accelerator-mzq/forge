@@ -5,6 +5,7 @@
 import { acquireLockByPath, LockHeldError } from '../archive/lock.js';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import { execSync } from 'node:child_process';
 import { getSource } from './sources/index.js';
 import type { MigrateOptions, ClassifyCtx } from './types.js';
 
@@ -40,14 +41,30 @@ export async function runMigrate(opts: MigrateOptions): Promise<number> {
   try {
     release = await acquireLockByPath(join(cwd, 'forge'), 'migrate', 'migrate.lock');
 
+    // git repo 探测:用 git rev-parse --git-dir 试探,失败即非 git
+    let inGitRepo = false;
+    try {
+      execSync('git rev-parse --git-dir', { cwd, stdio: 'pipe' });
+      inGitRepo = true;
+    } catch {
+      // 非 git 仓库 / git 不可用,信号 2 自然失效
+    }
+
     const ctx: ClassifyCtx = {
       cwd,
       archiveListPath: opts.archiveList,
-      inGitRepo: false, // P3 实施 git 探测
+      inGitRepo,
     };
 
     // P2/P3 实施真实 scan/classify
     const scan = await source.scan(detect.rootPath!);
+
+    // 空源守护(spec §1.5 / §3.1):isEmpty → exit 2
+    if (scan.isEmpty) {
+      console.error(`[migrate] 源目录无可迁移文件,确认 source 类型与路径:${detect.rootPath}`);
+      return 2;
+    }
+
     // plan-8d / plan-8e 阶段填实 cp/regen 路径时改为 const plan = await ...
     const plan = await source.classify(scan, ctx);
 

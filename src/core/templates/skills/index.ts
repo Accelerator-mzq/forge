@@ -1,7 +1,7 @@
 // 13 个 skill 真实文本的 registry — Plan 4 + plan-9i
 // 文件实体 .md 由 Task B 逐个填实
 
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -40,4 +40,23 @@ export interface LoadedSkill {
 /** 全量加载 13 个 skill,失败抛错(说明某个 .md 漏建) */
 export async function loadAllSkills(): Promise<LoadedSkill[]> {
   return Promise.all(SKILL_NAMES.map(async (name) => ({ name, content: await loadSkill(name) })));
+}
+
+/** 加载 _shared/*.md 全部 reference docs(plan-9b §2.6.8) */
+export async function loadAllSharedDocs(): Promise<Array<{ name: string; content: string }>> {
+  const sharedDir = join(__dirname, '_shared');
+  let entries: string[];
+  try {
+    entries = await readdir(sharedDir);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw err;
+  }
+  const mdFiles = entries.filter((n) => n.endsWith('.md'));
+  return Promise.all(
+    mdFiles.map(async (filename) => ({
+      name: filename.replace(/\.md$/, ''),
+      content: await readFile(join(sharedDir, filename), 'utf8'),
+    })),
+  );
 }

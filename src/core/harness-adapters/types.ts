@@ -30,6 +30,14 @@ export interface CommandSpec {
   content: string;
 }
 
+/** 共用 skill reference doc(plan-9b §2.6.8;被多 skill cross-ref) */
+export interface SharedDocSpec {
+  /** doc 名(如 'scope-category-guidance');完整文件名是 `<name>.md` */
+  name: string;
+  /** markdown 内容 */
+  content: string;
+}
+
 /** adapter 部署任务输入 */
 export interface DeployInput {
   /** 项目根目录 */
@@ -38,4 +46,6 @@ export interface DeployInput {
   skills: SkillSpec[];
   /** 要铺的命令列表 */
   commands: CommandSpec[];
+  /** v2 plan-9b 新增:共用 skill reference docs(铺到 _shared 子目录) */
+  sharedDocs?: SharedDocSpec[];
 }

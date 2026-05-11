@@ -47,6 +47,14 @@ export class CodexAdapter implements HarnessAdapter, LegacyDetector {
         });
       }
     }
+    // v2 plan-9b Task 7b:共用 reference docs 铺到 codex 对应 _shared 容器
+    // 路径沿 .agents/skills/forge-<name>/ 约定,_shared 作为伪 skill 容器
+    for (const doc of input.sharedDocs ?? []) {
+      files.push({
+        relPath: `.agents/skills/forge-_shared/${doc.name}.md`,
+        content: doc.content,
+      });
+    }
     return { files };
   }
 

@@ -36,6 +36,9 @@ import { readAnchorFile } from '../../core/legacy-bridge/encoding.js';
 import type { ForgeConfig } from '../../core/schema/types.js';
 // Task 8 (plan-9a §9): cross-cutting fence framework — 9g 实施完整 13 不变量逻辑
 import { crossCuttingFenceCheck } from '../../core/archive/fence.js';
+// plan-9d Task 6:verify_findings fence + ack-log consistency
+import { validateVerifyFindingsFence } from '../../core/archive/verify-findings-fence.js';
+import { validateAckLogConsistency } from '../../core/archive/ack-log-consistency.js';
 
 /**
  * 检测当前目录是否真实处于 git 工作树中
@@ -285,8 +288,9 @@ export function buildArchiveCommand(): Command {
               '✗ .verify-passed marker 已过期(tasks/content hash 不匹配),请重跑 verify',
             );
             // C2 修复:先 release lock 再 exit
+            // plan-9d Task 6 v2 M-1 修订:hash mismatch = fence business-fail,exit 1(沿 master §3.12.3)
             await archiveRelease();
-            process.exit(2);
+            process.exit(1);
           }
 
           // 比对 review marker 里的 hash
@@ -295,8 +299,9 @@ export function buildArchiveCommand(): Command {
               '✗ .review-passed marker 已过期(tasks/content hash 不匹配),请重跑 review',
             );
             // C2 修复:先 release lock 再 exit
+            // plan-9d Task 6 v2 M-1 修订:hash mismatch = fence business-fail,exit 1
             await archiveRelease();
-            process.exit(2);
+            process.exit(1);
           }
 
           // 步骤 3.5:P1.2 — 验证 evidence 完整性
@@ -304,8 +309,27 @@ export function buildArchiveCommand(): Command {
           if (!evResult.valid) {
             console.error('✗ verify evidence 校验失败:');
             for (const e of evResult.errors) console.error(`  - ${e.field}: ${e.message}`);
+            // plan-9d Task 6 v2 M-1 修订:evidence 校验失败 = fence business-fail,exit 1
             await archiveRelease();
-            process.exit(2);
+            process.exit(1);
+          }
+
+          // 步骤 3.6:plan-9d Task 6 — verify_findings fence 三级 × resolved × ack 矩阵 + finding_hash 篡改拒签
+          const vfResult = validateVerifyFindingsFence(verifyRec, verifyPath);
+          if (!vfResult.valid) {
+            console.error('✗ verify_findings fence 拒签:');
+            for (const e of vfResult.errors) console.error(`  - ${e.field}: ${e.message}`);
+            await archiveRelease();
+            process.exit(1);
+          }
+
+          // 步骤 3.7:plan-9d Task 6 v2 B-4 — ack-log 一致性 cross-check
+          const ackResult = await validateAckLogConsistency(changeDir, verifyRec, changeId);
+          if (!ackResult.valid) {
+            console.error('✗ ack-log 一致性校验失败:');
+            for (const e of ackResult.errors) console.error(`  - ${e.field}: ${e.message}`);
+            await archiveRelease();
+            process.exit(1);
           }
 
           // 步骤 4:human-override + 真实 git 状态校验 + outcomes 校验

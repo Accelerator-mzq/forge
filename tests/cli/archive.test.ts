@@ -205,7 +205,8 @@ describe('forge archive', () => {
       writeFileSync(tasksPath, '# Tasks\n\n- [ ] t1: extra task added\n- [ ] t2: more\n', 'utf8');
 
       const r = runCli(['archive', 'add-login'], projectRoot);
-      expect(r.exitCode).toBe(2);
+      // plan-9d Task 6 v2 M-1 修订:hash mismatch 从 exit 2 改 exit 1(fence business-fail,沿 master §3.12.3)
+      expect(r.exitCode).toBe(1);
       // 错误信息包含"已过期"或"不匹配"
       expect(r.stderr).toMatch(/已过期|不匹配/);
     } finally {
@@ -396,7 +397,8 @@ describe('forge archive', () => {
       writeFileSync(reviewPath, stringifyYAML(reviewMarker), 'utf8');
 
       const r = runCli(['archive', 'add-login', '--force'], projectRoot);
-      expect(r.exitCode).toBe(2);
+      // plan-9d Task 6 v2 M-1 修订:evidence 校验失败从 exit 2 改 exit 1(fence business-fail,沿 master §3.12.3)
+      expect(r.exitCode).toBe(1);
       expect(r.stderr).toMatch(/pass|evidence/);
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
@@ -450,7 +452,8 @@ describe('forge archive', () => {
       writeFileSync(reviewPath, stringifyYAML(reviewMarker), 'utf8');
 
       const r = runCli(['archive', 'add-login', '--force'], projectRoot);
-      expect(r.exitCode).toBe(2);
+      // plan-9d Task 6 v2 M-1 修订:evidence log_path 不存在从 exit 2 改 exit 1(fence business-fail,沿 master §3.12.3)
+      expect(r.exitCode).toBe(1);
       expect(r.stderr).toMatch(/log_path|evidence|不存在/);
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });

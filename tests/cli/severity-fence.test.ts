@@ -52,7 +52,6 @@ describe('severity schema', () => {
 describe('finding-hash framework', () => {
   it('computeFindingHash produces deterministic 64-hex SHA256', () => {
     const payload: FindingHashPayload = {
-      validate_run_id: 'run-1',
       content_hash: 'abc',
       git_head: 'def',
       dimension: 'completeness',
@@ -65,14 +64,13 @@ describe('finding-hash framework', () => {
     const h = computeFindingHash(payload);
     // 必须是 64 字符十六进制(SHA256 hex 输出)
     expect(h).toMatch(/^[a-f0-9]{64}$/);
-    // 同一 payload 再次计算结果相同(deterministic)
+    // 同一 8 字段稳定 payload 再次计算结果相同(deterministic,plan-9b v3 B1 修订)
     expect(computeFindingHash(payload)).toBe(h);
   });
 
   it('extractHashPayload strips ack/resolved/candidate fields', () => {
     const full: Finding = {
       id: 1,
-      validate_run_id: 'r',
       content_hash: 'c',
       git_head: 'g',
       dimension: 'correctness',
@@ -99,7 +97,6 @@ describe('finding-hash framework', () => {
   it('extractHashPayload + computeFindingHash round-trips', () => {
     const full: Finding = {
       id: 7,
-      validate_run_id: 'r2',
       content_hash: 'cc',
       git_head: 'gg',
       dimension: 'coherence',

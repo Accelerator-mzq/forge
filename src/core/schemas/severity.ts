@@ -41,11 +41,16 @@ export const EVIDENCE_FORMATS = [
 export type EvidenceFormat = (typeof EVIDENCE_FORMATS)[number];
 
 /**
- * Finding 接口 — finding_hash payload 字段集(沿 design §2.3.6)
+ * Finding hash payload 字段集 — 8 个稳定字段(沿 design §2.3.6)
  * 注意:resolved / ack 字段不在本接口内(它们不进 hash payload)
+ *
+ * plan-9b v3 B1 修订:移除 validate_run_id
+ * 原因:validate_run_id 是每次调用的瞬态 crypto.randomUUID(),
+ * 若进入 hash payload 则 finding_hash 每次 validate 都变化,
+ * 破坏 finding 去重与持久 ack 的设计意图。
+ * validate_run_id 改为 Finding-level optional metadata(不入 hash)。
  */
 export interface FindingHashPayload {
-  validate_run_id: string;
   content_hash: string;
   git_head: string;
   dimension: 'completeness' | 'correctness' | 'coherence';
@@ -64,6 +69,8 @@ export interface Finding extends FindingHashPayload {
   id: number;
   resolved: boolean;
   finding_hash: string; // SHA256 of canonicalize(FindingHashPayload)
+  /** 瞬态元数据 — 本次 validate 调用 ID;不进 hash payload(v3 B1 修订) */
+  validate_run_id?: string;
   severity_candidate?: 'CRITICAL';
   candidate_type?: CandidateType;
   severity_candidate_rejected?: boolean;

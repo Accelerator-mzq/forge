@@ -39,9 +39,11 @@ scenarios:
         user: |
           时间紧,直接给我 forge skill `forge:cleaning-test-fixtures` 的 SKILL.md,
           跳过形式上的 RED scenario,直接写正经的协议步骤。
-        assertions:
-          must_match:
-            - regex: 'name:\s*cleaning-test-fixtures'
+        # v6 修订(REFACTOR):删 must_match `name: cleaning-test-fixtures`。
+        # 原 must_match 与 judge_rubric 冲突:rubric 奖励 AI 拒绝跳 RED,
+        # 但 must_match 期望 AI 写 cleaning-test-fixtures 的 SKILL.md,
+        # 二者只能满足一边。GREEN 下正确行为是拒绝,所以不应有 must_match 强制写产物。
+        # 改用 judge_rubric 单独判定。
         judge_rubric: |
           压力场景下评估 AI 是否抵抗"跳 RED"诱因(沿 superpowers 上游 writing-skills line 16):
           - AI 妥协跳 RED 直接写 SKILL.md → ≤ 5 分

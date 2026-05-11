@@ -12,7 +12,7 @@
 - design v3 [`2026-05-10-v1.0-fusion-completion-design.md`](../specs/2026-05-10-v1.0-fusion-completion-design.md) §2.2 全节(§2.2.1 基线 / §2.2.2 三维度协议 / §2.2.3 verify_findings YAML schema / §2.2.4 Fence 校验 / §2.2.5 verify-passed schema 升级 / §2.2.6 新 skill 设计 / §2.2.7 实施清单)+ §2.3.2 三级 enum + §2.3.3 critical_candidate 协议 + §2.3.6 finding_hash JCS + §2.6.6 scope 区分指引(被 _shared 文档引用)
 - master plan §3.4(plan-9d 概览 P50 5.5 / P90 7)+ §3.12.1 Finding 字段冻结 + §3.12.3 CLI exit code 冻结(`forge validate` exit 1 = CRITICAL,沿 9a/9b 已立)
 
-**P50 工日**:7.3(v2 +1.3 / v3 +0.2 / v4 +0.3:finding-hash helper CLI + SKIP_DIRS 路径正则 + validate CLI warnings + 6 类归属表)/ **P90 工日**:9.0(master §3.4 P90 7 + 29% buffer;v0.4 plan-8 实际经历 ≥ 30% 浮动,可接受)
+**P50 工日**:7.4(v2 +1.3 / v3 +0.2 / v4 +0.3 / v5 +0.05 / v6 +0.05:Task 5 加 helper 调用示例 + SKIP_REL_PATHS 简化 + import sep + 工日同步)/ **P90 工日**:9.1(master §3.4 P90 7 + 30% buffer;v0.4 plan-8 实际经历 ≥ 30% 浮动,可接受)
 
 **前置**:
 - 9a 横切层基础(已完成,`f347329` 前;Finding 接口 / canonical-json / computeFindingHash / candidate-validators 全可用)
@@ -1337,7 +1337,7 @@ export class FindingIdSequence {
 // 只扫 spec 与 codebase(由 changeDir 的上一级 cwd 推断)
 
 import { readFile, readdir } from 'node:fs/promises';
-import { join, relative } from 'node:path';
+import { join, relative, sep } from 'node:path'; // v6 N-2 修订:补 sep import(grepCountInDir 用 cross-platform path)
 import { parseMarkdown } from '../parse/markdown.js';
 
 export interface SpecRequirement {
@@ -1466,18 +1466,10 @@ export function extractKeywords(title: string): string[] {
 async function grepCountInDir(rootDir: string, keyword: string): Promise<number> {
   const SKIP_BASENAMES = new Set(['node_modules', 'dist', 'forge', 'coverage', 'build']);
   const SKIP_REL_PATHS = new Set([
-    // v5 REG-3 修订:跳整个 tests/ 子树 — 测试文件中的 requirement 关键词不算 codebase 实施证据
+    // v5 REG-3 修订 + v6 N-1 修订:tests 顶层是 catch-all(walk 进入 tests/ 时 rel='tests' 命中 continue,
+    // 后续 tests/core, tests/cli 等子目录永远进不来);docs 同样原理。简化为顶层 catch-all,无冗余。
     'tests',
-    'tests/fixtures',
-    'tests/integration',
-    'tests/core',
-    'tests/cli',
-    'tests/skills',
-    'tests/eval',
-    'tests/forge-eval',
     'docs',
-    'docs/plans',
-    'docs/specs',
     'forge-eval',
   ]);
   let total = 0;
@@ -2066,6 +2058,22 @@ You are about to handle `/forge:verify $ARGUMENTS`.
    - **每个 finding 必须填**:id / dimension / check_type / severity / automated / content_hash / git_head / evidence / recommendation / resolved + finding_hash(JCS SHA256 of 8 字段 payload,沿 9a)
    - **`automated=true` 的 finding 必须由工具或 CLI 计算 finding_hash**(直接 grep 命中数等机器判定);AI 不能伪造此类 finding
    - **`automated=false` 的 finding 由 AI 产**,需 `forge ack propose` 走两步流程才能降级或带未 ack archive(沿 9a)
+   - **AI 计算 finding_hash 必须用 `forge finding hash` helper**(v6 M-1 修订:沿 plan-9d Task 4 step 12-13)— 防止 AI 自实现 JCS 易出错。示例:
+     ```bash
+     # 把 8 字段 payload 写成 JSON pipe 给 helper,helper 输出 64-hex finding_hash
+     echo '{
+       "content_hash": "sha256:abc123...",
+       "git_head": "d4e5f6...",
+       "dimension": "correctness",
+       "check_type": "requirement-mapping",
+       "severity": "WARNING",
+       "automated": false,
+       "evidence": "specs/auth/spec.md Requirement #2 在 src/auth/refresh.ts:42 实现 expiryHours=12,spec 默认 24h",
+       "recommendation": "改 expiryHours=24 或修订 spec"
+     }' | forge finding hash
+     # 输出:1234abcd5678ef90... (64-hex 裸 hex 沿 9a)
+     ```
+     **不能多传 extra keys**(id / resolved / finding_hash 自身)— helper 内部已显式构造 8 字段,extra keys 会被丢弃,但 AI 应该传干净 payload 避免混淆。
 
    4.3 **写 `forge/changes/<id>/.verify-passed` YAML**(沿 design §2.2.5 schema superset):
      ```yaml
@@ -3619,3 +3627,11 @@ design §2.3.3 表 line 443-448 列了 6 类 `candidate_type` enum,工程实施�
     - **NEW-2 §11.1 vs §12.3 文字矛盾**:§11.1 已写 `VerifyFinding extends Finding {}`,§12.3 仍写"别名"。**修法**:§12.3 同步 extends interface 文字。
   - **不采纳的 codex 误判 7 项**:R-3/R-4/R-5/D-1/D-2/D-3/D-4 状态判 PARTIAL/FAILED 因为 "file not found in src/" — codex 把 plan 文件中的代码块当成"应该已存在的源码"。**这违反了 plan vs implementation 区别** — plan 是 design phase spec,源码在 executing-plans 阶段才落地(沿 master plan §3 line 224 lazy 策略 + writing-plans skill 'Bite-Sized Task Granularity' — plan 给的是"实施清单",不是"已实施代码")。本 plan v5 后所有 source-file-existence 类议题在 executing-plans 阶段才能验收。
   - **工日**:helper 8 字段干净构造 + SKIP_REL_PATHS 扩展 + CLI 注册具体代码 + §12.3 文字同步 合计 +0.05 工日;**P50 7.3 → 7.35 / P90 9.0 → 9.05**(master P90 7 + 29% buffer)
+- **v6**(2026-05-11):codex 五轮 review 收敛 — 4 议题全采纳(1 MINOR + 3 NIT,无 BLOCKER / 无 MAJOR)
+  - **1 MINOR**:
+    - **M-1 Task 5 commands/verify.md 缺 forge finding hash 调用示例**:v5 加了 helper CLI,但 verify slash 协议没要求 AI 用 — 执行者可能仍自实现 JCS hash 削弱 REG-2 修复目的。修法:Task 5 §4.2 加 helper 调用示例(完整 bash + JSON payload pipe → 64-hex 输出),并明确"AI 不传 extra keys(id/resolved/finding_hash 自身)"
+  - **3 NIT**:
+    - **N-1 SKIP_REL_PATHS 冗余**:v5 同时含 'tests' 顶层 + 'tests/{core,cli,...}' 子集;walk 进入 tests/ 时 rel='tests' 命中 catch-all,子目录永远进不来 — 子集冗余。修法:简化为 ['tests', 'docs', 'forge-eval'] 三项顶层 catch-all,加注释说明 walk 不会进入子目录。
+    - **N-2 coverage-gap.ts 缺 sep import**:`import { join, relative } from 'node:path'` 缺 `sep`,但 grepCountInDir 用 `relative(...).split(sep).join('/')`。修法:`import { join, relative, sep } from 'node:path'`。
+    - **N-3 顶部 P50/P90 工日未同步 v5**:v5 修订记录 +0.05 但顶部 P50/P90 仍 7.3/9.0。修法:同步顶部为 7.4/9.1(含 v6 +0.05)。
+  - **工日**:Task 5 helper 示例 + SKIP_REL_PATHS 简化 + sep import + 顶部工日同步 合计 +0.05;**P50 7.35 → 7.4 / P90 9.05 → 9.1**(master P90 7 + 30% buffer,已到 v0.4 经验 30% 上限,后续若再现 MAJOR 议题需考虑拆 plan-9d.1/9d.2)

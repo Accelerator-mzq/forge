@@ -12,7 +12,7 @@
 - design v3 [`2026-05-10-v1.0-fusion-completion-design.md`](../specs/2026-05-10-v1.0-fusion-completion-design.md) §2.2 全节(§2.2.1 基线 / §2.2.2 三维度协议 / §2.2.3 verify_findings YAML schema / §2.2.4 Fence 校验 / §2.2.5 verify-passed schema 升级 / §2.2.6 新 skill 设计 / §2.2.7 实施清单)+ §2.3.2 三级 enum + §2.3.3 critical_candidate 协议 + §2.3.6 finding_hash JCS + §2.6.6 scope 区分指引(被 _shared 文档引用)
 - master plan §3.4(plan-9d 概览 P50 5.5 / P90 7)+ §3.12.1 Finding 字段冻结 + §3.12.3 CLI exit code 冻结(`forge validate` exit 1 = CRITICAL,沿 9a/9b 已立)
 
-**P50 工日**:7.0(v2 codex review 一轮 +1.3 工日;v3 codex review 二轮 +0.2 工日:coverage-gap parser 自实现 + tokenizer 强化 + Task 8 fixture 真算 hash + ack-log user 校验)/ **P90 工日**:8.7(master §3.4 P90 7 + 24% buffer)
+**P50 工日**:7.3(v2 +1.3 / v3 +0.2 / v4 +0.3:finding-hash helper CLI + SKIP_DIRS 路径正则 + validate CLI warnings + 6 类归属表)/ **P90 工日**:9.0(master §3.4 P90 7 + 29% buffer;v0.4 plan-8 实际经历 ≥ 30% 浮动,可接受)
 
 **前置**:
 - 9a 横切层基础(已完成,`f347329` 前;Finding 接口 / canonical-json / computeFindingHash / candidate-validators 全可用)
@@ -52,7 +52,7 @@
 | 1 | scenarios.yaml + 最小骨架 SKILL.md + 跑 baseline RED | **0.8**(v2 M-2 修订 +0.3:加 2 个 pressure scenario 覆盖 automated 降级 / WARNING self-ack / downgrade) | `forge-eval/scenarios/verifying-three-dimensions.yaml` **4 scenarios**(baseline-vague-suggestion / pressure-skip-coherence / pressure-downgrade-automated / pressure-self-ack-warning)+ `skills/verifying-three-dimensions/SKILL.md` 最小骨架 + `pnpm build` reverse-sync + RED avg ≤ 5 |
 | 2 | SKILL.md(production code)~330-400 行 | 1.0 | `skills/verifying-three-dimensions/SKILL.md` 完整内容:Overview / Methodology / 三维度协议 / 6 标定 example / forge-specific 反向加固(automated 不可降级)/ 红旗清单 / reference _shared/scope-category-guidance.md(**v2 M-3 修订**:reference 写法加 plugin runtime 路径提示,沿 receiving-code-review SKILL.md:292 convention) |
 | 3 | VerifyFinding marker schema 扩展 | 0.5 | `src/core/markers/types.ts` 加 `VerifyFinding` interface(**v2 m-1 修订**:改 `extends Finding` 而非裸 alias,留 verify-only 字段扩展位)+ `VerifyMarker.verify_findings?` 字段 + `src/core/validate/marker-schema.ts` 加 verify_findings 数组校验(**v2 B-1 修订**:finding_hash regex 改 `/^[a-f0-9]{64}$/` 裸 hex,沿 9a finding-hash.ts:8 + tests/cli/severity-fence.test.ts:66)+ tests |
-| 4 | validate.ts 自动产 CRITICAL findings + finding_hash | **1.3**(v2 B-2 修订 +0.5:扩三类 candidate;v2 m-2 修订 0.05:独立 nextFindingId 计数器) | `src/cli/commands/validate.ts` 加 candidate-to-finding 转换路径(**v2 B-2 修订:三类齐备**)— `coverage_gap`(spec 0 codebase 命中,grep 实现)+ `test_failure`(stub 接口预留,9g 完成后接 reporter parser)+ specs-files-missing(v1 已做);**v2 B-3 修订**:Example 1 candidate_type=coverage_gap;Example 5 candidate_type=coverage_gap(claim resolved 但 git 验证不到,而非 manual_claim)|
+| 4 | validate.ts 自动产 CRITICAL findings + finding_hash | **1.5**(v2 B-2 +0.5;v2 m-2 +0.05;v3 +0.2:tokenizer 强化 + parser 自实现;v4 +0.2:SKIP_DIRS 路径正则 + validate CLI warnings 输出 + finding-hash helper CLI) | `src/cli/commands/validate.ts` 加 candidate-to-finding 转换路径 — `coverage_gap`(spec 0 codebase 命中,grep 实现)+ `test_failure` stub(9g 完成后接 reporter parser)+ specs-files-missing;`src/cli/commands/finding.ts` 新增 helper(`forge finding hash` 接 stdin JSON 输出 finding_hash,给 AI 在 verify slash 阶段用);**v4 修订**:Example 1 candidate_type=coverage_gap;Example 5 candidate_type 不填(沿 v3 B-3 边界 case);SKIP_DIRS 改 directory-name + path 双判;validate CLI 输出 warnings(D-3 修订)|
 | 5 | `commands/verify.md` slash 重构 + verify_findings 写入 | 0.5 | `commands/verify.md` 加 §"三维度分析"段调 skill + `.verify-passed` YAML 输出 verify_findings 数组(自动产 CRITICAL + LLM 判定 WARNING/SUGGESTION 合并;附 finding 写入示例与 YAML schema 引用) |
 | 6 | archive.ts fence 三级 × resolved × ack 矩阵 + finding_hash 篡改拒签 + **ack-log 一致性** | **1.5**(v2 B-4 修订 +0.3:加 ack-log + pending-acks 一致性 helper;v2 M-1 修订 +0.2:对齐现有 archive exit code 到 master §3.12.3 freeze) | `src/cli/commands/archive.ts` 加 `validateVerifyFindingsFence`(三级 × resolved × ack 9 分支)+ **`validateAckLogConsistency`**(沿 design line 496-500:marker ack ↔ ack-log.jsonl 条目对齐 + pending-acks/ 残留拒签 + finding_hash 一致性)+ automated=true 不可降级(finding_hash 重算比对)+ downgrade ack 校验 + 现有 evidence/hash 校验 exit code 从 2 改 1 + tests(9 个分支 + 篡改 + downgrade + ack-log 一致性 + pending-acks 残留)|
 | 7 | GREEN leg 跑通 + REFACTOR loophole | 0.5 | 跑 `pnpm eval:skill verifying-three-dimensions` 验证 delta ≥ 1.5;若 GREEN < 6.5 回改 Task 2 SKILL.md 加红旗 plug(反向依赖 Task 2);REFACTOR plug ≥ 2 个观察到的借口 |
@@ -955,6 +955,24 @@ function checkVerifyFindingsArray(v: unknown, file?: string): ValidationResult {
     });
   }
   const results: ValidationResult[] = [];
+  // v4 D-2 修订:finding id 唯一性校验(同一 marker 内不允许重复 id)
+  const seenIds = new Set<number>();
+  for (let i = 0; i < v.length; i++) {
+    const f = v[i] as { id?: unknown };
+    if (typeof f?.id === 'number') {
+      if (seenIds.has(f.id)) {
+        results.push(
+          failed({
+            artifact: 'marker',
+            field: `verify_findings[${i}].id`,
+            message: `finding id ${f.id} 重复(同一 marker 内 id 必须唯一,沿 master §3.12.1)`,
+            file,
+          }),
+        );
+      }
+      seenIds.add(f.id);
+    }
+  }
   for (let i = 0; i < v.length; i++) {
     const f = v[i] as Record<string, unknown> | null;
     if (!f || typeof f !== 'object') {
@@ -1337,12 +1355,15 @@ export interface CoverageGapHit {
 
 /**
  * 从 spec.md 文本抽 Requirement 列表(沿 design Requirement 命名约定):
- * `## Requirement: <id>` 形式的 H2 heading,或 `## Requirement <id>`,或 `### Requirement:`
+ * `## Requirement: <id>` 或 `### Requirement: <id>` 或更深(H2-H6)
+ *
+ * v4 D-4 修订:扩 H2-H6(不限 H2-H3) — design line 304 没限制 Requirement 必须 H2;
+ * 若 spec 用 H4+ 写 Requirement 应被识别,而非静默漏扫
  */
 export function extractRequirements(specText: string): SpecRequirement[] {
   const md = parseMarkdown(specText);
   const reqSections = md.sections.filter(
-    (s) => s.level >= 2 && s.level <= 3 && /^Requirement\s*[:#]?\s*/i.test(s.heading),
+    (s) => s.level >= 2 && s.level <= 6 && /^Requirement\s*[:#]?\s*/i.test(s.heading),
   );
   return reqSections.map((sec) => {
     const m = sec.heading.match(/^Requirement\s*[:#]?\s*(.+)$/i);
@@ -1434,9 +1455,24 @@ export function extractKeywords(title: string): string[] {
   return result.slice(0, 5); // 取前 5 个,提高命中率(v3 M-1 修订:从 3 → 5)
 }
 
-/** 在 dir 下递归 grep 关键词(简化版 — 不用 child_process,用 readFile;v1.0 性能可接受) */
-async function grepCountInDir(dir: string, keyword: string): Promise<number> {
-  const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', 'forge', 'tests/fixtures']);
+/**
+ * 在 dir 下递归 grep 关键词(简化版 — 不用 child_process,用 readFile;v1.0 性能可接受)
+ *
+ * v4 R-3 修订:SKIP_DIRS 兼顾两种路径形态:
+ *   - 单层 directory name(node_modules / dist / .git / forge)— 用 SKIP_BASENAMES Set 匹配 e.name
+ *   - 含斜杠的 relative path(tests/fixtures / tests/integration / docs / docs/plans / docs/specs)— 用 SKIP_REL_PATHS 匹配 path.relative(root, currentDir)
+ * 同时跳所有以 . 或 _ 开头的目录(.git / .evidence / _shared 等)
+ */
+async function grepCountInDir(rootDir: string, keyword: string): Promise<number> {
+  const SKIP_BASENAMES = new Set(['node_modules', 'dist', 'forge', 'coverage', 'build']);
+  const SKIP_REL_PATHS = new Set([
+    'tests/fixtures',
+    'tests/integration',
+    'docs',
+    'docs/plans',
+    'docs/specs',
+    'forge-eval',
+  ]);
   let total = 0;
   async function walk(d: string): Promise<void> {
     let entries: import('node:fs').Dirent[];
@@ -1448,12 +1484,20 @@ async function grepCountInDir(dir: string, keyword: string): Promise<number> {
     for (const e of entries) {
       const p = join(d, e.name);
       if (e.isDirectory()) {
-        if (SKIP_DIRS.has(e.name) || e.name.startsWith('.')) continue;
+        // 1. basename skip(node_modules / dist / 等)
+        if (SKIP_BASENAMES.has(e.name)) continue;
+        // 2. dot / underscore prefix skip(.git / .evidence / _shared)
+        if (e.name.startsWith('.') || e.name.startsWith('_')) continue;
+        // 3. relative path skip(tests/fixtures / docs/plans / 等)
+        const rel = relative(rootDir, p).split(sep).join('/');
+        if (SKIP_REL_PATHS.has(rel)) continue;
         await walk(p);
       } else if (e.isFile() && /\.(ts|tsx|js|jsx|md)$/.test(e.name)) {
         try {
           const text = await readFile(p, 'utf8');
-          const matches = text.match(new RegExp(keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'));
+          const matches = text.match(
+            new RegExp(keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'),
+          );
           if (matches) total += matches.length;
         } catch {
           /* 文件读失败跳过 */
@@ -1461,10 +1505,12 @@ async function grepCountInDir(dir: string, keyword: string): Promise<number> {
       }
     }
   }
-  await walk(dir);
+  await walk(rootDir);
   return total;
 }
 ```
+
+**v4 R-3 修订**:`coverage-gap.ts` 顶部 import 加 `import { sep } from 'node:path'`(用于 cross-platform relative path 拼接)。
 
 - [ ] **Step 5: 创建 `src/core/validate/test-failure-stub.ts`**(v2 B-2 修订:9g 接口预留)
 
@@ -1707,17 +1753,54 @@ describe('coverage_gap scanner (plan-9d Task 4 v2)', () => {
 });
 ```
 
-- [ ] **Step 9: 修改 `src/cli/commands/validate.ts`** — 现有路径已输出 `finding_hash` slice(沿 9b),无需改动 CLI 层。仅确认输出格式:
+- [ ] **Step 9: 修改 `src/cli/commands/validate.ts`** — v4 D-3 修订:在 valid + invalid 双路径都输出 warnings,让 test_failure stub 提示对 CI 用户可见
+
+```typescript
+// src/cli/commands/validate.ts v4 D-3 修订
+// 修改前(现有 valid 路径 line 18-21):
+if (result.valid) {
+  console.log(`✓ ${changeId}: valid`);
+  process.exit(0);
+}
+
+// 修改后(v4 D-3:即使 valid 也打印 warnings):
+if (result.valid) {
+  console.log(`✓ ${changeId}: valid`);
+  // v4 D-3 修订:打印 warnings(stub 提示等),让 CI 用户看到 not_implemented 信号
+  for (const w of result.warnings) {
+    const prefix = w.message.startsWith('[stub]') ? '⚠' : 'ℹ';
+    console.warn(`  ${prefix} [${w.artifact}] ${w.message}`);
+  }
+  process.exit(0);
+}
+
+// invalid 路径同样在 errors 输出后打印 warnings(若有):
+const hasCritical = result.errors.some((e) => e.severity === 'CRITICAL');
+const exitCode = hasCritical ? 1 : 2;
+console.error(`✗ ${changeId}: ${result.errors.length} errors`);
+for (const e of result.errors) {
+  const sevPrefix = e.severity ? `[${e.severity}] ` : '';
+  const hashSuffix = e.finding_hash ? ` (finding_hash=${e.finding_hash.slice(0, 8)}...)` : '';
+  console.error(
+    `  - ${sevPrefix}[${e.artifact}] ${e.field ?? ''}: ${e.message}${e.file ? ` (${e.file}${e.line ? `:${e.line}` : ''})` : ''}${hashSuffix}`,
+  );
+}
+// v4 D-3:invalid 也输出 warnings
+for (const w of result.warnings) {
+  console.warn(`  ⚠ [${w.artifact}] ${w.message}`);
+}
+process.exit(exitCode);
+```
 
 ```bash
-# 手动验证 — 含 coverage_gap finding
+# 手动验证 — 含 coverage_gap finding + test_failure stub warning
 node ./dist/cli/index.js validate 9d-test
 # Expected stderr 含多行:
 #   ✗ 9d-test: 2 errors
 #   - [CRITICAL] [specs] : no spec files in specs/ (.../specs) (finding_hash=abcdef12...)
 #   - [CRITICAL] [specs] requirement.r1: coverage_gap: spec Requirement 'r1' 在 codebase 完全 0 命中 (...) (finding_hash=12345abc...)
+#   ⚠ [change] [stub] test_failure candidate validator 待 plan-9g(process_evidence + reporter parser)接入
 # Expected exit 1
-# Expected stderr 末尾有 [stub] test_failure ... 待 9g 接入 warning
 ```
 
 - [ ] **Step 10: 跑测试验证全 PASS**
@@ -1736,7 +1819,146 @@ pnpm test tests/cli/ tests/core/validate/
 
 Expected:全 PASS。
 
-- [ ] **Step 12: Commit**
+- [ ] **Step 12: 创建 `src/cli/commands/finding.ts`**(v4 R-5 修订:finding-hash helper CLI 给 AI 在 verify slash 阶段用)
+
+```typescript
+// src/cli/commands/finding.ts — plan-9d Task 4 v4 R-5 修订
+// `forge finding hash` CLI:接 stdin JSON(FindingHashPayload 8 字段)→ 输出 finding_hash
+// 用途:AI 在 /forge:verify slash 阶段调本 skill 后,通过本 helper 算 finding_hash 写 .verify-passed
+// 避免 AI 自己实现 JCS 序列化(复杂且易出错)
+//
+// 用法:echo '{"content_hash":"sha256:...","git_head":"...","dimension":"correctness",...}' \
+//       | forge finding hash
+// stdout: 64-hex finding_hash + 换行
+// exit 0 = 成功;exit 1 = JSON 无效 / 缺字段;exit 2 = io 错
+
+import { Command } from 'commander';
+import { computeFindingHash } from '../../core/validate/finding-hash.js';
+import type { FindingHashPayload } from '../../core/schemas/severity.js';
+import { isSeverity } from '../../core/schemas/severity.js';
+
+export function buildFindingCommand(): Command {
+  const finding = new Command('finding').description('Finding helper 子命令(verify 阶段用)');
+
+  finding
+    .command('hash')
+    .description('从 stdin 读 FindingHashPayload JSON,输出 finding_hash(64-hex)')
+    .action(async () => {
+      try {
+        const input = await readStdin();
+        let payload: unknown;
+        try {
+          payload = JSON.parse(input);
+        } catch {
+          console.error('✗ stdin 不是合法 JSON');
+          process.exit(1);
+        }
+        const validated = validateFindingHashPayload(payload);
+        if (!validated) {
+          console.error('✗ payload 缺必填字段或类型错(8 字段:content_hash/git_head/dimension/check_type/severity/automated/evidence/recommendation,沿 master §3.12.1)');
+          process.exit(1);
+        }
+        const hash = computeFindingHash(validated);
+        process.stdout.write(hash + '\n');
+        process.exit(0);
+      } catch (err) {
+        console.error(`✗ io error: ${(err as Error).message}`);
+        process.exit(2);
+      }
+    });
+
+  return finding;
+}
+
+async function readStdin(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (chunk) => (data += chunk));
+    process.stdin.on('end', () => resolve(data));
+    process.stdin.on('error', reject);
+  });
+}
+
+function validateFindingHashPayload(p: unknown): FindingHashPayload | null {
+  if (!p || typeof p !== 'object') return null;
+  const o = p as Record<string, unknown>;
+  if (typeof o.content_hash !== 'string') return null;
+  if (typeof o.git_head !== 'string') return null;
+  if (
+    o.dimension !== 'completeness' &&
+    o.dimension !== 'correctness' &&
+    o.dimension !== 'coherence'
+  )
+    return null;
+  if (typeof o.check_type !== 'string') return null;
+  if (!isSeverity(o.severity)) return null;
+  if (typeof o.automated !== 'boolean') return null;
+  if (typeof o.evidence !== 'string') return null;
+  if (typeof o.recommendation !== 'string') return null;
+  return o as unknown as FindingHashPayload;
+}
+```
+
+`src/cli/index.ts` 注册 `buildFindingCommand()`(沿 ack / evidence / scope 同模式)。
+
+- [ ] **Step 13: 写 finding-hash helper 测试**
+
+`tests/cli/finding-hash.test.ts`(简短测试 — 输入合法 JSON 输出 64-hex / 缺字段 exit 1 / 非 JSON exit 1):
+
+```typescript
+// tests/cli/finding-hash.test.ts — plan-9d Task 4 v4 R-5
+import { describe, it, expect } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { join } from 'node:path';
+
+describe('forge finding hash helper (v4 R-5)', () => {
+  const cliPath = join(process.cwd(), 'dist/cli/index.js');
+
+  function runHelper(input: string): { exitCode: number; stdout: string; stderr: string } {
+    try {
+      const stdout = execFileSync('node', [cliPath, 'finding', 'hash'], {
+        input,
+        encoding: 'utf8',
+      });
+      return { exitCode: 0, stdout, stderr: '' };
+    } catch (err) {
+      const e = err as { status: number; stdout: string; stderr: string };
+      return { exitCode: e.status ?? 0, stdout: e.stdout ?? '', stderr: e.stderr ?? '' };
+    }
+  }
+
+  it('合法 payload → 输出 64-hex finding_hash', () => {
+    const payload = JSON.stringify({
+      content_hash: 'sha256:' + 'a'.repeat(64),
+      git_head: 'd'.repeat(40),
+      dimension: 'correctness',
+      check_type: 'requirement-mapping',
+      severity: 'WARNING',
+      automated: false,
+      evidence: 'x',
+      recommendation: 'y',
+    });
+    const { exitCode, stdout } = runHelper(payload);
+    expect(exitCode).toBe(0);
+    expect(stdout.trim()).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('缺字段 → exit 1', () => {
+    const { exitCode, stderr } = runHelper(JSON.stringify({ content_hash: 'sha256:abc' }));
+    expect(exitCode).toBe(1);
+    expect(stderr).toMatch(/缺必填字段/);
+  });
+
+  it('非 JSON → exit 1', () => {
+    const { exitCode, stderr } = runHelper('not json');
+    expect(exitCode).toBe(1);
+    expect(stderr).toMatch(/不是合法 JSON/);
+  });
+});
+```
+
+- [ ] **Step 14: Commit**
 
 ```bash
 git add src/core/validate/auto-findings.ts \
@@ -1744,9 +1966,13 @@ git add src/core/validate/auto-findings.ts \
         src/core/validate/test-failure-stub.ts \
         src/core/validate/change.ts \
         src/core/validate/index.ts \
+        src/cli/commands/validate.ts \
+        src/cli/commands/finding.ts \
+        src/cli/index.ts \
         tests/cli/validate-verify-findings.test.ts \
+        tests/cli/finding-hash.test.ts \
         tests/core/validate/coverage-gap.test.ts
-git commit -m "feat(9d): validate.ts 自动产 CRITICAL findings 三类(Task 4 v2)— specs-files-missing + coverage_gap + test_failure stub"
+git commit -m "feat(9d): validate.ts 自动产 CRITICAL findings 三类 + finding-hash helper(Task 4 v4)"
 ```
 
 ---
@@ -2492,6 +2718,35 @@ describe('ack-log consistency (plan-9d Task 6 v2 B-4)', () => {
     expect(result.valid).toBe(true);
   });
 
+  // v4 R-4 修订:加 hash + user 同时错的 case,验证两个错都报(不被 continue 跳过)
+  it('marker WARNING ack + ack-log hash + user 同时不一致 → 两个错都报', async () => {
+    const finding = buildFinding({ severity: 'WARNING', severity_acked_by: 'msc' });
+    await writeFile(
+      join(changeDir, '.evidence', 'ack-log.jsonl'),
+      JSON.stringify({
+        schema: 'forge-ack-log/v1',
+        kind: 'ack',
+        timestamp: '2026-05-12T10:00:00Z',
+        action: 'ack-warning',
+        change_id: 'test-change',
+        finding_id: String(finding.id),
+        user: 'ai-agent', // user 错
+        rationale: 'edge case',
+        git_head: 'd'.repeat(40),
+        finding_hash: 'f'.repeat(64), // hash 错
+      }) + '\n',
+    );
+    const result = await validateAckLogConsistency(
+      changeDir,
+      { verify_findings: [finding] },
+      'test-change',
+    );
+    expect(result.valid).toBe(false);
+    expect(result.errors.length).toBeGreaterThanOrEqual(2); // 两个错都报,不 continue
+    expect(result.errors.some((e) => /finding_hash.*不一致/.test(e.message))).toBe(true);
+    expect(result.errors.some((e) => /user.*不一致/.test(e.message))).toBe(true);
+  });
+
   // v3 m-1 修订:加 user 不一致 case
   it('marker WARNING ack + ack-log user 与 marker severity_acked_by 不一致 → 拒签', async () => {
     const finding = buildFinding({ severity: 'WARNING', severity_acked_by: 'msc' });
@@ -3199,6 +3454,25 @@ git commit -m "test(9d): e2e fixture + verify_findings fence 全 9 分支 + 篡�
 
 本 plan reference 9i `skills/writing-skills/SKILL.md` 协议;Task 1 + Task 2 + Task 7 走五步骤;Task 7 REFACTOR 反向回改 Task 2(沿 9i Task 5 同模式)。
 
+### 11.1bis candidate_type 6 类归属与 plan-9d 范围(v4 D-1 修订)
+
+design §2.3.3 表 line 443-448 列了 6 类 `candidate_type` enum,工程实施归属如下(本 plan 与 9a / 9g / 9j / v1.1 边界):
+
+| candidate_type | design 验证算法(line 443-448)| 实施归属 | plan-9d v4 状态 |
+|---|---|---|---|
+| `test_failure` | worktree 重跑指定 test_file + test_name,取 exit_code | **9g**(reporter parser) | **stub** — `test-failure-stub.ts` 返回 not_implemented + validate CLI 输出 `⚠ [stub] ...` warning(v4 D-3) |
+| `hash_mismatch` | 重算 marker 中声称 mismatch 的 hash(tasks_hash / content_hash / log_hash / git.diff_hash 任一)| **archive.ts 现有路径**(line 274-289,v4 M-1 改 exit 1) | **不通过 candidate 框架** — archive 直接重算 marker hash 比对,不走 candidate-validators.ts |
+| `evidence_missing` | 检查 evidence.log_path 文件是否存在 | **9a candidate-validators.ts framework**(已 stub)| 本 plan **不动** — 9a 留的 framework 在 v1.1 / 9g 接入(沿 candidate-validators.ts:37 注释) |
+| `coverage_gap` | grep + AST 双重扫描 codebase 找 spec requirement 关键词 + identifier | **9d**(本 plan,grep 部分;AST 留 v1.1) | **✓ 本 plan 实施** — `coverage-gap.ts` extractRequirements + extractKeywords + grepCountInDir |
+| `api_contract` | spec API 签名 + AST 抽取 codebase 实现签名 + 比对 | **v1.1** | 推迟(沿 design §3.1 推迟项 + plan-9d §11.4 风险说明)|
+| `manual_claim` | 工具不能自动验证,需 user ack 升 CRITICAL | **9a + ack 流程**(已有)| 本 plan **不动** — `forge ack propose` 已是协议入口 |
+
+**关于 candidate-validators.ts(9a)的 NOT_IMPLEMENTED stub**:9a 留的 framework(`src/core/validate/candidate-validators.ts:22-43`)仍是 stub 状态;本 plan 不接入 9a framework 而是另起 `coverage-gap.ts` 直接产 finding。**理由**:9a candidate-validators.ts 设计的是 AI 写 `severity_candidate=CRITICAL` 后工具验证的路径;本 plan 实施的是工具直接产 `severity=CRITICAL + automated=true` 的路径(沿 design line 457 "工具自动产 CRITICAL"语义),不需要走 candidate 路径。两条路径都存在但语义不同:
+- **AI 候选 → 工具验证**(candidate-validators.ts):AI 不能直写 severity=CRITICAL,只能写 severity_candidate;工具按 candidate_type 验证后改 severity 或 reject
+- **工具直接产 CRITICAL**(本 plan validate.ts coverage_gap 类):工具自己扫 spec + codebase,产 severity=CRITICAL + automated=true 直接进 marker
+
+**v1.1 计划补完路径**:把 6 类 candidate validator 全实施(用 9d coverage-gap 模式 + 9g reporter parser + AST 解析等)+ 集成到 candidate-validators.ts;让 AI 候选路径与工具直产路径统一为同一实现。本 plan v1.0 不做(超范围)。
+
 ### 11.2 9d → 9g 验收依赖(沿 master BLOCKER #3)
 
 9g process_evidence yaml 第 8 攻击场景"空测试攻击"(测试套件假装 pass 但实际跳测试)需要 §2.7 + §2.2 组合防御:
@@ -3294,3 +3568,17 @@ git commit -m "test(9d): e2e fixture + verify_findings fence 全 9 分支 + 篡�
   - **1 NIT**:
     - **N-1**:§11.4 风险段说 `VerifyFinding 与 Finding 类型别名`,但 v2 m-1 已改 extends。同步文字。
   - **工日**:tokenizer 强化 + parser 自实现 + fixture hash 真算 + user 字段校验 合计 +0.2 工日;**P50 6.8 → 7.0 / P90 8.5 → 8.7**(在 master P90 7 + 24% buffer 内)
+- **v4**(2026-05-11):codex 三轮 adversarial review 8 议题全采纳(5 MAJOR + 1 MINOR + 2 NIT;无新 BLOCKER;含 v3 引入的 3 个 regression + 4 个设计层议题)
+  - v2 / v3 全 8 议题 ADOPTED 验证通过(codex 三轮独立确认实质修订)
+  - **5 MAJOR**:
+    - **R-3(新引入)**:`coverage-gap.ts` SKIP_DIRS Set 含 `'tests/fixtures'` 含斜杠路径,但实际比较 `e.name`(单层 dirname)— Set.has 永远 false。修法:SKIP_DIRS 拆 `SKIP_BASENAMES`(单层 name 匹配)+ `SKIP_REL_PATHS`(path relative root 匹配);加 `.startsWith('_')` 跳 `_shared` 类。
+    - **R-5(新引入)**:Example 5 + plan-9d 整体缺 concrete helper 让 AI 在 verify slash 阶段算 finding_hash — JCS 序列化复杂,AI 自实现易错。修法:Task 4 加 `forge finding hash` CLI(stdin JSON → stdout 64-hex);commands/verify.md Task 5 用此 helper(AI 不写 hash 算法,只调 CLI)。
+    - **D-1(新引入)**:`critical_candidate` 协议 6 类 validator 仍 NOT_IMPLEMENTED stub(9a 留的 framework `candidate-validators.ts:22-43`),plan-9d 只实施 coverage_gap 一类;6 类全闭环未明确归属。修法:加 §11.1bis 表显式 6 类归属(test_failure→9g / hash_mismatch→archive.ts 现路径 / evidence_missing→9a framework / coverage_gap→**9d** / api_contract→v1.1 / manual_claim→9a+ack);明确"AI 候选 → 工具验证" vs "工具直产 CRITICAL" 双路径语义。
+    - **D-3(新引入)**:`validate.ts` 成功路径 `if (result.valid) { console.log('✓'); exit(0); }` 不打印 warnings — test_failure stub `⚠ not_implemented` 提示对 CI 用户不可见(false green)。修法:Task 4 改 validate CLI valid + invalid 双路径都 console.warn 输出 warnings;exit code 不变。
+    - **D-4(新引入)**:`extractRequirements` filter `s.level >= 2 && s.level <= 3` 漏 H4+ Requirement;design line 304 没限制 H2 only。修法:扩 `s.level >= 2 && s.level <= 6`。
+  - **1 MINOR**:
+    - **R-4(误诊但合理 → 加测试)**:Codex 说 hash mismatch 后 continue 跳 user 校验,实际 plan v3 line 2330 hash mismatch **不 continue**(line 2326 continue 是 matchAck 不存在时跳 finding loop iteration,不是 hash mismatch 后)。Codex 误读,但加 test case 验证 hash + user 同时错时两个都报(不被 continue 跳过)— `tests/core/archive/ack-log-consistency.test.ts` 加 case "hash + user 同时不一致 → 两个错都报"。
+  - **2 NIT**:
+    - **B-3(NIT 残留误诊)**:Codex 说 plan:55 顶部汇总表残留 "Example 5 candidate_type=coverage_gap",实际 v3 已改为 "Example 5 candidate_type 不填(沿 v3 B-3 边界 case)" — codex 误读 plan:55 行内容。不需修。
+    - **D-2(新 NIT)**:`verify_findings` 数组内 `finding[].id` 唯一性未校验(可重复)— 修法:`marker-schema.ts checkVerifyFindingsArray` 加 `seenIds: Set<number>` 去重检测。
+  - **工日**:Task 4 加 finding-hash helper CLI + SKIP_DIRS 路径正则 + CLI warnings 输出 + 6 类归属表 + finding id 唯一性 合计 +0.3 工日;**P50 7.0 → 7.3 / P90 8.7 → 9.0**(master P90 7 + 29% buffer;v0.4 plan-8 实际经历 60+ 修订,工日浮动 ≥ 30% 是历史经验,可接受)

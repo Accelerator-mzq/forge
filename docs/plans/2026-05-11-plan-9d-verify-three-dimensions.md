@@ -1231,8 +1231,12 @@ describe('validate.ts auto-produce verify-domain CRITICAL findings (plan-9d Task
     // 沿 §11.1bis 责任边界:validate CLI 不产 fake_completion 类 finding(git diff 反向检测在 verify slash 阶段)
     // tasks 类 finding 若有,只可能来自 validate/tasks.ts 的不变量校验(如 hash mismatch / tasks.md 结构错),
     // 不应是 fake-completion CRITICAL — 沿 design line 457 工具自动产 CRITICAL 仅 spec-files-missing + coverage_gap
+    // v14 review MINOR regression 修订:过滤谓词用 artifact 字段(沿 src/core/validate/types.ts:12
+    // ValidationError.artifact: 'proposal'|'specs'|'design'|'tasks'|'marker'|'change'|'scope');
+    // 现有 tasks.ts 产 ValidationError 时 artifact='tasks' / field='items'|'item.id'(line 12/26),
+    // 用 field?.startsWith('tasks') 不匹配实际数据
     const tasksCriticalFindings = result.errors.filter(
-      (e) => e.field?.startsWith('tasks') && e.severity === 'CRITICAL',
+      (e) => e.artifact === 'tasks' && e.severity === 'CRITICAL',
     );
     expect(tasksCriticalFindings).toHaveLength(0);
     // coverage_gap 类(specs 0 命中)若产 finding 应在 specs artifact 下,非 tasks
@@ -3735,3 +3739,8 @@ design §2.3.3 表 line 443-448 列了 6 类 `candidate_type` enum,工程实施�
     - **Task 4 单测 fake-completion case 期望与 §11.1bis 责任边界冲突**:line 1210 case 名"tasks.md fake-completion → CRITICAL completeness/task-completion + finding_hash" + assertion 是软 if-only,但 case 名暗示 validate 层应产 fake-completion finding,与 line 1229/1674 + §11.1bis(fake_completion 归 verify slash)冲突 — 执行者按 case 名实施会撞 §11 边界。**修法**:case 名 + assertion 改反向:"validate 层不产 finding(由 verify slash 阶段产,沿 §11.1bis)";断言 `tasksCriticalFindings.length === 0`。
   - **工日**:纯文档对齐,无新代码逻辑;**P50 / P90 不变**(7.4 / 9.1)
   - **收敛状态**:Task 4 单测 case 边界与 §11.1bis 一致(反向验证 validate 层不产 fake-completion finding,verify slash Task 5 才产);plan 全文 candidate_type 责任归属 + e2e fixture 顺序 + 数字 + import 冲突 全已清。**plan-9d v14 达到 ≤ NIT 收敛阈值**。
+- **v15**(2026-05-11):codex 十四轮 fresh review 1 议题 ADOPTED + 1 新 MINOR regression — 1 议题全采纳
+  - **1 MINOR regression**:
+    - **Task 4 单测过滤谓词用错字段**:v14 改 case 后断言用 `e.field?.startsWith('tasks')`,但已提交 `ValidationError.artifact` 是 'tasks'(沿 types.ts:12),实际 `field` 是 'items' / 'item.id'(沿 tasks.ts:12/26) — 过滤无法捕获 validate 层误产的 tasks 类 finding。**修法**:改 `e.artifact === 'tasks'`,加注释说明字段名沿现有 ValidationError 接口。
+  - **工日**:纯文档对齐;**P50 / P90 不变**(7.4 / 9.1)
+  - **收敛状态**:Task 4 单测谓词字段与 ValidationError 接口一致;过滤可正确捕获 validate 层误产 tasks CRITICAL finding。**plan-9d v15 达到 ≤ NIT 收敛阈值**。

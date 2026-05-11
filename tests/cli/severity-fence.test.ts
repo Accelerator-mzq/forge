@@ -94,6 +94,28 @@ describe('finding-hash framework', () => {
     expect(payload.severity).toBe('WARNING');
   });
 
+  it('extractHashPayload 剥离 validate_run_id(v3 B1 修订核心合约)', () => {
+    // v3 B1 修订核心合约:Finding.validate_run_id 是瞬态元数据,不入 hash payload
+    // 此测试显式构造带 validate_run_id 的 Finding,验证 extractHashPayload 将其剥离
+    const finding: Finding = {
+      id: 99,
+      resolved: false,
+      finding_hash: 'placeholder',
+      validate_run_id: 'run-xyz', // 显式带值,验证剥离
+      content_hash: 'c',
+      git_head: 'g',
+      dimension: 'correctness',
+      check_type: 'test',
+      severity: 'CRITICAL',
+      automated: true,
+      evidence: 'e',
+      recommendation: 'r',
+    };
+    const payload = extractHashPayload(finding);
+    // validate_run_id 必须不在 hash payload 中(否则破坏 finding_hash 去重 / 持久 ack 设计)
+    expect('validate_run_id' in payload).toBe(false);
+  });
+
   it('extractHashPayload + computeFindingHash round-trips', () => {
     const full: Finding = {
       id: 7,

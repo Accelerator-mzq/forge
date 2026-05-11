@@ -286,3 +286,9 @@ v1.0 fence 不接受 `S/C/L`,只接受 `CRITICAL/WARNING/SUGGESTION` 完整字�
 Verify. Question. Then implement.
 
 No performative agreement. Technical rigor always.
+
+## Scope Category Guidance(plan-9b 共用 reference)
+
+判定一个 review 意见应走 SUGGESTION 还是 `## Out of Scope` / `## Future Work` / `## Non-Goals` 时,**先参考共用决策表**:`skills/_shared/scope-category-guidance.md`(plugin runtime 下:`_shared/scope-category-guidance.md`)。
+
+特别注意 §"常见误判 → 修正"段 — 不要默认把所有"不做"塞 SUGGESTION;跨 change 项应走 out-of-scope / future-work / non-goal,沿 `forge-scope-entries/v1` YAML 块。

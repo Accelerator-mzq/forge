@@ -44,9 +44,10 @@ function parseArgs(argv: string[]): CliOptions {
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   const opts = parseArgs(argv);
-  // 加载环境变量(缺少 ANTHROPIC_API_KEY 时抛错 → 退出码 2)
-  // v1.0(9i):anthropicBaseUrl 可选,支持第三方 endpoint(OpenRouter / LiteLLM / Bedrock proxy)
-  const { anthropicApiKey, anthropicBaseUrl } = loadEnv();
+  // 加载环境变量(API_KEY 与 AUTH_TOKEN 都缺时抛错 → 退出码 2)
+  // v1.0(9i):baseUrl + authToken 可选,支持第三方 endpoint
+  // (OpenRouter / LiteLLM / Bedrock proxy / PackyAPI / OneAPI 等)
+  const { anthropicApiKey, anthropicAuthToken, anthropicBaseUrl } = loadEnv();
 
   let skillsToRun: SkillName[];
   if (opts.skill) {
@@ -70,13 +71,18 @@ async function main(): Promise<void> {
   checkBudget(skillsToRun.length * 2.5);
 
   // 初始化 Anthropic SDK 客户端
-  // v1.0(9i):baseURL 可选,支持第三方兼容 endpoint;未配置时走 SDK 默认 https://api.anthropic.com
+  // v1.0(9i):baseURL + authToken 可选,支持第三方兼容 endpoint
+  // - apiKey 走 x-api-key header(Anthropic 原生)
+  // - authToken 走 Authorization: Bearer header(部分第三方如 PackyAPI / LiteLLM Bearer 模式)
+  // - 至少一个必须存在(loadEnv 已校验);两个都给时 SDK 行为按 apiKey 优先
   const client = new Anthropic({
-    apiKey: anthropicApiKey,
+    ...(anthropicApiKey ? { apiKey: anthropicApiKey } : {}),
+    ...(anthropicAuthToken ? { authToken: anthropicAuthToken } : {}),
     ...(anthropicBaseUrl ? { baseURL: anthropicBaseUrl } : {}),
   });
   if (anthropicBaseUrl) {
-    console.log(`ℹ 使用第三方 endpoint:${anthropicBaseUrl}`);
+    const authMode = anthropicAuthToken ? 'Bearer token' : 'x-api-key';
+    console.log(`ℹ 使用第三方 endpoint:${anthropicBaseUrl}(认证:${authMode})`);
   }
   const summary = await orchestrateRun(skillsToRun, client);
   const md = buildMarkdownReport(summary);

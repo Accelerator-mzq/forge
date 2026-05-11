@@ -684,7 +684,7 @@ OpenSpec verify-change.ts:152 "When uncertain, prefer SUGGESTION over WARNING" �
 | 想法 | 现实 |
 |---|---|
 | "测试都 pass 了,跳 Correctness/Coherence" | 测试 pass 只覆盖被写出来的 test。spec 里没测试覆盖的 Requirement 完全 silent。**跳维度 = 重新走第 1 维度** |
-| "这个 Requirement 在 codebase 没找到,但应该不重要,推 SUGGESTION" | `evidence_missing` 是 automated CRITICAL candidate;推 SUGGESTION = 偷懒。fence 拒签的不是你判定 SUGGESTION,而是你没让工具自动判 |
+| "这个 Requirement 在 codebase 没找到,但应该不重要,推 SUGGESTION" | `coverage_gap` 是 automated CRITICAL candidate(沿 §11.1bis;evidence_missing 仅指 evidence.log_path 文件缺失);推 SUGGESTION = 偷懒。fence 拒签的不是你判定 SUGGESTION,而是你没让工具自动判 |
 | "vague 'consider reviewing X'" | fence 看不到具体证据 → recommendation 等价无效。重写带 file:line / spec:Requirement-id |
 | "WARNING 我直接给 severity_acked_by = ai-agent 算自 ack" | WARNING ack 必须走 `forge ack propose` 两步流程(沿 9a),AI 自 ack 不存在;archive fence 校验 ack-log.jsonl 一致性 |
 | "automated=true CRITICAL 我改成 false 让 LLM 判" | finding_hash 重算 + 比对会拒签。修法是让工具自动产,不是改 automated 字段 |
@@ -2067,7 +2067,7 @@ You are about to handle `/forge:verify $ARGUMENTS`.
    4.1 **跑用户项目测试** — 读 `forge/config.yaml` 的 `context.test_command`,缺省 `pnpm test`,把 stdout 写到 `forge/changes/<id>/.evidence/test-output.log`,计算 `log_hash = sha256(test-output.log)`。**测试 pass 是 Completeness/task-completion 子项**(plan-9d 三维度协议)。
 
    4.2 **三维度分析 — 必须调用 `forge:verifying-three-dimensions` skill**(plan-9d 落地):
-   - **Completeness**:对 spec 每个 Requirement,grep codebase 找实施证据;完全无证据 → 产 CRITICAL `evidence_missing` finding(automated=true,工具可独立验证)
+   - **Completeness**:对 spec 每个 Requirement,grep codebase 找实施证据;完全无证据 → 产 CRITICAL `coverage_gap` finding(automated=true,工具可独立验证;沿 §11.1bis — `evidence_missing` 仅指 evidence.log_path 文件缺失,语义不同)
    - **Correctness**:对 spec 每个 Requirement 定位实施 file:line;WHEN/THEN scenario 覆盖检查 → WARNING/SUGGESTION findings(automated=false)
    - **Coherence**:design.md `## Decision:` 段比对 codebase;命名 / pattern 比对项目惯例 → WARNING/SUGGESTION findings(automated=false)
    - **每个 finding 必须填**:id / dimension / check_type / severity / automated / content_hash / git_head / evidence / recommendation / resolved + finding_hash(JCS SHA256 of 8 字段 payload,沿 9a)
@@ -3533,7 +3533,7 @@ design §2.3.3 表 line 443-448 列了 6 类 `candidate_type` enum,工程实施�
 
 9g process_evidence yaml 第 8 攻击场景"空测试攻击"(测试套件假装 pass 但实际跳测试)需要 §2.7 + §2.2 组合防御:
 - §2.7(9g):process_evidence 13 不变量校验测试套件真实跑了
-- §2.2(本 plan):verify_findings 校验 Completeness/spec-coverage 是否 0 个 evidence_missing(若有 evidence_missing CRITICAL,反向暴露空测试)
+- §2.2(本 plan):verify_findings 校验 Completeness/spec-coverage 是否 0 个 `coverage_gap` CRITICAL(若有 coverage_gap CRITICAL,反向暴露空测试 — spec 列 Requirement 但 codebase grep 0 命中 = 测试套件无对应实施;沿 §11.1bis,coverage_gap ≠ evidence_missing,后者仅指 evidence.log_path 文件缺失)
 
 本 plan 完成后,9g M5 里程碑可验收。
 
@@ -3575,7 +3575,7 @@ design §2.3.3 表 line 443-448 列了 6 类 `candidate_type` enum,工程实施�
 
 本 plan 经过 self-scan,确认:
 - 无 "TBD" / "TODO" / "implement later" / "fill in details" 等占位符
-- 无 "add appropriate error handling" 类抽象指令 — 错误处理明确到具体 candidate(evidence_missing / hash mismatch / ack 缺失)
+- 无 "add appropriate error handling" 类抽象指令 — 错误处理明确到具体 candidate(coverage_gap / spec-files-missing / hash_mismatch / ack 缺失;沿 §11.1bis 6 类归属)
 - 无 "Write tests for the above" 类无代码描述 — 每个 test 文件给出完整 case 列表 + 关键代码
 - "Similar to Task N" 仅在依赖说明段出现,task body 内代码重复给出(允许冗余但保证 task 可独立阅读)
 - 步骤 5(commands/verify.md 重构)给出完整重写文本,不依赖"按现有结构修改"模糊指令
@@ -3675,3 +3675,9 @@ design §2.3.3 表 line 443-448 列了 6 类 `candidate_type` enum,工程实施�
     - **N-1 inline 注释残留**:`coverage-gap.ts` Step 4 内层 comment line 1505 仍写"tests/fixtures / docs/plans / 等"旧示例。修法:改"顶层 catch-all:tests / docs / forge-eval — walk 进入后不会下钻"。
   - **工日**:纯文档对齐,无新代码;**P50 / P90 不变**(7.4 / 9.1)
   - **收敛状态**:无 BLOCKER / 无 MAJOR / 0 MINOR / 0 NIT 待处理 — **plan-9d v8 达到 ≤ NIT 收敛阈值**(v7 是 PARTIAL,v8 完成口径全局同步)
+- **v9**(2026-05-11):codex 八轮 review 发现 v8 M-1 仍 PARTIAL(2 处活跃残留)— 修订全采纳(1 MINOR,无 NIT)
+  - **1 MINOR**:
+    - **M-1 Task 5 commands/verify.md + SKILL 红旗清单仍有 evidence_missing 活跃残留**:v8 改了多处但 Task 5 §4.2 Completeness 段(plan:2070)+ SKILL 红旗清单第 2 行(plan:687)仍写 evidence_missing 用作 spec→codebase 0 命中。修法:全部改 `coverage_gap`(沿 §11.1bis)+ 显式注释 evidence_missing 仅指 evidence.log_path 缺失。同步扫 §12.1 spec coverage 检查表(plan:3536)+ §12.2 placeholder scan(plan:3578)2 处历史残留,统一改 coverage_gap。
+  - **0 NIT**:v8 N-1 已收敛
+  - **工日**:纯文档对齐,无新代码;**P50 / P90 不变**(7.4 / 9.1)
+  - **收敛状态**:无 BLOCKER / 无 MAJOR / 0 MINOR / 0 NIT 待处理 — **plan-9d v9 达到 ≤ NIT 收敛阈值**(v8 是 PARTIAL,v9 完成全文 evidence_missing → coverage_gap 同步;active 段全干净,仅修订记录 §13 段保留历史 v1-v8 描述)

@@ -12,7 +12,7 @@
 - design v3 [`2026-05-10-v1.0-fusion-completion-design.md`](../specs/2026-05-10-v1.0-fusion-completion-design.md) §2.2 全节(§2.2.1 基线 / §2.2.2 三维度协议 / §2.2.3 verify_findings YAML schema / §2.2.4 Fence 校验 / §2.2.5 verify-passed schema 升级 / §2.2.6 新 skill 设计 / §2.2.7 实施清单)+ §2.3.2 三级 enum + §2.3.3 critical_candidate 协议 + §2.3.6 finding_hash JCS + §2.6.6 scope 区分指引(被 _shared 文档引用)
 - master plan §3.4(plan-9d 概览 P50 5.5 / P90 7)+ §3.12.1 Finding 字段冻结 + §3.12.3 CLI exit code 冻结(`forge validate` exit 1 = CRITICAL,沿 9a/9b 已立)
 
-**P50 工日**:6.8(v2 codex review 一轮 4 BLOCKER + 4 MAJOR + 2 MINOR 全采纳 + Task 1/4/6/8 工日上调 1.3)/ **P90 工日**:8.5(在 master §3.4 P90 7 上做 +1.5 buffer 让 v2 在 master 范围 +21% 内)
+**P50 工日**:7.0(v2 codex review 一轮 +1.3 工日;v3 codex review 二轮 +0.2 工日:coverage-gap parser 自实现 + tokenizer 强化 + Task 8 fixture 真算 hash + ack-log user 校验)/ **P90 工日**:8.7(master §3.4 P90 7 + 24% buffer)
 
 **前置**:
 - 9a 横切层基础(已完成,`f347329` 前;Finding 接口 / canonical-json / computeFindingHash / candidate-validators 全可用)
@@ -603,13 +603,24 @@ forge v0.4 的 verify 阶段退化为"测试 pass + log_hash"二值判定(沿 de
   dimension: completeness
   check_type: task-completion
   severity: CRITICAL
-  automated: true                  # 工具自动判 — git diff 是机器判定结果(coverage_gap candidate),沿 design line 446
+  automated: true                  # 工具自动判 — git diff 是机器判定
+  # 注:candidate_type 字段不填(下文解释)
   evidence: "tasks.md#task-4 '加 rate-limit middleware' 标 [x] 但 git diff src/middleware/ 无相关改动(命令:git diff HEAD~1 -- src/middleware/)"
   recommendation: "完成 task-4 实施,或把 task-4 改回 [ ]"
   resolved: false
 ```
 
-**注**:本类 finding(标 [x] 但 git diff 空,即 fake-completion)由 `/forge:verify` slash 阶段 AI 调本 skill 时**主动跑 `git diff <previous-base>..HEAD -- <expected-path>` 命令**产生(plan-9d v2 Task 4 `forge validate` CLI 仅产 `coverage_gap` spec-side 类 finding + `test_failure` stub,**不内嵌 git CLI** — git diff fake-completion 检测在 verify slash 路径产,沿 commands/verify.md Task 5)。automated=true 因为 git diff 命令输出是机器判定,不是 AI 主观判定;candidate_type=`coverage_gap`(claim resolved 但 codebase 缺实施证据,语义是 spec→code 覆盖的反向 — 沿 design line 446 grep + AST 0 命中原则,这里 grep 路径换成 git diff)。**candidate_type ≠ `manual_claim`** — `manual_claim` 是工具完全不能自动判定的(沿 design line 448),需 user ack 才升 CRITICAL;但 git diff 是机器判定。
+**注**(v3 B-3 修订):本类 finding(标 [x] 但 git diff 空,即 fake-completion)由 `/forge:verify` slash 阶段 AI 调本 skill 时**主动跑 `git diff <previous-base>..HEAD -- <expected-path>` 命令**产生(plan-9d v2 Task 4 `forge validate` CLI 仅产 `coverage_gap` spec-side 类 finding + `test_failure` stub,**不内嵌 git CLI** — git diff fake-completion 检测在 verify slash 路径产,沿 commands/verify.md Task 5)。automated=true 合理:git diff 命令输出是机器判定。
+
+**关于 candidate_type 字段**:design line 443-448 列了 6 类 enum(test_failure / hash_mismatch / evidence_missing / coverage_gap / api_contract / manual_claim),但本 example "task 标 [x] 但 git diff 反向 0 改动" 不严格归入任何一类:
+- **不是 `coverage_gap`**(spec→code 方向的 grep,本 example 是 task→code 方向的 git diff 反向)
+- **不是 `manual_claim`**(manual_claim 工具不能自动判;本 example git diff 可自动判)
+- **不是 `hash_mismatch`**(hash_mismatch 重算 tasks_hash/content_hash/log_hash/git.diff_hash,task 标 [x] 后 hash 已更新无 mismatch)
+- **`fake_completion`** 不在 design 6 类 enum 之内(`Finding.candidate_type` 是 optional 字段,沿 9a severity.ts:75;不填合规)
+
+**v1.0 处理**:`candidate_type` 字段不填(沿 9a Finding.candidate_type 是 optional);check_type=`task-completion` 即可区分本类。**v1.1 计划**:design §3.1 推迟项可加 `fake_completion` candidate_type 第 7 类(若 verify slash 场景多,值得正式 enum 化)。
+
+**为什么 automated=true 仍合理**:design §2.3.3 表区分"工具自动产 CRITICAL"(line 457)与"AI 候选 + 工具验证"两种路径 — `git diff` 是工具自动判,落"工具自动产"路径(line 457 "forge validate 跑测试 fail / 算 hash mismatch / process_evidence 不变量违反等"语义涵盖 git diff 类工具自动判),不需要走 candidate 路径。
 
 ### Example 6 — Correctness/scenario-coverage SUGGESTION(LLM)
 
@@ -1294,34 +1305,57 @@ export class FindingIdSequence {
 }
 ```
 
-- [ ] **Step 4: 创建 `src/core/validate/coverage-gap.ts`**(v2 B-2 修订:spec 0 codebase 命中扫描)
+- [ ] **Step 4: 创建 `src/core/validate/coverage-gap.ts`**(v3 B-1 + M-1 修订:不依赖 parseSpec,自找 `## Requirement:` heading + tokenizer 拆 hyphen/camelCase)
 
 ```typescript
-// src/core/validate/coverage-gap.ts — plan-9d Task 4 v2 B-2 修订
+// src/core/validate/coverage-gap.ts — plan-9d Task 4 v3
 // 扫描 spec.md 列出的 Requirement,grep codebase 找实施证据;0 命中产 coverage_gap finding
 // 沿 design §2.3.3 line 446 grep + AST 0 命中原则;v1.0 仅 grep,AST 留 v1.1 增强
+//
+// v3 B-1 修订:不依赖 src/core/parse/specs.ts 的 parseSpec(它只解析 Scenario,无 Requirement);
+// 改用 parseMarkdown 直接找 `## Requirement:` heading
 //
 // 注:本模块不读 marker 文件(verify 阶段 marker 尚未产);
 // 只扫 spec 与 codebase(由 changeDir 的上一级 cwd 推断)
 
-import { readFile, readdir, stat } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { join, relative } from 'node:path';
-import { parseSpec, type ParsedRequirement } from '../parse/index.js';
+import { parseMarkdown } from '../parse/markdown.js';
+
+export interface SpecRequirement {
+  id: string; // Requirement: 后的标识(从 heading 抽)
+  title: string; // 完整标题(用于关键词抽取)
+}
 
 export interface CoverageGapHit {
-  spec_file: string; // spec 路径
-  requirement_id: string; // Requirement 段落锚点 / 标题
+  spec_file: string; // spec 路径(相对 codebaseRoot)
+  requirement_id: string; // Requirement 段落 id
   searched_keywords: string[]; // grep 用的关键词
   grep_results: Record<string, number>; // 关键词 → 命中次数
   total_hits: number;
 }
 
 /**
- * 扫描 specs/*.md 中每个 Requirement,在 codebase(默认 cwd 上一级)grep 关键词。
- * 完全 0 命中的 Requirement 收集到 zeroHits 列表,供 validateChange 产 CRITICAL coverage_gap finding。
+ * 从 spec.md 文本抽 Requirement 列表(沿 design Requirement 命名约定):
+ * `## Requirement: <id>` 形式的 H2 heading,或 `## Requirement <id>`,或 `### Requirement:`
+ */
+export function extractRequirements(specText: string): SpecRequirement[] {
+  const md = parseMarkdown(specText);
+  const reqSections = md.sections.filter(
+    (s) => s.level >= 2 && s.level <= 3 && /^Requirement\s*[:#]?\s*/i.test(s.heading),
+  );
+  return reqSections.map((sec) => {
+    const m = sec.heading.match(/^Requirement\s*[:#]?\s*(.+)$/i);
+    const id = (m?.[1] ?? sec.heading).trim();
+    return { id, title: sec.heading };
+  });
+}
+
+/**
+ * 扫描 specs/*.md 中每个 Requirement,在 codebase grep 关键词。
+ * 完全 0 命中的 Requirement 收集到列表,供 validateChange 产 CRITICAL coverage_gap finding。
  *
- * codebase 扫描范围:cwd 上一级(forge/changes/<id>/ 的上层项目根),排除 node_modules / dist / .git
- * 关键词抽取:Requirement 标题去停用词后取名词短语(简化版,v1.0 用)
+ * codebase 扫描范围:codebaseRoot,排除 node_modules / dist / .git / forge / tests/fixtures
  */
 export async function scanCoverageGaps(
   changeDir: string,
@@ -1332,7 +1366,7 @@ export async function scanCoverageGaps(
   try {
     entries = await readdir(specsDir);
   } catch {
-    return []; // specs/ 不可读,交给上层 fs 错处理
+    return [];
   }
   const mdFiles = entries.filter((n) => n.endsWith('.md'));
   const hits: CoverageGapHit[] = [];
@@ -1340,11 +1374,11 @@ export async function scanCoverageGaps(
   for (const name of mdFiles) {
     const specPath = join(specsDir, name);
     const specText = await readFile(specPath, 'utf8');
-    const parsed = parseSpec(specText);
+    const requirements = extractRequirements(specText);
 
-    for (const req of parsed.requirements) {
-      const keywords = extractKeywords(req.title); // 抽 1-3 个关键词
-      if (keywords.length === 0) continue; // 太短不扫
+    for (const req of requirements) {
+      const keywords = extractKeywords(req.id || req.title);
+      if (keywords.length === 0) continue;
       const grepResults: Record<string, number> = {};
       let total = 0;
       for (const kw of keywords) {
@@ -1353,10 +1387,9 @@ export async function scanCoverageGaps(
         total += count;
       }
       if (total === 0) {
-        // 完全 0 命中 → coverage_gap CRITICAL candidate
         hits.push({
           spec_file: relative(codebaseRoot, specPath),
-          requirement_id: req.id ?? req.title,
+          requirement_id: req.id,
           searched_keywords: keywords,
           grep_results: grepResults,
           total_hits: 0,
@@ -1367,15 +1400,38 @@ export async function scanCoverageGaps(
   return hits;
 }
 
-/** 从 Requirement 标题抽 1-3 个名词短语关键词(简化版,v1.0 用) */
-function extractKeywords(title: string): string[] {
-  const stopwords = new Set(['the', 'a', 'an', 'and', 'or', 'of', 'to', 'in', 'for', 'with']);
-  const words = title
+/**
+ * 从 Requirement 标题抽 1-5 个关键词(v3 M-1 修订:拆 hyphen / camelCase)
+ *
+ * 示例:
+ *   'token-refresh-flow' → ['token', 'refresh', 'flow']
+ *   'tokenRefreshFlow' → ['token', 'refresh', 'flow']
+ *   'token_refresh_flow' → ['token', 'refresh', 'flow']
+ *   'JWT API Endpoint' → ['jwt', 'api', 'endpoint']
+ */
+export function extractKeywords(title: string): string[] {
+  const stopwords = new Set([
+    'the', 'a', 'an', 'and', 'or', 'of', 'to', 'in', 'for', 'with',
+    'is', 'be', 'on', 'at', 'by', 'as', 'it', 'if',
+  ]);
+  // v3 M-1:把 camelCase 边界改成空格 + 把 hyphen / underscore / 标点 改空格
+  const tokens = title
+    .replace(/([a-z])([A-Z])/g, '$1 $2') // camelCase split
+    .replace(/[-_./:]+/g, ' ') // hyphen / underscore / 标点 → 空格
     .toLowerCase()
-    .replace(/[^\w\s-]/g, ' ')
+    .replace(/[^\w\s]/g, ' ')
     .split(/\s+/)
-    .filter((w) => w.length >= 4 && !stopwords.has(w));
-  return words.slice(0, 3);
+    .filter((w) => w.length >= 3 && !stopwords.has(w));
+  // 去重保序
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const t of tokens) {
+    if (!seen.has(t)) {
+      seen.add(t);
+      result.push(t);
+    }
+  }
+  return result.slice(0, 5); // 取前 5 个,提高命中率(v3 M-1 修订:从 3 → 5)
 }
 
 /** 在 dir 下递归 grep 关键词(简化版 — 不用 child_process,用 readFile;v1.0 性能可接受) */
@@ -1450,7 +1506,7 @@ export async function checkTestFailureStub(): Promise<TestFailureCheckResult> {
 ```typescript
 // src/core/validate/change.ts 顶部 import 新增:
 import { buildAutoCriticalFinding, FindingIdSequence } from './auto-findings.js';
-import { scanCoverageGaps } from './coverage-gap.ts'; // .ts 因 ESM 路径,build 后变 .js
+import { scanCoverageGaps } from './coverage-gap.js'; // v3 B-2:NodeNext ESM 用 .js 扩展(沿 change.ts:7 等现有 convention)
 import { checkTestFailureStub } from './test-failure-stub.js';
 
 // 修改 validateChange 函数体(line 15 后):
@@ -1588,12 +1644,31 @@ describe('coverage_gap scanner (plan-9d Task 4 v2)', () => {
     await rm(codebaseRoot, { recursive: true, force: true });
   });
 
-  it('spec Requirement 关键词在 codebase 0 命中 → 1 个 CoverageGapHit', async () => {
+  it('extractRequirements 解析 ## Requirement: heading → 列表', async () => {
+    const { extractRequirements } = await import('../../../src/core/validate/coverage-gap.js');
+    const reqs = extractRequirements(
+      `# Auth\n\n## Purpose\nx\n\n## Requirement: token-refresh-flow\n\nWHEN x THEN y\n\n## Requirement: refresh-rate-limit\n\nWHEN p THEN q`,
+    );
+    expect(reqs).toHaveLength(2);
+    expect(reqs[0]?.id).toBe('token-refresh-flow');
+    expect(reqs[1]?.id).toBe('refresh-rate-limit');
+  });
+
+  it('extractKeywords 拆 hyphen / camelCase / underscore', async () => {
+    const { extractKeywords } = await import('../../../src/core/validate/coverage-gap.js');
+    expect(extractKeywords('token-refresh-flow')).toEqual(['token', 'refresh', 'flow']);
+    expect(extractKeywords('tokenRefreshFlow')).toEqual(['token', 'refresh', 'flow']);
+    expect(extractKeywords('token_refresh_flow')).toEqual(['token', 'refresh', 'flow']);
+    expect(extractKeywords('JWT API Endpoint')).toEqual(['jwt', 'api', 'endpoint']);
+    expect(extractKeywords('the a is')).toEqual([]); // 全停用词
+  });
+
+  it('spec Requirement 关键词在 codebase 0 命中 → 1 个 CoverageGapHit(精确断言)', async () => {
     await writeFile(
       join(testDir, 'specs', 'auth.md'),
-      `# Auth Spec\n\n## Purpose\nx\n\n## Requirement: token-refresh-flow\n\nWHEN x THEN y\n\n## Requirement: refresh-rate-limit\n\nWHEN p THEN q`,
+      `# Auth Spec\n\n## Purpose\nx\n\n## Requirement: token-refresh-flow\n\nWHEN x THEN y\n\n## Requirement: rate-limit-throttle\n\nWHEN p THEN q`,
     );
-    // codebase 只有 token-refresh-flow 关键词,refresh-rate-limit 0 命中
+    // codebase 实现 tokenRefreshFlow(覆盖 #1),rate-limit-throttle 完全 0 命中(用 'completelyUnrelated' 关键词避命中)
     await mkdir(join(codebaseRoot, 'src'), { recursive: true });
     await writeFile(
       join(codebaseRoot, 'src', 'auth.ts'),
@@ -1601,15 +1676,12 @@ describe('coverage_gap scanner (plan-9d Task 4 v2)', () => {
     );
 
     const gaps = await scanCoverageGaps(testDir, codebaseRoot);
-    // 关键词抽取出 ['refresh', 'rate', 'limit'] 后 grep 全 0(代码只有 tokenRefreshFlow 含 refresh)
-    // 取决于 extractKeywords 实际抽什么 — refresh 可能命中,test 期望 rate-limit 类 0 命中
-    expect(gaps.length).toBeGreaterThanOrEqual(0); // 实际可能为 1(rate-limit 类 0 命中)
-    // 若 refresh-rate-limit 0 命中(假设 refresh 关键词被 'tokenRefreshFlow' 命中,但 rate / limit 0 命中)
-    if (gaps.length > 0) {
-      const gap = gaps[0];
-      expect(gap?.requirement_id).toContain('refresh-rate-limit');
-      expect(gap?.total_hits).toBe(0);
-    }
+    // v3 M-1 修订:严格断言 — Requirement #1 'token-refresh-flow' 应被 'tokenRefreshFlow' 命中(camelCase 拆后 ['token','refresh','flow'] 全在 src/auth.ts)
+    // Requirement #2 'rate-limit-throttle' 应 0 命中
+    expect(gaps).toHaveLength(1);
+    expect(gaps[0]?.requirement_id).toBe('rate-limit-throttle');
+    expect(gaps[0]?.total_hits).toBe(0);
+    expect(gaps[0]?.searched_keywords).toEqual(['rate', 'limit', 'throttle']);
   });
 
   it('spec 全部 Requirement 都有 codebase 命中 → 0 个 CoverageGapHit', async () => {
@@ -2265,6 +2337,18 @@ export async function validateAckLogConsistency(
           }),
         );
       }
+      // v3 m-1 修订:ack-log user 字段必须与 marker severity_acked_by 一致
+      // (防止 AI 在 marker 写 'msc' 但 ack-log 写 'ai-agent' 或反之的不一致路径)
+      if (matchAck.user !== f.severity_acked_by) {
+        results.push(
+          failed({
+            artifact: 'marker',
+            field: `${fieldBase}.severity_acked_by`,
+            message: `ack-log user (${matchAck.user}) 与 marker severity_acked_by (${f.severity_acked_by}) 不一致 — ack 主体不匹配,拒签`,
+            file: ackLogPath,
+          }),
+        );
+      }
     }
 
     // downgrade 路径同样需要 ack-log 验证(规则 1 + 3 类比)
@@ -2383,7 +2467,7 @@ describe('ack-log consistency (plan-9d Task 6 v2 B-4)', () => {
     expect(result.errors[0]?.message).toMatch(/ack-log.*无对应/);
   });
 
-  it('marker WARNING ack + ack-log 有匹配条目(finding_hash 一致)→ 通过', async () => {
+  it('marker WARNING ack + ack-log 有匹配条目(finding_hash + user 都一致)→ 通过', async () => {
     const finding = buildFinding({ severity: 'WARNING', severity_acked_by: 'msc' });
     await writeFile(
       join(changeDir, '.evidence', 'ack-log.jsonl'),
@@ -2394,7 +2478,7 @@ describe('ack-log consistency (plan-9d Task 6 v2 B-4)', () => {
         action: 'ack-warning',
         change_id: 'test-change',
         finding_id: String(finding.id),
-        user: 'msc',
+        user: 'msc', // 与 marker severity_acked_by 一致(v3 m-1)
         rationale: 'edge case',
         git_head: 'd'.repeat(40),
         finding_hash: finding.finding_hash,
@@ -2406,6 +2490,33 @@ describe('ack-log consistency (plan-9d Task 6 v2 B-4)', () => {
       'test-change',
     );
     expect(result.valid).toBe(true);
+  });
+
+  // v3 m-1 修订:加 user 不一致 case
+  it('marker WARNING ack + ack-log user 与 marker severity_acked_by 不一致 → 拒签', async () => {
+    const finding = buildFinding({ severity: 'WARNING', severity_acked_by: 'msc' });
+    await writeFile(
+      join(changeDir, '.evidence', 'ack-log.jsonl'),
+      JSON.stringify({
+        schema: 'forge-ack-log/v1',
+        kind: 'ack',
+        timestamp: '2026-05-12T10:00:00Z',
+        action: 'ack-warning',
+        change_id: 'test-change',
+        finding_id: String(finding.id),
+        user: 'ai-agent', // 与 marker 'msc' 不一致
+        rationale: 'edge case',
+        git_head: 'd'.repeat(40),
+        finding_hash: finding.finding_hash,
+      }) + '\n',
+    );
+    const result = await validateAckLogConsistency(
+      changeDir,
+      { verify_findings: [finding] },
+      'test-change',
+    );
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]?.message).toMatch(/user.*不一致/);
   });
 
   it('ack-log finding_hash 与 marker 重算不一致(payload 篡改)→ 拒签', async () => {
@@ -2628,20 +2739,29 @@ git commit -m "feat(9d): GREEN delta ≥ 1.5 + REFACTOR plug ≥ 2 个 loophole(
 - [ ] **Step 1: 创建 `tests/fixtures/verify-findings/build-fixture.ts`**(常量生成器)
 
 ```typescript
-// tests/fixtures/verify-findings/build-fixture.ts — plan-9d Task 8 v2 fixture 共享生成器
+// tests/fixtures/verify-findings/build-fixture.ts — plan-9d Task 8 v3 fixture 共享生成器
 // 避免每个 fixture 重写 marker YAML;按参数构造完整 change 目录
+//
+// v3 M-2 修订:tasks_hash / content_hash 由 computeTasksHash + computeContentHash 真算
+// (不再 hardcoded 'sha256:'+'a'.repeat(64) — 之前会被 archive.ts:283 hash mismatch 拦截,
+//  导致测试到不了 verify_findings fence)
+//
+// v3 M-3 修订:finding.content_hash 用与 marker 顶层一致的 sha256: 前缀格式
+// (沿 9b validate/change.ts:22 ctx.contentHash;Finding interface content_hash 是 sha256: 前缀)
 
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { stringify as yamlStringify } from 'yaml';
 import { computeFindingHash } from '../../../src/core/validate/finding-hash.js';
+import { computeContentHash } from '../../../src/core/hash/content.js';
+import { computeTasksHash } from '../../../src/core/hash/tasks.js';
 import type { Finding } from '../../../src/core/schemas/severity.js';
 
 export interface FixtureOpts {
   /** finding 字段(覆盖默认)*/
   finding?: Partial<Finding>;
   /** 是否写 ack-log 匹配条目 */
-  ackLogMatch?: 'matching' | 'hash-mismatch' | 'missing';
+  ackLogMatch?: 'matching' | 'hash-mismatch' | 'missing' | 'user-mismatch';
   /** 是否在 pending-acks 写残留 */
   pendingAcksResidual?: boolean;
   /** 是否故意篡改 marker finding_hash */
@@ -2660,6 +2780,9 @@ export interface FixtureOpts {
  * 构建一个完整 forge change 目录(proposal/design/tasks/specs + .verify-passed + .review-passed
  * + .evidence/ack-log.jsonl + .evidence/pending-acks/)
  *
+ * v3 M-2:真算 tasks_hash / content_hash,让 archive.ts:283 hash 比对路径通过
+ * v3 M-3:finding.content_hash 用 marker 同步值(sha256: 前缀)
+ *
  * 返回 { changeDir, finding }(finding 已含正确 finding_hash 或被故意篡改的 hash)
  */
 export async function buildFixture(rootDir: string, opts: FixtureOpts): Promise<{
@@ -2670,33 +2793,35 @@ export async function buildFixture(rootDir: string, opts: FixtureOpts): Promise<
   await mkdir(join(changeDir, 'specs'), { recursive: true });
   await mkdir(join(changeDir, '.evidence'), { recursive: true });
 
-  // 1. proposal/design/tasks/specs
+  // 1. proposal/design/tasks/specs(先写,后面 hash 计算依赖文件存在)
+  const tasksContent = `# Tasks\n\n- [x] task-1: implement X\n`;
   await writeFile(
     join(changeDir, 'proposal.md'),
-    `# Proposal\n\n## Why\nx\n\n## What Changes\ny\n\n## Impact\nz`,
+    `# Proposal\n\n## Why\nx\n\n## What Changes\ny\n\n## Impact\nz\n`,
   );
   await writeFile(
     join(changeDir, 'design.md'),
-    `# Design\n\n## Context\nx\n\n## Approach\ny`,
+    `# Design\n\n## Context\nx\n\n## Approach\ny\n`,
   );
-  await writeFile(
-    join(changeDir, 'tasks.md'),
-    `# Tasks\n\n- [x] task-1: implement X`,
-  );
+  await writeFile(join(changeDir, 'tasks.md'), tasksContent);
   await writeFile(
     join(changeDir, 'specs', 'spec.md'),
-    `# Spec\n\n## Purpose\nx\n\n## Requirement: r1\n\nWHEN x THEN y`,
+    `# Spec\n\n## Purpose\nx\n\n## Requirement: r1\n\nWHEN x THEN y\n`,
   );
 
-  // 2. 构造 finding
+  // v3 M-2 修订:真算 hash(沿 archive.ts:274-276 同函数)
+  const realTasksHash = computeTasksHash(tasksContent);
+  const realContentHash = await computeContentHash(changeDir);
+
+  // 2. 构造 finding(v3 M-3:content_hash 用 marker 同步 sha256: 前缀)
   const base: Finding = {
     id: 1,
     dimension: 'correctness',
     check_type: 'requirement-mapping',
     severity: 'WARNING',
     automated: false,
-    content_hash: 'a'.repeat(64),
-    git_head: 'd'.repeat(40),
+    content_hash: realContentHash, // v3 M-3:用 marker 同步值(sha256: 前缀)
+    git_head: 'd'.repeat(40), // 40-hex 裸 hex(沿 9a finding 字段)
     evidence: 'specs/spec.md Requirement r1 在 src/x.ts:10 实现与 spec 不一致',
     recommendation: '改 src/x.ts:10 让 behavior 与 spec 一致',
     resolved: false,
@@ -2709,7 +2834,7 @@ export async function buildFixture(rootDir: string, opts: FixtureOpts): Promise<
     finding.downgrade_acked_by = opts.downgrade.ackedBy;
     finding.downgrade_rationale = opts.downgrade.rationale;
   }
-  const realHash = computeFindingHash({
+  const realFindingHash = computeFindingHash({
     content_hash: finding.content_hash,
     git_head: finding.git_head,
     dimension: finding.dimension,
@@ -2719,15 +2844,15 @@ export async function buildFixture(rootDir: string, opts: FixtureOpts): Promise<
     evidence: finding.evidence,
     recommendation: finding.recommendation,
   });
-  finding.finding_hash = opts.tamperHash ? 'f'.repeat(64) : realHash;
+  finding.finding_hash = opts.tamperHash ? 'f'.repeat(64) : realFindingHash;
 
-  // 3. .verify-passed YAML
+  // 3. .verify-passed YAML(v3 M-2:hash 用真值)
   const verifyMarker = {
     schema: 'forge-verify/v1',
     verified_at: '2026-05-12T10:00:00Z',
     verified_by: 'ai-agent',
-    tasks_hash: 'sha256:' + 'a'.repeat(64),
-    content_hash: 'sha256:' + 'b'.repeat(64),
+    tasks_hash: realTasksHash, // v3 M-2:真算
+    content_hash: realContentHash, // v3 M-2:真算
     evidence: [
       {
         scenario_id: 's1',
@@ -2742,27 +2867,29 @@ export async function buildFixture(rootDir: string, opts: FixtureOpts): Promise<
   };
   await writeFile(join(changeDir, '.verify-passed'), yamlStringify(verifyMarker));
 
-  // 4. .review-passed YAML
+  // 4. .review-passed YAML(v3 M-2:hash 用真值;is_git_repo=false 配合 --force 跳 git 检查)
   await writeFile(
     join(changeDir, '.review-passed'),
     yamlStringify({
       schema: 'forge-review/v1',
       reviewed_at: '2026-05-12T11:00:00Z',
       reviewed_by: 'ai-agent',
-      tasks_hash: 'sha256:' + 'a'.repeat(64),
-      content_hash: 'sha256:' + 'b'.repeat(64),
-      git: { is_git_repo: false },
+      tasks_hash: realTasksHash, // v3 M-2:真算
+      content_hash: realContentHash, // v3 M-2:真算
+      git: { is_git_repo: false }, // 非 git fixture,e2e 测试需 --force
       review_outcomes: [],
     }),
   );
 
   // 5. .evidence/test.log
-  await writeFile(join(changeDir, '.evidence', 'test.log'), 'PASS 17/17');
+  await writeFile(join(changeDir, '.evidence', 'test.log'), 'PASS 17/17\n');
 
   // 6. .evidence/ack-log.jsonl(若有 ack 或 downgrade)
+  // ackLogMatch:'matching' 完整匹配;'missing' 不写 ack-log(留空);'hash-mismatch' user 对但 hash 篡改;'user-mismatch' hash 对但 user 不匹配(v3 m-1)
   const ackEntries: Record<string, unknown>[] = [];
   if (
     opts.ackLogMatch &&
+    opts.ackLogMatch !== 'missing' &&
     finding.severity === 'WARNING' &&
     finding.severity_acked_by
   ) {
@@ -2773,10 +2900,12 @@ export async function buildFixture(rootDir: string, opts: FixtureOpts): Promise<
       action: 'ack-warning',
       change_id: opts.changeId,
       finding_id: String(finding.id),
-      user: finding.severity_acked_by,
+      user:
+        opts.ackLogMatch === 'user-mismatch' ? 'ai-agent' : finding.severity_acked_by, // v3 m-1
       rationale: 'edge case acceptable',
       git_head: 'd'.repeat(40),
-      finding_hash: opts.ackLogMatch === 'hash-mismatch' ? 'e'.repeat(64) : realHash,
+      finding_hash:
+        opts.ackLogMatch === 'hash-mismatch' ? 'e'.repeat(64) : realFindingHash,
     });
   }
   if (opts.downgrade?.ackLogMatch) {
@@ -2790,7 +2919,7 @@ export async function buildFixture(rootDir: string, opts: FixtureOpts): Promise<
       user: opts.downgrade.ackedBy,
       rationale: opts.downgrade.rationale,
       git_head: 'd'.repeat(40),
-      finding_hash: realHash,
+      finding_hash: realFindingHash, // v3 修订:rename realHash → realFindingHash
     });
   }
   if (ackEntries.length > 0) {
@@ -2841,8 +2970,10 @@ describe('verify_findings end-to-end (plan-9d Task 8 v2)', () => {
   });
 
   function runArchive(changeId: string): { exitCode: number; stderr: string } {
+    // v3 M-2 修订:--force 让 non-git fixture 通过 archive.ts:319 的 is_git_repo=false 检查
+    // (本 e2e 测试目标是 verify_findings fence,不是 git 状态校验)
     try {
-      execFileSync('node', [cliPath, 'archive', changeId], {
+      execFileSync('node', [cliPath, 'archive', changeId, '--force'], {
         cwd: rootDir,
         encoding: 'utf8',
       });
@@ -3062,7 +3193,7 @@ git commit -m "test(9d): e2e fixture + verify_findings fence 全 9 分支 + 篡�
 
 ### 11.1 跨 sub-plan 接口冻结
 
-本 plan reference 9a `src/core/schemas/severity.ts` 的 Finding / FindingHashPayload 接口(§3.12.1 锁死);**不重定义**字段。VerifyFinding = Finding 类型别名(`src/core/markers/types.ts` Task 3)。
+本 plan reference 9a `src/core/schemas/severity.ts` 的 Finding / FindingHashPayload 接口(§3.12.1 锁死);**不重定义**字段。`VerifyFinding extends Finding {}` 在 `src/core/markers/types.ts`(Task 3,v2 m-1 修订:从裸 alias 改 extends,留 verify-only optional 字段扩展位)。
 
 本 plan reference 9b `skills/_shared/scope-category-guidance.md`(§3.12.2 路径冻结)— SKILL.md 第 ## 配套引用 段 link 该文档,部署链由 9b Task 7b harness-adapters 落地(本 plan 不修改 adapter)。
 
@@ -3087,7 +3218,7 @@ git commit -m "test(9d): e2e fixture + verify_findings fence 全 9 分支 + 篡�
 
 预测 codex adversarial review 可能提出的议题(预先思考,实施时反馈再修订):
 
-1. **VerifyFinding 与 Finding 类型别名是否过度耦合**:future 若需 verify-specific 字段(如 `requirement_id` 显式关联 spec 章节),类型别名会限制扩展。**应对**:Task 3 可以从 `VerifyFinding extends Finding { requirement_id?: string }` 起步,本 plan v1 保守用别名。
+1. **VerifyFinding extends Finding 扩展路径**(v2 m-1 修订后已采纳):future 若需 verify-specific 字段(如 `requirement_id` 显式关联 spec 章节),按 superset additive 原则在 interface 内加 optional 字段(沿 9a §3.12.1 freeze)。**v3 已合规**:`VerifyFinding extends Finding {}` 已就位。
 2. **validate.ts 三类 candidate 中,test_failure 与 tasks fake-completion 似乎是 verify slash 阶段才能判**:本 plan v1 把这两类放到 slash 阶段产(Task 5 已注明),只在 validate 层产 evidence_missing 类 finding。若 review 要求把 test_failure 也下沉到 validate CLI,需扩 validate CLI 跑测试 — 这是大改,留 9d v2 评估。
 3. **forge-eval scenario judge_rubric 是否过细**:RED scenario 期望 ≤ 5 + GREEN ≥ 6.5 + delta ≥ 1.5 三阈值同时满足,可能在 LLM-judge 噪声下不稳定。**应对**:沿 forge-eval 默认阈值,Task 7 REFACTOR 时若 GREEN avg 在 6.0-6.5 边缘可微调 judge_rubric 评分细节,但不放宽 delta 1.5 硬约束。
 4. **archive fence 拒签 exit code**:本 plan Task 6 用 exit 1(business-fail,沿 master §3.12.3),与现有 archive.ts process.exit(2) (fs/lock 类) 区分。**预期 OK**,但 review 可能要求 archive.ts 现有路径也按四语义槽对齐 — 那是 §3.12.3 后续 sub-plan 工作,本 plan 不重构现有 archive exit code。
@@ -3149,3 +3280,17 @@ git commit -m "test(9d): e2e fixture + verify_findings fence 全 9 分支 + 篡�
     - **m-1**:`VerifyFinding = Finding` 裸 alias 过耦合 — 改 `interface VerifyFinding extends Finding {}` + 注释"verify-only optional 字段在此扩展,沿 superset additive"
     - **m-2**:`id: results.length + 1` fs 错也算进会跳号 — auto-findings.ts 加 `FindingIdSequence` class,只在产生真实 Finding 时 next();change.ts 用 `findingIds.next()` 替代 `results.length + 1`
   - **工日**:Task 1/4/6/8 合计 +1.3 工日;**P50 5.5 → 6.8 / P90 7 → 8.5**(在 master P90 7 + 21% buffer 内)
+- **v3**(2026-05-11):codex 二轮 adversarial review 8 议题全采纳(3 BLOCKER + 3 MAJOR + 1 MINOR + 1 NIT;经独立对照代码 + design 全部确认为真问题,含 v2 引入的 3 个 regression)
+  - **3 BLOCKER**:
+    - **B-1(新引入)**:Task 4 coverage-gap.ts 用 `parseSpec.requirements` 但现有 parseSpec 只返 `{title, scenarios}`(`src/core/parse/specs.ts:5`)— 编译失败。修法:coverage-gap.ts 自实现 `extractRequirements`,用 parseMarkdown 找 `## Requirement:` heading;不依赖 parseSpec。同步加 extractRequirements 单测。
+    - **B-2(新引入)**:Task 4 change.ts import 用 `'./coverage-gap.ts'`,违反 NodeNext ESM convention(`tsconfig.json:4` + 现有 change.ts:7 全用 `.js`)。修法:`'./coverage-gap.js'`。
+    - **B-3(v1 verbiage only 未实质)**:Example 5 candidate_type=`coverage_gap` 语义错(design line 446 coverage_gap 是 spec→code grep,git diff fake-completion 不属此)。修法:Example 5 candidate_type 字段**不填**(沿 9a Finding.candidate_type optional);注释明确"task 标 [x] 但 git diff 反向 0 改动"不严格归入 design 6 类 enum 任意一类,check_type=`task-completion` 区分本类;v1.1 可加 `fake_completion` candidate_type 第 7 类。
+  - **3 MAJOR**:
+    - **M-1(新引入)**:coverage-gap.ts `extractKeywords` 只按空白切分(不拆 hyphen/camelCase/underscore)+ 测试断言 `>=0` 恒真。修法:tokenizer 拆 camelCase/hyphen/underscore,取前 5 关键词;测试严格断言 `toHaveLength(1) + requirement_id === 'rate-limit-throttle'`。
+    - **M-2(继承 v1-M-4 但未实质修)**:Task 8 e2e fixture 写死 marker hash → archive.ts:283 hash mismatch 先死,到不了 verify_findings fence。修法:build-fixture.ts 调 `computeTasksHash` + `computeContentHash` 真算 hash 写 marker;runArchive 加 `--force`(沿 archive.ts:319,非 git fixture 用 is_git_repo=false + --force 通过 git 状态检查)。
+    - **M-3(新引入)**:fixture finding.content_hash 用 `'a'.repeat(64)` 裸 hex,与 Task 3 schema `SHA256_RE = /^sha256:[a-f0-9]{64}$/` 冲突。修法:fixture content_hash 用 `realContentHash`(沿 computeContentHash 返回的 `sha256:<hex>` 前缀格式)。
+  - **1 MINOR**:
+    - **m-1(新引入)**:`validateAckLogConsistency` 未校验 ack-log `user` 与 marker `severity_acked_by` 一致 — AI 在 marker 写 'msc' 但 ack-log 写 'ai-agent' 可绕过。修法:加 `matchAck.user === f.severity_acked_by` 校验 + 新测试 case + buildFixture 加 `'user-mismatch'` 模式。
+  - **1 NIT**:
+    - **N-1**:§11.4 风险段说 `VerifyFinding 与 Finding 类型别名`,但 v2 m-1 已改 extends。同步文字。
+  - **工日**:tokenizer 强化 + parser 自实现 + fixture hash 真算 + user 字段校验 合计 +0.2 工日;**P50 6.8 → 7.0 / P90 8.5 → 8.7**(在 master P90 7 + 24% buffer 内)

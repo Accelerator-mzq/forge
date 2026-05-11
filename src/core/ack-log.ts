@@ -59,9 +59,6 @@ export interface PendingItem {
 // 常量
 // ──────────────────────────────────────────────────────────────────────────────
 
-/** ack-log.jsonl 相对于 changeRoot 的路径 */
-const ACK_LOG_REL = '.evidence/ack-log.jsonl';
-
 /** pending-acks 目录相对于 changeRoot 的路径 */
 const PENDING_DIR_REL = '.evidence/pending-acks';
 

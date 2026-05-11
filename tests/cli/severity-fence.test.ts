@@ -1,11 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  Severity,
-  CandidateType,
-  isSeverity,
-  isCandidateType,
-  EVIDENCE_FORMATS,
-} from '../../src/core/schemas/severity.js';
+import { isSeverity, isCandidateType, EVIDENCE_FORMATS } from '../../src/core/schemas/severity.js';
 import type { Finding, FindingHashPayload } from '../../src/core/schemas/severity.js';
 import {
   computeFindingHash,

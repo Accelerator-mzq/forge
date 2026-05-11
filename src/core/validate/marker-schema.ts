@@ -2,6 +2,10 @@
 
 import type { AnyMarker } from '../markers/index.js';
 import { type ValidationResult, ok, failed, mergeResults } from './types.js';
+// plan-9d Task 3 (v12 REG-IMPORT-001 修订):import 9a 三级 severity enum + isSeverity
+// 用于 checkVerifyFindingsArray 校验 verify_findings[i].severity(CRITICAL/WARNING/SUGGESTION)
+// 现有 local const SEVERITY_VALUES 已 rename → REVIEW_OUTCOME_SEVERITY_CODES 避免重名冲突
+import { SEVERITY_VALUES, isSeverity } from '../schemas/severity.js';
 
 // 已知合法的 schema 名称
 const KNOWN_SCHEMAS = [
@@ -16,12 +20,17 @@ type KnownSchema = (typeof KNOWN_SCHEMAS)[number];
 const ISO_8601_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 // sha256: 前缀 + 64 位小写十六进制
 const SHA256_RE = /^sha256:[a-f0-9]{64}$/;
+// finding_hash:裸 64-hex(沿 9a finding-hash.ts:8,不带 sha256: 前缀)
+const FINDING_HASH_RE = /^[a-f0-9]{64}$/;
 // git commit hash:40 位小写十六进制
 const GIT_HEAD_RE = /^[a-f0-9]{40}$/;
 // actor 合法值
 const ACTOR_VALUES = new Set(['ai-agent', 'human-override']);
-// review severity 合法值
-const SEVERITY_VALUES = new Set(['S', 'C', 'L']);
+// review_outcomes.severity 合法值(S/C/L 简码,语义独立于 9a 三级 enum CRITICAL/WARNING/SUGGESTION)
+// plan-9d Task 3 (v12 REG-IMPORT-001 修订):rename 自 SEVERITY_VALUES → REVIEW_OUTCOME_SEVERITY_CODES
+const REVIEW_OUTCOME_SEVERITY_CODES = new Set(['S', 'C', 'L']);
+// verify_findings.dimension 合法值(沿 design §2.2.2 三维度)
+const DIMENSION_VALUES = new Set(['completeness', 'correctness', 'coherence']);
 
 /**
  * 校验 marker 对象的 schema 合法性。
@@ -54,6 +63,10 @@ export function validateMarkerSchema(m: unknown, file?: string): ValidationResul
     results.push(checkSha256(obj, 'tasks_hash', file));
     results.push(checkSha256(obj, 'content_hash', file));
     results.push(checkEvidenceArray(obj.evidence, file));
+    // plan-9d Task 3 新增:verify_findings 数组校验(可选 superset additive,老 marker 缺等价 [])
+    if (obj.verify_findings !== undefined) {
+      results.push(checkVerifyFindingsArray(obj.verify_findings, file));
+    }
   } else if (schema === 'forge-review/v1') {
     results.push(checkTimestamp(obj, 'reviewed_at', file));
     results.push(checkActor(obj, 'reviewed_by', file));
@@ -66,6 +79,10 @@ export function validateMarkerSchema(m: unknown, file?: string): ValidationResul
     results.push(checkStringArray(obj, 'reasons', file));
     results.push(checkStringArray(obj, 'fake_completions', file));
     results.push(checkStringArray(obj, 'appended_tasks', file));
+    // plan-9d Task 3 新增:verify_findings 数组校验(可选 superset)
+    if (obj.verify_findings !== undefined) {
+      results.push(checkVerifyFindingsArray(obj.verify_findings, file));
+    }
   } else if (schema === 'forge-review-failed/v1') {
     results.push(checkTimestamp(obj, 'failed_at', file));
     if (!Array.isArray(obj.unresolved_outcomes)) {
@@ -298,8 +315,8 @@ function checkReviewOutcomes(v: unknown, file?: string): ValidationResult {
       );
       continue;
     }
-    // severity 必须是 S/C/L 之一
-    if (typeof o.severity !== 'string' || !SEVERITY_VALUES.has(o.severity)) {
+    // severity 必须是 S/C/L 之一(review_outcomes 简码,沿 v12 REG-IMPORT-001 修订:rename)
+    if (typeof o.severity !== 'string' || !REVIEW_OUTCOME_SEVERITY_CODES.has(o.severity)) {
       results.push(
         failed({
           artifact: 'marker',
@@ -346,6 +363,169 @@ function checkReviewOutcomes(v: unknown, file?: string): ValidationResult {
           artifact: 'marker',
           field: `review_outcomes[${i}].rationale`,
           message: 'required when accepted=false',
+          file,
+        }),
+      );
+    }
+  }
+  return mergeResults(...results);
+}
+
+// plan-9d Task 3:verify_findings 数组校验
+// 校验范围:必填字段存在性 + 类型 + 枚举值(沿 master §3.12.1)
+// 不校验业务规则(resolved/ack 矩阵 + finding_hash 与 payload 一致性) — 那是 Task 6 fence 的事
+function checkVerifyFindingsArray(v: unknown, file?: string): ValidationResult {
+  if (!Array.isArray(v)) {
+    return failed({
+      artifact: 'marker',
+      field: 'verify_findings',
+      message: 'must be array',
+      file,
+    });
+  }
+  const results: ValidationResult[] = [];
+  // v4 D-2 修订:finding id 唯一性校验(同一 marker 内不允许重复 id,沿 master §3.12.1)
+  const seenIds = new Set<number>();
+  for (let i = 0; i < v.length; i++) {
+    const f = v[i] as { id?: unknown };
+    if (typeof f?.id === 'number') {
+      if (seenIds.has(f.id)) {
+        results.push(
+          failed({
+            artifact: 'marker',
+            field: `verify_findings[${i}].id`,
+            message: `finding id ${f.id} 重复(同一 marker 内 id 必须唯一,沿 master §3.12.1)`,
+            file,
+          }),
+        );
+      }
+      seenIds.add(f.id);
+    }
+  }
+  for (let i = 0; i < v.length; i++) {
+    const f = v[i] as Record<string, unknown> | null;
+    if (!f || typeof f !== 'object') {
+      results.push(
+        failed({
+          artifact: 'marker',
+          field: `verify_findings[${i}]`,
+          message: 'must be object',
+          file,
+        }),
+      );
+      continue;
+    }
+    // 必填 11 字段(沿 master §3.12.1 Finding):
+    // id / dimension / check_type / severity / automated / evidence / recommendation / resolved
+    // + finding_hash / content_hash / git_head
+    if (typeof f.id !== 'number') {
+      results.push(
+        failed({
+          artifact: 'marker',
+          field: `verify_findings[${i}].id`,
+          message: 'required number',
+          file,
+        }),
+      );
+    }
+    if (typeof f.dimension !== 'string' || !DIMENSION_VALUES.has(f.dimension)) {
+      results.push(
+        failed({
+          artifact: 'marker',
+          field: `verify_findings[${i}].dimension`,
+          message: 'must be completeness|correctness|coherence',
+          file,
+        }),
+      );
+    }
+    if (typeof f.check_type !== 'string' || !f.check_type) {
+      results.push(
+        failed({
+          artifact: 'marker',
+          field: `verify_findings[${i}].check_type`,
+          message: 'required string',
+          file,
+        }),
+      );
+    }
+    if (!isSeverity(f.severity)) {
+      results.push(
+        failed({
+          artifact: 'marker',
+          field: `verify_findings[${i}].severity`,
+          message: `must be one of ${[...SEVERITY_VALUES].join(', ')}`,
+          file,
+        }),
+      );
+    }
+    if (typeof f.automated !== 'boolean') {
+      results.push(
+        failed({
+          artifact: 'marker',
+          field: `verify_findings[${i}].automated`,
+          message: 'required boolean',
+          file,
+        }),
+      );
+    }
+    if (typeof f.evidence !== 'string' || !f.evidence) {
+      results.push(
+        failed({
+          artifact: 'marker',
+          field: `verify_findings[${i}].evidence`,
+          message: 'required non-empty string',
+          file,
+        }),
+      );
+    }
+    if (typeof f.recommendation !== 'string' || !f.recommendation) {
+      results.push(
+        failed({
+          artifact: 'marker',
+          field: `verify_findings[${i}].recommendation`,
+          message: 'required non-empty string',
+          file,
+        }),
+      );
+    }
+    if (typeof f.resolved !== 'boolean') {
+      results.push(
+        failed({
+          artifact: 'marker',
+          field: `verify_findings[${i}].resolved`,
+          message: 'required boolean',
+          file,
+        }),
+      );
+    }
+    // plan-9d v2 B-1 修订:finding_hash 是裸 64-hex(沿 9a finding-hash.ts:8)
+    if (typeof f.finding_hash !== 'string' || !FINDING_HASH_RE.test(f.finding_hash)) {
+      results.push(
+        failed({
+          artifact: 'marker',
+          field: `verify_findings[${i}].finding_hash`,
+          message: 'must match ^[a-f0-9]{64}$ (裸 hex,无 sha256: 前缀,沿 9a)',
+          file,
+        }),
+      );
+    }
+    // content_hash / git_head 是 FindingHashPayload 字段(沿 9a;content_hash sha256: 前缀,git_head 裸 40-hex)
+    if (typeof f.content_hash !== 'string' || !SHA256_RE.test(f.content_hash)) {
+      results.push(
+        failed({
+          artifact: 'marker',
+          field: `verify_findings[${i}].content_hash`,
+          message: 'must match ^sha256:[a-f0-9]{64}$',
+          file,
+        }),
+      );
+    }
+    if (typeof f.git_head !== 'string' || !GIT_HEAD_RE.test(f.git_head)) {
+      results.push(
+        failed({
+          artifact: 'marker',
+          field: `verify_findings[${i}].git_head`,
+          message: 'must match ^[a-f0-9]{40}$',
           file,
         }),
       );

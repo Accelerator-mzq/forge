@@ -1,5 +1,7 @@
 // Marker YAML 类型 — spec §3.4
 
+import type { Finding } from '../schemas/severity.js';
+
 export interface VerifyMarker {
   schema: 'forge-verify/v1';
   verified_at: string; // ISO 8601 UTC
@@ -7,6 +9,19 @@ export interface VerifyMarker {
   tasks_hash: string;
   content_hash: string;
   evidence: EvidenceItem[];
+  // plan-9d Task 3 新增 — superset additive,老 marker 缺等价 []
+  verify_findings?: VerifyFinding[];
+}
+
+/**
+ * VerifyFinding — verify 阶段产出的 finding 项
+ * Reference 9a Finding 接口(沿 §3.12.1 Finding 字段冻结)
+ * plan-9d v2 m-1 修订:改 extends Finding 而非裸 alias,留 verify-only optional 字段扩展位
+ * (例如未来加 requirement_id?: string 显式关联 spec 章节,不打破现有接口)
+ * **不允许 require 新字段** — 沿 superset additive 原则
+ */
+export interface VerifyFinding extends Finding {
+  // verify-only optional 字段在此扩展;现版不加任何字段(沿 9a §3.12.1 freeze)
 }
 
 export interface EvidenceItem {
@@ -52,6 +67,8 @@ export interface VerifyFailedMarker {
   reasons: string[];
   fake_completions: string[]; // 已勾但虚假的 task id
   appended_tasks: string[];
+  // plan-9d Task 3 新增 — unresolved_findings 等价 verify_findings 中 resolved=false 子集
+  verify_findings?: VerifyFinding[];
 }
 
 export interface ReviewFailedMarker {

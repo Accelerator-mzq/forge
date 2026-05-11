@@ -3,13 +3,13 @@ import { describe, it, expect } from 'vitest';
 import { SKILL_NAMES, COMMAND_NAMES } from '../../../src/core/templates/index.js';
 
 describe('templates registry', () => {
-  // 验证 spec §2.2 表里的 12 个 skill 全到位
-  it('SKILL_NAMES 含 12 个不重复 skill', () => {
-    expect(SKILL_NAMES).toHaveLength(12);
-    expect(new Set(SKILL_NAMES).size).toBe(12);
+  // 验证 spec §2.2 表里的 12 个 skill + plan-9i writing-skills 共 13 项全到位
+  it('SKILL_NAMES 含 13 个不重复 skill', () => {
+    expect(SKILL_NAMES).toHaveLength(13);
+    expect(new Set(SKILL_NAMES).size).toBe(13);
   });
 
-  it('SKILL_NAMES 全量字面量与顺序匹配 spec §2.2 表', () => {
+  it('SKILL_NAMES 全量字面量与顺序匹配 spec §2.2 表 + plan-9i', () => {
     expect(SKILL_NAMES).toEqual([
       'using-forge',
       'brainstorming',
@@ -23,6 +23,7 @@ describe('templates registry', () => {
       'dispatching-parallel-agents',
       'using-git-worktrees',
       'finishing-a-development-branch',
+      'writing-skills', // plan-9i 新增
     ]);
   });
 

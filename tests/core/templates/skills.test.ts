@@ -41,3 +41,17 @@ describe('templates/skills', () => {
     expect(content).toContain('/forge:archive');
   });
 });
+
+// plan-9i Task 0 — 验证 SKILL_NAMES registry 扩展(writing-skills 第 13 项)
+// 注:SKILL_NAMES 已由上方 import 引入,无需重复 import
+describe('SKILL_NAMES registry (9i)', () => {
+  it('includes writing-skills (sole self-bootstrapped skill, design §2.9.5)', () => {
+    // writing-skills 是唯一"自引导"skill:用于编写其他 skills 的 skill 本身
+    expect(SKILL_NAMES).toContain('writing-skills');
+  });
+
+  it('has 13 entries (v0.1 12 + 9i writing-skills)', () => {
+    // plan-9i 将 registry 从 12 扩展到 13
+    expect(SKILL_NAMES.length).toBe(13);
+  });
+});

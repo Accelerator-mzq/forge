@@ -103,11 +103,15 @@ src/cli/commands/                                    ← 9i 不引入新 CLI 命
 
 ---
 
-## 2. Task 0 — SKILL_NAMES registry 扩展(单点改动,不写 placeholder)
+## 2. Task 0 — SKILL_NAMES registry 扩展 + 同步更新 hardcoded 12-item 断言
 
 **Files:**
 - Modify: `src/core/templates/skills/index.ts`(SKILL_NAMES 数组加 `'writing-skills'`)
-- Modify: `tests/core/templates/skills.test.ts`(若有 length 断言更新)
+- Modify: `tests/core/templates/registry.test.ts`(`toHaveLength(12)` → `13` + 完整列表数组加 `'writing-skills'`)
+- Modify: `tests/smoke.test.ts`(`toHaveLength(12)` → `13`)
+- Add: `tests/core/templates/skills.test.ts` 新增 SKILL_NAMES registry 单测段(沿 v4 修订)
+
+**v6 修订**(codex 五轮 review B-NEW):`tests/core/templates/registry.test.ts:8/13` 硬断言 `SKILL_NAMES.length === 12` + 完整 12 项列表,`tests/smoke.test.ts:44` 同样硬断言 12 — Task 0 不同步改这两个文件,Task 2 Step 4 跑 `tests/core/templates/` 全目录必挂(`registry.test.ts` 在该目录内)。v5 漏列这两 modify。
 
 **Goal**:让 `pnpm eval:skill writing-skills` 不被 CLI 校验拒绝(`forge-eval/index.ts:34` 要求 `--skill` 值在 SKILL_NAMES 内)。
 
@@ -138,7 +142,45 @@ export const SKILL_NAMES = [
 ] as const;
 ```
 
-- [ ] **Step 3: 用单测验证 SKILL_NAMES 接受 writing-skills(parser-only,不跑 CLI)**
+- [ ] **Step 3: 同步更新 hardcoded 12-item 断言(v6 必修,沿 codex 五轮 review B-NEW)**
+
+`tests/core/templates/registry.test.ts:8` 断言 `toHaveLength(12)`,`:13` 断言完整 12 项数组;`tests/smoke.test.ts:44` 断言 `toHaveLength(12)`。Task 0 改 SKILL_NAMES 为 13 项后必须同步这三个 hardcoded:
+
+```typescript
+// tests/core/templates/registry.test.ts:8 改为 13
+expect(SKILL_NAMES).toHaveLength(13);
+expect(new Set(SKILL_NAMES).size).toBe(13);
+
+// tests/core/templates/registry.test.ts:13 完整数组末尾加一行
+expect(SKILL_NAMES).toEqual([
+  'using-forge',
+  'brainstorming',
+  'writing-plans',
+  'subagent-driven-development',
+  'test-driven-development',
+  'requesting-code-review',
+  'receiving-code-review',
+  'verification-before-completion',
+  'systematic-debugging',
+  'dispatching-parallel-agents',
+  'using-git-worktrees',
+  'finishing-a-development-branch',
+  'writing-skills', // 9i 新增
+]);
+
+// tests/smoke.test.ts:44 改为 13
+expect(SKILL_NAMES).toHaveLength(13);
+```
+
+跑确认:
+
+```bash
+pnpm vitest tests/core/templates/registry.test.ts tests/smoke.test.ts
+```
+
+预期:registry.test.ts 4 PASS + smoke.test.ts(`exports templates registry` it 那条)PASS。
+
+- [ ] **Step 4: 加 9i 新 registry 单测(parser-only,不跑 CLI)**
 
 加测试到 `tests/core/templates/skills.test.ts`(或新建 `tests/core/templates/registry.test.ts`):
 
@@ -167,12 +209,12 @@ pnpm vitest tests/core/templates/ --testNamePattern "SKILL_NAMES registry"
 
 预期:2 tests PASS。完整 `tests/core/templates/` 全量跑由 Task 2 完成后(SKILL.md + `pnpm build` reverse-sync 全到位)恢复绿。
 
-- [ ] **Step 4: format:check + commit**
+- [ ] **Step 5: format:check + commit**
 
 ```bash
 pnpm format:check
-git add src/core/templates/skills/index.ts tests/core/templates/skills.test.ts
-git commit -m "feat(9i): SKILL_NAMES registry 12→13 — add writing-skills"
+git add src/core/templates/skills/index.ts tests/core/templates/skills.test.ts tests/core/templates/registry.test.ts tests/smoke.test.ts
+git commit -m "feat(9i): SKILL_NAMES registry 12→13 — add writing-skills + sync hardcoded 12-item assertions"
 ```
 
 ---
@@ -209,12 +251,12 @@ Skill tool: superpowers:writing-skills
 
 ```yaml
 skill: writing-skills
-# bootstrap_exception: 本 skill 自身的初次开发使用 superpowers:writing-skills 完成
+# bootstrap_exception: 本 skill 自身的初次开发使用 superpowers 上游 writing-skills 完成
 # (sole self-bootstrapped skill in forge,沿 design §2.9.5)
 # 上述声明是文档元数据,forge-eval runner 忽略未识别 yaml 顶层 key
 description: |
   forge:writing-skills protocol — RED-GREEN-REFACTOR + frontmatter + forge-eval 集成,
-  确保新 forge skill 真的塑形 AI 行为。BOOTSTRAP EXCEPTION:本 skill 自身初次开发用 superpowers:writing-skills。
+  确保新 forge skill 真的塑形 AI 行为。BOOTSTRAP EXCEPTION:本 skill 自身初次开发用 superpowers 上游 writing-skills。
 model: claude-sonnet-4-6
 
 scenarios:
@@ -294,6 +336,8 @@ pnpm build
 预期:`scripts/copy-templates.mjs:46-51` 反向同步把 `skills/writing-skills/SKILL.md` 读出 → `src/core/templates/skills/writing-skills.md` 自动加 `forge:` 前缀 + 写入 + `dist/core/templates/skills/writing-skills.md` 同步。stdout 末尾应含 `✓ synced 13 skills (root → src/core/templates/ + dist/)`(从 12 升到 13)。
 
 - [ ] **Step 6: 跑完整 RED+GREEN eval 观察 RED leg score**
+
+**必须在 Git-Bash 中执行**(本脚本是 bash 语法,沿用户内存"Windows 11 + Git-Bash + D: 盘项目"。若在 PowerShell 执行,改用 `$LASTEXITCODE` + `if ($LASTEXITCODE -in @(0,1)) {...}` 语法,沿 v6 修订 Mi-1):
 
 ```bash
 # v5 修订(codex 四轮 review M-1):区分 exit 1(eval 跑完 runPass false,预期)与 exit 2(infra fail,真错误)
@@ -964,7 +1008,13 @@ design §2.9.4 提出在 yaml `scenarios:` 数组里分类标 `phase: red | gree
 
 - **路径 A(推荐)**:**修订 design §2.9.4**(轻量改动,~0.2 工日) — 把 design 中的 "在 yaml `scenarios:` 数组里分类标 `phase: red | green`" 改为 "走现有 runner 双轨设计 — 每个 scenario 自动 RED + GREEN 配对"。承认现有 runner 是 v1.0 事实;phase / expected_judge_score_max 等字段标为 v1.1+ 增强目标。**此路径推荐**,因为 v1.0 实际 v0.1 forge-eval 已运作 12 skill × 29 case 双轨设计,没必要为字面对齐改 runner。
 - **路径 B**:**新开 sub-plan(假设 9k)扩展 runner**(~3-4 工日) — 改 `forge-eval/runner.ts` 读 `phase` 字段,RED-only / GREEN-only scenarios 各跑一次;改 `forge-eval/types.ts` 加新字段;改 `forge-eval/compare.ts` 处理新输入;现有 12 skill yaml 兼容(老 scenarios 默认 phase 由 withSkill 推断)
-- **路径 C**:**v1.0 显式承认不实施 phase 字段,推迟到 v1.1+**(~0.1 工日) — **必须同时**:(1) 在 `docs/specs/2026-05-10-v1.0-fusion-completion-design.md` §2.9.4 顶部插入显式段落 "v1.0 NOT IMPLEMENTED: phase / expected_judge_score_max / expected_violations / bootstrap_skill 字段是 v1.1+ 目标,v1.0 实施走 forge-eval runner 双轨设计(沿 forge-eval/runner.ts:106-131)" — design 文档自身承认不一致 + (2) 在 CHANGELOG / release-notes 标注同样信息。**仅改 CHANGELOG 不改 design 不构成真正 reconcile**(沿 codex 四轮 review M-3 修订)
+- **路径 C**:**v1.0 显式承认不实施 phase 字段,推迟到 v1.1+**(~0.3 工日,v6 修订上调) — **必须同时改三处**(沿 codex 五轮 review M-C):
+  1. `docs/specs/2026-05-10-v1.0-fusion-completion-design.md` §2.9.4 顶部插入显式段落 "v1.0 NOT IMPLEMENTED: phase / expected_judge_score_max / expected_violations / bootstrap_skill 字段是 v1.1+ 目标,v1.0 实施走 forge-eval runner 双轨设计(沿 forge-eval/runner.ts:106-131)"
+  2. **同步改 design §2.9.4 line 1573-1577**:把"必须配 phase: red | green"改为"现有 runner 双轨,phase 字段是 v1.1+ 目标";`expected_judge_score_max` / `expected_violations` 标 v1.1+ optional
+  3. **同步改 design §2.9.7 line 1620-1624 实施清单**:删除 "phase: red 标记 / phase: green 标记" + "expected_violations / expected_judge_score_max" 强制项,标"v1.1+";否则 design 内部 §2.9.4 顶部说不实施但 §2.9.7 仍要求 → 自相矛盾
+  4. CHANGELOG / release-notes 标注同样信息
+
+  **仅改 CHANGELOG / design 顶部不算真正 reconcile**(沿 codex 五轮 review M-C — design §2.9.7 line 1620-1624 内部 reference 必须同步)
 
 **9z release 前必须三选一**(不是 TODO,是 release blocker)。**owner 指定**:路径 A / 路径 C 由 9z owner 完成;路径 B 需新开 sub-plan(由 v1.0 master plan owner 决定是否引入)。本 plan-9i 自身不处理。
 
@@ -1072,15 +1122,21 @@ v3 plan 后 codex 三轮 review 又发现 2 BLOCKER + 4 MAJOR + 1 MINOR:
 | **Task 4**(forge-eval-integration.md) | fresh subagent(独立 markdown) | `forge:subagent-driven-development` |
 | **Task 6**(using-forge + tests) | fresh subagent(独立) | `forge:subagent-driven-development` |
 
-#### 执行顺序(v5 修订,codex 四轮 review B-1)
+#### 执行顺序(v5 修订,codex 四轮 review B-1;v6 加 barrier,codex 五轮 M-A)
 
-**Task 0 必须最先**(SKILL_NAMES 不含 writing-skills 时 `pnpm eval:skill writing-skills` 被 CLI 拒绝,沿 `forge-eval/index.ts:34` + plan §0 总览串行约束 line 55):
+**Task 0 必须最先 + 显式 barrier**(SKILL_NAMES 不含 writing-skills 时 `pnpm eval:skill writing-skills` 被 CLI 拒绝,沿 `forge-eval/index.ts:34` + plan §0 总览串行约束 line 55):
 
 1. **Task 0 派 fresh subagent**(SKILL_NAMES 扩展 + 单测)— 必须先跑
-2. 主代理 inline:Task 1 → Task 2(同一 session,bootstrap exception 内 invoke superpowers 上游 writing-skills 后连续走 RED → SKILL.md 写完)
-3. Task 3 / Task 4 派 fresh subagents(可并行,无 cross-task 依赖)
-4. 主代理 inline:Task 5(继续 bootstrap exception 链,可能回改 Task 2 SKILL.md)
-5. Task 6 派 fresh subagent
+2. **BARRIER**(v6 修订,sync block):**主代理 wait Task 0 subagent 返回 + commit 落盘**,通过运行以下命令验证 Task 0 完成:
+   ```bash
+   git log -1 --pretty=%s | grep -q "SKILL_NAMES registry 12→13"  # 确认 Task 0 commit 已落
+   grep -q "'writing-skills'" src/core/templates/skills/index.ts    # 确认 SKILL_NAMES 含 writing-skills
+   ```
+   两命令任一非 0 退出 → Task 0 未完成 → 等待。**禁止在 Task 0 commit 未落盘前进入 Task 1**(否则 `pnpm eval:skill writing-skills` 在 Task 1 Step 6 必挂)。
+3. 主代理 inline:Task 1 → Task 2(同一 session,bootstrap exception 内 invoke superpowers 上游 writing-skills 后连续走 RED → SKILL.md 写完)
+4. Task 3 / Task 4 派 fresh subagents(可并行,无 cross-task 依赖)
+5. 主代理 inline:Task 5(继续 bootstrap exception 链,可能回改 Task 2 SKILL.md)
+6. Task 6 派 fresh subagent
 
 主代理 inline 执行 Task 1+2+5 的好处:
 - 不需要"跨 task 持久化 subagent context"的非标准机制
@@ -1126,6 +1182,13 @@ v3 plan 后 codex 三轮 review 又发现 2 BLOCKER + 4 MAJOR + 1 MINOR:
   - **M-4**(Task 2 未跑 build,副本 stale):v5 修:Task 2 Step 4 改"Reverse-sync + Commit",必跑 pnpm build + stage src/core/templates/skills/writing-skills.md + 跑 tests/core/templates/ 验证
   - **Mi-1**(`head -3` 非断言):v5 修:Task 5 Step 3 改 `grep -q "^name: forge:writing-skills$" ... || exit 1` 自动断言
   - **P50 工日**:维持 3.0(v5 修订全是文档细节修正,不增 task)
+- **v6**(2026-05-11):codex **六轮** adversarial review 全采纳(独立对照 tests/core/templates/registry.test.ts / tests/smoke.test.ts / docs/specs §2.9.7 line 1620-1624 实证验证):
+  - **B-NEW**(Task 0 漏改 hardcoded 12-item 断言):registry.test.ts:8/13 + smoke.test.ts:44 硬断言 12,Task 0 改 SKILL_NAMES 为 13 后 Task 2 Step 4 跑 tests/core/templates/ 必挂。v6 修:Task 0 Files 列表加 registry.test.ts + smoke.test.ts;Step 3 同步改三个 hardcoded 断言(12→13 + 完整数组加 'writing-skills');Step 5 commit stage 加这两文件
+  - **M-A**(§10 Task 0 → Task 1 缺 barrier):v6 修:§10 加 BARRIER step,用 git log grep + grep SKILL_NAMES 双断言确认 Task 0 commit 落盘后才进 Task 1
+  - **M-B 部分**(yaml line 212/217 字面):清掉 yaml 顶部注释 + description 内 `superpowers:writing-skills` 字面(改"superpowers 上游 writing-skills");rubric line 240 保留 anti-pattern 描述(LLM 应理解为禁止)
+  - **M-C**(路径 C 连锁未估全):design §2.9.7 line 1620-1624 实施清单仍 reference phase 字段,路径 C 工日 0.1→0.3,加同步改 §2.9.4 line 1573-1577 + §2.9.7 line 1620-1624 两处
+  - **Mi-1**(PowerShell 兼容):Task 1 Step 6 加注"必须在 Git-Bash 执行,PowerShell 用 `$LASTEXITCODE`"
+  - **P50 工日**:维持 3.0(v6 修订全是文档细节修正,不增 task)
 
 #### 8.4.10 v5 修订(codex 四轮 review)
 

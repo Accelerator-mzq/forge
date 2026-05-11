@@ -63,7 +63,7 @@
 | 5 | `commands/verify.md` slash 重构 + verify_findings 写入 | 0.5 | `commands/verify.md` 加 §"三维度分析"段调 skill + `.verify-passed` YAML 输出 verify_findings 数组(自动产 CRITICAL + LLM 判定 WARNING/SUGGESTION 合并;附 finding 写入示例与 YAML schema 引用) |
 | 6 | archive.ts fence 三级 × resolved × ack 矩阵 + finding_hash 篡改拒签 + **ack-log 一致性** | **1.5**(v2 B-4 修订 +0.3:加 ack-log + pending-acks 一致性 helper;v2 M-1 修订 +0.2:对齐现有 archive exit code 到 master §3.12.3 freeze) | `src/cli/commands/archive.ts` 加 `validateVerifyFindingsFence`(三级 × resolved × ack 9 分支)+ **`validateAckLogConsistency`**(沿 design line 496-500:marker ack ↔ ack-log.jsonl 条目对齐 + pending-acks/ 残留拒签 + finding_hash 一致性)+ automated=true 不可降级(finding_hash 重算比对)+ downgrade ack 校验 + 现有 evidence/hash 校验 exit code 从 2 改 1 + tests(9 个分支 + 篡改 + downgrade + ack-log 一致性 + pending-acks 残留)|
 | 7 | GREEN leg 跑通 + REFACTOR loophole | 0.5 | 跑 `pnpm eval:skill verifying-three-dimensions` 验证 delta ≥ 1.5;若 GREEN < 6.5 回改 Task 2 SKILL.md 加红旗 plug(反向依赖 Task 2);REFACTOR plug ≥ 2 个观察到的借口 |
-| 8 | 集成 e2e 测试 + 全本地 verify | **0.6**(v2 M-4 修订 +0.2:完整列 9 分支 + downgrade + hash tamper + ack-log 残留 + AI 直填 ack 但无 ack-log 条目 共 12 fixture/test name) | `tests/integration/verify-findings-end-to-end.test.ts` 完整 12 个 e2e case(无 placeholder ellipsis,沿 v2 M-4 修订) + fixture **完整列**:9 fence 分支 × 3(CRITICAL/WARNING/SUGGESTION × resolved/no-ack/ack)+ downgrade × 2(缺 ack / 完整)+ hash tamper × 1 + ack-log 缺条目 × 1 + pending-acks 残留 × 1 = 13 fixture;`pnpm typecheck && lint && format:check && build && test` 全绿 |
+| 8 | 集成 e2e 测试 + 全本地 verify | **0.6**(v2 M-4 修订 +0.2:完整列 9 分支 + downgrade + hash tamper + ack-log 残留 + AI 直填 ack 但无 ack-log 条目 共 13 fixture/test name;v11 MINOR-2 修订:数字 12→13 全口径对齐) | `tests/integration/verify-findings-end-to-end.test.ts` 完整 13 个 e2e case(无 placeholder ellipsis,沿 v2 M-4 修订) + fixture **完整列**:9 fence 分支 × 3(CRITICAL/WARNING/SUGGESTION × resolved/no-ack/ack)+ downgrade × 2(缺 ack / 完整)+ hash tamper × 1 + ack-log 缺条目 × 1 + pending-acks 残留 × 1 = 13 fixture;`pnpm typecheck && lint && format:check && build && test` 全绿 |
 
 **串行约束 + 反向依赖**:
 - Task 0(SKILL_NAMES)必须先(否则 Task 1 跑 `pnpm eval:skill verifying-three-dimensions` CLI 拒绝,沿 `forge-eval/index.ts:34` 注册检查)
@@ -121,7 +121,7 @@ tests/smoke.test.ts                                    ← Task 0:hardcoded 13-i
 src/core/canonical-json.ts                  ← 9a 已立 JCS;本 plan 仅调 canonicalHash 不改实现
 src/core/validate/finding-hash.ts           ← 9a 已立 computeFindingHash / extractHashPayload;本 plan reference
 src/core/schemas/severity.ts                ← 9a 已立 Finding / FindingHashPayload;本 plan reference
-src/core/validate/candidate-validators.ts   ← 9a 已立 candidate 验证算法骨架(stub);**本 plan 不调用骨架**(沿 v11 MINOR-1 修订),改新建 coverage-gap.ts + test-failure-stub.ts 直接在 change.ts 产 Finding 走 ValidationError → CLI 路径(沿 §11.1bis 6 类归属:9a framework 留 evidence_missing 等 future 接入)
+src/core/validate/candidate-validators.ts   ← 9a 已立 candidate 验证算法骨架(stub);**本 plan 不调用骨架**(沿 v11 MINOR-1 修订),改新建 coverage-gap.ts + test-failure-stub.ts 直接在 change.ts 产 Finding 走 ValidationError → CLI 路径(沿 §11.1bis 6 类归属,9a framework 留待 v1.1 接入)
 src/core/archive/                           ← 9e 改 transaction;本 plan 在 archive.ts CLI 加 fence,不动 transaction 核心
 src/cli/commands/ack.ts                     ← 9a 已立 propose/confirm/reject;本 plan 仅产生需 ack 的 finding,ack CLI 不变
 src/cli/commands/evidence.ts                ← 9a 已立 record-tdd/record-verify/record-review;本 plan 不动(9g 加 process_evidence 集成)
@@ -770,7 +770,7 @@ describe('verify_findings marker schema (plan-9d Task 3)', () => {
         test_command: 'pnpm test',
         test_file: 'tests/auth.test.ts',
         log_path: './.evidence/test.log',
-        log_hash: 'sha256:' + 'c'.repeat(64),
+        log_hash: realLogHash, // v12 REG-E2E-LOGHASH-001:真算
         pass: true,
       },
     ],
@@ -933,8 +933,18 @@ export interface VerifyFinding extends Finding {
 
 ```typescript
 // src/core/validate/marker-schema.ts
-// 在文件顶部 import:
+// v12 REG-IMPORT-001 修订:现有 marker-schema.ts:18 已有 local const SEVERITY_VALUES = new Set(['S','C','L'])
+// 用于 review_outcomes.severity 校验。引入 9a Finding severity(CRITICAL/WARNING/SUGGESTION)
+// 会撞名,需 rename 一方避免重复标识符冲突。
+//
+// 实施 step:
+//   1. rename marker-schema.ts:18 local const SEVERITY_VALUES → REVIEW_OUTCOME_SEVERITY_CODES
+//      (该 Set 装 'S' / 'C' / 'L' review 简码,语义独立于 9a Severity enum;
+//       现 marker-schema.ts:302 引用 SEVERITY_VALUES.has(o.severity) 同步改名 REVIEW_OUTCOME_SEVERITY_CODES.has)
+//   2. import 9a 三级 enum + isSeverity:
 import { SEVERITY_VALUES, isSeverity } from '../schemas/severity.js';
+// 注:rename 现有 local const + import 9a 后,marker-schema.ts 顶层 SEVERITY_VALUES 即指 9a 三级 enum,
+// 用于本 plan checkVerifyFindingsArray 中校验 verify_findings[i].severity
 
 // 在 line 51 附近,forge-verify/v1 分支末尾加:
 if (schema === 'forge-verify/v1') {
@@ -3066,6 +3076,7 @@ import { stringify as yamlStringify } from 'yaml';
 import { computeFindingHash } from '../../../src/core/validate/finding-hash.js';
 import { computeContentHash } from '../../../src/core/hash/content.js';
 import { computeTasksHash } from '../../../src/core/hash/tasks.js';
+import { computeLogHash } from '../../../src/core/hash/log.js'; // v12 REG-E2E-LOGHASH-001 修订
 import type { Finding } from '../../../src/core/schemas/severity.js';
 
 export interface FixtureOpts {
@@ -3170,7 +3181,7 @@ export async function buildFixture(rootDir: string, opts: FixtureOpts): Promise<
         test_command: 'pnpm test',
         test_file: 'tests/x.test.ts',
         log_path: './.evidence/test.log',
-        log_hash: 'sha256:' + 'c'.repeat(64),
+        log_hash: realLogHash, // v12 REG-E2E-LOGHASH-001:真算
         pass: true,
       },
     ],
@@ -3192,8 +3203,13 @@ export async function buildFixture(rootDir: string, opts: FixtureOpts): Promise<
     }),
   );
 
-  // 5. .evidence/test.log
-  await writeFile(join(changeDir, '.evidence', 'test.log'), 'PASS 17/17\n');
+  // 5. .evidence/test.log + 真算 log_hash(v12 REG-E2E-LOGHASH-001 修订)
+  // 旧版用 hardcoded 'sha256:'+'c'.repeat(64) 假值,但 marker-integrity.ts:58-59 validateEvidence
+  // 会重算 computeLogHash 并与 marker expectedHash 比对,假 hash 会让 archive 在 evidence 校验提前失败
+  // 测不到 verify_findings fence;改为真算
+  const logPath = join(changeDir, '.evidence', 'test.log');
+  await writeFile(logPath, 'PASS 17/17\n');
+  const realLogHash = await computeLogHash(logPath);
 
   // 6. .evidence/ack-log.jsonl(若有 ack 或 downgrade)
   // ackLogMatch:'matching' 完整匹配;'missing' 不写 ack-log(留空);'hash-mismatch' user 对但 hash 篡改;'user-mismatch' hash 对但 user 不匹配(v3 m-1)
@@ -3253,11 +3269,11 @@ export async function buildFixture(rootDir: string, opts: FixtureOpts): Promise<
 }
 ```
 
-- [ ] **Step 2: 写 `tests/integration/verify-findings-end-to-end.test.ts`**(12 完整 e2e case)
+- [ ] **Step 2: 写 `tests/integration/verify-findings-end-to-end.test.ts`**(13 完整 e2e case)
 
 ```typescript
-// tests/integration/verify-findings-end-to-end.test.ts — plan-9d Task 8 v2 M-4
-// 完整 12 e2e case,无 ellipsis;每个 case 给完整 fixture 构造 + archive run + 断言
+// tests/integration/verify-findings-end-to-end.test.ts — plan-9d Task 8 v2 M-4 / v11 MINOR-2
+// 完整 13 e2e case,无 ellipsis;每个 case 给完整 fixture 构造 + archive run + 断言
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdir, rm } from 'node:fs/promises';
@@ -3693,3 +3709,12 @@ design §2.3.3 表 line 443-448 列了 6 类 `candidate_type` enum,工程实施�
   - **MINOR-2**:Task 8 测试数量 12 vs 13 表实际 13 case 但文字写 12。修法:全改 13。
   - **工日**:纯文档对齐;**P50 / P90 不变**(7.4 / 9.1)
   - **收敛状态**:active 段 candidate_type 描述全口径一致 + Task 8 数字对齐 + §13 self-summary 与实际一致。**plan-9d v11 达到 ≤ NIT 收敛阈值**。
+- **v12**(2026-05-11):codex 十一轮 fresh review 发现 v11 引入 4 议题(2 MAJOR + 2 MINOR;无 BLOCKER 无 NIT)— 全采纳
+  - **2 MAJOR**:
+    - **REG-IMPORT-001 marker-schema.ts:18 SEVERITY_VALUES 重复标识符冲突**:plan Task 3 加 `import { SEVERITY_VALUES, isSeverity }` 时未察 marker-schema.ts:18 已有 local const `SEVERITY_VALUES = new Set(['S','C','L'])`(review_outcomes.severity 简码) — 同模块重复声明会 compile error。**修法**:Task 3 加 step 先 rename marker-schema.ts:18 local const → `REVIEW_OUTCOME_SEVERITY_CODES`(语义独立于 9a Severity enum),line 302 引用同步;然后再 import 9a SEVERITY_VALUES。
+    - **REG-E2E-LOGHASH-001 buildFixture log_hash 假值会被 archive evidence 校验先死**:plan Task 8 buildFixture 用 `'sha256:'+'c'.repeat(64)` 假值,但 marker-integrity.ts:58-59 validateEvidence 会重算 `computeLogHash(absLogPath)` 比对 marker expectedHash → fixture 在 evidence 校验提前失败,测不到 verify_findings fence。**修法**:buildFixture 加 `import { computeLogHash } from '../../../src/core/hash/log.js'`;test.log 写入后调 `const realLogHash = await computeLogHash(logPath)` 写到 marker。
+  - **2 MINOR**:
+    - **TASK8-COUNT line 66 / 3256 / 3260 残留 "12 e2e"**:v11 改了 line 3023/3026/3032 但漏 line 66 总览表(`12 fixture/test name / 12 个 e2e case`)+ Step 2 描述(`12 完整 e2e case`)。**修法**:全改 13。
+    - **EM-SCAN line 124 残留 evidence_missing**:v11 改 candidate-validators 边界描述时带入"9a framework 留 evidence_missing 等 future 接入"。**修法**:改"9a framework 留待 v1.1 接入"(不提具体 candidate_type)。
+  - **工日**:纯文档对齐 + import 改 + computeLogHash 接入,无新代码逻辑;**P50 / P90 不变**(7.4 / 9.1)
+  - **收敛状态**:Task 3 import 冲突明确化 rename step;Task 8 fixture log_hash 真算路径就位;Task 8 数字 13 全口径对齐;line 124 evidence_missing STRAY 清。**plan-9d v12 达到 ≤ NIT 收敛阈值**。

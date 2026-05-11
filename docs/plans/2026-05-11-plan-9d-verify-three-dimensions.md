@@ -3549,7 +3549,7 @@ design §2.3.3 表 line 443-448 列了 6 类 `candidate_type` enum,工程实施�
 预测 codex adversarial review 可能提出的议题(预先思考,实施时反馈再修订):
 
 1. **VerifyFinding extends Finding 扩展路径**(v2 m-1 修订后已采纳):future 若需 verify-specific 字段(如 `requirement_id` 显式关联 spec 章节),按 superset additive 原则在 interface 内加 optional 字段(沿 9a §3.12.1 freeze)。**v3 已合规**:`VerifyFinding extends Finding {}` 已就位。
-2. **validate.ts 三类 candidate 中,test_failure 与 tasks fake-completion 似乎是 verify slash 阶段才能判**:本 plan v1 把这两类放到 slash 阶段产(Task 5 已注明),只在 validate 层产 evidence_missing 类 finding。若 review 要求把 test_failure 也下沉到 validate CLI,需扩 validate CLI 跑测试 — 这是大改,留 9d v2 评估。
+2. **validate.ts 自动产 CRITICAL 范围**(v9 历史风险,v3-v8 已 resolved):本 plan v1 倾向把 test_failure 与 tasks fake-completion 放到 slash 阶段产;v2 B-2 修订后明确 validate 层产 `spec-files-missing + coverage_gap` 两类 CRITICAL Finding,test_failure 走 stub warning(9g 完成后接 reporter),fake_completion 在 verify slash 阶段 AI 调 skill 跑 git diff 产 — 沿 §11.1bis 6 类归属表(沿 v9 codex review 修订:旧表述 evidence_missing 已统一改 coverage_gap)。
 3. **forge-eval scenario judge_rubric 是否过细**:RED scenario 期望 ≤ 5 + GREEN ≥ 6.5 + delta ≥ 1.5 三阈值同时满足,可能在 LLM-judge 噪声下不稳定。**应对**:沿 forge-eval 默认阈值,Task 7 REFACTOR 时若 GREEN avg 在 6.0-6.5 边缘可微调 judge_rubric 评分细节,但不放宽 delta 1.5 硬约束。
 4. **archive fence 拒签 exit code**:本 plan Task 6 用 exit 1(business-fail,沿 master §3.12.3),与现有 archive.ts process.exit(2) (fs/lock 类) 区分。**预期 OK**,但 review 可能要求 archive.ts 现有路径也按四语义槽对齐 — 那是 §3.12.3 后续 sub-plan 工作,本 plan 不重构现有 archive exit code。
 
@@ -3681,3 +3681,9 @@ design §2.3.3 表 line 443-448 列了 6 类 `candidate_type` enum,工程实施�
   - **0 NIT**:v8 N-1 已收敛
   - **工日**:纯文档对齐,无新代码;**P50 / P90 不变**(7.4 / 9.1)
   - **收敛状态**:无 BLOCKER / 无 MAJOR / 0 MINOR / 0 NIT 待处理 — **plan-9d v9 达到 ≤ NIT 收敛阈值**(v8 是 PARTIAL,v9 完成全文 evidence_missing → coverage_gap 同步;active 段全干净,仅修订记录 §13 段保留历史 v1-v8 描述)
+- **v10**(2026-05-11):codex 九轮 review 发现 §11.4 line 3552 风险段第 2 项仍写 "只在 validate 层产 evidence_missing 类 finding" 旧 v1 风险描述 — 1 MINOR 全采纳
+  - **1 MINOR**:
+    - **M-1 §11.4 风险段第 2 项 v1 旧描述**:旧文字反映 v1 初稿时的 candidate 归属猜测,v2 B-2 修订后 validate 实际产 spec-files-missing + coverage_gap 两类。修法:整段重写为"v9 历史风险,v3-v8 已 resolved" + 沿 §11.1bis 列实际归属。
+  - **0 NIT**
+  - **工日**:纯文档对齐;**P50 / P90 不变**(7.4 / 9.1)
+  - **收敛状态**:全文 `evidence_missing` 残留扫:active 段 0 处(line 36/658 = DoD 正确归属;line 524 = 显式排除;line 556/623 = Example 注释语义对比;line 687/2070/3536 = 已 v9 修订;line 3521 = §11.1bis 真实语义定义);§13 修订记录历史 v3+v8+v9+v10 段保留(合法历史)。**plan-9d v10 达到 ≤ NIT 收敛阈值,active 段 candidate_type 表述全局口径一致**。

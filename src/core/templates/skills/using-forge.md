@@ -139,6 +139,18 @@ forge 在三 harness 下的协议支持:
 | `/forge:verify`                                    | 跑 forge validate + 写 verify-passed YAML | forge:verification-before-completion                                                                                                           |
 | `/forge:archive`                                   | 归档 change 到 forge/changes/archive/     | (CLI `forge archive`,无 skill 链)                                                                                                              |
 
+## meta-development entry — writing-skills
+
+forge 框架自身的 skill 开发流程(用户主动 invoke,不走 slash command 路径):
+
+| 触发                                                  | 调起 skill             |
+| ----------------------------------------------------- | ---------------------- |
+| 创建一个新 forge skill(`skills/<name>/SKILL.md`)      | `forge:writing-skills` |
+| 修订一个 forge skill 的 behavior(不是 typo)           | `forge:writing-skills` |
+| 跑 forge-eval baseline 重跑发现 skill 失效 → REFACTOR | `forge:writing-skills` |
+
+`forge:writing-skills` 自身的初次开发使用 superpowers 上游 writing-skills 完成(bootstrap exception,沿 design §2.9.5);后续修订使用 forge:writing-skills 自身。详 `skills/writing-skills/SKILL.md`。
+
 ## forge 红旗清单(覆盖 superpowers 红旗清单的 forge 专属补充)
 
 除了 superpowers 通用红旗,forge 多一条:

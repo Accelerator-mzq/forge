@@ -1466,8 +1466,15 @@ export function extractKeywords(title: string): string[] {
 async function grepCountInDir(rootDir: string, keyword: string): Promise<number> {
   const SKIP_BASENAMES = new Set(['node_modules', 'dist', 'forge', 'coverage', 'build']);
   const SKIP_REL_PATHS = new Set([
+    // v5 REG-3 修订:跳整个 tests/ 子树 — 测试文件中的 requirement 关键词不算 codebase 实施证据
+    'tests',
     'tests/fixtures',
     'tests/integration',
+    'tests/core',
+    'tests/cli',
+    'tests/skills',
+    'tests/eval',
+    'tests/forge-eval',
     'docs',
     'docs/plans',
     'docs/specs',
@@ -1896,11 +1903,32 @@ function validateFindingHashPayload(p: unknown): FindingHashPayload | null {
   if (typeof o.automated !== 'boolean') return null;
   if (typeof o.evidence !== 'string') return null;
   if (typeof o.recommendation !== 'string') return null;
-  return o as unknown as FindingHashPayload;
+  // v5 REG-2 修订:显式构造干净 8 字段 object,丢弃 extra keys
+  // 防止 AI 传完整 Finding JSON(含 id/resolved/finding_hash 等)时,
+  // 输出 hash 含 extra keys → 与 archive extractHashPayload 8 字段 hash 不一致 → 系统性 hash 不可重现
+  return {
+    content_hash: o.content_hash,
+    git_head: o.git_head,
+    dimension: o.dimension,
+    check_type: o.check_type,
+    severity: o.severity,
+    automated: o.automated,
+    evidence: o.evidence,
+    recommendation: o.recommendation,
+  };
 }
 ```
 
-`src/cli/index.ts` 注册 `buildFindingCommand()`(沿 ack / evidence / scope 同模式)。
+`src/cli/index.ts` 注册 `buildFindingCommand()`(v5 NEW-1 修订:给出具体 import + addCommand 代码):
+
+```typescript
+// src/cli/index.ts(v5 NEW-1 修订:加 finding 命令注册)
+// 在 import 段加(沿 ack / evidence / scope 同 convention):
+import { buildFindingCommand } from './commands/finding.js';
+
+// 在 buildCli() 函数体 program.addCommand 调用段加(沿现有 ack/evidence/scope 注册位置):
+program.addCommand(buildFindingCommand());
+```
 
 - [ ] **Step 13: 写 finding-hash helper 测试**
 
@@ -3526,7 +3554,7 @@ design §2.3.3 表 line 443-448 列了 6 类 `candidate_type` enum,工程实施�
 
 ### 12.3 Type consistency
 
-- `VerifyFinding`(Task 3 定义)= `Finding`(9a `src/core/schemas/severity.ts`)别名 — 全 plan 字段引用一致
+- `VerifyFinding`(Task 3 定义)`extends Finding {}`(9a `src/core/schemas/severity.ts`)空 interface — v2 m-1 修订后留 verify-only optional 字段扩展位;全 plan 字段引用一致
 - `FindingHashPayload`(9a 8 字段)在 Task 4 `buildAutoCriticalFinding` + Task 6 `validateVerifyFindingsFence` 一致使用
 - `computeFindingHash` / `extractHashPayload`(9a)签名在 Task 4 + Task 6 一致
 - 字段大小写一致:`severity_acked_by` / `severity_acked_at` / `downgraded_from` / `downgrade_acked_by` / `downgrade_rationale`(沿 9a)
@@ -3582,3 +3610,12 @@ design §2.3.3 表 line 443-448 列了 6 类 `candidate_type` enum,工程实施�
     - **B-3(NIT 残留误诊)**:Codex 说 plan:55 顶部汇总表残留 "Example 5 candidate_type=coverage_gap",实际 v3 已改为 "Example 5 candidate_type 不填(沿 v3 B-3 边界 case)" — codex 误读 plan:55 行内容。不需修。
     - **D-2(新 NIT)**:`verify_findings` 数组内 `finding[].id` 唯一性未校验(可重复)— 修法:`marker-schema.ts checkVerifyFindingsArray` 加 `seenIds: Set<number>` 去重检测。
   - **工日**:Task 4 加 finding-hash helper CLI + SKIP_DIRS 路径正则 + CLI warnings 输出 + 6 类归属表 + finding id 唯一性 合计 +0.3 工日;**P50 7.0 → 7.3 / P90 8.7 → 9.0**(master P90 7 + 29% buffer;v0.4 plan-8 实际经历 60+ 修订,工日浮动 ≥ 30% 是历史经验,可接受)
+- **v5**(2026-05-11):codex 四轮 adversarial review — codex 出现**系统性误判**(把 plan 文件中的代码块当成"应该已存在的源码"判 PARTIAL/FAILED 因 "file not found",违反 plan vs implementation 区别)。剔除误判后,**真议题 4 个**(3 MAJOR + 1 NIT)全采纳:
+  - **3 MAJOR**(plan 内部 bug,不依赖源码 audit):
+    - **REG-2 finding-hash helper hash extra fields**:`validateFindingHashPayload` 返回 `o as FindingHashPayload` 透传 object — 若 AI 传完整 Finding JSON(含 id/resolved/finding_hash 等),JCS hash 会含 extra keys,与 archive `extractHashPayload` 8 字段 hash 不一致 → 系统性 hash 不可重现。**修法**:helper 显式构造 8 字段干净 object,丢弃 extra keys。
+    - **REG-3 SKIP_REL_PATHS 漏 tests/core, tests/cli**:v4 修订只 skip tests/fixtures + tests/integration,其他 tests/* 子树仍扫 — 测试文件中 requirement 关键词会被误算为实施证据。**修法**:扩 SKIP_REL_PATHS 含 `tests` 顶层 + tests/{core,cli,skills,eval,forge-eval}。
+    - **NEW-1 src/cli/index.ts 注册 verbiage only**:v4 只说"注册 `buildFindingCommand()`"没给具体代码。**修法**:补 `import { buildFindingCommand } from './commands/finding.js'` + `program.addCommand(buildFindingCommand())` 具体 patch。
+  - **1 NIT**:
+    - **NEW-2 §11.1 vs §12.3 文字矛盾**:§11.1 已写 `VerifyFinding extends Finding {}`,§12.3 仍写"别名"。**修法**:§12.3 同步 extends interface 文字。
+  - **不采纳的 codex 误判 7 项**:R-3/R-4/R-5/D-1/D-2/D-3/D-4 状态判 PARTIAL/FAILED 因为 "file not found in src/" — codex 把 plan 文件中的代码块当成"应该已存在的源码"。**这违反了 plan vs implementation 区别** — plan 是 design phase spec,源码在 executing-plans 阶段才落地(沿 master plan §3 line 224 lazy 策略 + writing-plans skill 'Bite-Sized Task Granularity' — plan 给的是"实施清单",不是"已实施代码")。本 plan v5 后所有 source-file-existence 类议题在 executing-plans 阶段才能验收。
+  - **工日**:helper 8 字段干净构造 + SKIP_REL_PATHS 扩展 + CLI 注册具体代码 + §12.3 文字同步 合计 +0.05 工日;**P50 7.3 → 7.35 / P90 9.0 → 9.05**(master P90 7 + 29% buffer)

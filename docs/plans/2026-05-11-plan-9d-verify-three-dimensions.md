@@ -4,7 +4,7 @@
 
 **Goal**:落地 `forge:verifying-three-dimensions` skill — 把 OpenSpec verify-change.ts 三维度(Completeness / Correctness / Coherence)分析方法论 forge 化,补 forge v0.4 verify 退化为"测试 pass + log_hash"的能力缺口(沿 design §2.2 全节)。同时落地 `.verify-passed` marker 的 `verify_findings` 数组 schema 扩展、`forge validate` 自动产 CRITICAL findings + `finding_hash` 输出、`commands/verify.md` 三维度协议重构、`forge archive` fence 三级 × resolved × ack 矩阵校验 — 让 verify 阶段的发现既能被 AI 用 skill 系统化产出,又能被工具反向加固。
 
-**Architecture**:四层加固。(1) **行为塑造层**:新 skill `skills/verifying-three-dimensions/SKILL.md`(~250-400 行,4-6 标定 example,引用 9b `skills/_shared/scope-category-guidance.md` 区分指引)+ `forge-eval/scenarios/verifying-three-dimensions.yaml`(RED + GREEN scenarios)。(2) **数据形态层**:`.verify-passed` / `.verify-failed` marker schema 加 `verify_findings` 数组字段(superset additive,老 marker 缺等价 `[]`,沿 design §2.2.5);marker-schema.ts 加 verify_findings 数组校验(每项含 §3.12.1 Finding 8 字段 + ack 字段)。(3) **CLI 自动检层**:`src/cli/commands/validate.ts` 升级 — 把 `validateChange` 现有自动校验(tasks fake_completions / spec/codebase evidence_missing / test_failure)的 ValidationError 转换为 `Finding` 数组并产 `finding_hash`(JCS,沿 9a `computeFindingHash`),供 verify slash command 写入 marker。(4) **Fence 校验层**:`src/cli/commands/archive.ts` 扩展 — verify_findings 三级 fence(`automated=true` CRITICAL 不可降级 / WARNING 缺 ack 拒签 / SUGGESTION 通过)+ `finding_hash` 重算比对(篡改拒签)+ downgrade ack 校验(沿 §2.2.4)。
+**Architecture**:四层加固。(1) **行为塑造层**:新 skill `skills/verifying-three-dimensions/SKILL.md`(~250-400 行,4-6 标定 example,引用 9b `skills/_shared/scope-category-guidance.md` 区分指引)+ `forge-eval/scenarios/verifying-three-dimensions.yaml`(RED + GREEN scenarios)。(2) **数据形态层**:`.verify-passed` / `.verify-failed` marker schema 加 `verify_findings` 数组字段(superset additive,老 marker 缺等价 `[]`,沿 design §2.2.5);marker-schema.ts 加 verify_findings 数组校验(每项含 §3.12.1 Finding 8 字段 + ack 字段)。(3) **CLI 自动检层**(v8 M-1 修订:口径与 §11.1bis 一致):`src/cli/commands/validate.ts` 升级 — 自动产 `spec-files-missing`(specs/ 空)+ `coverage_gap`(spec Requirement grep 0 命中)两类 CRITICAL Finding + `finding_hash`(JCS,沿 9a `computeFindingHash`);`test_failure` 走 stub warning(9g 完成后接 reporter parser);`hash_mismatch` 在 archive.ts 现有路径处理;`fake_completion` 在 verify slash 阶段 AI 调 skill 跑 git diff 产 finding。(4) **Fence 校验层**:`src/cli/commands/archive.ts` 扩展 — verify_findings 三级 fence(`automated=true` CRITICAL 不可降级 / WARNING 缺 ack 拒签 / SUGGESTION 通过)+ `finding_hash` 重算比对(篡改拒签)+ downgrade ack 校验(沿 §2.2.4)。
 
 **Tech Stack**:Node 20+ / TypeScript ESM / commander 12 / `yaml` v2 / vitest / @anthropic-ai/sdk(forge-eval LLM-as-judge,已有)/ 现有 `src/core/canonical-json.ts`(9a)+ `src/core/validate/finding-hash.ts`(9a `computeFindingHash`)+ `src/core/schemas/severity.ts`(9a Finding 接口)+ `skills/_shared/scope-category-guidance.md`(9b)+ `skills/writing-skills/SKILL.md`(9i 协议)。**不引入新 npm 依赖**;`@anthropic-ai/sdk` 仅在 forge-eval runner 路径下用,**不在 validate CLI 内嵌 LLM 调用**(沿 design §2.2.7 实施清单第 4 项 — validate 只产自动 CRITICAL,LLM 判定在 skill 由 AI agent 主体跑)。
 
@@ -87,7 +87,7 @@
 skills/verifying-three-dimensions/SKILL.md             ← Task 1:最小骨架 → Task 2:~280-350 行完整协议
 forge-eval/scenarios/verifying-three-dimensions.yaml   ← Task 1+7:2 scenarios(走现有 runner 双轨)
 tests/cli/verify-findings-fence.test.ts                ← Task 6:archive fence 三级 × resolved × ack 矩阵(9 分支)+ automated 不可降级 + downgrade ack
-tests/cli/validate-verify-findings.test.ts             ← Task 4:validate.ts 三类 candidate 产 finding_hash
+tests/cli/validate-verify-findings.test.ts             ← Task 4:validate.ts spec-files-missing + coverage_gap CRITICAL finding + finding_hash(沿 §11.1bis 归属)
 tests/core/markers/verify-findings-schema.test.ts      ← Task 3:VerifyFinding marker schema 校验
 tests/integration/verify-findings-end-to-end.test.ts   ← Task 8:end-to-end fixture(verify → archive,自动 CRITICAL 篡改拒签)
 tests/fixtures/verify-findings/                        ← Task 8:含 verify_findings 的 marker fixture(含 automated/manual / resolved/unresolved / ack/未ack)
@@ -105,7 +105,7 @@ src/core/templates/skills/verifying-three-dimensions.md  ← scripts/copy-templa
 src/core/templates/skills/index.ts                     ← Task 0:SKILL_NAMES 加 'verifying-three-dimensions'(从 13 → 14)
 src/core/markers/types.ts                              ← Task 3:加 VerifyFinding interface + VerifyMarker.verify_findings? + VerifyFailedMarker.verify_findings? 字段
 src/core/validate/marker-schema.ts                     ← Task 3:verify_findings 数组校验(每项含 8 必填 + finding_hash 格式 + 可选 ack 字段)
-src/cli/commands/validate.ts                           ← Task 4:三类 candidate → Finding 转换 + finding_hash 输出(complement ValidationError.finding_hash,沿 9b)
+src/cli/commands/validate.ts                           ← Task 4:spec-files-missing + coverage_gap CRITICAL Finding 转换 + finding_hash 输出(沿 §11.1bis;test_failure stub warning;hash_mismatch 在 archive.ts 不在本 CLI)
 src/core/validate/change.ts                            ← Task 4:从 validateChange 收集 candidate 信息(test_failure 状态需透传)
 src/cli/commands/archive.ts                            ← Task 6:加 validateVerifyFindingsFence 函数 + 三级 × resolved × ack 9 分支 + finding_hash 重算 + automated 不可降级
 commands/verify.md                                     ← Task 5:加 §"三维度分析"段调 skill + .verify-passed YAML 写 verify_findings 数组
@@ -508,7 +508,7 @@ forge v0.4 的 verify 阶段退化为"测试 pass + log_hash"二值判定(沿 de
 | 维度 | 检查项 | 自动 / LLM | 产 finding 路径 |
 |---|---|---|---|
 | **Completeness** | task 完成度(checkbox 计数) | 自动 | `forge validate` 已做(走 ValidationError → Finding;沿 plan-9d Task 4) |
-| | spec 覆盖度(每个 Requirement 在 codebase 有实施证据) | LLM(本 skill) | AI 调本 skill 产 finding(若完全无证据 → 自动可判 `evidence_missing` candidate,沿 §2.3.3) |
+| | spec 覆盖度(每个 Requirement 在 codebase 有实施证据) | 自动 + LLM | `forge validate` 已做(走 coverage_gap candidate,沿 §11.1bis;grep + 0 命中);AI 调本 skill 在 grep 命中后再判语义偏离 |
 | **Correctness** | requirement 实施映射(file:line) | LLM(本 skill) | AI 调本 skill 给具体 file:line |
 | | scenario 覆盖(WHEN/THEN/AND 条件在 code 或 test 中体现) | LLM(本 skill) | AI 调本 skill 给 file:line + scenario-id |
 | **Coherence** | design 决策追溯(design.md `## Decision:` / `## Approach:` 段是否被实施) | LLM(本 skill) | AI 调本 skill grep design.md 关键词 + 比对 codebase |
@@ -519,8 +519,9 @@ forge v0.4 的 verify 阶段退化为"测试 pass + log_hash"二值判定(沿 de
 每次 verify 必须**三维度全跑**,不允许跳维度:
 
 1. **Completeness**:
-   - 先看 `forge validate` 自动产的 finding(已包含 tasks_hash mismatch / fake_completions 类)
-   - 对 spec 每个 Requirement,grep codebase 找实施证据;**完全无证据 → CRITICAL `evidence_missing`**(automated=true,工具可自动判)
+   - 先看 `forge validate` 自动产的 finding(含 spec-files-missing / coverage_gap 类,沿 §11.1bis)
+   - 对 spec 每个 Requirement,grep codebase 找实施证据;**完全无证据 → CRITICAL `coverage_gap`**(automated=true,工具自动判,沿 design line 446;若 spec 列了但 grep 0 命中,validate 已自动产此类 finding,AI 调本 skill 时合并即可)
+   - 对 tasks.md 标 [x] 但 git diff 反向 0 改动:走 `fake_completion` 路径(verify slash 阶段 AI 主动跑 `git diff` 产 CRITICAL finding,automated=true,candidate_type 不填 — 沿 v3 B-3 边界 case;**不**走 evidence_missing,因 evidence_missing 语义是 evidence.log_path 文件缺失,不同)
 2. **Correctness**:
    - 对 spec 每个 Requirement,定位实施 file:line;**WHEN/THEN/AND scenario 在 test 或 code 中找证据;若找不到 → WARNING `scenario-coverage`**
 3. **Coherence**:
@@ -650,7 +651,13 @@ forge v1.0 比 OpenSpec verify-change.ts 走更远 — 假设 AI 在 verify 阶�
 
 ### 1. automated=true CRITICAL 不可降级
 
-工具自动判的 CRITICAL findings(test_failure / tasks_hash mismatch / evidence_missing)由 `forge validate` 产 `finding_hash`(JCS SHA256,沿 9a):
+工具自动判的 CRITICAL findings(v8 M-1 修订:口径与 §11.1bis 一致):
+- `forge validate` 阶段产:**spec-files-missing**(specs/ 空)+ **coverage_gap**(spec Requirement grep 0 命中)
+- `forge archive` 现有路径产:**hash_mismatch**(marker tasks_hash / content_hash 重算不一致,line 274-289)
+- `/forge:verify` slash AI 调 skill 阶段产:**fake_completion**(tasks 标 [x] 但 git diff 反向 0 改动,automated=true 因 git 是机器判定;candidate_type 字段不填,沿 v3 B-3 边界 case)
+- **不在 v1.0 实施**(沿 §11.1bis):`evidence_missing` 由 9a candidate-validators.ts framework 处理 / `api_contract` 推迟 v1.1 / `manual_claim` 走 9a ack 流程 / `test_failure` 走 stub warning,9g 完成后接 reporter parser
+
+上述所有 CRITICAL finding 都由对应工具产 `finding_hash`(JCS SHA256,沿 9a `computeFindingHash`):
 - AI 改 severity 重算 hash 即不一致 → archive fence 拒签(沿 design §2.2.4)
 - AI 改 evidence / recommendation 也会改 hash,同样拒签
 - AI 唯一合规路径:走 `forge ack propose` 启动两步 ack 流程(沿 9a;CI 模式直接拒绝)
@@ -1140,7 +1147,7 @@ git commit -m "feat(9d): VerifyFinding marker schema 扩展(Task 3)— verify_fi
 
 ---
 
-## 6. Task 4 — validate.ts 自动产 CRITICAL findings + finding_hash(三类 candidate)
+## 6. Task 4 — validate.ts 自动产 CRITICAL findings + finding_hash(v8 M-1 修订:实际产 spec-files-missing + coverage_gap;test_failure stub)
 
 **Files:**
 - Modify: `src/core/validate/change.ts`(收集 candidate 信息,产 Finding 数组)
@@ -1152,14 +1159,14 @@ git commit -m "feat(9d): VerifyFinding marker schema 扩展(Task 3)— verify_fi
 - Create: `tests/cli/validate-verify-findings.test.ts`
 - Create: `tests/core/validate/coverage-gap.test.ts`
 
-**Goal**(v2 B-2 修订:范围扩三类 — 沿 design §2.2.7 line 402 实施清单):让 `forge validate <change-id>` 自动产三类 candidate CRITICAL `Finding`(沿 design §2.3.3 表 line 443-448):
+**Goal**(v8 M-1 修订:口径与 §11.1bis 6 类归属一致):让 `forge validate <change-id>` 自动产以下两类 CRITICAL `Finding`(沿 design §2.3.3 表 line 443-448 + §11.1bis):
 1. `spec-files-missing`(沿 v1):specs/ 目录存在但 0 个 .md 文件(coverage_gap candidate 子类)
 2. **`coverage_gap`**(v2 新增):spec 列了 Requirement 但 codebase grep 完全 0 命中(沿 design line 446 grep + AST 0 命中原则 — 本 plan v2 用纯 grep,AST 留 v1.1 增强)
 3. **`test_failure` stub**(v2 新增接口预留):test_failure candidate validator 走 9g reporter parser;9g 完成前 stub 返回 `not_implemented` 标记 + warning(沿 plan-9a §3.1 archive fence stub 合约同模式)
 
 **不调 LLM** — LLM 判定路径在 commands/verify.md slash AI 调 skill 阶段(沿 design §2.2.7 边界)。
 
-**注**:9b 已在 `ValidationError` 加 `severity` + `finding_hash` 字段(`src/core/validate/types.ts:24-27`),且 scope 类 finding 已走完整路径。本 task 把这套机制扩展到 verify-domain 三类 candidate。
+**注**:9b 已在 `ValidationError` 加 `severity` + `finding_hash` 字段(`src/core/validate/types.ts:24-27`),且 scope 类 finding 已走完整路径。本 task 把这套机制扩展到 verify-domain CRITICAL(spec-files-missing + coverage_gap)。
 
 **`hash_mismatch` candidate 不在 validate 阶段做**:`hash_mismatch` 验证算法(design line 444)需要 marker 文件(`.verify-passed` / `.review-passed`)存在并 reference 已写入 hash 与重算结果比对;`forge validate` 在 verify 之前调用,marker 尚未产 — `hash_mismatch` 的语义对象在 archive 阶段(archive.ts:283 现有路径)。本 task 不重复;archive.ts 的 hash mismatch 路径在 Task 6 已对齐到 exit 1(沿 M-1 修订)。
 
@@ -1495,7 +1502,7 @@ async function grepCountInDir(rootDir: string, keyword: string): Promise<number>
         if (SKIP_BASENAMES.has(e.name)) continue;
         // 2. dot / underscore prefix skip(.git / .evidence / _shared)
         if (e.name.startsWith('.') || e.name.startsWith('_')) continue;
-        // 3. relative path skip(tests/fixtures / docs/plans / 等)
+        // 3. relative path skip(顶层 catch-all:tests / docs / forge-eval — walk 进入后不会下钻)
         const rel = relative(rootDir, p).split(sep).join('/');
         if (SKIP_REL_PATHS.has(rel)) continue;
         await walk(p);
@@ -1554,7 +1561,7 @@ export async function checkTestFailureStub(): Promise<TestFailureCheckResult> {
 }
 ```
 
-- [ ] **Step 6: 修改 `src/core/validate/change.ts`** — 集成三类 candidate + FindingIdSequence
+- [ ] **Step 6: 修改 `src/core/validate/change.ts`** — 集成 spec-files-missing + coverage_gap + test_failure stub + FindingIdSequence(沿 v8 M-1 口径)
 
 ```typescript
 // src/core/validate/change.ts 顶部 import 新增:
@@ -3656,3 +3663,15 @@ design §2.3.3 表 line 443-448 列了 6 类 `candidate_type` enum,工程实施�
     - **N-2 SKIP_REL_PATHS 上方注释残留旧子路径**:注释仍写"tests/fixtures / tests/integration / docs/plans / docs/specs",但 Set 已 v6 简化为三顶层 catch-all。修法:注释同步成"顶层 relative path catch-all"+ 说明 walk 不进入子目录的逻辑。
   - **工日**:纯文档对齐 + heredoc 改写,无新代码;**P50 / P90 不变**(7.4 / 9.1)。
   - **收敛状态**:无 BLOCKER / 无 MAJOR / 0 MINOR / 0 NIT 待处理 — **plan-9d v7 达到 ≤ NIT 收敛阈值**,可进入 executing-plans 阶段。
+- **v8**(2026-05-11):codex 七轮 review 发现 v7 M-1 PARTIAL(口径全局同步未完成) — 修订 2 议题全采纳(1 MINOR + 1 NIT,无 BLOCKER 无 MAJOR)
+  - **1 MINOR**:
+    - **M-1 多处旧 candidate_type 表述未同步到 §11.1bis 归属表**:v7 改了 DoD line 31 但 Architecture / SKILL.md 三维度协议 / SKILL.md 反向加固段 / Task 4 Goal 等多处仍写"三类 candidate"/`evidence_missing`/`tasks_hash mismatch`/`test_failure`/`fake_completions` 旧语义。修法:全局对齐到 §11.1bis 6 类归属:
+      - Architecture 段 §"CLI 自动检层"改"spec-files-missing + coverage_gap" + 显式说明 fake_completion 在 verify slash;test_failure stub;hash_mismatch 在 archive
+      - SKILL.md 三维度协议表:Completeness 行 "evidence_missing candidate" → "coverage_gap candidate";"forge validate 已做"补 spec-files-missing + coverage_gap 类
+      - SKILL.md 主流程 step 1:`evidence_missing` → `coverage_gap`;加 `fake_completion` 路径说明(git diff 反向检测,candidate_type 不填)
+      - SKILL.md `## forge-specific 反向加固` §1:三类 candidate → 按 §11.1bis 4 路径(validate 产 / archive 产 / verify slash AI 产 / 不实施)拆分
+      - Task 4 标题 / Goal / 文件列表 / Step 6 全部从"三类 candidate"改"spec-files-missing + coverage_gap + test_failure stub"
+  - **1 NIT**:
+    - **N-1 inline 注释残留**:`coverage-gap.ts` Step 4 内层 comment line 1505 仍写"tests/fixtures / docs/plans / 等"旧示例。修法:改"顶层 catch-all:tests / docs / forge-eval — walk 进入后不会下钻"。
+  - **工日**:纯文档对齐,无新代码;**P50 / P90 不变**(7.4 / 9.1)
+  - **收敛状态**:无 BLOCKER / 无 MAJOR / 0 MINOR / 0 NIT 待处理 — **plan-9d v8 达到 ≤ NIT 收敛阈值**(v7 是 PARTIAL,v8 完成口径全局同步)

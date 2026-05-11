@@ -865,6 +865,19 @@ proposal.md / design.md 内 {#forge-oos} / {#forge-non-goals} / {#forge-future-w
 
 - [ ] **Step 0(v3 B1 修订前置):修 9a FindingHashPayload 移除 `validate_run_id`**
 
+**关键顺序**(v7 codex 六轮 MINOR 2 修订):Step 0 **必须先于** Task 1-8 完成。后续 Task 用 8 字段 payload,若 Step 0 没做,Task 4 写实现 + 测试时会 TypeScript 报错。
+
+**Skip-detection 检测命令**(实施者在执行 Step 0 前 + 后跑此命令确认状态):
+
+```bash
+# 跑前:期望命中(还未做 Step 0)
+# 跑后:期望无命中(Step 0 已完成)
+rg -n "validate_run_id:" src/core/schemas/severity.ts src/core/validate/finding-hash.ts tests/cli/severity-fence.test.ts
+```
+
+若已无命中 → Step 0 已完成,可直接进入 Step 1;若仍有命中 → Step 0 必须做。
+
+
 修改 `src/core/schemas/severity.ts`:
 
 ```typescript
@@ -2875,9 +2888,11 @@ v3 codex MAJOR 2:OpenCode adapter 现状不存在,留独立 issue;7b 收敛 clau
 
 **Goal**:e2e 测试覆盖整个 9b 链路 — fixture 含 archived change(active entry) + 第二个 archived change(superseding) → 跑 `forge scope scan-archived-followups` → 输出 active entries 扣 superseded 项 → propose.md 加 entry → `forge validate` 通过 → marker 计算 content_hash 在改 forge-oos 段后不变。
 
-- [ ] **Step 1: 准备 fixture(v2 MINOR 2 修订:用常量生成避免字面值耦合)**
+- [ ] **Step 1: 准备 fixture(v2 MINOR 2 修订:用常量生成避免字面值耦合;v6 codex 六轮 MINOR 1 修订:补建 tests/integration/ 目录)**
 
 ```bash
+# v6 codex 六轮 MINOR 1 修订:tests/integration/ 现状不存在,必须先建,否则 Step 2 写测试文件会失败
+mkdir -p tests/integration
 mkdir -p tests/fixtures/scope/archived-with-active-entry
 mkdir -p tests/fixtures/scope/archived-with-superseding
 ```
@@ -3186,6 +3201,17 @@ archived-with-active-entry / archived-with-superseding 两份 fixture
 ## 11. 修订记录
 
 - **v1**(2026-05-11 commit `96b2955`):初稿。沿 master plan §3.2 + §3.12.1bis + §3.12.2 + §3.12.3 锁定的接口写。本 plan 不实施 archive_summary handoff_to_backlog 的真实聚合(那是 9e2),只提供数据源(scanArchivedFollowups)。
+- **v7**(2026-05-11):codex 六轮 adversarial review 采纳 MINOR(**0 BLOCKER + 0 MAJOR + 2 MINOR + 1 NIT + 4 Confirmed-OK**):
+  - **MINOR 1 — Task 8 创建 `tests/integration/scope-end-to-end.test.ts` 但未先建目录**(`tests/integration/` 现状不存在,vitest 写不进去):**v7 修订**:Task 8 Step 1 bash 块加 `mkdir -p tests/integration`
+  - **MINOR 2 — Step 0 没有 skip-detection 命令,实施者可能跳过导致后续 TS 报错**(8 字段 payload 没就位 → Task 4 写 implementation 时 TS 不通):**v7 修订**:Step 0 段开头明确写"Step 0 必须先于 Task 1-8 完成";加 `rg -n "validate_run_id:" src/core/schemas/severity.ts src/core/validate/finding-hash.ts tests/cli/severity-fence.test.ts` skip-detection 命令(跑前期望命中、跑后期望无命中)
+  - **NIT — 新增测试仍混用 `execFileSync`**(plan-9b:1134/2223/2798/3010):**v7 不修**(沿用户"MINOR 以上收敛即可"要求;execFileSync 用例工作正常,仅风格不一致;实施者可选改用 runCli 简化)
+  - **Confirmed-OK**(v6 已正确,v7 验证仍 OK):
+    - Angle 1:specs fixture `## Scenario: s1` + `**Given**/**When**/**Then**` 真匹配 specs.ts:28/41,validate 通过(validate/specs.ts:12/28)
+    - Angle 2:`- [ ] task-1: do thing` 真匹配 tasks.ts:32 TASK_RE,validate 通过(validate/tasks.ts:8)
+    - Angle 3:proposal validator 仅 3 规则(proposal.ts:8/13/18),fixture(`# P\n## Why\n\nw\n## What\n\nc\n`)全满足
+    - Angle 5:`../cli/helpers.js` 从 tests/integration/ 正确解析到 tests/cli/helpers.ts;runCli 已 export(helpers.ts:15)
+  - **工日**:v7 仅 plan 文档级修订(mkdir + skip-detection 命令),不上调工日
+  - **收敛状态**:**v7 已收敛**(0 BLOCKER + 0 MAJOR + 0 MINOR remaining;1 NIT 用户允许不修);**可进入实施**
 - **v6**(2026-05-11):codex 五轮 adversarial review 全采纳(**2 BLOCKER + 1 MINOR + 1 NIT + 4 Confirmed-OK**):
   - **BLOCKER 1 — Task 4/8 validate-pass fixture 实际会失败**(v5 写 `'# A\n'` + `'# T\n'`,但 `src/core/validate/specs.ts:12` 要求 `scenarios.length>0`,`tasks.ts:8` 要求 `items.length>0`;参考 `parse/specs.ts` STEP_RE 必须用 `**Given** x` 加粗格式,`parse/tasks.ts` TASK_RE 必须含冒号 `- [ ] id: desc`):**v6 修订**:
     - Task 4 Step 2 beforeEach fixture:`specs/a.md` 改 `# A\n\n## Scenario: s1\n\n**Given** x\n\n**When** y\n\n**Then** z\n`;`tasks.md` 改 `# T\n\n- [ ] task-1: do thing\n`

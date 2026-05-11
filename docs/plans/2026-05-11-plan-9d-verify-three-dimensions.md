@@ -121,7 +121,7 @@ tests/smoke.test.ts                                    ← Task 0:hardcoded 13-i
 src/core/canonical-json.ts                  ← 9a 已立 JCS;本 plan 仅调 canonicalHash 不改实现
 src/core/validate/finding-hash.ts           ← 9a 已立 computeFindingHash / extractHashPayload;本 plan reference
 src/core/schemas/severity.ts                ← 9a 已立 Finding / FindingHashPayload;本 plan reference
-src/core/validate/candidate-validators.ts   ← 9a 已立 candidate 验证算法骨架;本 plan 在 validate.ts 调它,不动骨架
+src/core/validate/candidate-validators.ts   ← 9a 已立 candidate 验证算法骨架(stub);**本 plan 不调用骨架**(沿 v11 MINOR-1 修订),改新建 coverage-gap.ts + test-failure-stub.ts 直接在 change.ts 产 Finding 走 ValidationError → CLI 路径(沿 §11.1bis 6 类归属:9a framework 留 evidence_missing 等 future 接入)
 src/core/archive/                           ← 9e 改 transaction;本 plan 在 archive.ts CLI 加 fence,不动 transaction 核心
 src/cli/commands/ack.ts                     ← 9a 已立 propose/confirm/reject;本 plan 仅产生需 ack 的 finding,ack CLI 不变
 src/cli/commands/evidence.ts                ← 9a 已立 record-tdd/record-verify/record-review;本 plan 不动(9g 加 process_evidence 集成)
@@ -3020,16 +3020,16 @@ git commit -m "feat(9d): GREEN delta ≥ 1.5 + REFACTOR plug ≥ 2 个 loophole(
 
 ---
 
-## 10. Task 8 — 集成 e2e 测试 + 全本地 verify(v2 M-4 修订:完整 13 fixture + 12 e2e case,无 placeholder)
+## 10. Task 8 — 集成 e2e 测试 + 全本地 verify(v11 MINOR-2 修订:完整 13 fixture + 13 e2e case,无 placeholder)
 
 **Files:**
-- Create: `tests/integration/verify-findings-end-to-end.test.ts`(12 e2e case,无 ellipsis)
+- Create: `tests/integration/verify-findings-end-to-end.test.ts`(13 e2e case,无 ellipsis)
 - Create: `tests/fixtures/verify-findings/`(13 fixture change,常量生成器构造)
 - Create: `tests/fixtures/verify-findings/build-fixture.ts`(共享 fixture 生成器 — 避免每个 fixture 重写 marker YAML)
 
 **Goal**:把 verify(产 finding)→ archive(fence 校验)的真实链路打通;**完整覆盖** Task 6 fence 9 分支 + downgrade 路径 + finding_hash 篡改 + ack-log 一致性(v2 B-4)+ pending-acks 残留 + exit code 对齐(v2 M-1)的 end-to-end 路径。**v2 M-4 修订:无 placeholder ellipsis,每个 case 给完整测试代码 + 完整 fixture 构造**。
 
-**13 fixture × 12 e2e case 完整列表**:
+**13 fixture × 13 e2e case 完整列表**:
 
 | # | Fixture / case 名 | Severity | resolved | ack | finding_hash | downgrade | ack-log | pending-acks | 期望 |
 |---|---|---|---|---|---|---|---|---|---|
@@ -3533,7 +3533,7 @@ design §2.3.3 表 line 443-448 列了 6 类 `candidate_type` enum,工程实施�
 
 9g process_evidence yaml 第 8 攻击场景"空测试攻击"(测试套件假装 pass 但实际跳测试)需要 §2.7 + §2.2 组合防御:
 - §2.7(9g):process_evidence 13 不变量校验测试套件真实跑了
-- §2.2(本 plan):verify_findings 校验 Completeness/spec-coverage 是否 0 个 `coverage_gap` CRITICAL(若有 coverage_gap CRITICAL,反向暴露空测试 — spec 列 Requirement 但 codebase grep 0 命中 = 测试套件无对应实施;沿 §11.1bis,coverage_gap ≠ evidence_missing,后者仅指 evidence.log_path 文件缺失)
+- §2.2(本 plan):verify_findings 校验 Completeness/spec-coverage 是否 0 个 `coverage_gap` CRITICAL(若有 coverage_gap CRITICAL,反向暴露空测试 — spec 列 Requirement 但 codebase grep 0 命中 = 测试套件无对应实施;沿 §11.1bis 6 类归属)
 
 本 plan 完成后,9g M5 里程碑可验收。
 
@@ -3549,7 +3549,7 @@ design §2.3.3 表 line 443-448 列了 6 类 `candidate_type` enum,工程实施�
 预测 codex adversarial review 可能提出的议题(预先思考,实施时反馈再修订):
 
 1. **VerifyFinding extends Finding 扩展路径**(v2 m-1 修订后已采纳):future 若需 verify-specific 字段(如 `requirement_id` 显式关联 spec 章节),按 superset additive 原则在 interface 内加 optional 字段(沿 9a §3.12.1 freeze)。**v3 已合规**:`VerifyFinding extends Finding {}` 已就位。
-2. **validate.ts 自动产 CRITICAL 范围**(v9 历史风险,v3-v8 已 resolved):本 plan v1 倾向把 test_failure 与 tasks fake-completion 放到 slash 阶段产;v2 B-2 修订后明确 validate 层产 `spec-files-missing + coverage_gap` 两类 CRITICAL Finding,test_failure 走 stub warning(9g 完成后接 reporter),fake_completion 在 verify slash 阶段 AI 调 skill 跑 git diff 产 — 沿 §11.1bis 6 类归属表(沿 v9 codex review 修订:旧表述 evidence_missing 已统一改 coverage_gap)。
+2. **validate.ts 自动产 CRITICAL 范围**(v3-v8 已 resolved):v2 B-2 修订后明确 validate 层产 `spec-files-missing + coverage_gap` 两类 CRITICAL Finding;`test_failure` 走 stub warning(9g 完成后接 reporter);`fake_completion` 在 verify slash 阶段 AI 调 skill 跑 git diff 产 — 沿 §11.1bis 6 类归属表。
 3. **forge-eval scenario judge_rubric 是否过细**:RED scenario 期望 ≤ 5 + GREEN ≥ 6.5 + delta ≥ 1.5 三阈值同时满足,可能在 LLM-judge 噪声下不稳定。**应对**:沿 forge-eval 默认阈值,Task 7 REFACTOR 时若 GREEN avg 在 6.0-6.5 边缘可微调 judge_rubric 评分细节,但不放宽 delta 1.5 硬约束。
 4. **archive fence 拒签 exit code**:本 plan Task 6 用 exit 1(business-fail,沿 master §3.12.3),与现有 archive.ts process.exit(2) (fs/lock 类) 区分。**预期 OK**,但 review 可能要求 archive.ts 现有路径也按四语义槽对齐 — 那是 §3.12.3 后续 sub-plan 工作,本 plan 不重构现有 archive exit code。
 

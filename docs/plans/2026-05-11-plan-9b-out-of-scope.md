@@ -12,7 +12,7 @@
 - design v3 [`2026-05-10-v1.0-fusion-completion-design.md`](../specs/2026-05-10-v1.0-fusion-completion-design.md) §2.6 全节(§2.6.1-2.6.8)+ §2.4.3 archive_summary handoff_to_backlog 数据形态(本 plan 仅产数据源,实际 archive_summary 聚合在 9e2)
 - master plan §3.2(plan-9b 概览)+ §3.12.1bis(scope-entries schema 顶级字段冻结)+ §3.12.2(`skills/_shared/scope-category-guidance.md` 路径冻结)+ §3.12.3(`forge scope scan-archived-followups` exit code 冻结)
 
-**P50 工日**:3.5 / **P90 工日**:4.5
+**P50 工日**:4.0(v2 codex review 一轮修订上调 +0.5)/ **P90 工日**:5.0
 
 **前置**:9a 横切层基础(已完成,commit `0196d55..07e95b7`)。本 plan 在 9a 锁定的 `src/core/schemas/severity.ts`(severity / FindingHashPayload)+ `src/core/canonical-json.ts`(JCS)+ `src/core/validate/finding-hash.ts`(computeFindingHash)之上扩展。
 
@@ -20,7 +20,8 @@
 - §3.12.1bis 三个 schema 顶级字段(entries / superseding_entries / anchor_id)写入 `src/core/schemas/scope-entries.ts`,后续 sub-plan 仅 reference 不重定义
 - proposal.md / design.md 经 9b 升级后:含 `{#forge-oos}` / `{#forge-non-goals}` / `{#forge-future-work}` anchor 时,这三段从 content_hash 剔除;改 YAML 块不致 marker 失效
 - `forge scope scan-archived-followups <change-id>` CLI 输出 active entries JSON(扣 superseding_entries),exit 0 / 2 与 §3.12.3 一致
-- `forge validate` 检测 scope YAML 语法错时产 CRITICAL finding(finding_hash 走 9a 路径,validate exit 1)
+- `forge validate` 检测 scope YAML 语法错时产 CRITICAL finding(finding_hash 走 9a 路径绑定真实 `validate_run_id` / `content_hash` / `git_head`,**不允许静态占位**;CLI exit 1,沿 master §3.12.3 freeze)
+- `forge update`(active 部署命令)部署 `.claude/skills/forge-_shared/scope-category-guidance.md` 到项目级目录(v2 codex review MAJOR 4 修订:adapter 部署链);smoke test 验证落地
 - `commands/propose.md` slash 在产 proposal/design 时输出 anchor ID;在新 change 启动时调 `forge scope scan-archived-followups` 走 AskUserQuestion 流程
 - `skills/_shared/scope-category-guidance.md` 完成;`scripts/copy-templates.mjs` 扩展同步 `skills/_shared/*.md` 到 `src/core/templates/skills/_shared/` + `dist/core/templates/skills/_shared/`;`skills/receiving-code-review/SKILL.md` reference 该文档(9d / 9f 自行 reference)
 - 单元 + 集成测试覆盖:scope-entries YAML parse / anchor 识别 / content_hash 排除(三段) / scan-archived-followups CLI(active / superseding / 空 archive 三场景)/ validate scope YAML 语法错产 CRITICAL finding
@@ -30,20 +31,21 @@
 
 ## 0. 总览
 
-本 sub-plan 拆 8 个 task(累计 P50 3.5 工日):
+本 sub-plan 拆 **9 个 task**(v2 codex review 一轮修订:Task 7 拆 7a + 7b;累计 P50 4.0 工日):
 
 | Task | 名称 | 工日 P50 | 关键交付 |
 |------|------|---------|---------|
-| 1 | scope-entries schema 锁死 | 0.3 | `src/core/schemas/scope-entries.ts` + tests(§3.12.1bis 接口冻结) |
-| 2 | anchor ID 识别 + fenced YAML 抽取 | 0.5 | `src/core/parse/markdown.ts` 扩展 + 新增 `src/core/parse/fenced-yaml.ts` + tests |
-| 3 | content_hash 改造按 anchor 剔除三段 | 0.5 | `src/core/hash/content.ts` 改造 + tests |
-| 4 | validate scope YAML schema 校验 | 0.4 | `src/core/validate/scope-entries.ts` + `validateChange` 集成 + CRITICAL finding hash 接通 |
-| 5 | `forge scope scan-archived-followups` CLI | 0.6 | `src/cli/commands/scope.ts` + `src/core/scope/aggregator.ts` + CLI test |
+| 1 | scope-entries schema 锁死 | 0.3 | `src/core/schemas/scope-entries.ts` + tests(§3.12.1bis 接口冻结,v2 含 `schema` 字段) |
+| 2 | anchor ID 识别 + fenced YAML 抽取 | 0.5 | `src/core/parse/markdown.ts` 扩展(注释修正)+ 新增 `src/core/parse/fenced-yaml.ts` + tests |
+| 3 | content_hash 改造按 anchor 剔除三段 | 0.5 | `src/core/hash/content.ts` 改造(**v2 修订:按 heading level 算区间覆盖 H3 子标题**)+ tests |
+| 4 | validate scope YAML schema + ValidationError severity + CLI exit 1 | **0.6**(v2 修订上调 0.4→0.6:B1 + B2 实施) | `src/core/validate/scope-entries.ts` + `validateChange` 传 run/git context + `ValidationError.severity` 扩展 + `validate.ts` CLI exit 0/1/2 三档 |
+| 5 | `forge scope scan-archived-followups` CLI | 0.6 | `src/cli/commands/scope.ts` + `src/core/scope/aggregator.ts` + CLI test(**v2 修订:ENOENT 真实 exit 2 测试,删 placeholder**) |
 | 6 | `commands/propose.md` slash 升级 | 0.3 | anchor ID 模板指示 + Pending follow-ups 扫描段 + AskUserQuestion 流程 |
-| 7 | `skills/_shared/scope-category-guidance.md` + copy-templates 扩展 + receiving-code-review reference | 0.5 | 共用区分指引文档 + 部署链接入 + receiving-code-review skill cross-ref |
-| 8 | 集成 fixture + e2e 测试 + verify | 0.4 | end-to-end 测试覆盖 archived → propose → scope scan → user 决策 → marker hash 稳定 |
+| 7a | `skills/_shared/scope-category-guidance.md` + copy-templates 扩展(fail-fast)+ receiving-code-review reference | 0.4 | 共用区分指引文档 + 部署链 source(_shared 缺失 fail-fast)+ receiving-code-review skill cross-ref |
+| **7b**(v2 codex review MAJOR 4 修订:新增) | harness-adapters 加 sharedDocs 部署 + `forge update` 接入 + smoke | **0.4**(v2 新增 task) | `types.ts` 加 `SharedDocSpec` + claude/codex/opencode adapter 铺 `.claude/skills/forge-_shared/`(及对应 codex/opencode 路径)+ `forge update` 命令调 loadAllSharedDocs() + smoke test |
+| 8 | 集成 fixture + e2e 测试 + verify | 0.4 | end-to-end 测试覆盖 archived → propose → scope scan → user 决策 → marker hash 稳定(**v2 修订:fixture 用常量生成 + 断言严格 `===0`**) |
 
-单人路径:1 → 2 → 3 → 4 → 5 → 6 → 7 → 8(串行;Task 2 是 Task 3/4/5 的依赖)。Task 5 / 6 / 7 三者无相互依赖可并行(若多 agent)。
+单人路径:1 → 2 → 3 → 4 → 5 → 6 → 7a → 7b → 8(串行;Task 2 是 Task 3/4/5 的依赖;Task 7a 是 7b 的依赖)。Task 5 / 6 / 7a 三者无相互依赖可并行(若多 agent)。
 
 ---
 
@@ -414,7 +416,9 @@ if (headingMatch) {
     buffer.length = 0;
   }
   const rawHeading = headingMatch[2] ?? '';
-  // 匹配 anchor `{#xxx}` 后缀(只接 kebab/underscore/alphanum,沿 commonmark heading-id 扩展)
+  // 匹配 anchor `{#xxx}` 后缀(charset 仅 ASCII alphanum + `_` + `-`;
+  // **v2 codex MINOR 修订**:不是 CommonMark heading-id 兼容;forge 只用三个固定 ASCII anchor
+  // (forge-oos / forge-non-goals / forge-future-work),严格 charset 是有意为之 — 阻止"用 unicode 绕过 fence"攻击)
   const anchorMatch = rawHeading.match(/^(.*?)\s*\{#([A-Za-z0-9_-]+)\}\s*$/);
   current = {
     level: headingMatch[1]?.length ?? 1,
@@ -659,6 +663,54 @@ describe('computeContentHash — anchor 剔除(plan-9b Task 3)', () => {
     expect(await computeContentHash(dir)).toBe(h1);
   });
 
+  it('forge-oos 段含 H3 子标题 → 子标题及内容也被剔除(v2 codex MAJOR 2 修订)', async () => {
+    const v1 = [
+      '# P',
+      '## Why\n\nw',
+      '## What\n\nc',
+      '## Out of Scope {#forge-oos}',
+      '',
+      'top body',
+      '',
+      '### Sub Detail',
+      '',
+      'sub body v1',
+      '',
+      '## Next Section',
+      '',
+      'next body',
+      '',
+    ].join('\n');
+    const v2 = v1.replace('sub body v1', 'sub body v2 changed');
+    await writeFile(join(dir, 'proposal.md'), v1);
+    await writeFile(join(dir, 'design.md'), '# Design\n');
+    const h1 = await computeContentHash(dir);
+    await writeFile(join(dir, 'proposal.md'), v2);
+    expect(await computeContentHash(dir)).toBe(h1);
+  });
+
+  it('forge-oos 段后接 H1 → H1 不被剔除(剔除止于下一同级或更高级)', async () => {
+    const text = [
+      '# P',
+      '## Why\n\nw',
+      '## What\n\nc',
+      '## Out of Scope {#forge-oos}',
+      '',
+      'oos body',
+      '',
+      '# New H1',
+      '',
+      'h1 body',
+    ].join('\n');
+    await writeFile(join(dir, 'proposal.md'), text);
+    await writeFile(join(dir, 'design.md'), '# Design\n');
+    const h1 = await computeContentHash(dir);
+    // 改 H1 段 → hash 应变(H1 不被剔除)
+    await writeFile(join(dir, 'proposal.md'), text.replace('h1 body', 'h1 changed'));
+    const h2 = await computeContentHash(dir);
+    expect(h1).not.toBe(h2);
+  });
+
   it('tasks.md / specs/*.md 内带 anchor → 不剔除(仅 proposal/design 走 anchor 剔除)', async () => {
     await writeFile(join(dir, 'proposal.md'), '# P\n## Why\n\nw\n## What\n\nc\n');
     await writeFile(join(dir, 'design.md'), '# Design\n');
@@ -709,35 +761,51 @@ for (const rel of files) {
 // 文件底部加 helper
 /**
  * 从 markdown 文本剔除带 SCOPE_ANCHOR_IDS(forge-oos / forge-non-goals / forge-future-work)
- * 的段(含 heading 行 + 该段全部 body,直到下一个同级或更高级 heading 或文件末尾)。
- * 用法:proposal.md / design.md 走此过滤后再计 content_hash。
+ * 的段(含 heading 行 + 该段全部 body + 任意 H3+ 子标题及其内容,
+ * **直到下一个同级或更高级 heading 或文件末尾**)。
  *
- * 实施:用 parseMarkdown 拿 sections + startLine/endLine,
- *      把命中 anchor 的 section 区间从原文本的行序列剔除,保留其他行。
+ * **v2 codex MAJOR 2 修订**:不能直接用 parseMarkdown 的 section.endLine,
+ * 因为 parseMarkdown 任意 level heading 都关 section,H3 子标题会被切成独立 section
+ * 让剔除不完整。本函数自己扫 sections,根据 level 自行算"下一同级或更高级"区间。
+ *
+ * 实施:proposal.md / design.md 走此过滤后再计 content_hash。
  */
 function stripScopeAnchoredSections(text: string): string {
   const md = parseMarkdown(text);
-  // 收集要剔除的行号区间 [startLine, endLine](1-indexed,inclusive)
+  const sections = md.sections;
+
+  // 收集要剔除的行号区间 [start, end](1-indexed,inclusive,在 body 行坐标系)
   const ranges: { start: number; end: number }[] = [];
-  for (const sec of md.sections) {
-    if (sec.anchor && (SCOPE_ANCHOR_IDS as readonly string[]).includes(sec.anchor)) {
-      ranges.push({ start: sec.startLine, end: sec.endLine });
+  for (let i = 0; i < sections.length; i++) {
+    const sec = sections[i];
+    if (!sec) continue;
+    if (!sec.anchor || !(SCOPE_ANCHOR_IDS as readonly string[]).includes(sec.anchor)) continue;
+
+    // 找下一个 level <= sec.level 的 section,作为本剔除区间的结束(exclusive)
+    let endLineInclusive = md.body.split('\n').length; // 默认到文件末尾(body 行数)
+    for (let j = i + 1; j < sections.length; j++) {
+      const nextSec = sections[j];
+      if (!nextSec) continue;
+      if (nextSec.level <= sec.level) {
+        // 区间到下一同级或更高级 heading 的前一行(exclusive of nextSec.startLine)
+        endLineInclusive = nextSec.startLine - 1;
+        break;
+      }
     }
+    ranges.push({ start: sec.startLine, end: endLineInclusive });
   }
   if (ranges.length === 0) return text;
 
-  // 注意:parseMarkdown 把 frontmatter 切掉了,sections 的行号是 body 内的 1-indexed。
-  // 我们需要在原文本上剔除 — 但 frontmatter 也可能存在。
-  // 简化:先剥 frontmatter,在 body 上剔除,再拼回 frontmatter(若有)。
+  // 剥 frontmatter — parseMarkdown 内部已剥掉,sections 行号是 body 内 1-indexed
   const fmMatch = text.match(/^---\n[\s\S]*?\n---\n/);
   const frontmatter = fmMatch ? fmMatch[0] : '';
   const body = fmMatch ? text.slice(fmMatch[0].length) : text;
   const lines = body.split('\n');
 
-  // 构建"保留行"set(剔除 ranges 覆盖到的)
+  // 构建"保留行"
   const keepLines: string[] = [];
   for (let i = 0; i < lines.length; i++) {
-    const lineNum = i + 1; // 1-indexed,与 parseMarkdown 一致
+    const lineNum = i + 1; // 1-indexed body 内
     const inRange = ranges.some((r) => lineNum >= r.start && lineNum <= r.end);
     if (!inRange) keepLines.push(lines[i] ?? '');
   }
@@ -769,17 +837,532 @@ proposal.md / design.md 内 {#forge-oos} / {#forge-non-goals} / {#forge-future-w
 
 ---
 
-## 5. Task 4 — validate scope YAML schema 校验 + CRITICAL finding
+## 5. Task 4 — validate scope YAML schema + ValidationError severity 扩展 + CLI exit 1(v2 BLOCKER 修订)
 
 **Files:**
 - Create: `src/core/validate/scope-entries.ts`
+- Modify: `src/core/validate/types.ts`(ValidationError 加 `severity` + `finding_hash`,artifact 加 `'scope'`;**v2 B2 修订**)
 - Modify: `src/core/validate/index.ts`(re-export)
-- Modify: `src/core/validate/change.ts`(validateChange 调 validateScopeEntries)
+- Modify: `src/core/validate/change.ts`(validateChange 计算 runId/contentHash/gitHead + 传给 validateScopeEntries;**v2 B1 修订**)
+- Modify: `src/cli/commands/validate.ts`(exit 0/1/2 三档,沿 master §3.12.3 freeze;**v2 B2 修订**)
 - Create: `tests/core/validate/scope-entries.test.ts`
+- Modify(existing): `tests/cli/validate.test.ts`(若已有相关 fixture,验 CRITICAL → exit 1)
 
-**Goal**:`forge validate` 检测 proposal.md / design.md 内三段 fenced YAML block 时,做 schema 校验(顶级 schema 字段 / entries[].id 必填 kebab-case / entries[].category 与 anchor_id 一致 / entries[].reason 必填且非空 / entries[].status 合法等)。语法错或 schema 不符 → 产 CRITICAL finding,**finding_hash 走 9a 路径**,validate exit 1(沿 §3.12.3)。
+**Goal**(v2 修订):`forge validate` 检测 proposal.md / design.md 内三段 fenced YAML block 时做 schema 校验。
 
-**注意**:本 task 实现"产 CRITICAL finding"的语义,**但不实现 validate exit code 改动**。现有 `validate.ts:14-30` exit 0/2,9a 的"finding 框架"目前仅在 candidate-validators.ts。9b 在此期内:scope YAML 错走 `validateChange` 的 `errors[]`(走原 exit 2 路径),**但 errors[i].field 标 `severity: 'CRITICAL'`**,后续 9d 实施 verify 三维度时统一改 finding 输出。**本 plan 锁定**:9b 不改 exit code 语义,只产含 severity:CRITICAL 的 error 项,接通到 9a finding_hash 计算(便于 9d 统一收割)。
+**v2 B1 修订**:scope finding 的 `finding_hash` 必须绑定**真实运行时上下文**(`validate_run_id` 用 `crypto.randomUUID()` 生成本次 validate 调用唯一 ID;`content_hash` 用 `computeContentHash(changeDir)`;`git_head` 用 `execFileSync('git rev-parse HEAD')`,非 git 用 'no-git-head'),**不允许静态占位**。这样 hash 才真实反映 change 状态,具有去重 / 防伪造能力(对照 9a `FindingHashPayload` 设计意图)。
+
+**v2 B2 修订**:`forge validate` CLI exit code 走 master §3.12.3 freeze 三档:**0 = 全 PASS / 1 = CRITICAL findings 存在 / 2 = config / fs 错**。原 `validate.ts:14-30` 0/2 改为 0/1/2。`ValidationError` 加 `severity?: Severity` + `finding_hash?: string` 字段;`artifact` enum 加 `'scope'`。
+
+- [ ] **Step 1: 扩展 ValidationError(severity + finding_hash + artifact 加 'scope')**
+
+修改 `src/core/validate/types.ts`:
+
+```typescript
+// src/core/validate/types.ts — 顶部加 import
+import type { Severity } from '../schemas/severity.js';
+
+export interface ValidationError {
+  artifact: 'proposal' | 'specs' | 'design' | 'tasks' | 'marker' | 'change' | 'scope';
+  field?: string;
+  message: string;
+  file?: string;
+  line?: number;
+  /** 三级分级(沿 9a severity.ts);CRITICAL → CLI exit 1;
+   *  未指定 / WARNING / SUGGESTION → 走原 exit 2(fs/config 类错或 schema 类业务错)
+   *  v2 B2 修订:scope 类 finding 显式标 'CRITICAL' */
+  severity?: Severity;
+  /** 9a finding_hash(JCS SHA256 of FindingHashPayload);仅 scope 类 finding 有 */
+  finding_hash?: string;
+}
+```
+
+- [ ] **Step 2: 写 failing tests(含 B1 真实 hash 接通 + B2 exit 1 + 原 schema 校验)**
+
+```typescript
+// tests/core/validate/scope-entries.test.ts(v2 修订:含真实 context 参数)
+import { describe, it, expect } from 'vitest';
+import { validateScopeEntries } from '../../../src/core/validate/scope-entries.js';
+
+const ctx = {
+  runId: '11111111-1111-1111-1111-111111111111',
+  contentHash: 'sha256:abc',
+  gitHead: 'deadbeef',
+};
+
+describe('validateScopeEntries(plan-9b v2 Task 4)', () => {
+  const baseFile = '/tmp/proposal.md';
+
+  it('valid YAML block + 字段全 → ok', () => {
+    const text = [
+      '# P',
+      '## Why\n\nw',
+      '## What\n\nc',
+      '## Out of Scope {#forge-oos}',
+      '',
+      '```yaml',
+      'schema: forge-scope-entries/v1',
+      'anchor_id: forge-oos',
+      'entries:',
+      '  - id: a-thing',
+      '    category: out-of-scope',
+      '    description: desc',
+      '    reason: because',
+      '    priority: medium',
+      '    status: active',
+      '    triggered_by: null',
+      '    related_change: null',
+      '```',
+      '',
+    ].join('\n');
+    const r = validateScopeEntries(text, baseFile, ctx);
+    expect(r.valid).toBe(true);
+  });
+
+  it('YAML 语法错 → CRITICAL finding,severity 标 CRITICAL', () => {
+    const text = '## Out of Scope {#forge-oos}\n\n```yaml\n: invalid\n```\n';
+    const r = validateScopeEntries(text, baseFile, ctx);
+    expect(r.valid).toBe(false);
+    expect(r.errors[0]?.severity).toBe('CRITICAL');
+    expect(r.errors[0]?.message).toMatch(/yaml.*parse/i);
+  });
+
+  it('finding_hash 是真实绑定(不同 runId → 不同 hash)', () => {
+    const text = [
+      '## Out of Scope {#forge-oos}\n',
+      '```yaml',
+      'schema: other/v1',
+      'anchor_id: forge-oos',
+      'entries: []',
+      '```',
+    ].join('\n');
+    const r1 = validateScopeEntries(text, baseFile, ctx);
+    const r2 = validateScopeEntries(text, baseFile, {
+      ...ctx,
+      runId: '22222222-2222-2222-2222-222222222222',
+    });
+    expect(r1.errors[0]?.finding_hash).not.toBe(r2.errors[0]?.finding_hash);
+  });
+
+  it('finding_hash 是真实绑定(不同 contentHash → 不同 hash)', () => {
+    const text = '## Out of Scope {#forge-oos}\n\n```yaml\nschema: bad/v1\nanchor_id: forge-oos\nentries: []\n```\n';
+    const r1 = validateScopeEntries(text, baseFile, ctx);
+    const r2 = validateScopeEntries(text, baseFile, { ...ctx, contentHash: 'sha256:different' });
+    expect(r1.errors[0]?.finding_hash).not.toBe(r2.errors[0]?.finding_hash);
+  });
+
+  it('schema 字段不对 → CRITICAL', () => {
+    const text = '## Out of Scope {#forge-oos}\n\n```yaml\nschema: other/v1\nanchor_id: forge-oos\nentries: []\n```\n';
+    const r = validateScopeEntries(text, baseFile, ctx);
+    expect(r.valid).toBe(false);
+    expect(r.errors[0]?.field).toBe('schema');
+    expect(r.errors[0]?.severity).toBe('CRITICAL');
+  });
+
+  it('anchor_id 与 enclosing section anchor 不一致 → CRITICAL', () => {
+    const text = '## Future Work {#forge-future-work}\n\n```yaml\nschema: forge-scope-entries/v1\nanchor_id: forge-oos\nentries: []\n```\n';
+    const r = validateScopeEntries(text, baseFile, ctx);
+    expect(r.valid).toBe(false);
+    expect(r.errors[0]?.field).toMatch(/anchor_id/);
+  });
+
+  it('entries[].reason 空 → CRITICAL', () => {
+    const text = [
+      '## Out of Scope {#forge-oos}\n',
+      '```yaml',
+      'schema: forge-scope-entries/v1',
+      'anchor_id: forge-oos',
+      'entries:',
+      '  - id: a',
+      '    category: out-of-scope',
+      '    description: d',
+      '    reason: ""',
+      '    priority: null',
+      '    status: active',
+      '    triggered_by: null',
+      '    related_change: null',
+      '```',
+    ].join('\n');
+    const r = validateScopeEntries(text, baseFile, ctx);
+    expect(r.valid).toBe(false);
+    expect(r.errors[0]?.field).toBe('entries[0].reason');
+  });
+
+  it('entries[].category ≠ anchor_id 默认映射 → CRITICAL', () => {
+    const text = [
+      '## Out of Scope {#forge-oos}\n',
+      '```yaml',
+      'schema: forge-scope-entries/v1',
+      'anchor_id: forge-oos',
+      'entries:',
+      '  - id: a',
+      '    category: future-work',
+      '    description: d',
+      '    reason: r',
+      '    priority: null',
+      '    status: active',
+      '    triggered_by: null',
+      '    related_change: null',
+      '```',
+    ].join('\n');
+    const r = validateScopeEntries(text, baseFile, ctx);
+    expect(r.valid).toBe(false);
+    expect(r.errors[0]?.field).toBe('entries[0].category');
+  });
+
+  it('entries[].status 非法 → CRITICAL', () => {
+    const text = [
+      '## Out of Scope {#forge-oos}\n',
+      '```yaml',
+      'schema: forge-scope-entries/v1',
+      'anchor_id: forge-oos',
+      'entries:',
+      '  - id: a',
+      '    category: out-of-scope',
+      '    description: d',
+      '    reason: r',
+      '    priority: null',
+      '    status: pending',
+      '    triggered_by: null',
+      '    related_change: null',
+      '```',
+    ].join('\n');
+    const r = validateScopeEntries(text, baseFile, ctx);
+    expect(r.valid).toBe(false);
+    expect(r.errors[0]?.field).toBe('entries[0].status');
+  });
+
+  it('无 scope section / 无 yaml block → ok(老 change 兼容)', () => {
+    const text = '# P\n\n## Why\n\nw\n\n## What\n\nc\n';
+    const r = validateScopeEntries(text, baseFile, ctx);
+    expect(r.valid).toBe(true);
+  });
+});
+```
+
+```typescript
+// tests/cli/validate.test.ts(追加;v2 B2 修订:exit 1 验证)
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+
+const CLI = join(process.cwd(), 'dist', 'cli', 'index.js');
+
+describe('forge validate exit code(v2 B2 修订:0/1/2 三档)', () => {
+  let projectRoot: string;
+  let changeDir: string;
+  beforeEach(async () => {
+    projectRoot = await mkdtemp(join(tmpdir(), 'forge-validate-exit-'));
+    changeDir = join(projectRoot, 'forge', 'changes', 'test-id');
+    await mkdir(join(changeDir, 'specs'), { recursive: true });
+    await writeFile(join(changeDir, 'specs', 'a.md'), '# A\n');
+    await writeFile(join(changeDir, 'tasks.md'), '# T\n');
+    await writeFile(join(changeDir, 'design.md'), '# D\n');
+  });
+  afterEach(async () => {
+    await rm(projectRoot, { recursive: true, force: true });
+  });
+
+  it('全合规 → exit 0', () => {
+    writeFileSync(join(changeDir, 'proposal.md'), '# P\n\n## Why\n\nw\n\n## What\n\nc\n');
+    const out = execFileSync('node', [CLI, 'validate', 'test-id'], { cwd: projectRoot, encoding: 'utf8' });
+    expect(out).toContain('valid');
+  });
+
+  it('CRITICAL scope finding → exit 1', () => {
+    writeFileSync(
+      join(changeDir, 'proposal.md'),
+      [
+        '# P\n## Why\n\nw\n## What\n\nc',
+        '## Out of Scope {#forge-oos}\n',
+        '```yaml',
+        'schema: forge-scope-entries/v1',
+        'anchor_id: forge-oos',
+        'entries:',
+        '  - id: a',
+        '    category: out-of-scope',
+        '    description: d',
+        '    reason: ""',
+        '    priority: null',
+        '    status: active',
+        '    triggered_by: null',
+        '    related_change: null',
+        '```',
+      ].join('\n'),
+    );
+    let exitCode = 0;
+    try {
+      execFileSync('node', [CLI, 'validate', 'test-id'], { cwd: projectRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (e) {
+      exitCode = (e as { status?: number }).status ?? 0;
+    }
+    expect(exitCode).toBe(1);
+  });
+
+  it('non-CRITICAL business-fail(proposal missing Why)→ exit 2(老 behavior 兼容)', () => {
+    writeFileSync(join(changeDir, 'proposal.md'), '# P\n\n## What\n\nc\n');
+    let exitCode = 0;
+    try {
+      execFileSync('node', [CLI, 'validate', 'test-id'], { cwd: projectRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (e) {
+      exitCode = (e as { status?: number }).status ?? 0;
+    }
+    expect(exitCode).toBe(2);
+  });
+});
+
+import { writeFileSync } from 'node:fs';
+```
+
+- [ ] **Step 3: 跑测试确认 fail**
+
+```bash
+pnpm vitest run tests/core/validate/scope-entries.test.ts tests/cli/validate.test.ts
+```
+Expected: 全部 fail(模块不存在 + CLI 无 exit 1 行为)
+
+- [ ] **Step 4: 写 validateScopeEntries 实现(v2 B1 修订:接受真实 context)**
+
+```typescript
+// src/core/validate/scope-entries.ts(v2 B1 修订:context 参数)
+import { parseMarkdown } from '../parse/markdown.js';
+import { parseFencedYamlBlocks, FencedYamlParseError } from '../parse/fenced-yaml.js';
+import {
+  ANCHOR_TO_CATEGORY,
+  SCOPE_ANCHOR_IDS,
+  isScopeCategory,
+  isScopeStatus,
+  type ScopeAnchorId,
+} from '../schemas/scope-entries.js';
+import { computeFindingHash } from './finding-hash.js';
+import type { FindingHashPayload } from '../schemas/severity.js';
+import type { ValidationError } from './types.js';
+
+/** validate 运行时上下文(v2 B1 修订)— 调用方必须提供真实值 */
+export interface ScopeValidateContext {
+  /** 本次 validate 调用唯一 ID(crypto.randomUUID()) */
+  runId: string;
+  /** computeContentHash(changeDir) 的结果(`sha256:...`) */
+  contentHash: string;
+  /** git rev-parse HEAD(40-char SHA);非 git → 'no-git-head' */
+  gitHead: string;
+}
+
+export interface ScopeValidationResult {
+  valid: boolean;
+  errors: ValidationError[];
+}
+
+export function validateScopeEntries(
+  text: string,
+  file: string | undefined,
+  ctx: ScopeValidateContext,
+): ScopeValidationResult {
+  const errors: ValidationError[] = [];
+  const md = parseMarkdown(text);
+
+  for (const sec of md.sections) {
+    if (!sec.anchor || !(SCOPE_ANCHOR_IDS as readonly string[]).includes(sec.anchor)) continue;
+
+    let blocks: unknown[];
+    try {
+      blocks = parseFencedYamlBlocks(sec.body);
+    } catch (err) {
+      const bi = err instanceof FencedYamlParseError ? err.blockIndex : 0;
+      errors.push(makeError('yaml-parse', `yaml parse failed in block #${bi}: ${(err as Error).message}`, file, sec.anchor as ScopeAnchorId, ctx));
+      continue;
+    }
+    if (blocks.length === 0) continue;
+
+    const block = blocks[0] as Record<string, unknown>;
+    const anchorId = sec.anchor as ScopeAnchorId;
+
+    if (block.schema !== 'forge-scope-entries/v1') {
+      errors.push(makeError('schema', `expected 'forge-scope-entries/v1', got ${JSON.stringify(block.schema)}`, file, anchorId, ctx));
+      continue;
+    }
+    if (block.anchor_id !== anchorId) {
+      errors.push(makeError('anchor_id', `anchor_id ${JSON.stringify(block.anchor_id)} ≠ enclosing section anchor ${anchorId}`, file, anchorId, ctx));
+      continue;
+    }
+    const entries = Array.isArray(block.entries) ? block.entries : null;
+    if (!entries) {
+      errors.push(makeError('entries', `entries must be array`, file, anchorId, ctx));
+      continue;
+    }
+
+    const expectedCategory = ANCHOR_TO_CATEGORY[anchorId];
+    entries.forEach((e, i) => {
+      const entry = e as Record<string, unknown>;
+      const pre = `entries[${i}]`;
+      const push = (subfield: string, msg: string) =>
+        errors.push(makeError(`${pre}.${subfield}`, msg, file, anchorId, ctx));
+
+      if (typeof entry.id !== 'string' || entry.id.length === 0) push('id', `must be non-empty string`);
+      if (typeof entry.description !== 'string' || entry.description.length === 0) push('description', `must be non-empty string`);
+      if (typeof entry.reason !== 'string' || entry.reason.length === 0) push('reason', `must be non-empty string(必填论证,沿 design §2.6.3)`);
+      if (!isScopeCategory(entry.category)) push('category', `must be one of out-of-scope|non-goal|future-work`);
+      else if (entry.category !== expectedCategory) push('category', `category ${entry.category} ≠ anchor_id ${anchorId} 默认映射 ${expectedCategory}`);
+      if (!isScopeStatus(entry.status)) push('status', `must be one of active|inherited|superseded|completed|obsolete`);
+    });
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+function makeError(
+  field: string,
+  message: string,
+  file: string | undefined,
+  anchorId: ScopeAnchorId,
+  ctx: ScopeValidateContext,
+): ValidationError {
+  // v2 B1 修订:**真实**绑定 9a FindingHashPayload 字段(不允许静态占位)
+  const payload: FindingHashPayload = {
+    validate_run_id: ctx.runId,
+    content_hash: ctx.contentHash,
+    git_head: ctx.gitHead,
+    dimension: 'correctness',
+    check_type: `scope-entries:${anchorId}:${field}`,
+    severity: 'CRITICAL',
+    automated: true,
+    evidence: file ? `file:${file}` : 'change-level',
+    recommendation: message,
+  };
+  return {
+    artifact: 'scope',
+    field,
+    message,
+    file,
+    severity: 'CRITICAL',
+    finding_hash: computeFindingHash(payload),
+  };
+}
+```
+
+- [ ] **Step 5: 修 validate/index.ts re-export**
+
+```typescript
+// src/core/validate/index.ts — 末尾加
+export * from './scope-entries.js';
+```
+
+- [ ] **Step 6: 修 validateChange 计算 + 传 ctx(v2 B1 修订)**
+
+修改 `src/core/validate/change.ts`,顶部加 imports + 在 validateChange 开始处算 ctx:
+
+```typescript
+// src/core/validate/change.ts — 顶部
+import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { validateScopeEntries } from './scope-entries.js';
+import { computeContentHash } from '../hash/content.js';
+
+// validateChange 函数体开始处
+export async function validateChange(changeDir: string): Promise<ValidationResult> {
+  const results: ValidationResult[] = [];
+  // v2 B1 修订:计算真实 ctx(runId 唯一 / contentHash / gitHead)
+  const ctx = {
+    runId: randomUUID(),
+    contentHash: await computeContentHash(changeDir),
+    gitHead: getGitHead() ?? 'no-git-head',
+  };
+  // ... 现有 proposal/design/tasks/specs 校验逻辑
+
+  // 在 proposal 校验 try 块内,parseProposal 之后加:
+  const scopeP = validateScopeEntries(text, proposalPath, ctx);
+  if (!scopeP.valid) {
+    for (const e of scopeP.errors) results.push({ valid: false, errors: [e], warnings: [] });
+  }
+  // design 校验 try 块内,parseDesign 之后加同样调用(传 designPath + ctx)
+  const scopeD = validateScopeEntries(text, designPath, ctx);
+  if (!scopeD.valid) {
+    for (const e of scopeD.errors) results.push({ valid: false, errors: [e], warnings: [] });
+  }
+}
+
+function getGitHead(): string | null {
+  try {
+    return execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch {
+    return null;
+  }
+}
+```
+
+- [ ] **Step 7: 修 validate.ts CLI 走 exit 0/1/2(v2 B2 修订)**
+
+```typescript
+// src/cli/commands/validate.ts(完整替换)
+import { Command } from 'commander';
+import { join } from 'node:path';
+import { validateChange } from '../../core/validate/index.js';
+
+export function buildValidateCommand(): Command {
+  return new Command('validate')
+    .argument('<changeId>', 'change directory id (e.g., add-login)')
+    .description('Validate a change directory')
+    .action(async (changeId: string) => {
+      const changeDir = join(process.cwd(), 'forge', 'changes', changeId);
+      const result = await validateChange(changeDir);
+
+      if (result.valid) {
+        console.log(`✓ ${changeId}: valid`);
+        process.exit(0);
+      }
+
+      // v2 B2 修订:exit 1 if any CRITICAL,否则 exit 2(老 behavior)
+      const hasCritical = result.errors.some((e) => e.severity === 'CRITICAL');
+      const exitCode = hasCritical ? 1 : 2;
+      console.error(`✗ ${changeId}: ${result.errors.length} errors`);
+      for (const e of result.errors) {
+        const sevPrefix = e.severity ? `[${e.severity}] ` : '';
+        const hashSuffix = e.finding_hash ? ` (finding_hash=${e.finding_hash.slice(0, 8)}...)` : '';
+        console.error(
+          `  - ${sevPrefix}[${e.artifact}] ${e.field ?? ''}: ${e.message}${e.file ? ` (${e.file}${e.line ? `:${e.line}` : ''})` : ''}${hashSuffix}`,
+        );
+      }
+      process.exit(exitCode);
+    });
+}
+```
+
+- [ ] **Step 8: 跑测试 + typecheck**
+
+```bash
+pnpm build && pnpm vitest run tests/core/validate/scope-entries.test.ts tests/cli/validate.test.ts
+```
+Expected: scope-entries 10/10 PASS;validate.test.ts exit code 三档 3/3 PASS
+
+```bash
+pnpm typecheck && pnpm lint && pnpm format:check
+```
+Expected: 全 PASS
+
+跑现有 validate test 确认无回归:
+
+```bash
+pnpm vitest run tests/core/validate/ tests/cli/validate.test.ts tests/cli/archive.test.ts
+```
+Expected: 全 PASS;若现有 fixture 触发新 CRITICAL → 是预期(应该不会,现有 fixture 不带 anchor section)
+
+- [ ] **Step 9: commit**
+
+```bash
+git add src/core/validate/types.ts src/core/validate/scope-entries.ts \
+        src/core/validate/index.ts src/core/validate/change.ts \
+        src/cli/commands/validate.ts \
+        tests/core/validate/scope-entries.test.ts tests/cli/validate.test.ts
+git commit -m "feat(9b): scope YAML schema + ValidationError severity + validate exit 1(v2 BLOCKER 修订)
+
+- v2 B1: validateScopeEntries 接 ScopeValidateContext {runId, contentHash, gitHead}(真实绑定)
+       FindingHashPayload 9 字段全真实运行时;不允许 <validate-static> 占位
+- v2 B2: ValidationError 加 severity + finding_hash;artifact enum 加 'scope'
+       validate.ts CLI exit 0/1/2 三档(沿 master §3.12.3 freeze)
+- validateChange 用 crypto.randomUUID + computeContentHash + git rev-parse HEAD 算 ctx"
+```
 
 - [ ] **Step 1: 写 failing test**
 
@@ -1518,25 +2101,27 @@ describe('forge scope scan-archived-followups(plan-9b Task 5)', () => {
     expect(parsed.entries[0].source_change).toBe('2026-05-01-a');
   });
 
-  it('archive 目录不存在 → exit 2 + stderr 含 ENOENT', () => {
-    // 不创建 forge/changes/archive
-    const root = mkdtemp(join(tmpdir(), 'forge-9b-noarch-'));
-    // ... 用 spawn 同步,期望 exit 2
-    let exitCode = 0;
-    let stderr = '';
+  it('archive 目录不存在 → exit 2 + stderr 含 ENOENT(v2 codex MAJOR 3 修订:删 placeholder,真实测)', async () => {
+    // 用独立 root,不在 beforeEach 内建 archive 目录
+    const noArchRoot = await mkdtemp(join(tmpdir(), 'forge-9b-noarch-'));
     try {
-      execFileSync('node', [CLI, 'scope', 'scan-archived-followups', 'x'], {
-        cwd: projectRoot, // 已删了 archive 目录(beforeEach 创建,这里手动删)
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-    } catch (e) {
-      exitCode = (e as { status?: number }).status ?? 0;
-      stderr = ((e as { stderr?: Buffer }).stderr ?? Buffer.from('')).toString();
+      let exitCode = 0;
+      let stderr = '';
+      try {
+        execFileSync('node', [CLI, 'scope', 'scan-archived-followups', 'new-id'], {
+          cwd: noArchRoot,
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+      } catch (e) {
+        exitCode = (e as { status?: number }).status ?? 0;
+        stderr = ((e as { stderr?: Buffer }).stderr ?? Buffer.from('')).toString();
+      }
+      expect(exitCode).toBe(2);
+      expect(stderr).toMatch(/ENOENT|不存在/);
+    } finally {
+      await rm(noArchRoot, { recursive: true, force: true });
     }
-    // 现在 archive 目录存在(beforeEach 建),需先删才能触发 ENOENT — 改用 setup 控制
-    // 简化:跳过此用例的 ENOENT 验证,放到 aggregator unit test 已覆盖
-    expect(true).toBe(true); // placeholder
   });
 });
 ```
@@ -1714,15 +2299,17 @@ git commit -m "docs(9b): propose.md slash 加 anchor + Pending follow-ups 扫描
 
 ---
 
-## 8. Task 7 — `skills/_shared/scope-category-guidance.md` + copy-templates 扩展 + receiving-code-review reference
+## 8. Task 7a — `skills/_shared/scope-category-guidance.md` + copy-templates fail-fast + receiving-code-review reference(v2 修订:Task 7 拆 7a + 7b)
 
 **Files:**
 - Create: `skills/_shared/scope-category-guidance.md`
-- Modify: `scripts/copy-templates.mjs`(扩展同步 `skills/_shared/*.md` → `src/core/templates/skills/_shared/` + `dist/core/templates/skills/_shared/`)
+- Modify: `scripts/copy-templates.mjs`(扩展同步 `skills/_shared/*.md` → `src/core/templates/skills/_shared/` + `dist/core/templates/skills/_shared/`;**v2 codex MAJOR 4 修订:_shared 缺失 fail-fast,不允许 graceful skip**)
 - Modify: `skills/receiving-code-review/SKILL.md`(加 §"区分指引" cross-ref)
 - 注:`skills/verifying-three-dimensions/SKILL.md`(9d 创建)和 `skills/exploring/SKILL.md`(9f 创建)自行 cross-ref,**本 plan 不创建这两个 skill**
 
-**Goal**:产出 `skills/_shared/scope-category-guidance.md` 共用区分指引文档(沿 design §2.6.6 表),被 receiving-code-review + 未来 9d/9f 三 skill cross-reference。同时把 `_shared/` 路径接入 `copy-templates.mjs` 部署链(沿 master BLOCKER 二轮 #8 修订:`docs/skill-shared/` 不在部署链,会 404)。
+**Goal**:产出 `skills/_shared/scope-category-guidance.md` 共用区分指引文档(沿 design §2.6.6 表),被 receiving-code-review + 未来 9d/9f 三 skill cross-reference。同时把 `_shared/` 路径接入 `copy-templates.mjs` 反向同步链(进 src/core/templates/ + dist/);**v2 修订:_shared 缺失 fail-fast 而非 graceful skip — 防止 release CI 静默缺漏**。
+
+**注意**:此 task 完成后 `_shared/scope-category-guidance.md` 已进 `src/core/templates/skills/_shared/` 和 `dist/core/templates/skills/_shared/`,但**还没接入 harness-adapters 部署链** — adapter 把 templates 铺到项目级 `.claude/skills/forge-<name>/` 仅认 SKILL_NAMES 13 个 skill,不认 _shared。Adapter 接入在 Task 7b 完成。
 
 - [ ] **Step 1: 写 skills/_shared/scope-category-guidance.md**
 
@@ -1769,22 +2356,28 @@ archive 阶段若发现 SUGGESTION > 5 项 或 SUGGESTION 中含关键词(`futur
 - 跨 change 扫描:`forge scope scan-archived-followups <change-id>`(沿 design §2.6.5)
 ```
 
-- [ ] **Step 2: 扩展 copy-templates.mjs 同步 `_shared/`**
+- [ ] **Step 2: 扩展 copy-templates.mjs 同步 `_shared/`(v2 修订:fail-fast)**
 
-修改 `scripts/copy-templates.mjs`,在 `syncSkills()` 后加 `syncSharedSkillDocs()`:
+修改 `scripts/copy-templates.mjs`,在 `syncSkills()` 后加 `syncSharedSkillDocs()`,**_shared 缺失 fail-fast**:
 
 ```javascript
 // scripts/copy-templates.mjs — 在 syncCommands() 上面加新函数
 
 // 同步 skills/_shared/*.md → src/core/templates/skills/_shared/ → dist/core/templates/skills/_shared/
 // plan-9b §2.6.8:跨 skill 共用 reference(被 receiving-code-review / verifying-three-dimensions / exploring 引用)
+// v2 codex MAJOR 4 修订:_shared 缺失 fail-fast — 防止 release CI 静默缺漏 runtime 404
 async function syncSharedSkillDocs() {
   const srcDir = join(REPO_ROOT, 'skills', '_shared');
   if (!existsSync(srcDir)) {
-    console.log('• skills/_shared/ 不存在,跳过 shared docs 同步');
-    return [];
+    console.error(`✗ skills/_shared/ 缺失:${srcDir}`);
+    console.error('  plan-9b §2.6.8 要求 _shared 目录在部署清单中存在;请检查是否被误删');
+    process.exit(1);
   }
   const mdFiles = (await readdir(srcDir)).filter((n) => n.endsWith('.md'));
+  if (mdFiles.length === 0) {
+    console.error(`✗ skills/_shared/ 为空:期望至少含 scope-category-guidance.md(plan-9b 交付)`);
+    process.exit(1);
+  }
 
   const srcTemplatesDir = join(REPO_ROOT, 'src', 'core', 'templates', 'skills', '_shared');
   await mkdir(srcTemplatesDir, { recursive: true });
@@ -1807,7 +2400,7 @@ async function syncSharedSkillDocs() {
 
 // 顶层调用部分(文件末尾):
 await syncSkills();
-await syncSharedSkillDocs(); // plan-9b §2.6.8
+await syncSharedSkillDocs(); // plan-9b §2.6.8(v2 修订:fail-fast)
 await syncCommands();
 ```
 
@@ -1855,17 +2448,209 @@ Expected: 两处都命中
 ```bash
 git add skills/_shared/ scripts/copy-templates.mjs skills/receiving-code-review/SKILL.md \
         src/core/templates/skills/ dist/core/templates/skills/
-git commit -m "feat(9b): skills/_shared/scope-category-guidance.md + copy-templates _shared/ 同步
+git commit -m "feat(9b): skills/_shared/scope-category-guidance.md + copy-templates _shared/ 同步(Task 7a)
 
 - scope-category-guidance.md:design §2.6.6 决策表 + 常见误判修正 + cross-ref
 - copy-templates.mjs syncSharedSkillDocs():_shared/*.md → src/core/templates/skills/_shared/ + dist/
+  v2 codex MAJOR 4 修订:_shared 缺失或为空 fail-fast(exit 1)而非 graceful skip
 - receiving-code-review/SKILL.md:加 §\"Scope Category Guidance\" cross-ref _shared 文档
-- 9d/9f 创建新 skill 时自行 cross-ref(本 plan 不创建)"
+- 9d/9f 创建新 skill 时自行 cross-ref(本 plan 不创建)
+- 部署链接入 Task 7b(adapter 铺到项目级 .claude/skills/forge-_shared/)"
 ```
 
 ---
 
-## 9. Task 8 — 集成 fixture + e2e 测试 + verify
+## 9. Task 7b — harness-adapters 接 sharedDocs 部署链 + `forge update` 接入 + smoke(v2 codex MAJOR 4 新增 task)
+
+**Files:**
+- Modify: `src/core/harness-adapters/types.ts`(加 `SharedDocSpec` + `DeployInput.sharedDocs`)
+- Modify: `src/core/harness-adapters/claude.ts`(plan() 把 sharedDocs 铺到 `.claude/skills/forge-_shared/<name>.md`)
+- Modify: `src/core/harness-adapters/codex.ts`(等价路径,沿 codex adapter 当前 skill 部署位置)
+- Modify: `src/core/harness-adapters/opencode.ts`(若存在)
+- Modify: `src/core/templates/skills/index.ts`(加 `loadAllSharedDocs()` API)
+- Modify: `src/cli/commands/update.ts`(`forge update` 调 loadAllSharedDocs 传入 DeployInput.sharedDocs)
+- Modify: `tests/cli/update.test.ts`(若已有 — 加 smoke 验 `.claude/skills/forge-_shared/scope-category-guidance.md` 落地;若无 新建)
+
+**Goal**:把 `_shared/scope-category-guidance.md` 接入 harness-adapters 部署链。3 个 adapter(claude / codex / opencode)`plan()` 时把 `input.sharedDocs` 铺到对应 harness 的 _shared 位置:
+- Claude Code:`.claude/skills/forge-_shared/<name>.md`
+- Codex CLI:沿现有 codex adapter skill 部署位置 + `/forge-_shared/`(实施时按 codex.ts 现状对齐)
+- OpenCode:同上
+
+`forge update` 命令(active 部署命令)调 `loadAllSharedDocs()` 把所有 `_shared/*.md` 传入 `DeployInput.sharedDocs`,跑 plan() 部署。Smoke test 验证落地。
+
+**注意**:`forge init` 在 v1.2 移除(沿 init.ts:38 deprecation),9b 不为 forge init 加 smoke;仅 `forge update`(active 命令)走完整 smoke。
+
+- [ ] **Step 1: 扩展 types.ts 加 SharedDocSpec + DeployInput.sharedDocs**
+
+```typescript
+// src/core/harness-adapters/types.ts(追加)
+
+/** 共用 skill reference doc(plan-9b §2.6.8;被多 skill cross-ref) */
+export interface SharedDocSpec {
+  /** doc 名(如 'scope-category-guidance');完整文件名是 `<name>.md` */
+  name: string;
+  /** markdown 内容 */
+  content: string;
+}
+
+export interface DeployInput {
+  projectRoot: string;
+  skills: SkillSpec[];
+  commands: CommandSpec[];
+  /** v2 plan-9b 新增:共用 skill reference docs(铺到 _shared 子目录) */
+  sharedDocs?: SharedDocSpec[];
+}
+```
+
+- [ ] **Step 2: 修 claude.ts adapter plan() 铺 sharedDocs**
+
+```typescript
+// src/core/harness-adapters/claude.ts — plan() 内部追加:
+async plan(input: DeployInput): Promise<DeployPlan> {
+  const files: PlannedFile[] = [];
+  for (const skill of input.skills) {
+    files.push({
+      relPath: `.claude/skills/forge-${skill.name}/SKILL.md`,
+      content: skill.content,
+    });
+  }
+  for (const cmd of input.commands) {
+    files.push({
+      relPath: `.claude/commands/forge/${cmd.name}.md`,
+      content: cmd.content,
+    });
+  }
+  // v2 plan-9b Task 7b:共用 reference docs 铺到 forge-_shared/ "skill-like" 容器
+  // 命名约定:.claude/skills/forge-_shared/<name>.md(沿 forge-<name> 风格;_shared 是合法 skill name 字面)
+  for (const doc of input.sharedDocs ?? []) {
+    files.push({
+      relPath: `.claude/skills/forge-_shared/${doc.name}.md`,
+      content: doc.content,
+    });
+  }
+  return { files };
+}
+```
+
+类似修改 `codex.ts` / `opencode.ts`(若存在),路径按各 harness 的 skill 安装位置对齐(实施时读两文件确认现状)。
+
+- [ ] **Step 3: 修 templates/skills/index.ts 加 loadAllSharedDocs()**
+
+```typescript
+// src/core/templates/skills/index.ts(追加)
+
+import { readdir } from 'node:fs/promises';
+
+/** 加载 _shared/*.md 全部 reference docs(plan-9b §2.6.8) */
+export async function loadAllSharedDocs(): Promise<Array<{ name: string; content: string }>> {
+  const sharedDir = join(__dirname, '_shared');
+  let entries: string[];
+  try {
+    entries = await readdir(sharedDir);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw err;
+  }
+  const mdFiles = entries.filter((n) => n.endsWith('.md'));
+  return Promise.all(
+    mdFiles.map(async (filename) => ({
+      name: filename.replace(/\.md$/, ''),
+      content: await readFile(join(sharedDir, filename), 'utf8'),
+    })),
+  );
+}
+```
+
+- [ ] **Step 4: 修 update.ts CLI 传 sharedDocs**
+
+```typescript
+// src/cli/commands/update.ts — 在调 adapter.plan() 前加:
+import { loadAllSkills, loadAllSharedDocs } from '../../core/templates/skills/index.js';
+
+// ...在构造 DeployInput 的地方:
+const sharedDocs = await loadAllSharedDocs();
+const input: DeployInput = { projectRoot, skills, commands, sharedDocs };
+const plan = await adapter.plan(input);
+// 后续 apply plan 已有,不改
+```
+
+(若现有 update.ts 没用 loadAllSkills 而是其他 API,实施时按 update.ts 实际现状 align;关键是把 sharedDocs 注入 DeployInput)
+
+- [ ] **Step 5: 写 smoke test**
+
+```typescript
+// tests/cli/update.test.ts(追加;若不存在新建)
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtemp, mkdir, writeFile, rm, readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+
+const CLI = join(process.cwd(), 'dist', 'cli', 'index.js');
+
+describe('forge update — sharedDocs 部署(v2 plan-9b Task 7b smoke)', () => {
+  let projectRoot: string;
+  beforeEach(async () => {
+    projectRoot = await mkdtemp(join(tmpdir(), 'forge-update-shared-'));
+    await mkdir(join(projectRoot, '.claude'), { recursive: true });
+    // 写一个最小 forge/config.yaml 让 update 跑(沿 config 现状最小字段)
+    await mkdir(join(projectRoot, 'forge'), { recursive: true });
+    await writeFile(join(projectRoot, 'forge', 'config.yaml'), 'schema: forge-config/v1\n');
+  });
+  afterEach(async () => {
+    await rm(projectRoot, { recursive: true, force: true });
+  });
+
+  it('forge update 把 scope-category-guidance.md 铺到 .claude/skills/forge-_shared/', () => {
+    execFileSync('node', [CLI, 'update'], { cwd: projectRoot, encoding: 'utf8' });
+    const expected = join(projectRoot, '.claude', 'skills', 'forge-_shared', 'scope-category-guidance.md');
+    expect(existsSync(expected)).toBe(true);
+  });
+
+  it('forge update 部署的 scope-category-guidance.md 内容含 design §2.6.6 表', async () => {
+    execFileSync('node', [CLI, 'update'], { cwd: projectRoot, encoding: 'utf8' });
+    const content = await readFile(
+      join(projectRoot, '.claude', 'skills', 'forge-_shared', 'scope-category-guidance.md'),
+      'utf8',
+    );
+    expect(content).toMatch(/Scope Category Guidance/);
+    expect(content).toMatch(/Future Work/);
+    expect(content).toMatch(/forge-oos/);
+  });
+});
+```
+
+- [ ] **Step 6: build + 跑 smoke 确认 pass**
+
+```bash
+pnpm build && pnpm vitest run tests/cli/update.test.ts
+```
+Expected: 2/2 PASS;若失败常因 update.ts 实际 API 与 plan 不符,按 update.ts 现状 align Step 4 调用
+
+- [ ] **Step 7: typecheck + lint + format + commit**
+
+```bash
+pnpm typecheck && pnpm lint && pnpm format:check
+git add src/core/harness-adapters/types.ts \
+        src/core/harness-adapters/claude.ts src/core/harness-adapters/codex.ts \
+        src/core/harness-adapters/opencode.ts \
+        src/core/templates/skills/index.ts \
+        src/cli/commands/update.ts \
+        tests/cli/update.test.ts
+git commit -m "feat(9b): harness-adapters sharedDocs 部署 + forge update 接入(v2 Task 7b)
+
+types.ts DeployInput 加 sharedDocs;claude/codex/opencode adapter plan() 铺
+.claude/skills/forge-_shared/<name>.md(及 codex/opencode 对应路径)
+loadAllSharedDocs() 加载 src/core/templates/skills/_shared/*.md
+update.ts 传 sharedDocs 进 DeployInput
+smoke test:forge update → scope-category-guidance.md 落地 + 内容验证
+解决 v2 codex MAJOR 4 — _shared 进 runtime 部署链(沿 master BLOCKER 二轮 #8 修订意图)"
+```
+
+---
+
+## 10. Task 8 — 集成 fixture + e2e 测试 + verify
 
 **Files:**
 - Create: `tests/integration/scope-end-to-end.test.ts`
@@ -1874,14 +2659,16 @@ git commit -m "feat(9b): skills/_shared/scope-category-guidance.md + copy-templa
 
 **Goal**:e2e 测试覆盖整个 9b 链路 — fixture 含 archived change(active entry) + 第二个 archived change(superseding) → 跑 `forge scope scan-archived-followups` → 输出 active entries 扣 superseded 项 → propose.md 加 entry → `forge validate` 通过 → marker 计算 content_hash 在改 forge-oos 段后不变。
 
-- [ ] **Step 1: 准备 fixture**
+- [ ] **Step 1: 准备 fixture(v2 MINOR 2 修订:用常量生成避免字面值耦合)**
 
 ```bash
 mkdir -p tests/fixtures/scope/archived-with-active-entry
 mkdir -p tests/fixtures/scope/archived-with-superseding
 ```
 
-写两个 fixture 目录的 proposal.md / design.md(沿 Task 5 测试里的字面 yaml,但移到 fixture 文件):
+写两个 fixture 目录的 proposal.md / design.md。**v2 修订**:fixture 中 source_change 字面值会与 e2e cp 目标目录名(如 `2026-05-01-archived-with-active-entry`)耦合;为减少手动对齐,fixture proposal.md 不 hardcode source_change,**改由 e2e 在 cp 后用 string template 写入**(见 Step 2 / Step 3 重写)。
+
+Step 1 仅准备 active entry fixture(superseding 在 e2e 内 string template 生成):
 
 `tests/fixtures/scope/archived-with-active-entry/proposal.md`:
 
@@ -1958,30 +2745,56 @@ import { computeContentHash } from '../../src/core/hash/content.js';
 const CLI = join(process.cwd(), 'dist', 'cli', 'index.js');
 const FIXTURE_ROOT = join(process.cwd(), 'tests', 'fixtures', 'scope');
 
+// v2 MINOR 2 修订:用常量生成 fixture target 路径,避免字面值耦合
+const ACTIVE_CHANGE_DIR = '2026-05-01-archived-with-active-entry';
+const SUPERSEDING_CHANGE_DIR = '2026-05-02-archived-with-superseding';
+const TARGET_ENTRY_ID = 'refresh-grace-period';
+
 describe('plan-9b end-to-end', () => {
   let projectRoot: string;
   beforeAll(async () => {
     projectRoot = await mkdtemp(join(tmpdir(), 'forge-9b-e2e-'));
-    // 把 fixture archived changes 复制到项目 archive/
-    await cp(join(FIXTURE_ROOT, 'archived-with-active-entry'), join(projectRoot, 'forge', 'changes', 'archive', '2026-05-01-archived-with-active-entry'), { recursive: true });
-    await cp(join(FIXTURE_ROOT, 'archived-with-superseding'), join(projectRoot, 'forge', 'changes', 'archive', '2026-05-02-archived-with-superseding'), { recursive: true });
+    // 把 active entry fixture cp 到项目 archive
+    await cp(
+      join(FIXTURE_ROOT, 'archived-with-active-entry'),
+      join(projectRoot, 'forge', 'changes', 'archive', ACTIVE_CHANGE_DIR),
+      { recursive: true },
+    );
+    // superseding fixture 不用 fixture 文件,直接用 string template 写,引用 ACTIVE_CHANGE_DIR 常量
+    const supersedingDir = join(projectRoot, 'forge', 'changes', 'archive', SUPERSEDING_CHANGE_DIR);
+    await mkdir(supersedingDir, { recursive: true });
+    await writeFile(
+      join(supersedingDir, 'proposal.md'),
+      [
+        '# Add Refresh Grace Period\n',
+        '## Why\n\nAddress refresh-grace-period\n',
+        '## What\n\nImplement\n',
+        '## Out of Scope {#forge-oos}\n',
+        '```yaml',
+        'schema: forge-scope-entries/v1',
+        'anchor_id: forge-oos',
+        'entries: []',
+        'superseding_entries:',
+        `  - source_change: ${ACTIVE_CHANGE_DIR}`,
+        `    entry_id: ${TARGET_ENTRY_ID}`,
+        '    new_status: superseded',
+        '    rationale: implemented here',
+        '```',
+      ].join('\n'),
+    );
+    await writeFile(join(supersedingDir, 'design.md'), '# Design\n');
   });
   afterAll(async () => {
     await rm(projectRoot, { recursive: true, force: true });
   });
 
-  it('forge scope scan-archived-followups:active entry 被 superseding 扣 → []', () => {
-    // 注意 fixture 内的 source_change 应匹配实际目录名
-    // 实施时把 fixture 内 source_change 改成 '2026-05-01-archived-with-active-entry'
+  it('forge scope scan-archived-followups:active entry 被 superseding 扣 → 严格 ===0(v2 MINOR 2 修订)', () => {
     const out = execFileSync('node', [CLI, 'scope', 'scan-archived-followups', 'new-id'], {
       cwd: projectRoot,
       encoding: 'utf8',
     });
     const parsed = JSON.parse(out);
-    // 注:fixture 的 source_change 若未对齐目录名,本用例会显示 1 entry。需在 fixture 写 source_change 时用实际目录名 '2026-05-01-...'。
-    // 测试时若 fixture source_change=archived-with-active-entry(无前缀),则 superseding 不命中,entry 应为 1。
-    // 实施者需对齐两侧的 source_change 字面;此用例期望 0(superseding 对齐时)。
-    expect(parsed.entries.length).toBeLessThanOrEqual(1);
+    expect(parsed.entries).toEqual([]); // 严格断言:active entry 被 superseding 完全扣除
   });
 
   it('content_hash 稳定性:只改 forge-oos 段不破坏 hash', async () => {
@@ -2119,17 +2932,9 @@ describe('plan-9b end-to-end', () => {
 
 (注:fixture 的 `source_change` 字段需要在实施时与实际目录名对齐,沿 Step 1 的 fixture 文件需在 superseding 那份里写 `source_change: 2026-05-01-archived-with-active-entry` — 即 e2e 把 fixture cp 到的目录名)
 
-- [ ] **Step 3: 修正 fixture 的 source_change 字段对齐目录名**
+- [ ] **Step 3: ~~修正 fixture source_change~~(v2 MINOR 2 修订:删除此步;Step 2 已用常量生成,无 fixture 静态文件需要对齐)**
 
-修改 `tests/fixtures/scope/archived-with-superseding/proposal.md` 内 yaml block:
-
-```yaml
-superseding_entries:
-  - source_change: 2026-05-01-archived-with-active-entry
-    entry_id: refresh-grace-period
-    new_status: superseded
-    rationale: implemented here
-```
+(原 Step 3 删除;tests/fixtures/scope/archived-with-superseding/ 目录不再需要,可不创建。仅保留 archived-with-active-entry fixture 文件)
 
 - [ ] **Step 4: build + 跑 e2e test**
 
@@ -2157,37 +2962,78 @@ archived-with-active-entry / archived-with-superseding 两份 fixture
 
 ---
 
-## 10. 修订记录
+## 11. 修订记录
 
-- **v1**(2026-05-11):初稿。沿 master plan §3.2 + §3.12.1bis + §3.12.2 + §3.12.3 锁定的接口写。本 plan 不实施 archive_summary handoff_to_backlog 的真实聚合(那是 9e2),只提供数据源(scanArchivedFollowups)。
-- 锁定决策:
-  - **CLI exit code**:scope scan-archived-followups 0/2(沿 §3.12.3);validate scope YAML 错走原 validate exit 2(本 plan 不改 exit 1 语义,留 9d 三维度统一收割)
-  - **finding_hash 接通方式**:每个 scope CRITICAL finding 在 scope-entries.ts 内即时算 finding_hash(走 9a `computeFindingHash`),写到 error.finding_hash 字段;`validateChange` 把 message 加 finding_hash 前 8 字符前缀便于 CLI 输出定位
-  - **路径决策**:沿 master BLOCKER 二轮 #8 修订,共享文档路径用 `skills/_shared/scope-category-guidance.md`(进 copy-templates 部署链),不用 `docs/skill-shared/`
-  - **content_hash 实施位置**:沿 design §2.6.3 命名是 `src/core/markers/content-hash.ts`,但实际 v0.4 代码 hash 模块在 `src/core/hash/content.ts` — 本 plan **改造现有 hash/content.ts**,不新建 markers/content-hash.ts(避免双份实现,DRY)
-  - **propose.md slash 决策**:不要求"用户必须处理 archived followups",仅"必须提示";静默丢弃决策是禁止行为(沿 §2.6.5 "不强制"语义)
+- **v1**(2026-05-11 commit `96b2955`):初稿。沿 master plan §3.2 + §3.12.1bis + §3.12.2 + §3.12.3 锁定的接口写。本 plan 不实施 archive_summary handoff_to_backlog 的真实聚合(那是 9e2),只提供数据源(scanArchivedFollowups)。
+- **v2**(2026-05-11):codex 一轮 adversarial review 全采纳(**2 BLOCKER + 4 MAJOR + 2 MINOR**):
+  - **BLOCKER 1 — finding_hash 静态占位失效**(原 v1 Task 4 用 `<validate-static>` 填 9 字段 payload,所有 scope finding 共享同 hash,失去去重/防伪造):**v2 修订**:`validateScopeEntries` 改签名接受 `ScopeValidateContext {runId, contentHash, gitHead}`,从 `validateChange` 传入真实值(`crypto.randomUUID()` + `computeContentHash(changeDir)` + `git rev-parse HEAD`)
+  - **BLOCKER 2 — validate exit code 违反 master §3.12.3 freeze**(原 v1 决定"留 9d 收割" — **错**,master §3.12.3 已锁 validate exit 1 = CRITICAL):**v2 修订**:`ValidationError` 加 `severity?: Severity` + `finding_hash?: string` 字段;artifact enum 加 `'scope'`;`validate.ts` CLI 改 exit 0/1/2 三档(CRITICAL → exit 1;其他业务错 → exit 2)
+  - **MAJOR 1 — ScopeEntriesBlock 顶级 `schema` 字段 master freeze 漏**:**v2 修订**:同步修 master `2026-05-10-plan-9-v1.0-fusion-completion-master.md` §3.12.1bis 加 `schema | literal 'forge-scope-entries/v1' | required` 行
+  - **MAJOR 2 — H3 子标题让 scope 段剔除不完整**(原 v1 Task 3 用 parseMarkdown 的 section.endLine,但 parseMarkdown 任意 level heading 都关 section):**v2 修订**:`stripScopeAnchoredSections` 自己扫 sections,按 `next.level <= sec.level` 算"下一同级或更高级 heading"区间;加 H3 子标题 + H1 边界两个新测试
+  - **MAJOR 3 — CLI ENOENT 测试是占位**(原 v1 Task 5 Step 5 `expect(true).toBe(true)`):**v2 修订**:删 placeholder,改 mkdtemp + 不创建 archive 目录 + 真实 execFileSync 跑 CLI + 断言 status===2 + stderr 含 ENOENT
+  - **MAJOR 4 — `_shared` 部署链不完整 + graceful skip 隐患**:**v2 修订**:Task 7 拆 7a/7b:
+    - 7a:copy-templates 同步 _shared 加 fail-fast(缺失 / 空目录 exit 1)
+    - 7b(新增 task):harness-adapters/{claude,codex,opencode}.ts plan() 把 `input.sharedDocs` 铺到项目级 `.claude/skills/forge-_shared/<name>.md`;`templates/skills/index.ts` 加 `loadAllSharedDocs()`;`forge update` 注入 sharedDocs;smoke test 验落地
+  - **MINOR 1 — anchor regex 注释误称 CommonMark**:**v2 修订**:注释改为"forge 三 ASCII anchor — 严格 charset 是有意为之,阻止 unicode 绕过 fence"
+  - **MINOR 2 — e2e fixture source_change 字面值耦合 + 断言放宽**:**v2 修订**:e2e 用常量 `ACTIVE_CHANGE_DIR` / `SUPERSEDING_CHANGE_DIR` / `TARGET_ENTRY_ID` 生成 superseding fixture(string template),断言改 `===0` 严格匹配
+  - **工日上调**:P50 3.5 → 4.0 / P90 4.5 → 5.0;master plan §3.2 表 + §0 总计已同步更新(P50 39.5 / P90 52.5)
+- 锁定决策(v1 → v2 沿用,无变化):
+  - **scope scan-archived-followups CLI exit code**:0/2(沿 §3.12.3)
+  - **路径决策**:`skills/_shared/scope-category-guidance.md`(master BLOCKER 二轮 #8 修订)
+  - **content_hash 实施位置**:`src/core/hash/content.ts` 改造,不新建 markers/content-hash.ts(DRY)
+  - **propose.md slash**:不强制用户处理 archived followups,仅必须提示;静默丢弃禁止
 
 ---
 
-## 11. Self-Review
+## 12. Self-Review(v2 修订)
 
-### 11.1 Spec coverage(对照 master §3.2 + design §2.6 / §3.12)
+### 12.1 Spec coverage(对照 master §3.2 + design §2.6 / §3.12)
 
 | spec 条目 | 实施 task |
 |---|---|
-| `src/core/schemas/scope-entries.ts`(`forge-scope-entries/v1`) | Task 1 |
-| proposal.md / design.md 加 anchor ID 模板 | Task 6(slash 模板指示;实际产文件由 AI 走 propose flow 时遵守) |
-| `src/core/markers/content-hash.ts` 修订(anchor 排除三段) | Task 3(改造 src/core/hash/content.ts,沿 §10 修订记录) |
-| `src/cli/commands/scope.ts scan-archived-followups` | Task 5 |
+| `src/core/schemas/scope-entries.ts`(`forge-scope-entries/v1`,**v2 含 `schema` 顶级字段**) | Task 1 |
+| proposal.md / design.md 加 anchor ID 模板 | Task 6 |
+| `src/core/markers/content-hash.ts` 修订(anchor 排除三段,**v2 修订:按 level 算区间覆盖 H3 子标题**) | Task 3(改造 `src/core/hash/content.ts`,沿 §11 修订记录) |
+| `src/cli/commands/scope.ts scan-archived-followups`(**v2 修订:ENOENT 真实测试**) | Task 5 |
 | `commands/propose.md` Pending follow-ups 扫描段 | Task 6 |
-| `src/cli/commands/validate.ts` scope YAML schema 校验 + CRITICAL finding | Task 4 |
-| `skills/_shared/scope-category-guidance.md` + copy-templates 扩展 + receiving-code-review reference | Task 7 |
-| 单元测试(anchor 识别 / content_hash 排除 / superseding_entries forward-reference / scope YAML parse / category 区分) | Task 1-5 + Task 8 |
-| §3.12.1bis 三 schema 顶级字段冻结 | Task 1 |
-| §3.12.2 `skills/_shared/` 路径 | Task 7 |
-| §3.12.3 scope scan-archived-followups exit code(0/2) | Task 5 |
+| `src/cli/commands/validate.ts` scope YAML schema 校验 + CRITICAL finding(**v2 修订:exit 0/1/2 三档 + finding_hash 真实绑定**) | Task 4 |
+| `skills/_shared/scope-category-guidance.md` + copy-templates 扩展 + receiving-code-review reference(**v2 修订:fail-fast**) | Task 7a |
+| harness-adapters sharedDocs 部署链 + `forge update` 接入(**v2 新增**) | Task 7b |
+| 单元测试 + smoke + e2e(anchor 识别 / content_hash 排除 / H3 子标题 / superseding forward-reference / scope YAML parse / category 区分 / validate exit 1 / scope ENOENT / forge update 部署 _shared) | Task 1-5 + Task 7b + Task 8 |
+| §3.12.1bis 四 schema 顶级字段冻结(含 `schema`)| Task 1 |
+| §3.12.2 `skills/_shared/` 路径 | Task 7a + 7b |
+| §3.12.3 scope scan-archived-followups exit code(0/2)+ **validate exit code(0/1/2)** | Task 4 + Task 5 |
 
-**结论**:全部 master §3.2 + 锁定接口都被 task 覆盖。`skills/exploring/SKILL.md` 与 `skills/verifying-three-dimensions/SKILL.md` 的 cross-ref 留给 9f / 9d 创建该 skill 时实施(本 plan §1 "不修改文件"段明确边界)。
+**结论**:全部 master §3.2 + 锁定接口都被 task 覆盖。9 个 task(v1 8 个 + v2 拆 Task 7 为 7a/7b)。
+
+### 12.2 Placeholder scan(v2)
+
+| 风险点 | 状态 |
+|---|---|
+| TBD / TODO / "implement later" 字符串 | 全文 grep 无命中 |
+| "add appropriate error handling" 类抽象指示 | 无 |
+| 缺测试代码的 step | 无 |
+| placeholder 断言(`expect(true).toBe(true)`)| **v2 已删除**(Task 5 ENOENT 真实测) |
+| 字面值耦合(fixture source_change)| **v2 已修复**(string template 常量生成) |
+| `<=` 放宽断言 | **v2 已严格化**(`expect(...).toEqual([])`)|
+
+### 12.3 Type consistency(v2 含新接口)
+
+| 类型/函数名 | 定义于 | 后续 task 引用 |
+|---|---|---|
+| `ScopeEntry` / `SupersedingRef` / `ScopeEntriesBlock`(**v2 含 `schema` 顶级**) | Task 1 | Task 4 + Task 5 |
+| `SCOPE_ANCHOR_IDS` / `ScopeAnchorId` | Task 1 | Task 3 / Task 4 / Task 5 |
+| `ANCHOR_TO_CATEGORY` | Task 1 | Task 4 |
+| `parseFencedYamlBlocks` / `FencedYamlParseError` | Task 2 | Task 4 + Task 5 |
+| `Section.anchor` | Task 2 | Task 3 / Task 4 / Task 5 |
+| `computeFindingHash` | 9a 已立 | Task 4 |
+| `ScopeValidateContext`(**v2 新增**) | Task 4 | (内部使用) |
+| `ValidationError.severity` + `.finding_hash`(**v2 新增字段**) | Task 4 | Task 4 CLI 输出 |
+| `AggregatedScopeEntry` / `scanArchivedFollowups` | Task 5 | (9e2 archive_summary handoff 聚合) |
+| `SharedDocSpec` + `DeployInput.sharedDocs`(**v2 新增**) | Task 7b | Task 7b adapter plan() + Task 7b smoke |
+| `loadAllSharedDocs`(**v2 新增**) | Task 7b | Task 7b update.ts |
+
+**结论**:跨 task 类型 + 函数名一致;`scope-entries.ts` 是 single source of truth,后续 sub-plan(9e2 / 9f / 9d)reference 不重定义。
 
 ### 11.2 Placeholder scan
 

@@ -1,8 +1,10 @@
 // forge validate 子命令测试
 // 测试验证 change 目录的成功/失败路径
 
-import { describe, it, expect } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, unlinkSync } from 'node:fs';
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runCli } from './helpers.js';
@@ -63,14 +65,15 @@ describe('forge validate', () => {
     }
   });
 
-  // Test 2: forge validate add-login 在 change 目录里 proposal 缺 Why → exit 2 + stderr 含 [proposal] why
-  it('forge validate add-login 在 proposal 缺 Why 时 → exit 2, stderr 含 [proposal]', () => {
+  // Test 2: forge validate add-login 在 change 目录里 proposal 缺 Why → exit 1(v3 B2 修订:business-fail 标 CRITICAL → exit 1)
+  it('forge validate add-login 在 proposal 缺 Why 时 → exit 1(CRITICAL), stderr 含 [proposal]', () => {
     const { dir, cleanup } = makeChangeDir('add-login', {
       proposal: '# Title\n\n## What\nw\n', // 没 Why
     });
     try {
       const r = runCli(['validate', 'add-login'], dir);
-      expect(r.exitCode).toBe(2);
+      // v3 B2 修订:business-fail 现在是 CRITICAL → exit 1(不再是 exit 2)
+      expect(r.exitCode).toBe(1);
       expect(r.stderr).toContain('[proposal]');
     } finally {
       cleanup();
@@ -87,5 +90,106 @@ describe('forge validate', () => {
     } finally {
       cleanup();
     }
+  });
+});
+
+// ─── v2 B2 修订:exit 0/1/2 三档测试 ────────────────────────────────────────────
+
+const CLI = join(process.cwd(), 'dist', 'cli', 'index.js');
+
+describe('forge validate exit code(v2 B2 修订:0/1/2 三档)', () => {
+  let projectRoot: string;
+  let changeDir: string;
+  beforeEach(async () => {
+    projectRoot = await mkdtemp(join(tmpdir(), 'forge-validate-exit-'));
+    changeDir = join(projectRoot, 'forge', 'changes', 'test-id');
+    await mkdir(join(changeDir, 'specs'), { recursive: true });
+    // v6 codex 五轮 BLOCKER 1 修订:fixture 必须满足 specs.ts:12 (scenarios.length>0) + given/when/then 非空
+    // 沿 parse/specs.ts STEP_RE = /^\*\*(Given|When|Then|And|But)\*\*\s+(.+)$/i,必须用 **Given** 加粗格式
+    // 否则 "全合规 → exit 0" 用例会 fail
+    await writeFile(
+      join(changeDir, 'specs', 'a.md'),
+      '# A\n\n## Scenario: s1\n\n**Given** x\n\n**When** y\n\n**Then** z\n',
+    );
+    // tasks.ts:8 要求 items.length>0;沿 parse/tasks.ts TASK_RE = /^\s*- \[([ x])\]\s+([\w-]+)\s*:\s*(.+)$/
+    // 必须含冒号分隔 id 和 description:`- [ ] task-1: do thing`
+    await writeFile(join(changeDir, 'tasks.md'), '# T\n\n- [ ] task-1: do thing\n');
+    await writeFile(join(changeDir, 'design.md'), '# D\n');
+  });
+  afterEach(async () => {
+    await rm(projectRoot, { recursive: true, force: true });
+  });
+
+  it('全合规 → exit 0', () => {
+    writeFileSync(join(changeDir, 'proposal.md'), '# P\n\n## Why\n\nw\n\n## What\n\nc\n');
+    const out = execFileSync('node', [CLI, 'validate', 'test-id'], {
+      cwd: projectRoot,
+      encoding: 'utf8',
+    });
+    expect(out).toContain('valid');
+  });
+
+  it('CRITICAL scope finding → exit 1', () => {
+    writeFileSync(
+      join(changeDir, 'proposal.md'),
+      [
+        '# P\n## Why\n\nw\n## What\n\nc',
+        '## Out of Scope {#forge-oos}\n',
+        '```yaml',
+        'schema: forge-scope-entries/v1',
+        'anchor_id: forge-oos',
+        'entries:',
+        '  - id: a',
+        '    category: out-of-scope',
+        '    description: d',
+        '    reason: ""',
+        '    priority: null',
+        '    status: active',
+        '    triggered_by: null',
+        '    related_change: null',
+        '```',
+      ].join('\n'),
+    );
+    let exitCode = 0;
+    try {
+      execFileSync('node', [CLI, 'validate', 'test-id'], {
+        cwd: projectRoot,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (e) {
+      exitCode = (e as { status?: number }).status ?? 0;
+    }
+    expect(exitCode).toBe(1);
+  });
+
+  it('proposal missing Why → CRITICAL business-fail → exit 1(v3 B2 修订:删 v2 旧"exit 2"期望)', () => {
+    writeFileSync(join(changeDir, 'proposal.md'), '# P\n\n## What\n\nc\n');
+    let exitCode = 0;
+    try {
+      execFileSync('node', [CLI, 'validate', 'test-id'], {
+        cwd: projectRoot,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (e) {
+      exitCode = (e as { status?: number }).status ?? 0;
+    }
+    expect(exitCode).toBe(1); // v3 修订:business-fail 也算 CRITICAL → exit 1(沿 master §3.12.3 freeze)
+  });
+
+  it('fs error(proposal.md 不存在)→ exit 2(仅 fs/config 错走 2)', () => {
+    // 不写 proposal.md 模拟 fs 错(beforeEach 没创建它)
+    let exitCode = 0;
+    try {
+      execFileSync('node', [CLI, 'validate', 'test-id'], {
+        cwd: projectRoot,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (e) {
+      exitCode = (e as { status?: number }).status ?? 0;
+    }
+    expect(exitCode).toBe(2);
   });
 });

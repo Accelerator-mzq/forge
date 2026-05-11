@@ -1,5 +1,6 @@
 // forge validate 子命令 — 验证 change 目录
-// 使用 validateChange API,exit 0/2 + 错误打印到 stderr
+// v2 B2 修订:exit 0/1/2 三档(沿 master §3.12.3 freeze)
+// exit 0 = 全 PASS;exit 1 = CRITICAL findings 存在;exit 2 = fs/config 错
 
 import { Command } from 'commander';
 import { join } from 'node:path';
@@ -18,15 +19,20 @@ export function buildValidateCommand(): Command {
         // 验证成功 → stdout + exit 0
         console.log(`✓ ${changeId}: valid`);
         process.exit(0);
-      } else {
-        // 验证失败 → stderr + exit 2
-        console.error(`✗ ${changeId}: ${result.errors.length} errors`);
-        for (const e of result.errors) {
-          console.error(
-            `  - [${e.artifact}] ${e.field ?? ''}: ${e.message}${e.file ? ` (${e.file}${e.line ? `:${e.line}` : ''})` : ''}`,
-          );
-        }
-        process.exit(2);
       }
+
+      // v2 B2 修订:exit 1 if any CRITICAL,否则 exit 2(fs/config 类错)
+      const hasCritical = result.errors.some((e) => e.severity === 'CRITICAL');
+      const exitCode = hasCritical ? 1 : 2;
+      console.error(`✗ ${changeId}: ${result.errors.length} errors`);
+      for (const e of result.errors) {
+        // 输出加 severity prefix + finding_hash suffix
+        const sevPrefix = e.severity ? `[${e.severity}] ` : '';
+        const hashSuffix = e.finding_hash ? ` (finding_hash=${e.finding_hash.slice(0, 8)}...)` : '';
+        console.error(
+          `  - ${sevPrefix}[${e.artifact}] ${e.field ?? ''}: ${e.message}${e.file ? ` (${e.file}${e.line ? `:${e.line}` : ''})` : ''}${hashSuffix}`,
+        );
+      }
+      process.exit(exitCode);
     });
 }

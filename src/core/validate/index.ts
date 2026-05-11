@@ -8,3 +8,5 @@ export * from './marker-integrity.js';
 // Task 7(plan-9a §8): cross-cutting framework — finding_hash 计算 + candidate 验证骨架
 export * from './finding-hash.js';
 export * from './candidate-validators.js';
+// plan-9b Task 4: scope YAML block 校验
+export * from './scope-entries.js';

@@ -42,16 +42,20 @@ describe('templates/skills', () => {
   });
 });
 
-// plan-9i Task 0 — 验证 SKILL_NAMES registry 扩展(writing-skills 第 13 项)
+// plan-9i Task 0 + plan-9d Task 0 — 验证 SKILL_NAMES registry 扩展(9i:writing-skills 第 13 项 + 9d:verifying-three-dimensions 第 14 项)
 // 注:SKILL_NAMES 已由上方 import 引入,无需重复 import
-describe('SKILL_NAMES registry (9i)', () => {
-  it('includes writing-skills (sole self-bootstrapped skill, design §2.9.5)', () => {
-    // writing-skills 是唯一"自引导"skill:用于编写其他 skills 的 skill 本身
+describe('SKILL_NAMES registry (9i + 9d)', () => {
+  it('writing-skills 是 SKILL_NAMES 第 13 项', () => {
     expect(SKILL_NAMES).toContain('writing-skills');
+    expect(SKILL_NAMES.indexOf('writing-skills')).toBe(12); // 0-indexed
   });
 
-  it('has 13 entries (v0.1 12 + 9i writing-skills)', () => {
-    // plan-9i 将 registry 从 12 扩展到 13
-    expect(SKILL_NAMES.length).toBe(13);
+  it('verifying-three-dimensions 是 SKILL_NAMES 第 14 项', () => {
+    expect(SKILL_NAMES).toContain('verifying-three-dimensions');
+    expect(SKILL_NAMES.indexOf('verifying-three-dimensions')).toBe(13); // 0-indexed
+  });
+
+  it('SKILL_NAMES 总数 14', () => {
+    expect(SKILL_NAMES.length).toBe(14);
   });
 });

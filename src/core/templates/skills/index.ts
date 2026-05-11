@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-/** 13 个移植 skill 名(spec §2.2 12 skill 表 + plan-9i writing-skills) */
+/** 14 个移植 skill 名(spec §2.2 12 skill 表 + plan-9i writing-skills + plan-9d verifying-three-dimensions) */
 export const SKILL_NAMES = [
   'using-forge',
   'brainstorming',
@@ -23,6 +23,7 @@ export const SKILL_NAMES = [
   'using-git-worktrees',
   'finishing-a-development-branch',
   'writing-skills', // 9i 新增(沿 design §2.9 协议落地 + plan-9i v7)
+  'verifying-three-dimensions', // 9d 新增(沿 design §2.2 协议落地 + plan-9d v15)
 ] as const;
 
 export type SkillName = (typeof SKILL_NAMES)[number];
@@ -37,7 +38,7 @@ export interface LoadedSkill {
   content: string;
 }
 
-/** 全量加载 13 个 skill,失败抛错(说明某个 .md 漏建) */
+/** 全量加载 14 个 skill,失败抛错(说明某个 .md 漏建) */
 export async function loadAllSkills(): Promise<LoadedSkill[]> {
   return Promise.all(SKILL_NAMES.map(async (name) => ({ name, content: await loadSkill(name) })));
 }

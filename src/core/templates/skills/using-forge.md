@@ -130,14 +130,14 @@ forge 在三 harness 下的协议支持:
 
 触发以下任一命令时,会自动调起对应 skill 链:
 
-| 命令                                               | 用途                                      | 调起 skill                                                                                                                                     |
-| -------------------------------------------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/forge:brainstorm <topic>`                        | 模糊想法 → forge/drafts/<date>-<topic>.md | forge:brainstorming                                                                                                                            |
-| `/forge:propose <change-id> [--from-draft <name>]` | draft → 4 个 change 产物                  | forge:writing-plans                                                                                                                            |
-| `/forge:apply [--parallel]`                        | tasks.md → 实施                           | forge:subagent-driven-development + forge:test-driven-development(--parallel 加 forge:dispatching-parallel-agents + forge:using-git-worktrees) |
-| `/forge:review`                                    | 派 review subagent + 收反馈               | forge:requesting-code-review + forge:receiving-code-review                                                                                     |
-| `/forge:verify`                                    | 跑 forge validate + 写 verify-passed YAML | forge:verification-before-completion                                                                                                           |
-| `/forge:archive`                                   | 归档 change 到 forge/changes/archive/     | (CLI `forge archive`,无 skill 链)                                                                                                              |
+| 命令                                               | 用途                                                   | 调起 skill                                                                                                                                     |
+| -------------------------------------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/forge:brainstorm <topic>`                        | 模糊想法 → forge/drafts/<date>-<topic>.md              | forge:brainstorming                                                                                                                            |
+| `/forge:propose <change-id> [--from-draft <name>]` | draft → 4 个 change 产物                               | forge:writing-plans                                                                                                                            |
+| `/forge:apply [--parallel]`                        | tasks.md → 实施                                        | forge:subagent-driven-development + forge:test-driven-development(--parallel 加 forge:dispatching-parallel-agents + forge:using-git-worktrees) |
+| `/forge:review`                                    | 派 review subagent + 收反馈                            | forge:requesting-code-review + forge:receiving-code-review                                                                                     |
+| `/forge:verify`                                    | 跑 forge validate + 三维度分析 + 写 verify-passed YAML | forge:verification-before-completion + forge:verifying-three-dimensions                                                                        |
+| `/forge:archive`                                   | 归档 change 到 forge/changes/archive/                  | (CLI `forge archive`,无 skill 链)                                                                                                              |
 
 ## meta-development entry — writing-skills
 

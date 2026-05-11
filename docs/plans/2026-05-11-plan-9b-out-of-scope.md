@@ -12,12 +12,12 @@
 - design v3 [`2026-05-10-v1.0-fusion-completion-design.md`](../specs/2026-05-10-v1.0-fusion-completion-design.md) §2.6 全节(§2.6.1-2.6.8)+ §2.4.3 archive_summary handoff_to_backlog 数据形态(本 plan 仅产数据源,实际 archive_summary 聚合在 9e2)
 - master plan §3.2(plan-9b 概览)+ §3.12.1bis(scope-entries schema 顶级字段冻结)+ §3.12.2(`skills/_shared/scope-category-guidance.md` 路径冻结)+ §3.12.3(`forge scope scan-archived-followups` exit code 冻结)
 
-**P50 工日**:4.0(v2 codex review 一轮修订上调 +0.5)/ **P90 工日**:5.0
+**P50 工日**:4.2(v2 +0.5 + v3 +0.2)/ **P90 工日**:5.2(v2 +0.5 + v3 +0.2)
 
 **前置**:9a 横切层基础(已完成,commit `0196d55..07e95b7`)。本 plan 在 9a 锁定的 `src/core/schemas/severity.ts`(severity / FindingHashPayload)+ `src/core/canonical-json.ts`(JCS)+ `src/core/validate/finding-hash.ts`(computeFindingHash)之上扩展。
 
 **DoD**(完成定义):
-- §3.12.1bis 三个 schema 顶级字段(entries / superseding_entries / anchor_id)写入 `src/core/schemas/scope-entries.ts`,后续 sub-plan 仅 reference 不重定义
+- §3.12.1bis **四个** schema 顶级字段(`schema` / `entries` / `superseding_entries` / `anchor_id`)写入 `src/core/schemas/scope-entries.ts`,后续 sub-plan 仅 reference 不重定义(v3 codex review NIT 修订:补 `schema` 字段表述)
 - proposal.md / design.md 经 9b 升级后:含 `{#forge-oos}` / `{#forge-non-goals}` / `{#forge-future-work}` anchor 时,这三段从 content_hash 剔除;改 YAML 块不致 marker 失效
 - `forge scope scan-archived-followups <change-id>` CLI 输出 active entries JSON(扣 superseding_entries),exit 0 / 2 与 §3.12.3 一致
 - `forge validate` 检测 scope YAML 语法错时产 CRITICAL finding(finding_hash 走 9a 路径绑定真实 `validate_run_id` / `content_hash` / `git_head`,**不允许静态占位**;CLI exit 1,沿 master §3.12.3 freeze)
@@ -38,7 +38,7 @@
 | 1 | scope-entries schema 锁死 | 0.3 | `src/core/schemas/scope-entries.ts` + tests(§3.12.1bis 接口冻结,v2 含 `schema` 字段) |
 | 2 | anchor ID 识别 + fenced YAML 抽取 | 0.5 | `src/core/parse/markdown.ts` 扩展(注释修正)+ 新增 `src/core/parse/fenced-yaml.ts` + tests |
 | 3 | content_hash 改造按 anchor 剔除三段 | 0.5 | `src/core/hash/content.ts` 改造(**v2 修订:按 heading level 算区间覆盖 H3 子标题**)+ tests |
-| 4 | validate scope YAML schema + ValidationError severity + CLI exit 1 | **0.6**(v2 修订上调 0.4→0.6:B1 + B2 实施) | `src/core/validate/scope-entries.ts` + `validateChange` 传 run/git context + `ValidationError.severity` 扩展 + `validate.ts` CLI exit 0/1/2 三档 |
+| 4 | validate scope YAML + ValidationError severity + CLI exit 1 + 9a FindingHashPayload 修订 + 现有 validator 标 severity | **0.8**(v2 修订 0.4→0.6;v3 修订 0.6→0.8:B1 跨 9a 接口修订 + B2 proposal/specs/tasks validator severity 标注) | 9a `FindingHashPayload` 9→8 字段(v3 B1)+ `src/core/validate/scope-entries.ts` + `validateChange` 传 ctx + `ValidationError.severity` 扩展 + 现有 validator 标 CRITICAL + `validate.ts` CLI exit 0/1/2 三档 |
 | 5 | `forge scope scan-archived-followups` CLI | 0.6 | `src/cli/commands/scope.ts` + `src/core/scope/aggregator.ts` + CLI test(**v2 修订:ENOENT 真实 exit 2 测试,删 placeholder**) |
 | 6 | `commands/propose.md` slash 升级 | 0.3 | anchor ID 模板指示 + Pending follow-ups 扫描段 + AskUserQuestion 流程 |
 | 7a | `skills/_shared/scope-category-guidance.md` + copy-templates 扩展(fail-fast)+ receiving-code-review reference | 0.4 | 共用区分指引文档 + 部署链 source(_shared 缺失 fail-fast)+ receiving-code-review skill cross-ref |
@@ -837,22 +837,108 @@ proposal.md / design.md 内 {#forge-oos} / {#forge-non-goals} / {#forge-future-w
 
 ---
 
-## 5. Task 4 — validate scope YAML schema + ValidationError severity 扩展 + CLI exit 1(v2 BLOCKER 修订)
+## 5. Task 4 — validate scope YAML schema + ValidationError severity + CLI exit 1(v2 BLOCKER + v3 BLOCKER 修订)
 
 **Files:**
+- **Modify(9a 接口冻结修订)**:`src/core/schemas/severity.ts`(`FindingHashPayload` 移除 `validate_run_id` 字段,从 9 字段降为 8 字段;**v3 B1 修订**)
+- **Modify(9a 接口冻结修订)**:`src/core/validate/finding-hash.ts`(`extractHashPayload` 同步去 `validate_run_id`)
+- **Modify**:`tests/core/validate/finding-hash.test.ts`(若已断言 validate_run_id 进 hash — 更新或删该 assertion)
 - Create: `src/core/validate/scope-entries.ts`
 - Modify: `src/core/validate/types.ts`(ValidationError 加 `severity` + `finding_hash`,artifact 加 `'scope'`;**v2 B2 修订**)
 - Modify: `src/core/validate/index.ts`(re-export)
-- Modify: `src/core/validate/change.ts`(validateChange 计算 runId/contentHash/gitHead + 传给 validateScopeEntries;**v2 B1 修订**)
+- Modify: `src/core/validate/proposal.ts` / `specs.ts` / `tasks.ts`(现有 business-fail error 显式标 `severity: 'CRITICAL'`;**v3 B2 修订**:沿 master §3.12.3 freeze,business-fail 走 exit 1 不是 exit 2)
+- Modify: `src/core/validate/change.ts`(validateChange 计算 contentHash + gitHead + 传给 validateScopeEntries;`cannot read X` 类 fs error 不标 severity;**v2 B1 修订 + v3 B1 调整**)
 - Modify: `src/cli/commands/validate.ts`(exit 0/1/2 三档,沿 master §3.12.3 freeze;**v2 B2 修订**)
 - Create: `tests/core/validate/scope-entries.test.ts`
-- Modify(existing): `tests/cli/validate.test.ts`(若已有相关 fixture,验 CRITICAL → exit 1)
+- Modify(existing): `tests/cli/validate.test.ts`(验 CRITICAL → exit 1 + fs 错 → exit 2;**v3 修订:删 "missing Why exit 2" 旧期望**)
 
-**Goal**(v2 修订):`forge validate` 检测 proposal.md / design.md 内三段 fenced YAML block 时做 schema 校验。
+**Goal**(v3 修订):`forge validate` 检测 proposal.md / design.md 内三段 fenced YAML block 时做 schema 校验,同时**重新分类全部 validate error 的 exit code 走向**沿 master §3.12.3。
 
-**v2 B1 修订**:scope finding 的 `finding_hash` 必须绑定**真实运行时上下文**(`validate_run_id` 用 `crypto.randomUUID()` 生成本次 validate 调用唯一 ID;`content_hash` 用 `computeContentHash(changeDir)`;`git_head` 用 `execFileSync('git rev-parse HEAD')`,非 git 用 'no-git-head'),**不允许静态占位**。这样 hash 才真实反映 change 状态,具有去重 / 防伪造能力(对照 9a `FindingHashPayload` 设计意图)。
+**v3 B1 修订(跨 9a 接口冻结)**:9a 实施时把 `validate_run_id`(crypto.randomUUID 生成的 ephemeral ID)进了 `FindingHashPayload` 9 字段。但 ephemeral 字段进 hash 让同一逻辑 finding 每次 validate 出不同 hash,**破坏 9a finding_hash 的去重 / 持久 ack 设计意图**(同一错误 ack 一次后,下次 validate 应仍能匹配同 hash 跳过 ack 要求)。**v3 修订**:`FindingHashPayload` 从 9 字段降为 8 字段(移除 `validate_run_id`);hash 仅绑定稳定字段(`content_hash` / `git_head` / `dimension` / `check_type` / `severity` / `automated` / `evidence` / `recommendation`)。注:master §3.12.1 freeze 表**没有显式锁 `validate_run_id` 字段**(line 425-439 列的字段不含 validate_run_id),所以本修订仅影响 9a 实施细节,不动 master;但 plan-9b §11 修订记录会记该跨 plan 改动便于追溯。
 
-**v2 B2 修订**:`forge validate` CLI exit code 走 master §3.12.3 freeze 三档:**0 = 全 PASS / 1 = CRITICAL findings 存在 / 2 = config / fs 错**。原 `validate.ts:14-30` 0/2 改为 0/1/2。`ValidationError` 加 `severity?: Severity` + `finding_hash?: string` 字段;`artifact` enum 加 `'scope'`。
+**v2 B1 修订(保留)**:scope finding 的 `finding_hash` 必须绑定**真实运行时上下文**(`content_hash` 用 `computeContentHash(changeDir)`;`git_head` 用 `execFileSync('git rev-parse HEAD')`,非 git 用 'no-git-head'),**不允许静态占位**。配合 v3 B1 移除 validate_run_id,hash 现在同 change 状态下稳定可去重。
+
+**v3 B2 修订(扩展 v2 B2)**:`forge validate` exit code 走 master §3.12.3 freeze 三档:**0 = 全 PASS / 1 = CRITICAL findings 存在 / 2 = config / fs 错**。**v3 修订**(沿 codex 二轮):"缺 Why 段" / "tasks empty" 等业务 schema 校验失败也是 CRITICAL → exit 1,不是 exit 2;exit 2 **仅**留给 fs/config 错(如 `cannot read proposal.md`)。具体实施:
+- `src/core/validate/proposal.ts` / `specs.ts` / `tasks.ts` 全部 business-fail error 显式加 `severity: 'CRITICAL'`
+- `src/core/validate/change.ts` 内 `cannot read X` 类 fs error **不标 severity**(undefined),用 message prefix `[fs]` 标识
+- `src/cli/commands/validate.ts` 判定:errors 中存在 severity === 'CRITICAL' → exit 1;否则(全是 fs 错)→ exit 2
+
+- [ ] **Step 0(v3 B1 修订前置):修 9a FindingHashPayload 移除 `validate_run_id`**
+
+修改 `src/core/schemas/severity.ts`:
+
+```typescript
+// FindingHashPayload 从 9 字段降为 8 字段(v3 codex review BLOCKER 1 修订:移除 ephemeral validate_run_id)
+// 这是 9a 接口冻结的反向调整;ephemeral runId 进 hash 破坏 finding_hash 去重设计意图(同一逻辑 finding ack 一次后应能稳定匹配)
+// master §3.12.1 表未显式锁 validate_run_id,本修订仅影响 9a 实施细节
+export interface FindingHashPayload {
+  content_hash: string;
+  git_head: string;
+  dimension: 'completeness' | 'correctness' | 'coherence';
+  check_type: string;
+  severity: Severity;
+  automated: boolean;
+  evidence: string;
+  recommendation: string;
+}
+
+export interface Finding extends FindingHashPayload {
+  id: number;
+  resolved: boolean;
+  finding_hash: string;
+  /** ephemeral metadata — 本次 validate 调用 ID;不进 hash payload(v3 B1 修订) */
+  validate_run_id?: string;
+  severity_candidate?: 'CRITICAL';
+  candidate_type?: CandidateType;
+  severity_candidate_rejected?: boolean;
+  candidate_rejected_reason?: string;
+  severity_acked_by?: string;
+  severity_acked_at?: string;
+  downgraded_from?: Severity;
+  downgraded_to?: Severity;
+  downgrade_acked_by?: string;
+  downgrade_rationale?: string;
+}
+```
+
+修改 `src/core/validate/finding-hash.ts`:
+
+```typescript
+// extractHashPayload 从 9 字段降为 8 字段
+export function extractHashPayload(finding: Finding): FindingHashPayload {
+  return {
+    content_hash: finding.content_hash,
+    git_head: finding.git_head,
+    dimension: finding.dimension,
+    check_type: finding.check_type,
+    severity: finding.severity,
+    automated: finding.automated,
+    evidence: finding.evidence,
+    recommendation: finding.recommendation,
+  };
+}
+```
+
+跑 9a 现有 test 看是否回归:
+
+```bash
+pnpm vitest run tests/core/validate/finding-hash.test.ts
+```
+
+若有 assertion 依赖 `validate_run_id` 进 hash → 更新 test(去除该 assertion 或改为"不同 validate_run_id 下同 hash")。
+
+commit:
+
+```bash
+git add src/core/schemas/severity.ts src/core/validate/finding-hash.ts tests/core/validate/finding-hash.test.ts
+git commit -m "refactor(9a→v1.0): FindingHashPayload 移除 validate_run_id(v3 plan-9b BLOCKER 1 修订)
+
+ephemeral runId 进 hash 破坏 finding_hash 去重 / 持久 ack 设计意图
+8 字段稳定 payload:content_hash + git_head + dimension + check_type +
+                  severity + automated + evidence + recommendation
+validate_run_id 改 Finding-level metadata(optional,不入 hash)
+master §3.12.1 freeze 表未显式锁 validate_run_id,本修订不动 master"
+```
 
 - [ ] **Step 1: 扩展 ValidationError(severity + finding_hash + artifact 加 'scope')**
 
@@ -880,12 +966,11 @@ export interface ValidationError {
 - [ ] **Step 2: 写 failing tests(含 B1 真实 hash 接通 + B2 exit 1 + 原 schema 校验)**
 
 ```typescript
-// tests/core/validate/scope-entries.test.ts(v2 修订:含真实 context 参数)
+// tests/core/validate/scope-entries.test.ts(v3 修订:context 去 runId)
 import { describe, it, expect } from 'vitest';
 import { validateScopeEntries } from '../../../src/core/validate/scope-entries.js';
 
 const ctx = {
-  runId: '11111111-1111-1111-1111-111111111111',
   contentHash: 'sha256:abc',
   gitHead: 'deadbeef',
 };
@@ -927,7 +1012,7 @@ describe('validateScopeEntries(plan-9b v2 Task 4)', () => {
     expect(r.errors[0]?.message).toMatch(/yaml.*parse/i);
   });
 
-  it('finding_hash 是真实绑定(不同 runId → 不同 hash)', () => {
+  it('finding_hash 稳定:同 ctx 下两次调用产同 hash(v3 B1 修订:去 ephemeral runId)', () => {
     const text = [
       '## Out of Scope {#forge-oos}\n',
       '```yaml',
@@ -937,11 +1022,8 @@ describe('validateScopeEntries(plan-9b v2 Task 4)', () => {
       '```',
     ].join('\n');
     const r1 = validateScopeEntries(text, baseFile, ctx);
-    const r2 = validateScopeEntries(text, baseFile, {
-      ...ctx,
-      runId: '22222222-2222-2222-2222-222222222222',
-    });
-    expect(r1.errors[0]?.finding_hash).not.toBe(r2.errors[0]?.finding_hash);
+    const r2 = validateScopeEntries(text, baseFile, ctx);
+    expect(r1.errors[0]?.finding_hash).toBe(r2.errors[0]?.finding_hash);
   });
 
   it('finding_hash 是真实绑定(不同 contentHash → 不同 hash)', () => {
@@ -1101,8 +1183,20 @@ describe('forge validate exit code(v2 B2 修订:0/1/2 三档)', () => {
     expect(exitCode).toBe(1);
   });
 
-  it('non-CRITICAL business-fail(proposal missing Why)→ exit 2(老 behavior 兼容)', () => {
+  it('proposal missing Why → CRITICAL business-fail → exit 1(v3 B2 修订:删 v2 旧"exit 2"期望)', () => {
     writeFileSync(join(changeDir, 'proposal.md'), '# P\n\n## What\n\nc\n');
+    let exitCode = 0;
+    try {
+      execFileSync('node', [CLI, 'validate', 'test-id'], { cwd: projectRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (e) {
+      exitCode = (e as { status?: number }).status ?? 0;
+    }
+    expect(exitCode).toBe(1); // v3 修订:business-fail 也算 CRITICAL → exit 1(沿 master §3.12.3 freeze)
+  });
+
+  it('fs error(proposal.md 不存在)→ exit 2(仅 fs/config 错走 2)', () => {
+    // 删 proposal.md 模拟 fs 错
+    unlinkSync(join(changeDir, 'proposal.md').replace(/\\/g, '/'));
     let exitCode = 0;
     try {
       execFileSync('node', [CLI, 'validate', 'test-id'], { cwd: projectRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -1113,7 +1207,7 @@ describe('forge validate exit code(v2 B2 修订:0/1/2 三档)', () => {
   });
 });
 
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, unlinkSync } from 'node:fs';
 ```
 
 - [ ] **Step 3: 跑测试确认 fail**
@@ -1140,10 +1234,8 @@ import { computeFindingHash } from './finding-hash.js';
 import type { FindingHashPayload } from '../schemas/severity.js';
 import type { ValidationError } from './types.js';
 
-/** validate 运行时上下文(v2 B1 修订)— 调用方必须提供真实值 */
+/** validate 运行时上下文(v2 B1 + v3 B1 修订)— 仅含稳定字段,**不含 ephemeral runId** */
 export interface ScopeValidateContext {
-  /** 本次 validate 调用唯一 ID(crypto.randomUUID()) */
-  runId: string;
   /** computeContentHash(changeDir) 的结果(`sha256:...`) */
   contentHash: string;
   /** git rev-parse HEAD(40-char SHA);非 git → 'no-git-head' */
@@ -1219,9 +1311,8 @@ function makeError(
   anchorId: ScopeAnchorId,
   ctx: ScopeValidateContext,
 ): ValidationError {
-  // v2 B1 修订:**真实**绑定 9a FindingHashPayload 字段(不允许静态占位)
+  // v2 B1 + v3 B1 修订:**真实**绑定 9a FindingHashPayload 8 字段(去 ephemeral validate_run_id)
   const payload: FindingHashPayload = {
-    validate_run_id: ctx.runId,
     content_hash: ctx.contentHash,
     git_head: ctx.gitHead,
     dimension: 'correctness',
@@ -1249,13 +1340,12 @@ function makeError(
 export * from './scope-entries.js';
 ```
 
-- [ ] **Step 6: 修 validateChange 计算 + 传 ctx(v2 B1 修订)**
+- [ ] **Step 6: 修 validateChange 计算 + 传 ctx + 现有 validator 标 severity(v2 B1 + v3 B2 修订)**
 
-修改 `src/core/validate/change.ts`,顶部加 imports + 在 validateChange 开始处算 ctx:
+修改 `src/core/validate/change.ts`:
 
 ```typescript
 // src/core/validate/change.ts — 顶部
-import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { validateScopeEntries } from './scope-entries.js';
 import { computeContentHash } from '../hash/content.js';
@@ -1263,13 +1353,18 @@ import { computeContentHash } from '../hash/content.js';
 // validateChange 函数体开始处
 export async function validateChange(changeDir: string): Promise<ValidationResult> {
   const results: ValidationResult[] = [];
-  // v2 B1 修订:计算真实 ctx(runId 唯一 / contentHash / gitHead)
-  const ctx = {
-    runId: randomUUID(),
-    contentHash: await computeContentHash(changeDir),
-    gitHead: getGitHead() ?? 'no-git-head',
-  };
-  // ... 现有 proposal/design/tasks/specs 校验逻辑
+  // v2 B1 + v3 B1 修订:仅含稳定字段,**不含 ephemeral runId**
+  let ctx: { contentHash: string; gitHead: string };
+  try {
+    ctx = {
+      contentHash: await computeContentHash(changeDir),
+      gitHead: getGitHead() ?? 'no-git-head',
+    };
+  } catch (err) {
+    // computeContentHash 抛错(罕见 — 仅 specs/ 非 ENOENT 类 IO 错)
+    // 退化为 'no-content-hash' 让校验仍能跑(scope finding 仍可产但 hash 弱化)
+    ctx = { contentHash: 'no-content-hash', gitHead: 'no-git-head' };
+  }
 
   // 在 proposal 校验 try 块内,parseProposal 之后加:
   const scopeP = validateScopeEntries(text, proposalPath, ctx);
@@ -1281,6 +1376,8 @@ export async function validateChange(changeDir: string): Promise<ValidationResul
   if (!scopeD.valid) {
     for (const e of scopeD.errors) results.push({ valid: false, errors: [e], warnings: [] });
   }
+  // v3 B2 修订:fs 错(cannot read X)**不标 severity**(走 exit 2);现有 try/catch 内 failed() 调用 message 加 '[fs]' 前缀
+  // 例:cannot read proposal.md → failed({artifact:'proposal', message:'[fs] cannot read proposal.md: ...'})
 }
 
 function getGitHead(): string | null {
@@ -1291,6 +1388,23 @@ function getGitHead(): string | null {
   }
 }
 ```
+
+**v3 B2 修订**:修 proposal.ts / specs.ts / tasks.ts 现有 validator,给所有 business-fail error 加 `severity: 'CRITICAL'`:
+
+```typescript
+// src/core/validate/proposal.ts — 全部 failed() 调用加 severity
+errors.push(
+  failed({ artifact: 'proposal', field: 'title', message: 'missing or empty H1 title', file, severity: 'CRITICAL' }),
+);
+errors.push(
+  failed({ artifact: 'proposal', field: 'why', message: 'missing or empty Why section', file, severity: 'CRITICAL' }),
+);
+errors.push(
+  failed({ artifact: 'proposal', field: 'what', message: 'missing or empty What section', file, severity: 'CRITICAL' }),
+);
+```
+
+(specs.ts / tasks.ts 同样模式 — 所有现有 failed() 调用 spread `severity: 'CRITICAL'`)
 
 - [ ] **Step 7: 修 validate.ts CLI 走 exit 0/1/2(v2 B2 修订)**
 
@@ -1909,6 +2023,39 @@ describe('scanArchivedFollowups(plan-9b Task 5)', () => {
     expect(r.entries).toHaveLength(0);
   });
 
+  it('archived yaml 块缺 schema 字段 → skip + stderr warning(v3 codex MAJOR 1 修订)', async () => {
+    await makeArchive('legacy-no-schema', [
+      '# P\n## Why\n\nw\n## What\n\nc',
+      '## Out of Scope {#forge-oos}',
+      '',
+      '```yaml',
+      'anchor_id: forge-oos',
+      'entries:',
+      '  - id: legacy-entry',
+      '    category: out-of-scope',
+      '    description: d',
+      '    reason: r',
+      '    priority: null',
+      '    status: active',
+      '    triggered_by: null',
+      '    related_change: null',
+      '```',
+    ].join('\n'));
+    const stderrChunks: string[] = [];
+    const origWrite = process.stderr.write.bind(process.stderr);
+    (process.stderr.write as unknown) = ((chunk: string | Buffer) => {
+      stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    }) as typeof process.stderr.write;
+    try {
+      const r = await scanArchivedFollowups(forgeRoot);
+      expect(r.entries).toHaveLength(0); // legacy entry 不被聚合(schema 缺)
+      expect(stderrChunks.join('')).toMatch(/skipping yaml block/);
+    } finally {
+      (process.stderr.write as unknown) = origWrite;
+    }
+  });
+
   it('archive 目录不存在 → throw with code ENOENT', async () => {
     const empty = await mkdtemp(join(tmpdir(), 'forge-9b-empty-'));
     await expect(scanArchivedFollowups(empty)).rejects.toThrow(/ENOENT|not found|不存在/);
@@ -1997,7 +2144,21 @@ export async function scanArchivedFollowups(forgeRoot: string): Promise<Aggregat
           throw err;
         }
         for (const block of blocks) {
-          const b = block as { entries?: ScopeEntry[]; superseding_entries?: SupersedingRef[] };
+          const b = block as {
+            schema?: string;
+            entries?: ScopeEntry[];
+            superseding_entries?: SupersedingRef[];
+          };
+          // v3 codex MAJOR 1 修订:必须先校验 schema 字段(沿 master §3.12.1bis required)
+          // archived 老 change(plan-9b 协议前)的 yaml 块可能缺 schema 字段:
+          // 策略 — stderr warning 提示 + skip(不阻断聚合,沿 archived 历史不可改原则)
+          if (b.schema !== 'forge-scope-entries/v1') {
+            process.stderr.write(
+              `⚠ scope-aggregator: skipping yaml block in ${changeId}/${fname} — ` +
+                `expected schema='forge-scope-entries/v1', got ${JSON.stringify(b.schema)}\n`,
+            );
+            continue;
+          }
           for (const e of b.entries ?? []) {
             if (e.status === 'active') {
               collected.push({ ...e, source_change: changeId });
@@ -2462,23 +2623,23 @@ git commit -m "feat(9b): skills/_shared/scope-category-guidance.md + copy-templa
 
 ## 9. Task 7b — harness-adapters 接 sharedDocs 部署链 + `forge update` 接入 + smoke(v2 codex MAJOR 4 新增 task)
 
-**Files:**
+**Files**(v3 codex review MAJOR 2 修订:收敛范围 — OpenCode adapter 不存在于现状 codebase,删除 opencode 改动;留到 OpenCode adapter 独立建立后再补 sharedDocs 部署):
 - Modify: `src/core/harness-adapters/types.ts`(加 `SharedDocSpec` + `DeployInput.sharedDocs`)
 - Modify: `src/core/harness-adapters/claude.ts`(plan() 把 sharedDocs 铺到 `.claude/skills/forge-_shared/<name>.md`)
-- Modify: `src/core/harness-adapters/codex.ts`(等价路径,沿 codex adapter 当前 skill 部署位置)
-- Modify: `src/core/harness-adapters/opencode.ts`(若存在)
+- Modify: `src/core/harness-adapters/codex.ts`(plan() 把 sharedDocs 铺到 codex adapter 当前 skill 部署位置下的 `_shared/` 子目录,实施时按 codex.ts:30+ 现状对齐路径)
 - Modify: `src/core/templates/skills/index.ts`(加 `loadAllSharedDocs()` API)
 - Modify: `src/cli/commands/update.ts`(`forge update` 调 loadAllSharedDocs 传入 DeployInput.sharedDocs)
-- Modify: `tests/cli/update.test.ts`(若已有 — 加 smoke 验 `.claude/skills/forge-_shared/scope-category-guidance.md` 落地;若无 新建)
+- Modify: `tests/cli/update.test.ts`(已存在 — 追加 smoke 验 `.claude/skills/forge-_shared/scope-category-guidance.md` 落地)
 
-**Goal**:把 `_shared/scope-category-guidance.md` 接入 harness-adapters 部署链。3 个 adapter(claude / codex / opencode)`plan()` 时把 `input.sharedDocs` 铺到对应 harness 的 _shared 位置:
+**Goal**:把 `_shared/scope-category-guidance.md` 接入 harness-adapters 部署链。**2 个 adapter**(claude / codex)`plan()` 时把 `input.sharedDocs` 铺到对应 harness 的 _shared 位置:
 - Claude Code:`.claude/skills/forge-_shared/<name>.md`
-- Codex CLI:沿现有 codex adapter skill 部署位置 + `/forge-_shared/`(实施时按 codex.ts 现状对齐)
-- OpenCode:同上
+- Codex CLI:沿现有 codex adapter skill 部署位置 + `/forge-_shared/`(实施时按 codex.ts:30+ 现状对齐)
 
 `forge update` 命令(active 部署命令)调 `loadAllSharedDocs()` 把所有 `_shared/*.md` 传入 `DeployInput.sharedDocs`,跑 plan() 部署。Smoke test 验证落地。
 
-**注意**:`forge init` 在 v1.2 移除(沿 init.ts:38 deprecation),9b 不为 forge init 加 smoke;仅 `forge update`(active 命令)走完整 smoke。
+**注意**:
+- `forge init` 在 v1.2 移除(沿 init.ts:38 deprecation),9b 不为 forge init 加 smoke;仅 `forge update`(active 命令)走完整 smoke
+- **OpenCode adapter 现状不存在**(`ls src/core/harness-adapters/` 仅含 claude / codex / detector / hash-compare / index / interface / legacy-detector / transaction / types,**无 opencode.ts**)。v3 收敛 7b 仅 claude + codex;OpenCode sharedDocs 部署留到 OpenCode adapter 整体建立后(v1.1 / 独立 issue)处理
 
 - [ ] **Step 1: 扩展 types.ts 加 SharedDocSpec + DeployInput.sharedDocs**
 
@@ -2532,7 +2693,7 @@ async plan(input: DeployInput): Promise<DeployPlan> {
 }
 ```
 
-类似修改 `codex.ts` / `opencode.ts`(若存在),路径按各 harness 的 skill 安装位置对齐(实施时读两文件确认现状)。
+类似修改 `codex.ts`(v3 修订:仅 codex,不动 opencode.ts — 现状不存在),路径按 codex.ts 的 skill 安装位置对齐(实施时读 codex.ts 确认现状)。
 
 - [ ] **Step 3: 修 templates/skills/index.ts 加 loadAllSharedDocs()**
 
@@ -2634,18 +2795,18 @@ Expected: 2/2 PASS;若失败常因 update.ts 实际 API 与 plan 不符,按 upda
 pnpm typecheck && pnpm lint && pnpm format:check
 git add src/core/harness-adapters/types.ts \
         src/core/harness-adapters/claude.ts src/core/harness-adapters/codex.ts \
-        src/core/harness-adapters/opencode.ts \
         src/core/templates/skills/index.ts \
         src/cli/commands/update.ts \
         tests/cli/update.test.ts
-git commit -m "feat(9b): harness-adapters sharedDocs 部署 + forge update 接入(v2 Task 7b)
+git commit -m "feat(9b): harness-adapters sharedDocs 部署 + forge update 接入(v2 Task 7b / v3 收敛)
 
-types.ts DeployInput 加 sharedDocs;claude/codex/opencode adapter plan() 铺
-.claude/skills/forge-_shared/<name>.md(及 codex/opencode 对应路径)
+types.ts DeployInput 加 sharedDocs;claude + codex adapter plan() 铺
+.claude/skills/forge-_shared/<name>.md(及 codex 对应路径)
 loadAllSharedDocs() 加载 src/core/templates/skills/_shared/*.md
 update.ts 传 sharedDocs 进 DeployInput
 smoke test:forge update → scope-category-guidance.md 落地 + 内容验证
-解决 v2 codex MAJOR 4 — _shared 进 runtime 部署链(沿 master BLOCKER 二轮 #8 修订意图)"
+解决 v2 codex MAJOR 4 — _shared 进 runtime 部署链(沿 master BLOCKER 二轮 #8 修订意图)
+v3 codex MAJOR 2:OpenCode adapter 现状不存在,留独立 issue;7b 收敛 claude + codex"
 ```
 
 ---
@@ -2965,6 +3126,17 @@ archived-with-active-entry / archived-with-superseding 两份 fixture
 ## 11. 修订记录
 
 - **v1**(2026-05-11 commit `96b2955`):初稿。沿 master plan §3.2 + §3.12.1bis + §3.12.2 + §3.12.3 锁定的接口写。本 plan 不实施 archive_summary handoff_to_backlog 的真实聚合(那是 9e2),只提供数据源(scanArchivedFollowups)。
+- **v3**(2026-05-11):codex 二轮 adversarial review 全采纳(**2 BLOCKER + 2 MAJOR + 1 NIT + 3 Confirmed-OK**):
+  - **BLOCKER 1 — ephemeral runId 进 hash 破坏 finding_hash 去重**(v2 用 `crypto.randomUUID()` 作为 `validate_run_id` 进 hash payload,让同一逻辑 finding 每次 validate 产不同 hash,违反 9a finding_hash 持久 ack 设计意图):**v3 修订**:**跨 9a 接口修订** — `FindingHashPayload` 从 9 字段降为 8 字段(移除 `validate_run_id`);hash 仅绑定稳定字段。`ScopeValidateContext` 去 `runId` 字段。注:master §3.12.1 freeze 表未显式锁 validate_run_id,不动 master。
+  - **BLOCKER 2 — validate exit 语义仍把非 scope 业务失败压到 exit 2,违反 master §3.12.3 freeze**(v2 实施只让 scope CRITICAL 走 exit 1,缺 Why / tasks empty 等 business-fail 仍走 exit 2):**v3 修订**:proposal/specs/tasks validator 全部 business-fail error 显式加 `severity: 'CRITICAL'`;`change.ts` 内 fs 错(cannot read X)**不标 severity** + message 加 `[fs]` 前缀;CLI 判定按"任一 CRITICAL → exit 1;否则有 error → exit 2";test 用例从 "missing Why exit 2" 改为 "missing Why exit 1" + 新增 "fs error exit 2"
+  - **MAJOR 1 — aggregator 不校验 schema,会接受缺 schema 的 archived YAML**:**v3 修订**:`scanArchivedFollowups` 解析 yaml 块后先校验 `schema === 'forge-scope-entries/v1'`;archived 老 change 缺 schema → `stderr` warning + skip(不阻断聚合,沿 archived 历史不可改原则);加单元测试覆盖缺 schema 用例
+  - **MAJOR 2 — Task 7b OpenCode adapter 现状不存在**(`ls src/core/harness-adapters/` 验证):**v3 修订**:Task 7b 收敛 claude + codex,删 opencode.ts 相关 modify;OpenCode sharedDocs 部署留到 OpenCode adapter 独立建立后(v1.1 / 独立 issue)
+  - **NIT — DoD 文案仍写"三个顶级字段"漏 schema**:**v3 修订**:改"四个顶级字段(`schema` / `entries` / `superseding_entries` / `anchor_id`)"
+  - **Confirmed-OK**(v3 验证我提的疑问无问题,不需修改):
+    - B1 OK:`computeContentHash` 不会因缺 proposal/design/tasks/specs 直接 abort(content.ts:17 + 35 + 50,缺 specs/ 跳过 ENOENT,缺顶层文件用 `<MISSING>` 占位);v3 仍保留 try/catch 兜底是合理冗余
+    - NEW-3 OK:`parseMarkdown.sections` 按文档扫描顺序 push(markdown.ts:55+65),`j = i + 1` 可靠
+    - NEW-5 OK:`tests/cli/update.test.ts` 已存在,plan "追加"可执行
+  - **工日上调**:P50 4.0 → 4.2 / P90 5.0 → 5.2;但 master plan 9b 工日表未同步上调(本次仅 0.2d 调整,不更新 master 表节省修订成本;v3 工日差由本 plan §11 修订记录跟踪)
 - **v2**(2026-05-11):codex 一轮 adversarial review 全采纳(**2 BLOCKER + 4 MAJOR + 2 MINOR**):
   - **BLOCKER 1 — finding_hash 静态占位失效**(原 v1 Task 4 用 `<validate-static>` 填 9 字段 payload,所有 scope finding 共享同 hash,失去去重/防伪造):**v2 修订**:`validateScopeEntries` 改签名接受 `ScopeValidateContext {runId, contentHash, gitHead}`,从 `validateChange` 传入真实值(`crypto.randomUUID()` + `computeContentHash(changeDir)` + `git rev-parse HEAD`)
   - **BLOCKER 2 — validate exit code 违反 master §3.12.3 freeze**(原 v1 决定"留 9d 收割" — **错**,master §3.12.3 已锁 validate exit 1 = CRITICAL):**v2 修订**:`ValidationError` 加 `severity?: Severity` + `finding_hash?: string` 字段;artifact enum 加 `'scope'`;`validate.ts` CLI 改 exit 0/1/2 三档(CRITICAL → exit 1;其他业务错 → exit 2)

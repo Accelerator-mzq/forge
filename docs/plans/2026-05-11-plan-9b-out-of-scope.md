@@ -933,7 +933,7 @@ pnpm vitest run tests/cli/severity-fence.test.ts
 commit:
 
 ```bash
-git add src/core/schemas/severity.ts src/core/validate/finding-hash.ts tests/core/validate/finding-hash.test.ts
+git add src/core/schemas/severity.ts src/core/validate/finding-hash.ts tests/cli/severity-fence.test.ts
 git commit -m "refactor(9a→v1.0): FindingHashPayload 移除 validate_run_id(v3 plan-9b BLOCKER 1 修订)
 
 ephemeral runId 进 hash 破坏 finding_hash 去重 / 持久 ack 设计意图
@@ -1142,8 +1142,16 @@ describe('forge validate exit code(v2 B2 修订:0/1/2 三档)', () => {
     projectRoot = await mkdtemp(join(tmpdir(), 'forge-validate-exit-'));
     changeDir = join(projectRoot, 'forge', 'changes', 'test-id');
     await mkdir(join(changeDir, 'specs'), { recursive: true });
-    await writeFile(join(changeDir, 'specs', 'a.md'), '# A\n');
-    await writeFile(join(changeDir, 'tasks.md'), '# T\n');
+    // v6 codex 五轮 BLOCKER 1 修订:fixture 必须满足 specs.ts:12 (scenarios.length>0) + given/when/then 非空
+    // 沿 parse/specs.ts STEP_RE = /^\*\*(Given|When|Then|And|But)\*\*\s+(.+)$/i,必须用 **Given** 加粗格式
+    // 否则 "全合规 → exit 0" 用例会 fail
+    await writeFile(
+      join(changeDir, 'specs', 'a.md'),
+      '# A\n\n## Scenario: s1\n\n**Given** x\n\n**When** y\n\n**Then** z\n',
+    );
+    // tasks.ts:8 要求 items.length>0;沿 parse/tasks.ts TASK_RE = /^\s*- \[([ x])\]\s+([\w-]+)\s*:\s*(.+)$/
+    // 必须含冒号分隔 id 和 description:`- [ ] task-1: do thing`
+    await writeFile(join(changeDir, 'tasks.md'), '# T\n\n- [ ] task-1: do thing\n');
     await writeFile(join(changeDir, 'design.md'), '# D\n');
   });
   afterEach(async () => {
@@ -2944,10 +2952,12 @@ superseding_entries:
 ```typescript
 // tests/integration/scope-end-to-end.test.ts
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtemp, cp, rm, writeFile, readFile } from 'node:fs/promises';
+// v6 codex 五轮 BLOCKER 2 修订:加 mkdir(line 2973 / Step 4 'bad-id' fixture 用到)
+import { mkdtemp, mkdir, cp, rm, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { execFileSync } from 'node:child_process';
+// v6 codex 五轮 NIT 修订:沿 update.test.ts / scope-cli.test.ts 静态 import runCli 风格
+import { runCli } from '../cli/helpers.js';
 import { computeContentHash } from '../../src/core/hash/content.js';
 
 const CLI = join(process.cwd(), 'dist', 'cli', 'index.js');
@@ -3025,10 +3035,14 @@ describe('plan-9b end-to-end', () => {
     ).catch(async () => {
       // changeDir 未建 — 手动创建
       await rm(changeDir, { recursive: true, force: true });
-      const { mkdir } = await import('node:fs/promises');
+      // v6 codex 五轮 BLOCKER 2 修订:mkdir 已在顶部静态 import,删 inline import
       await mkdir(join(changeDir, 'specs'), { recursive: true });
-      await writeFile(join(changeDir, 'specs', 'a.md'), '# A\n');
-      await writeFile(join(changeDir, 'tasks.md'), '# T\n');
+      // v6 codex 五轮 BLOCKER 1 修订:fixture 需满足 specs scenarios.length>0 + tasks items.length>0
+      await writeFile(
+        join(changeDir, 'specs', 'a.md'),
+        '# A\n\n## Scenario: s1\n\n**Given** x\n\n**When** y\n\n**Then** z\n',
+      );
+      await writeFile(join(changeDir, 'tasks.md'), '# T\n\n- [ ] task-1: do thing\n');
       await writeFile(join(changeDir, 'design.md'), '# D\n');
       await writeFile(
         join(changeDir, 'proposal.md'),
@@ -3077,25 +3091,21 @@ describe('plan-9b end-to-end', () => {
 
   it('forge validate 通过(scope YAML 合规)', () => {
     // 跑 forge validate <new-id>;期望 exit 0
-    let exitCode = 0;
-    try {
-      execFileSync('node', [CLI, 'validate', 'new-id'], {
-        cwd: projectRoot,
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-    } catch (e) {
-      exitCode = (e as { status?: number }).status ?? 0;
-    }
-    expect(exitCode).toBe(0);
+    // v6 codex 五轮 NIT 修订:用 runCli 替 execFileSync(沿 update.test.ts:8 / validate.test.ts:8 风格)
+    const r = runCli(['validate', 'new-id'], projectRoot);
+    expect(r.exitCode).toBe(0);
   });
 
   it('forge validate 拒签:scope YAML 缺 reason 字段 → exit 1(v4 codex 三轮 BLOCKER 3 修订,沿 v3 B2 业务 CRITICAL → exit 1)', async () => {
     const changeDir = join(projectRoot, 'forge', 'changes', 'bad-id');
-    const { mkdir } = await import('node:fs/promises');
+    // v6 codex 五轮 BLOCKER 2 修订:mkdir 顶部静态 import,删 inline import
     await mkdir(join(changeDir, 'specs'), { recursive: true });
-    await writeFile(join(changeDir, 'specs', 'a.md'), '# A\n');
-    await writeFile(join(changeDir, 'tasks.md'), '# T\n');
+    // v6 codex 五轮 BLOCKER 1 修订:fixture 需含真实 scenario + checkbox(否则 specs/tasks validator 自己产 CRITICAL,污染本测试期望的"scope 缺 reason 产 CRITICAL"语义)
+    await writeFile(
+      join(changeDir, 'specs', 'a.md'),
+      '# A\n\n## Scenario: s1\n\n**Given** x\n\n**When** y\n\n**Then** z\n',
+    );
+    await writeFile(join(changeDir, 'tasks.md'), '# T\n\n- [ ] task-1: do thing\n');
     await writeFile(join(changeDir, 'design.md'), '# D\n');
     await writeFile(
       join(changeDir, 'proposal.md'),
@@ -3136,6 +3146,9 @@ describe('plan-9b end-to-end', () => {
     expect(stderr).toMatch(/reason|CRITICAL/);
   });
 });
+
+// v6 codex 五轮 NIT 修订:e2e 顶部 import 已加 runCli;execFileSync 仅"forge validate 拒签"用例为兼容 stderr 捕获保留
+//   (runCli 返回结构 { stdout, stderr, exitCode } 一致,实施时该用例可直接改 runCli 简化)
 ```
 
 (注:fixture 的 `source_change` 字段需要在实施时与实际目录名对齐,沿 Step 1 的 fixture 文件需在 superseding 那份里写 `source_change: 2026-05-01-archived-with-active-entry` — 即 e2e 把 fixture cp 到的目录名)
@@ -3173,6 +3186,18 @@ archived-with-active-entry / archived-with-superseding 两份 fixture
 ## 11. 修订记录
 
 - **v1**(2026-05-11 commit `96b2955`):初稿。沿 master plan §3.2 + §3.12.1bis + §3.12.2 + §3.12.3 锁定的接口写。本 plan 不实施 archive_summary handoff_to_backlog 的真实聚合(那是 9e2),只提供数据源(scanArchivedFollowups)。
+- **v6**(2026-05-11):codex 五轮 adversarial review 全采纳(**2 BLOCKER + 1 MINOR + 1 NIT + 4 Confirmed-OK**):
+  - **BLOCKER 1 — Task 4/8 validate-pass fixture 实际会失败**(v5 写 `'# A\n'` + `'# T\n'`,但 `src/core/validate/specs.ts:12` 要求 `scenarios.length>0`,`tasks.ts:8` 要求 `items.length>0`;参考 `parse/specs.ts` STEP_RE 必须用 `**Given** x` 加粗格式,`parse/tasks.ts` TASK_RE 必须含冒号 `- [ ] id: desc`):**v6 修订**:
+    - Task 4 Step 2 beforeEach fixture:`specs/a.md` 改 `# A\n\n## Scenario: s1\n\n**Given** x\n\n**When** y\n\n**Then** z\n`;`tasks.md` 改 `# T\n\n- [ ] task-1: do thing\n`
+    - Task 8 e2e 内部 ensure-fixture path + 第四用例 "bad-id" fixture 同样改成真实 Scenario + checkbox
+  - **BLOCKER 2 — Task 8 e2e 使用 `mkdir` 但未顶部静态 import**(v5 用 `await import('node:fs/promises')` inline,与 update.test.ts:5 现有 CLI 测试风格不一致):**v6 修订**:Task 8 顶部 import `node:fs/promises` 加 `mkdir`;删 inline `await import` 调用
+  - **MINOR — Step 0 commit `git add` 仍包含旧路径 `tests/core/validate/finding-hash.test.ts`**(v5 Files 列表更新到 `tests/cli/severity-fence.test.ts` 但 commit 命令没同步):**v6 修订**:`git add` 命令改为 `tests/cli/severity-fence.test.ts`
+  - **NIT — Task 7b/8 用 `execFileSync`,与 helpers.ts:15 `runCli` helper 风格不一致**:**v6 修订**(顺手):Task 8 e2e 顶部加 `import { runCli } from '../cli/helpers.js';`;"forge validate 通过"用例改用 runCli;"forge validate 拒签 reason"用例因需 stderr 断言保留 execFileSync(注释说明实施时可改 runCli 简化)
+  - **Confirmed-OK**(v5 已正确,v6 验证仍 OK,无需改):
+    - Angle A:`forge-spec-driven/v1` 字面量确认正确(types.ts:8 + schema.test.ts:21 + valid.yaml:1)
+    - Angle B:全仓库 `validate_run_id` 仅 5 处命中,v5 Step 0 Files 列表已覆盖全部(plan-9b:843)
+    - Angle C/D/F/G:extractHashPayload 调用方不要求 validate_run_id;scope-cli 已静态 import runCli;valid-change fixture 无 anchor;ValidationError.severity 字段 optional 处理
+  - **工日**:v6 仅 fixture 数据 + 静态 import 局部修订,不上调工日
 - **v5**(2026-05-11):codex 四轮 adversarial review 全采纳(**0 BLOCKER + 2 MAJOR + 1 MINOR + 2 Confirmed-OK**):
   - **MAJOR 1 — Task 7b smoke test config schema 字面量错**(v4 写 `forge-config/v1`,但 `src/core/schema/types.ts:8` 注释明确是 `forge-spec-driven/v1`):**v5 修订**:Task 7b Step 5 fixture config 字面量改为 `forge-spec-driven/v1`
   - **MAJOR 2 — Step 0 漏掉现有 validate_run_id 测试文件**(v3 Step 0 Files 列表只有 severity.ts + finding-hash.ts,但 9a 实际已建 `tests/cli/severity-fence.test.ts` 在 line 55/75/102 含 `validate_run_id` 字段断言。Step 0 不删该 test 字面会让 TS 报错):**v5 修订**:Step 0 Files 列表显式加入 `tests/cli/severity-fence.test.ts`,要求删 line 55 的 FindingHashPayload `validate_run_id` 字段(TS 报错必须改);line 75/102 的 Finding `validate_run_id` 字段推荐删(v3 改 optional 后 TS 不强制)

@@ -45,7 +45,8 @@ async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   const opts = parseArgs(argv);
   // 加载环境变量(缺少 ANTHROPIC_API_KEY 时抛错 → 退出码 2)
-  const { anthropicApiKey } = loadEnv();
+  // v1.0(9i):anthropicBaseUrl 可选,支持第三方 endpoint(OpenRouter / LiteLLM / Bedrock proxy)
+  const { anthropicApiKey, anthropicBaseUrl } = loadEnv();
 
   let skillsToRun: SkillName[];
   if (opts.skill) {
@@ -69,7 +70,14 @@ async function main(): Promise<void> {
   checkBudget(skillsToRun.length * 2.5);
 
   // 初始化 Anthropic SDK 客户端
-  const client = new Anthropic({ apiKey: anthropicApiKey });
+  // v1.0(9i):baseURL 可选,支持第三方兼容 endpoint;未配置时走 SDK 默认 https://api.anthropic.com
+  const client = new Anthropic({
+    apiKey: anthropicApiKey,
+    ...(anthropicBaseUrl ? { baseURL: anthropicBaseUrl } : {}),
+  });
+  if (anthropicBaseUrl) {
+    console.log(`ℹ 使用第三方 endpoint:${anthropicBaseUrl}`);
+  }
   const summary = await orchestrateRun(skillsToRun, client);
   const md = buildMarkdownReport(summary);
   await writeFile('eval-report.md', md, 'utf8');

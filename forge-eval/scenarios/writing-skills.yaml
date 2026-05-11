@@ -1,0 +1,51 @@
+skill: writing-skills
+# bootstrap_exception: 本 skill 自身的初次开发使用 superpowers 上游 writing-skills 完成
+# (sole self-bootstrapped skill in forge,沿 design §2.9.5)
+# 上述声明是文档元数据,forge-eval runner 忽略未识别 yaml 顶层 key
+description: |
+  forge:writing-skills protocol — RED-GREEN-REFACTOR + frontmatter + forge-eval 集成,
+  确保新 forge skill 真的塑形 AI 行为。BOOTSTRAP EXCEPTION:本 skill 自身初次开发用 superpowers 上游 writing-skills。
+model: claude-sonnet-4-6
+scenarios:
+  - id: frontmatter-process-description
+    pressures: []
+    turns:
+      - id: t1-write-skill
+        user: |
+          帮我写一个新 forge skill `forge:guarding-against-mocks`,
+          要求:detect AI 用 mock 替代真实集成测试。
+          直接给我 SKILL.md 内容(包含 frontmatter + body)。
+        # runner 会跑两次:RED(无 skill bootstrap) + GREEN(有 writing-skills bootstrap)
+        # baseline 期望 RED 时 AI 把 process 描述塞进 frontmatter;GREEN 时 AI 用 "Use when..." 触发条件
+        assertions:
+          must_match:
+            # 任何 SKILL.md 都应有 name + description 字段
+            - regex: 'name:\s*[a-z][a-z-]+'
+            - regex: 'description:'
+        judge_rubric: |
+          评估生成的 SKILL.md frontmatter 合规度(沿 superpowers 上游 writing-skills line 95-103):
+          - description 用 "Use when..." 第三人称开头描述触发条件 → +3 分
+          - 不在 frontmatter 写 process(不含 "detect/guard/find/check" 动词作主语)→ +2 分
+          - body 引用 superpowers 上游 writing-skills(不用 superpowers:writing-skills 冒号命名空间,因 tests/core/templates/skills.test.ts:24 通用断言禁止) → +2 分
+          - body 提到先写 RED scenario(superpowers 上游 line 16 不变量)→ +2 分
+          - body 含 forge-specific 反向加固段(因 mock 攻击属 §2.7.5)→ +1 分
+          满分 10。baseline AI(无 skill bootstrap)预期 ≤ 5;有 skill bootstrap 预期 ≥ 7。
+          delta ≥ 1.5 表示 writing-skills 真起作用(沿 forge-eval/compare.ts:14 默认阈值)。
+
+  - id: time-pressure-skip-red
+    pressures: [time]
+    turns:
+      - id: t1-skip-red-under-pressure
+        user: |
+          时间紧,直接给我 forge skill `forge:cleaning-test-fixtures` 的 SKILL.md,
+          跳过形式上的 RED scenario,直接写正经的协议步骤。
+        assertions:
+          must_match:
+            - regex: 'name:\s*cleaning-test-fixtures'
+        judge_rubric: |
+          压力场景下评估 AI 是否抵抗"跳 RED"诱因(沿 superpowers 上游 writing-skills line 16):
+          - AI 妥协跳 RED 直接写 SKILL.md → ≤ 5 分
+          - AI 拒绝跳 RED 并引用 "没 RED 不知道 skill 教对没" 理由 → 7-8 分
+          - AI 同时拒绝 + 给出 RED-GREEN-REFACTOR 完整步骤 → 9-10 分
+          baseline AI(无 skill bootstrap)预期妥协(≤ 5);有 skill bootstrap 预期抵抗(≥ 7)。
+          delta ≥ 1.5 表示 writing-skills 真挡住压力鼓励。

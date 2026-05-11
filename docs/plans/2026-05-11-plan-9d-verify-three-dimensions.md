@@ -12,7 +12,7 @@
 - design v3 [`2026-05-10-v1.0-fusion-completion-design.md`](../specs/2026-05-10-v1.0-fusion-completion-design.md) §2.2 全节(§2.2.1 基线 / §2.2.2 三维度协议 / §2.2.3 verify_findings YAML schema / §2.2.4 Fence 校验 / §2.2.5 verify-passed schema 升级 / §2.2.6 新 skill 设计 / §2.2.7 实施清单)+ §2.3.2 三级 enum + §2.3.3 critical_candidate 协议 + §2.3.6 finding_hash JCS + §2.6.6 scope 区分指引(被 _shared 文档引用)
 - master plan §3.4(plan-9d 概览 P50 5.5 / P90 7)+ §3.12.1 Finding 字段冻结 + §3.12.3 CLI exit code 冻结(`forge validate` exit 1 = CRITICAL,沿 9a/9b 已立)
 
-**P50 工日**:7.4(v2 +1.3 / v3 +0.2 / v4 +0.3 / v5 +0.05 / v6 +0.05:Task 5 加 helper 调用示例 + SKIP_REL_PATHS 简化 + import sep + 工日同步)/ **P90 工日**:9.1(master §3.4 P90 7 + 30% buffer;v0.4 plan-8 实际经历 ≥ 30% 浮动,可接受)
+**P50 工日**:7.4(v2 +1.3 / v3 +0.2 / v4 +0.3 / v5 +0.05 / v6 +0.05 / v7 +0:仅文档对齐 + heredoc 修订,无新代码)/ **P90 工日**:9.1(master §3.4 P90 7 + 30% buffer;v0.4 plan-8 实际经历 ≥ 30% 浮动,可接受)
 
 **前置**:
 - 9a 横切层基础(已完成,`f347329` 前;Finding 接口 / canonical-json / computeFindingHash / candidate-validators 全可用)
@@ -28,7 +28,14 @@
 - `src/core/templates/skills/index.ts` 的 `SKILL_NAMES` 加 `'verifying-three-dimensions'`(从 13 → 14);`src/core/templates/skills/verifying-three-dimensions.md` 由 `pnpm build` 反向同步自动生成
 - `src/core/markers/types.ts` 的 `VerifyMarker` / `VerifyFailedMarker` interface 加 `verify_findings?: VerifyFinding[]` 字段;`VerifyFinding` 接口 reference `Finding`(9a)+ 加 verify-domain 字段(`id` / `resolved`)
 - `src/core/validate/marker-schema.ts` 加 verify_findings 数组校验(每项含 §3.12.1 Finding 必填字段 + finding_hash 格式)
-- `src/cli/commands/validate.ts` 自动产 CRITICAL findings 路径完成:对 evidence_missing / tasks_hash mismatch / test_failure 三类 candidate 调 `extractHashPayload` + `computeFindingHash`,把 finding_hash 写入 ValidationError 输出
+- `src/cli/commands/validate.ts` 自动产 CRITICAL findings 路径完成(v7 M-1 修订:口径与 Task 4 正文一致):
+  - `spec-files-missing`:specs/ 空目录 → 产 CRITICAL finding + finding_hash
+  - `coverage_gap`:spec Requirement grep codebase 0 命中 → 产 CRITICAL finding + finding_hash(沿 §11.1bis 6 类归属:9d 实施)
+  - `test_failure`:走 stub 返回 not_implemented + validate CLI stderr 输出 `⚠ [stub] ...` warning(9g 完成后接 reporter parser;沿 §11.1bis 归属表)
+  - `hash_mismatch`:**不在 validate 阶段处理** — archive.ts 现有路径已做(line 274-289,v2 M-1 改 exit 1)
+  - `evidence_missing`:9a candidate-validators.ts framework 已有 stub(本 plan 不动)
+  - `api_contract` / `manual_claim`:推迟 v1.1 / 走 9a ack 流程(沿 §11.1bis)
+  - 所有产出 finding 通过 `extractHashPayload` + `computeFindingHash`(9a)写 finding_hash 到 ValidationError
 - `commands/verify.md` 重构:加 §"三维度分析"段调 `forge:verifying-three-dimensions` skill;原"测试 pass + log_hash"步骤保留作为 Completeness/task-completion 子项;`.verify-passed` YAML 输出含 `verify_findings` 数组(三维度产出 + validate.ts 自动产 CRITICAL 合并)
 - `src/cli/commands/archive.ts` fence 加 verify_findings 三级校验(沿 §2.2.4 表):
   - `automated=true` CRITICAL **不可降级**(finding_hash 重算比对,任何字段被篡改 → 拒签)
@@ -1458,9 +1465,10 @@ export function extractKeywords(title: string): string[] {
 /**
  * 在 dir 下递归 grep 关键词(简化版 — 不用 child_process,用 readFile;v1.0 性能可接受)
  *
- * v4 R-3 修订:SKIP_DIRS 兼顾两种路径形态:
- *   - 单层 directory name(node_modules / dist / .git / forge)— 用 SKIP_BASENAMES Set 匹配 e.name
- *   - 含斜杠的 relative path(tests/fixtures / tests/integration / docs / docs/plans / docs/specs)— 用 SKIP_REL_PATHS 匹配 path.relative(root, currentDir)
+ * v4 R-3 修订 + v6 N-1 简化 + v7 N-2 注释同步:SKIP_DIRS 兼顾两种路径形态:
+ *   - 单层 directory name(node_modules / dist / forge / coverage / build)— 用 SKIP_BASENAMES Set 匹配 e.name
+ *   - 顶层 relative path(tests / docs / forge-eval)— 用 SKIP_REL_PATHS exact match path.relative(root, currentDir);
+ *     walk 从 rootDir 开始,进入 tests/ 时 rel='tests' 命中 catch-all → continue,后续 tests/core, tests/cli 等子目录永远进不来
  * 同时跳所有以 . 或 _ 开头的目录(.git / .evidence / _shared 等)
  */
 async function grepCountInDir(rootDir: string, keyword: string): Promise<number> {
@@ -2058,10 +2066,11 @@ You are about to handle `/forge:verify $ARGUMENTS`.
    - **每个 finding 必须填**:id / dimension / check_type / severity / automated / content_hash / git_head / evidence / recommendation / resolved + finding_hash(JCS SHA256 of 8 字段 payload,沿 9a)
    - **`automated=true` 的 finding 必须由工具或 CLI 计算 finding_hash**(直接 grep 命中数等机器判定);AI 不能伪造此类 finding
    - **`automated=false` 的 finding 由 AI 产**,需 `forge ack propose` 走两步流程才能降级或带未 ack archive(沿 9a)
-   - **AI 计算 finding_hash 必须用 `forge finding hash` helper**(v6 M-1 修订:沿 plan-9d Task 4 step 12-13)— 防止 AI 自实现 JCS 易出错。示例:
+   - **AI 计算 finding_hash 必须用 `forge finding hash` helper**(v6 M-1 修订 + v7 N-1 修订:沿 plan-9d Task 4 step 12-13)— 防止 AI 自实现 JCS 易出错。示例**用 heredoc 避免单引号 shell 破损**(JSON 内换行 / 单引号 / 中文均安全):
      ```bash
      # 把 8 字段 payload 写成 JSON pipe 给 helper,helper 输出 64-hex finding_hash
-     echo '{
+     cat <<'JSON' | forge finding hash
+     {
        "content_hash": "sha256:abc123...",
        "git_head": "d4e5f6...",
        "dimension": "correctness",
@@ -2070,10 +2079,14 @@ You are about to handle `/forge:verify $ARGUMENTS`.
        "automated": false,
        "evidence": "specs/auth/spec.md Requirement #2 在 src/auth/refresh.ts:42 实现 expiryHours=12,spec 默认 24h",
        "recommendation": "改 expiryHours=24 或修订 spec"
-     }' | forge finding hash
+     }
+     JSON
      # 输出:1234abcd5678ef90... (64-hex 裸 hex 沿 9a)
      ```
-     **不能多传 extra keys**(id / resolved / finding_hash 自身)— helper 内部已显式构造 8 字段,extra keys 会被丢弃,但 AI 应该传干净 payload 避免混淆。
+     **关键约束**:
+     - **用 `<<'JSON'` heredoc(单引号 quoted)**:JSON 内部含单引号 / `$` / 反引号 / 中文均不会被 shell 解析(v7 N-1 修订:沿 bash heredoc quoted delimiter convention)
+     - **不能多传 extra keys**(id / resolved / finding_hash 自身)— helper 内部已显式构造 8 字段,extra keys 会被丢弃,但 AI 应该传干净 payload 避免混淆
+     - **JSON 内换行用真实换行**(不写 `\n`)— heredoc 保留原样换行;若 evidence/recommendation 内文要含 `\n` 字面值则写 `\\n` 双反斜杠(JSON 串 escape)
 
    4.3 **写 `forge/changes/<id>/.verify-passed` YAML**(沿 design §2.2.5 schema superset):
      ```yaml
@@ -3635,3 +3648,11 @@ design §2.3.3 表 line 443-448 列了 6 类 `candidate_type` enum,工程实施�
     - **N-2 coverage-gap.ts 缺 sep import**:`import { join, relative } from 'node:path'` 缺 `sep`,但 grepCountInDir 用 `relative(...).split(sep).join('/')`。修法:`import { join, relative, sep } from 'node:path'`。
     - **N-3 顶部 P50/P90 工日未同步 v5**:v5 修订记录 +0.05 但顶部 P50/P90 仍 7.3/9.0。修法:同步顶部为 7.4/9.1(含 v6 +0.05)。
   - **工日**:Task 5 helper 示例 + SKIP_REL_PATHS 简化 + sep import + 顶部工日同步 合计 +0.05;**P50 7.35 → 7.4 / P90 9.05 → 9.1**(master P90 7 + 30% buffer,已到 v0.4 经验 30% 上限,后续若再现 MAJOR 议题需考虑拆 plan-9d.1/9d.2)
+- **v7**(2026-05-11):codex 六轮 review 全收敛(1 MINOR + 2 NIT 全采纳,无 BLOCKER 无 MAJOR)
+  - **1 MINOR**:
+    - **M-1 顶部 DoD line 31 口径与 Task 4 正文冲突**:DoD 仍写"对 evidence_missing / tasks_hash mismatch / test_failure 三类 candidate" — 但 v4 之后 Task 4 正文已改为"实际产 spec-files-missing + coverage_gap;test_failure 走 stub;hash_mismatch 不在 validate"。执行者拿 DoD 对照会撞坑。修法:DoD line 31 重写,与 Task 4 + §11.1bis 6 类归属表保持一致,显式列每类的归属(spec-files-missing / coverage_gap 在本 plan;test_failure stub;hash_mismatch 在 archive.ts;evidence_missing/api_contract/manual_claim 各自归属)。
+  - **2 NIT**:
+    - **N-1 Task 5 helper 示例单引号 fragile**:`echo '...'` 单引号包外,若 JSON 内 evidence 含单引号会破 shell。修法:改 `cat <<'JSON' ... JSON` heredoc(quoted delimiter)— JSON 内含单引号 / `$` / 反引号 / 中文均不被 shell 解析。
+    - **N-2 SKIP_REL_PATHS 上方注释残留旧子路径**:注释仍写"tests/fixtures / tests/integration / docs/plans / docs/specs",但 Set 已 v6 简化为三顶层 catch-all。修法:注释同步成"顶层 relative path catch-all"+ 说明 walk 不进入子目录的逻辑。
+  - **工日**:纯文档对齐 + heredoc 改写,无新代码;**P50 / P90 不变**(7.4 / 9.1)。
+  - **收敛状态**:无 BLOCKER / 无 MAJOR / 0 MINOR / 0 NIT 待处理 — **plan-9d v7 达到 ≤ NIT 收敛阈值**,可进入 executing-plans 阶段。

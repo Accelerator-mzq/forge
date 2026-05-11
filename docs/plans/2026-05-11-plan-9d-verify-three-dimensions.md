@@ -1207,7 +1207,9 @@ describe('validate.ts auto-produce verify-domain CRITICAL findings (plan-9d Task
     await rm(testDir, { recursive: true, force: true });
   });
 
-  it('tasks.md fake-completion(标 [x] 但 changeDir 无实施)→ CRITICAL completeness/task-completion + finding_hash', async () => {
+  it('tasks.md fake-completion(标 [x] 但 changeDir 无实施)→ validate 层不产 finding(由 verify slash 阶段产,沿 §11.1bis)', async () => {
+    // v13 review MINOR:case 边界明确化 — fake_completion candidate 归属 verify slash(commands/verify.md Task 5),
+    // 不在 validate CLI 阶段产 finding;本测试反向验证 validate 层**不**产 tasks 类 CRITICAL finding
     await writeFile(
       join(testDir, 'proposal.md'),
       `# Proposal\n\n## Why\n\ntest\n\n## What Changes\n\nadd X\n\n## Impact\n\nsmall`,
@@ -1226,15 +1228,14 @@ describe('validate.ts auto-produce verify-domain CRITICAL findings (plan-9d Task
     );
 
     const result = await validateChange(testDir);
-    // 注:具体 fake-completion 检测可能在 verify slash 阶段做(本 task 是 validate 层 — 主要测 tasks.md 不变量类 finding)
-    // 此 test 验证 validate 层 finding 路径不抛 + finding 含 finding_hash + severity=CRITICAL
-    if (result.errors.some((e) => e.field === 'tasks')) {
-      const fc = result.errors.find((e) => e.field?.startsWith('tasks'));
-      // 若 tasks 类 finding 产生,必须含 severity + finding_hash
-      if (fc?.severity === 'CRITICAL') {
-        expect(fc.finding_hash).toMatch(/^[a-f0-9]{64}$/);
-      }
-    }
+    // 沿 §11.1bis 责任边界:validate CLI 不产 fake_completion 类 finding(git diff 反向检测在 verify slash 阶段)
+    // tasks 类 finding 若有,只可能来自 validate/tasks.ts 的不变量校验(如 hash mismatch / tasks.md 结构错),
+    // 不应是 fake-completion CRITICAL — 沿 design line 457 工具自动产 CRITICAL 仅 spec-files-missing + coverage_gap
+    const tasksCriticalFindings = result.errors.filter(
+      (e) => e.field?.startsWith('tasks') && e.severity === 'CRITICAL',
+    );
+    expect(tasksCriticalFindings).toHaveLength(0);
+    // coverage_gap 类(specs 0 命中)若产 finding 应在 specs artifact 下,非 tasks
   });
 
   it('specs/ 为空 → CRITICAL specs/no-files + finding_hash', async () => {
@@ -3729,3 +3730,8 @@ design §2.3.3 表 line 443-448 列了 6 类 `candidate_type` enum,工程实施�
     - **CHECK4-3624 §13 历史段 line 3626 "13 fixture × 12 e2e case" 是合法历史**:codex 标 line 3624 但实际 line 3626 是 v2 修订记录"M-4"项历史描述,合法 §13 历史不需修。**判定**:不修,§13 历史段保留历史 v2 描述。line 3717 类似为 v11 历史。
   - **工日**:纯文档对齐 + 顺序重排,无新代码逻辑;**P50 / P90 不变**(7.4 / 9.1)
   - **收敛状态**:Task 8 buildFixture 顺序合规(test.log/log_hash → marker);Task 3 单元测试 hardcoded log_hash 注释明确;line 66 downgrade 计数与实际一致;§13 历史段不动。**plan-9d v13 达到 ≤ NIT 收敛阈值**。
+- **v14**(2026-05-11):codex 十三轮 fresh review 4 议题全 ADOPTED + 1 新 MINOR — 1 议题全采纳
+  - **1 MINOR**:
+    - **Task 4 单测 fake-completion case 期望与 §11.1bis 责任边界冲突**:line 1210 case 名"tasks.md fake-completion → CRITICAL completeness/task-completion + finding_hash" + assertion 是软 if-only,但 case 名暗示 validate 层应产 fake-completion finding,与 line 1229/1674 + §11.1bis(fake_completion 归 verify slash)冲突 — 执行者按 case 名实施会撞 §11 边界。**修法**:case 名 + assertion 改反向:"validate 层不产 finding(由 verify slash 阶段产,沿 §11.1bis)";断言 `tasksCriticalFindings.length === 0`。
+  - **工日**:纯文档对齐,无新代码逻辑;**P50 / P90 不变**(7.4 / 9.1)
+  - **收敛状态**:Task 4 单测 case 边界与 §11.1bis 一致(反向验证 validate 层不产 fake-completion finding,verify slash Task 5 才产);plan 全文 candidate_type 责任归属 + e2e fixture 顺序 + 数字 + import 冲突 全已清。**plan-9d v14 达到 ≤ NIT 收敛阈值**。

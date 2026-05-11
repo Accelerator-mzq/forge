@@ -13,6 +13,7 @@ import { buildUpgradeCommand } from './commands/upgrade.js';
 import { buildMigrateCommand } from './commands/migrate.js';
 import { buildAckCommand } from './commands/ack.js';
 import { buildEvidenceCommand } from './commands/evidence.js';
+import { buildScopeCommand } from './commands/scope.js';
 
 // 创建主命令
 const program = new Command();
@@ -51,6 +52,9 @@ program.addCommand(buildAckCommand());
 
 // 注册 evidence 子命令(plan-9a Task 5 — evidence helper 记录框架)
 program.addCommand(buildEvidenceCommand());
+
+// 注册 scope 子命令(plan-9b Task 5 — scope aggregator)
+program.addCommand(buildScopeCommand());
 
 // 解析命令行参数,遇到错误时打印并退出
 program.parseAsync(process.argv).catch((err: unknown) => {

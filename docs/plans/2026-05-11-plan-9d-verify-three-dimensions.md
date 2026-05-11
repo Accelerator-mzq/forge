@@ -63,7 +63,7 @@
 | 5 | `commands/verify.md` slash 重构 + verify_findings 写入 | 0.5 | `commands/verify.md` 加 §"三维度分析"段调 skill + `.verify-passed` YAML 输出 verify_findings 数组(自动产 CRITICAL + LLM 判定 WARNING/SUGGESTION 合并;附 finding 写入示例与 YAML schema 引用) |
 | 6 | archive.ts fence 三级 × resolved × ack 矩阵 + finding_hash 篡改拒签 + **ack-log 一致性** | **1.5**(v2 B-4 修订 +0.3:加 ack-log + pending-acks 一致性 helper;v2 M-1 修订 +0.2:对齐现有 archive exit code 到 master §3.12.3 freeze) | `src/cli/commands/archive.ts` 加 `validateVerifyFindingsFence`(三级 × resolved × ack 9 分支)+ **`validateAckLogConsistency`**(沿 design line 496-500:marker ack ↔ ack-log.jsonl 条目对齐 + pending-acks/ 残留拒签 + finding_hash 一致性)+ automated=true 不可降级(finding_hash 重算比对)+ downgrade ack 校验 + 现有 evidence/hash 校验 exit code 从 2 改 1 + tests(9 个分支 + 篡改 + downgrade + ack-log 一致性 + pending-acks 残留)|
 | 7 | GREEN leg 跑通 + REFACTOR loophole | 0.5 | 跑 `pnpm eval:skill verifying-three-dimensions` 验证 delta ≥ 1.5;若 GREEN < 6.5 回改 Task 2 SKILL.md 加红旗 plug(反向依赖 Task 2);REFACTOR plug ≥ 2 个观察到的借口 |
-| 8 | 集成 e2e 测试 + 全本地 verify | **0.6**(v2 M-4 修订 +0.2:完整列 9 分支 + downgrade + hash tamper + ack-log 残留 + AI 直填 ack 但无 ack-log 条目 共 13 fixture/test name;v11 MINOR-2 修订:数字 12→13 全口径对齐) | `tests/integration/verify-findings-end-to-end.test.ts` 完整 13 个 e2e case(无 placeholder ellipsis,沿 v2 M-4 修订) + fixture **完整列**:9 fence 分支 × 3(CRITICAL/WARNING/SUGGESTION × resolved/no-ack/ack)+ downgrade × 2(缺 ack / 完整)+ hash tamper × 1 + ack-log 缺条目 × 1 + pending-acks 残留 × 1 = 13 fixture;`pnpm typecheck && lint && format:check && build && test` 全绿 |
+| 8 | 集成 e2e 测试 + 全本地 verify | **0.6**(v2 M-4 修订 +0.2:完整列 9 分支 + downgrade + hash tamper + ack-log 残留 + AI 直填 ack 但无 ack-log 条目 共 13 fixture/test name;v11 MINOR-2 修订:数字 12→13 全口径对齐;v13 修订:downgrade-missing-ack e2e 路径由 Task 6 fence 单元测试覆盖,Task 8 e2e 只测 downgrade × 1 完整路径) | `tests/integration/verify-findings-end-to-end.test.ts` 完整 13 个 e2e case(无 placeholder ellipsis,沿 v2 M-4 修订) + fixture **完整列**:9 fence 分支 × 3(CRITICAL/WARNING/SUGGESTION × resolved/no-ack/ack)+ downgrade × 1(完整,缺 ack 在 Task 6 fence 单元测试覆盖)+ hash tamper × 1 + ack-log 缺条目 × 1 + pending-acks 残留 × 1 = 13 fixture;`pnpm typecheck && lint && format:check && build && test` 全绿 |
 
 **串行约束 + 反向依赖**:
 - Task 0(SKILL_NAMES)必须先(否则 Task 1 跑 `pnpm eval:skill verifying-three-dimensions` CLI 拒绝,沿 `forge-eval/index.ts:34` 注册检查)
@@ -770,7 +770,10 @@ describe('verify_findings marker schema (plan-9d Task 3)', () => {
         test_command: 'pnpm test',
         test_file: 'tests/auth.test.ts',
         log_path: './.evidence/test.log',
-        log_hash: realLogHash, // v12 REG-E2E-LOGHASH-001:真算
+        // v13 REG-LOGHASH-TASK3-001 修订:Task 3 测试是 marker-schema 单元测试,
+        // 只校验 schema 格式(SHA256_RE),不真重算 log hash;hardcoded 合法 sha256: 前缀即可
+        // (e2e 测试中 fixture 必须真算 — 见 Task 8 buildFixture)
+        log_hash: 'sha256:' + 'c'.repeat(64),
         pass: true,
       },
     ],
@@ -3168,7 +3171,14 @@ export async function buildFixture(rootDir: string, opts: FixtureOpts): Promise<
   });
   finding.finding_hash = opts.tamperHash ? 'f'.repeat(64) : realFindingHash;
 
-  // 3. .verify-passed YAML(v3 M-2:hash 用真值)
+  // 3. .evidence/test.log + 真算 log_hash(v13 REG-LOGHASH-ORDER-001 修订:必须在 verify marker 写入之前算)
+  // 旧版 v12 把 test.log 写入和 realLogHash 计算放在 marker 之后,但 marker 引用 realLogHash → use-before-declaration
+  // 修法:test.log 写入 + computeLogHash 提前到 marker 构造之前(沿 marker-integrity.ts:58-59 真算需求)
+  const logPath = join(changeDir, '.evidence', 'test.log');
+  await writeFile(logPath, 'PASS 17/17\n');
+  const realLogHash = await computeLogHash(logPath);
+
+  // 4. .verify-passed YAML(v3 M-2:hash 用真值;v12 REG-E2E-LOGHASH-001:log_hash 真算;v13 修订:顺序前置)
   const verifyMarker = {
     schema: 'forge-verify/v1',
     verified_at: '2026-05-12T10:00:00Z',
@@ -3181,7 +3191,7 @@ export async function buildFixture(rootDir: string, opts: FixtureOpts): Promise<
         test_command: 'pnpm test',
         test_file: 'tests/x.test.ts',
         log_path: './.evidence/test.log',
-        log_hash: realLogHash, // v12 REG-E2E-LOGHASH-001:真算
+        log_hash: realLogHash, // v12 REG-E2E-LOGHASH-001:真算(v13 顺序修正)
         pass: true,
       },
     ],
@@ -3189,7 +3199,7 @@ export async function buildFixture(rootDir: string, opts: FixtureOpts): Promise<
   };
   await writeFile(join(changeDir, '.verify-passed'), yamlStringify(verifyMarker));
 
-  // 4. .review-passed YAML(v3 M-2:hash 用真值;is_git_repo=false 配合 --force 跳 git 检查)
+  // 5. .review-passed YAML(v3 M-2:hash 用真值;is_git_repo=false 配合 --force 跳 git 检查)
   await writeFile(
     join(changeDir, '.review-passed'),
     yamlStringify({
@@ -3202,14 +3212,6 @@ export async function buildFixture(rootDir: string, opts: FixtureOpts): Promise<
       review_outcomes: [],
     }),
   );
-
-  // 5. .evidence/test.log + 真算 log_hash(v12 REG-E2E-LOGHASH-001 修订)
-  // 旧版用 hardcoded 'sha256:'+'c'.repeat(64) 假值,但 marker-integrity.ts:58-59 validateEvidence
-  // 会重算 computeLogHash 并与 marker expectedHash 比对,假 hash 会让 archive 在 evidence 校验提前失败
-  // 测不到 verify_findings fence;改为真算
-  const logPath = join(changeDir, '.evidence', 'test.log');
-  await writeFile(logPath, 'PASS 17/17\n');
-  const realLogHash = await computeLogHash(logPath);
 
   // 6. .evidence/ack-log.jsonl(若有 ack 或 downgrade)
   // ackLogMatch:'matching' 完整匹配;'missing' 不写 ack-log(留空);'hash-mismatch' user 对但 hash 篡改;'user-mismatch' hash 对但 user 不匹配(v3 m-1)
@@ -3718,3 +3720,12 @@ design §2.3.3 表 line 443-448 列了 6 类 `candidate_type` enum,工程实施�
     - **EM-SCAN line 124 残留 evidence_missing**:v11 改 candidate-validators 边界描述时带入"9a framework 留 evidence_missing 等 future 接入"。**修法**:改"9a framework 留待 v1.1 接入"(不提具体 candidate_type)。
   - **工日**:纯文档对齐 + import 改 + computeLogHash 接入,无新代码逻辑;**P50 / P90 不变**(7.4 / 9.1)
   - **收敛状态**:Task 3 import 冲突明确化 rename step;Task 8 fixture log_hash 真算路径就位;Task 8 数字 13 全口径对齐;line 124 evidence_missing STRAY 清。**plan-9d v12 达到 ≤ NIT 收敛阈值**。
+- **v13**(2026-05-11):codex 十二轮 fresh review 发现 v12 引入 use-before-declaration bug + 数字 mismatch — 4 议题全采纳(2 MAJOR + 2 MINOR)
+  - **2 MAJOR**:
+    - **REG-LOGHASH-ORDER-001 Task 8 buildFixture marker 引用 realLogHash 在 declaration 之前**:v12 把 test.log 写入 + computeLogHash 放在 marker 之后,但 marker step 引用 realLogHash → JS 运行时 ReferenceError。**修法**:把 test.log 写入 + computeLogHash 提前到 marker 构造之前(步骤 3 → 步骤 5 重排)。
+    - **REG-LOGHASH-TASK3-001 Task 3 测试代码块 log_hash 引用 realLogHash 但无声明**:v12 修订 propagate 到 Task 3 单元测试,但 marker-schema 单元测试不需要真 log_hash,且测试代码块没有 logPath / computeLogHash 调用。**修法**:Task 3 base marker log_hash 恢复 hardcoded `'sha256:' + 'c'.repeat(64)` — marker-schema 仅校验格式不真重算,加注释明确"e2e 测试中 fixture 必须真算 — 见 Task 8"。
+  - **2 MINOR**:
+    - **TASK8-DOWNGRADE-COUNT line 66 "downgrade × 2" 与 case 表不一致**:case 表只有 case 12 downgrade-complete 一项,line 66 说 downgrade × 2(缺 ack / 完整)。实际 downgrade 缺 ack 路径在 Task 6 fence **单元**测试中已覆盖(verify-findings-fence.test.ts §"downgrade 路径"段),Task 8 e2e 只测完整路径。**修法**:line 66 改"downgrade × 1(完整,缺 ack 在 Task 6 fence 单元测试覆盖)"。
+    - **CHECK4-3624 §13 历史段 line 3626 "13 fixture × 12 e2e case" 是合法历史**:codex 标 line 3624 但实际 line 3626 是 v2 修订记录"M-4"项历史描述,合法 §13 历史不需修。**判定**:不修,§13 历史段保留历史 v2 描述。line 3717 类似为 v11 历史。
+  - **工日**:纯文档对齐 + 顺序重排,无新代码逻辑;**P50 / P90 不变**(7.4 / 9.1)
+  - **收敛状态**:Task 8 buildFixture 顺序合规(test.log/log_hash → marker);Task 3 单元测试 hardcoded log_hash 注释明确;line 66 downgrade 计数与实际一致;§13 历史段不动。**plan-9d v13 达到 ≤ NIT 收敛阈值**。

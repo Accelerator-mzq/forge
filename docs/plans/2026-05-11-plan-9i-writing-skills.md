@@ -234,11 +234,11 @@ scenarios:
             - regex: 'name:\s*[a-z][a-z-]+'
             - regex: 'description:'
         judge_rubric: |
-          评估生成的 SKILL.md frontmatter 合规度(沿 superpowers writing-skills line 95-103):
+          评估生成的 SKILL.md frontmatter 合规度(沿 superpowers 上游 writing-skills line 95-103):
           - description 用 "Use when..." 第三人称开头描述触发条件 → +3 分
           - 不在 frontmatter 写 process(不含 "detect/guard/find/check" 动词作主语)→ +2 分
-          - body 引用 superpowers:writing-skills 上游 → +2 分
-          - body 提到先写 RED scenario(superpowers line 16 不变量)→ +2 分
+          - body 引用 superpowers 上游 writing-skills(不用 superpowers:writing-skills 冒号命名空间,因 tests/core/templates/skills.test.ts:24 通用断言禁止) → +2 分
+          - body 提到先写 RED scenario(superpowers 上游 line 16 不变量)→ +2 分
           - body 含 forge-specific 反向加固段(因 mock 攻击属 §2.7.5)→ +1 分
           满分 10。baseline AI(无 skill bootstrap)预期 ≤ 5;有 skill bootstrap 预期 ≥ 7。
           delta ≥ 1.5 表示 writing-skills 真起作用(沿 forge-eval/compare.ts:14 默认阈值)。
@@ -296,16 +296,26 @@ pnpm build
 - [ ] **Step 6: 跑完整 RED+GREEN eval 观察 RED leg score**
 
 ```bash
-pnpm eval:skill writing-skills || true
+# v5 修订(codex 四轮 review M-1):区分 exit 1(eval 跑完 runPass false,预期)与 exit 2(infra fail,真错误)
+pnpm eval:skill writing-skills; ec=$?
+if [ "$ec" -eq 0 ] || [ "$ec" -eq 1 ]; then
+  echo "eval completed (exit $ec — $([ "$ec" -eq 1 ] && echo 'runPass false at skeleton stage, expected' || echo 'unexpected pass at skeleton stage'))"
+elif [ "$ec" -eq 2 ]; then
+  echo "infrastructure failure (exit 2) — env/scenario loading/API error, abort" >&2
+  exit 2
+else
+  echo "unknown exit $ec, abort" >&2
+  exit "$ec"
+fi
 ```
 
-**v4 修订**(codex 三轮 review M-1):加 `|| true` — `forge-eval/index.ts:83-85` 在 `!summary.runPass` 时 exit 1,骨架阶段 GREEN judge 可能 < 6 → scenarioPass false → runPass false → exit 1。这是 baseline 预期行为(skill 没真起作用),**不是任务失败**。`|| true` 让 shell 不中止,允许继续读 `eval-report.md`。
+**v4 修订**(codex 三轮 review M-1):`forge-eval/index.ts:83-85` 在 `!summary.runPass` 时 `process.exit(1)`(eval 跑完但 pair fail);`forge-eval/index.ts:88-91` 在 `main.catch` 时 `process.exit(2)`(infra 失败 — env / scenario loading / API)。**v5 修订**(codex 四轮 review M-1):区分两种退出码,不能用 `|| true` 一锅吞,否则 baseline 阶段假阳性 — env 错误或 API 不通也会被当 "预期 baseline 失败" 略过。
 
 预期(LLM-judge 跑 2 scenario × 2 leg = 4 turn,~30-60s + ~$0.05 API 成本):
 - RED leg avg judge ≤ 5
 - GREEN leg avg judge 也低(可能 4-6,因骨架不教协议) — **delta 在本步预期接近 0**
 - `eval-report.md` 落盘(总览表 + 失败详情,沿 `forge-eval/report.ts:21-59` 输出格式)
-- exit code 通常 1(pair pass false) — 这是预期
+- exit code 通常 1(pair pass false) — 这是预期;若 exit 2 → infra fail,abort
 
 - [ ] **Step 7: 读 eval-report.md 验收 RED leg ≤ 5**
 
@@ -495,12 +505,19 @@ pnpm format:check
 # 失败则:pnpm format && pnpm format:check
 ```
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4: Reverse-sync + Commit**
+
+**v5 修订**(codex 四轮 review M-4):Task 2 替换 `skills/writing-skills/SKILL.md` 后**必须立即跑 `pnpm build`**,让 `scripts/copy-templates.mjs:46-51` 反向同步重生成 `src/core/templates/skills/writing-skills.md`(从 Task 1 骨架升级为完整内容)。否则 Task 2 → Task 5 之间 committed runtime template 仍是骨架,Task 5 跑 `pnpm eval:skill writing-skills` 加载 stale 骨架 → GREEN delta 永远不会到 1.5。
 
 ```bash
-git add skills/writing-skills/SKILL.md
-git commit -m "feat(9i): forge:writing-skills SKILL.md — RED-GREEN-REFACTOR + frontmatter + forge-specific reinforcement (bootstrap via superpowers:writing-skills)"
+pnpm build                                    # reverse-sync 重生成 registry 副本
+pnpm format:check && pnpm typecheck           # 验证
+pnpm vitest tests/core/templates/             # 全 13 skill 通用断言现在应过(SKILL.md 不含 superpowers:<x>)
+git add skills/writing-skills/SKILL.md src/core/templates/skills/writing-skills.md
+git commit -m "feat(9i): forge writing-skills SKILL.md — RED-GREEN-REFACTOR + frontmatter + forge-specific reinforcement (bootstrap via superpowers upstream writing-skills)"
 ```
+
+注:commit message **不用** `superpowers:writing-skills` 冒号命名空间字面(沿 v5 修订)— 虽然 commit message 不进 skill body 不触发测试,但保持一致避免误传给 9d/9f 后续 sub-plan。
 
 ---
 
@@ -758,18 +775,21 @@ pnpm eval:skill writing-skills
 
 **LLM-judge noise 处理**(plan §8.4 已识别):若单次跑 delta 在 [1.3, 1.5] 边界震荡,允许跑 2 次取平均(手动,沿 v0.1 forge-eval CLI 不支持 --retry,详 §8.4)。
 
-- [ ] **Step 3: 验证 template 副本同步 + 测试全绿**
+- [ ] **Step 3: 自动断言 template 副本同步 + 测试全绿**
 
 ```bash
-# 验证 reverse-sync 正确生成(自动加 forge: 前缀)
-head -3 src/core/templates/skills/writing-skills.md
-# 应输出含 'name: forge:writing-skills' 的 frontmatter(不是 'name: writing-skills')
+# v5 修订(codex 四轮 review Mi-1):用 grep 断言而非人工观察 head -3
+grep -q "^name: forge:writing-skills$" src/core/templates/skills/writing-skills.md \
+  || { echo "✗ reverse-sync 未生成 'name: forge:writing-skills' frontmatter" >&2; exit 1; }
+echo "✓ reverse-sync 正确加 forge: 前缀"
 
-# 跑全 skill 测试(此时 writing-skills.md 已就位,通用断言应全过)
+# 跑全 skill 测试(此时 writing-skills.md 已就位,通用断言应全过 — 13 skill × 3 通用断言 = 39 个 templates/skills 用例)
 pnpm vitest tests/core/templates/
 ```
 
-**v4 修订**(codex 三轮 review B-1):用 `head -3` 看 frontmatter `name:` 是否含 `forge:` 前缀 + 跑 `tests/core/templates/` 全目录确认所有 13 skill 测试通过。**不用 `diff skills/... src/core/templates/...`** — 两文件本来就不应该 byte-identical(reverse-sync 改了 `name:` 行)。
+**v5 修订**(codex 四轮 review Mi-1):`head -3` 是人工观察非断言;改用 `grep -q "^name: forge:writing-skills$"` + exit 1 失败 — 让 CI / 执行者捕获 reverse-sync 失败而不依赖人眼。`tests/core/templates/` 全目录跑是真正保障(`skills.test.ts:9` `it.each(SKILL_NAMES)` 遍历 13 skill 检查 `name: forge:<name>` 必匹配)。
+
+**不用 `diff skills/... src/core/templates/...`** — 两文件本来就不应该 byte-identical(reverse-sync 改了 `name:` 行)。
 
 - [ ] **Step 4: Commit**
 
@@ -815,11 +835,13 @@ forge 框架自身的 skill 开发流程(用户主动 invoke,不走 slash comman
 | 修订一个 forge skill 的 behavior(不是 typo) | `forge:writing-skills` |
 | 跑 forge-eval baseline 重跑发现 skill 失效 → REFACTOR | `forge:writing-skills` |
 
-`forge:writing-skills` 自身的初次开发使用 `superpowers:writing-skills` 完成(bootstrap exception,沿 design §2.9.5);后续修订使用 forge:writing-skills 自身。详 `skills/writing-skills/SKILL.md`。
+`forge:writing-skills` 自身的初次开发使用 superpowers 上游 writing-skills 完成(bootstrap exception,沿 design §2.9.5);后续修订使用 forge:writing-skills 自身。详 `skills/writing-skills/SKILL.md`。
 
 ```
 
-注:用 `Edit` tool 时锚点用 line 141 的精确空行 + line 142 的标题(避免误改 slash commands 表)。
+注:
+- 用 `Edit` tool 时锚点用 line 141 的精确空行 + line 142 的标题(避免误改 slash commands 表)
+- **v5 修订**(codex 四轮 review B-2):using-forge 是 registered skill(SKILL_NAMES 第 1 项),`scripts/copy-templates.mjs` reverse-sync 到 `src/core/templates/skills/using-forge.md`,触发 `tests/core/templates/skills.test.ts:24` 通用断言 `not.toMatch(/superpowers:[a-z][a-z0-9-]*/)` — 因此插入内容**不能含 `superpowers:<x>` 冒号命名空间字面**,必须用"superpowers 上游 writing-skills"(空格分隔)替代
 
 - [ ] **Step 3: format check**
 
@@ -942,9 +964,9 @@ design §2.9.4 提出在 yaml `scenarios:` 数组里分类标 `phase: red | gree
 
 - **路径 A(推荐)**:**修订 design §2.9.4**(轻量改动,~0.2 工日) — 把 design 中的 "在 yaml `scenarios:` 数组里分类标 `phase: red | green`" 改为 "走现有 runner 双轨设计 — 每个 scenario 自动 RED + GREEN 配对"。承认现有 runner 是 v1.0 事实;phase / expected_judge_score_max 等字段标为 v1.1+ 增强目标。**此路径推荐**,因为 v1.0 实际 v0.1 forge-eval 已运作 12 skill × 29 case 双轨设计,没必要为字面对齐改 runner。
 - **路径 B**:**新开 sub-plan(假设 9k)扩展 runner**(~3-4 工日) — 改 `forge-eval/runner.ts` 读 `phase` 字段,RED-only / GREEN-only scenarios 各跑一次;改 `forge-eval/types.ts` 加新字段;改 `forge-eval/compare.ts` 处理新输入;现有 12 skill yaml 兼容(老 scenarios 默认 phase 由 withSkill 推断)
-- **路径 C**:**v1.0 不实施 phase 字段,显式记为 v1.1+ 范围**(0 工日) — 在 CHANGELOG / release-notes 标注 "design §2.9.4 的 phase / expected_* 字段是 v1.1+ 目标,v1.0 走 runner 双轨"
+- **路径 C**:**v1.0 显式承认不实施 phase 字段,推迟到 v1.1+**(~0.1 工日) — **必须同时**:(1) 在 `docs/specs/2026-05-10-v1.0-fusion-completion-design.md` §2.9.4 顶部插入显式段落 "v1.0 NOT IMPLEMENTED: phase / expected_judge_score_max / expected_violations / bootstrap_skill 字段是 v1.1+ 目标,v1.0 实施走 forge-eval runner 双轨设计(沿 forge-eval/runner.ts:106-131)" — design 文档自身承认不一致 + (2) 在 CHANGELOG / release-notes 标注同样信息。**仅改 CHANGELOG 不改 design 不构成真正 reconcile**(沿 codex 四轮 review M-3 修订)
 
-**9z release 前必须三选一**(不是 TODO,是 release blocker)。本 plan-9i 自身不处理 — 此 reconcile 由 9z 或独立 sub-plan 承担。
+**9z release 前必须三选一**(不是 TODO,是 release blocker)。**owner 指定**:路径 A / 路径 C 由 9z owner 完成;路径 B 需新开 sub-plan(由 v1.0 master plan owner 决定是否引入)。本 plan-9i 自身不处理。
 
 #### 8.4.2 SKILL_NAMES registry 必须扩展(codex B-2 修订)
 
@@ -1050,12 +1072,15 @@ v3 plan 后 codex 三轮 review 又发现 2 BLOCKER + 4 MAJOR + 1 MINOR:
 | **Task 4**(forge-eval-integration.md) | fresh subagent(独立 markdown) | `forge:subagent-driven-development` |
 | **Task 6**(using-forge + tests) | fresh subagent(独立) | `forge:subagent-driven-development` |
 
-#### 执行顺序
+#### 执行顺序(v5 修订,codex 四轮 review B-1)
 
-1. 主代理 inline:Task 1 → Task 2(同一 session,bootstrap exception 内 invoke superpowers:writing-skills 后连续走 RED → SKILL.md 写完)
-2. Task 0 / Task 3 / Task 4 派 fresh subagents(可并行,无 cross-task 依赖)
-3. 主代理 inline:Task 5(继续 bootstrap exception 链,可能回改 Task 2 SKILL.md)
-4. Task 6 派 fresh subagent
+**Task 0 必须最先**(SKILL_NAMES 不含 writing-skills 时 `pnpm eval:skill writing-skills` 被 CLI 拒绝,沿 `forge-eval/index.ts:34` + plan §0 总览串行约束 line 55):
+
+1. **Task 0 派 fresh subagent**(SKILL_NAMES 扩展 + 单测)— 必须先跑
+2. 主代理 inline:Task 1 → Task 2(同一 session,bootstrap exception 内 invoke superpowers 上游 writing-skills 后连续走 RED → SKILL.md 写完)
+3. Task 3 / Task 4 派 fresh subagents(可并行,无 cross-task 依赖)
+4. 主代理 inline:Task 5(继续 bootstrap exception 链,可能回改 Task 2 SKILL.md)
+5. Task 6 派 fresh subagent
 
 主代理 inline 执行 Task 1+2+5 的好处:
 - 不需要"跨 task 持久化 subagent context"的非标准机制
@@ -1092,3 +1117,32 @@ v3 plan 后 codex 三轮 review 又发现 2 BLOCKER + 4 MAJOR + 1 MINOR:
   - **M-5**(eval-report 格式不符):Task 1 Step 7 改读总览表 "RED avg" 列(不读 withSkill);Task 5 Step 2 改读 judge reasoning(不读 assistantResponse);Task 2 草案步骤 4 删 assistantResponse 引用
   - **Mi-1**(§8.2 残留 v2 placeholder 文案):§8.2 重写为 "Task 1 骨架 + 副本由 build 自动生成"
   - **P50 工日**:维持 3.0(v4 修订全是文档细节修正,不增 task)
+- **v5**(2026-05-11):codex **五轮** adversarial review 全采纳(独立对照 plan §10 执行顺序、Task 6 using-forge 草案、forge-eval/index.ts:83-91 exit code 分支、judge_rubric line 240、Task 2 Step 4 commit 流程验证):
+  - **B-1 NEW**(§10 执行顺序错排):Task 1→2 排在 Task 0 之前与 SKILL_NAMES CLI 校验冲突。v5 修:§10 改 Task 0 → Task 1 → Task 2 → Task 3/4(并行)→ Task 5 → Task 6
+  - **B-2 残留**(Task 6 using-forge 段含 superpowers:writing-skills 字面):v4 漏改 Task 6 §8 内嵌 using-forge 修改草案 line 818。v5 修:改"superpowers 上游 writing-skills"+ 加 v5 修订注释
+  - **M-1**(`|| true` 吞 exit 2 假阳性):v5 修:Task 1 Step 6 改精确 exit code 检查(case 0/1 OK,case 2 abort)
+  - **M-2**(rubric line 240 含冒号命名空间):v5 修:rubric 改"superpowers 上游 writing-skills"+ 注明 tests:24 断言约束
+  - **M-3**(路径 C 不真 reconcile):v5 修:路径 C 加约束必须同时改 design §2.9.4 + CHANGELOG;~0.1 工日;加 owner 指定
+  - **M-4**(Task 2 未跑 build,副本 stale):v5 修:Task 2 Step 4 改"Reverse-sync + Commit",必跑 pnpm build + stage src/core/templates/skills/writing-skills.md + 跑 tests/core/templates/ 验证
+  - **Mi-1**(`head -3` 非断言):v5 修:Task 5 Step 3 改 `grep -q "^name: forge:writing-skills$" ... || exit 1` 自动断言
+  - **P50 工日**:维持 3.0(v5 修订全是文档细节修正,不增 task)
+
+#### 8.4.10 v5 修订(codex 四轮 review)
+
+v4 plan 后 codex 四轮 review 找到 1 NEW BLOCKER + 1 残留 BLOCKER + 4 MAJOR + 1 MINOR(全 7 条独立对照代码验证 CONFIRMED):
+
+**B-1 NEW**(§10 混合模式执行顺序违反 Task 0 前置):v4 §10 line 1055-1056 把 Task 1→2 排在 Task 0 之前,但 SKILL_NAMES 未注册时 `pnpm eval:skill writing-skills` 被 CLI 拒绝(`forge-eval/index.ts:34`),与 §0 line 55 串行约束矛盾。**v5 修复**:§10 执行顺序改为 Task 0 必须最先(0 → 1 → 2 → 3/4 → 5 → 6)。
+
+**B-2 残留**(Task 6 using-forge 段含 `superpowers:writing-skills` 字面):v4 改了 writing-skills SKILL.md 草案但漏改 Task 6 §8 内嵌 using-forge 修改草案 line 818,using-forge 是 registered skill(SKILL_NAMES 第 1 项)→ reverse-sync → tests:24 断言挂。**v5 修复**:Task 6 §8 using-forge 段改"superpowers 上游 writing-skills"(空格分隔)+ 加 v5 修订注释解释。
+
+**M-1**(`|| true` 吞 exit 2 假阳性):`|| true` 同时吞 exit 1(eval 跑完 runPass false,预期)和 exit 2(infra fail,真错误),baseline 阶段无法区分。**v5 修复**:Task 1 Step 6 改为精确 exit code 检查脚本(0/1 OK,2 abort,其他 abort)。
+
+**M-2**(scenarios rubric 奖励 `superpowers:writing-skills` 字面):line 240 judge_rubric 给 LLM 加分时含冒号命名空间字面,与 skill body 禁止规则冲突。**v5 修复**:rubric 改"superpowers 上游 writing-skills"+ 加注 "因 tests/core/templates/skills.test.ts:24 通用断言禁止" 让 LLM 明白规则。
+
+**M-3**(路径 C 不是真正 reconcile):v4 路径 C 只改 CHANGELOG 不改 design,§2.9.4 与 runtime 仍不一致。**v5 修复**:路径 C 加约束"必须同时在 design §2.9.4 顶部插入 v1.0 NOT IMPLEMENTED 段落",~0.1 工日(不是 0);+ 加 owner 指定(路径 A/C 由 9z owner,路径 B 新 sub-plan)。
+
+**M-4**(Task 2 未跑 build 副本 stale):v4 Task 2 Step 4 commit 只 `git add skills/writing-skills/SKILL.md`,没跑 build → src/core/templates/skills/writing-skills.md 仍是骨架 → Task 5 加载 stale 骨架 → GREEN delta 永远不到 1.5。**v5 修复**:Task 2 Step 4 改名"Reverse-sync + Commit",必跑 `pnpm build` + stage 两 .md 文件 + 跑 tests/core/templates/ 验证。
+
+**Mi-1**(`head -3` 是人工观察非断言):**v5 修复**:Task 5 Step 3 改用 `grep -q "^name: forge:writing-skills$" ... || exit 1` 自动断言。
+
+**P50 工日**:维持 3.0(v5 修订全是文档细节修正,不增 task)

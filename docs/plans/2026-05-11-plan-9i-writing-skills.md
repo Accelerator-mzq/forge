@@ -80,6 +80,8 @@ tests/forge-eval/writing-skills-protocol.test.ts     ← Task 6:yaml 结构合�
 skills/using-forge/SKILL.md                          ← Task 6:在红旗清单段之前(line 142 前)新增 §"meta-development entry" 段
 src/core/templates/skills/index.ts                   ← Task 0:SKILL_NAMES 加 'writing-skills'(从 12 → 13);loadAllSkills 自动覆盖
 tests/core/templates/skills.test.ts                  ← Task 0:加 SKILL_NAMES registry 单测(参与 v3 修订 M-2 验收)
+tests/core/templates/registry.test.ts                ← Task 0:hardcoded 12-item 断言 → 13 + 完整数组加 'writing-skills'(v6 修订,codex 五轮 B-NEW)
+tests/smoke.test.ts                                  ← Task 0:hardcoded 12-item 断言 → 13(v6 修订,codex 五轮 B-NEW)
 ```
 
 ### Build 自动生成文件(commit 时 stage,不手写)
@@ -1008,13 +1010,14 @@ design §2.9.4 提出在 yaml `scenarios:` 数组里分类标 `phase: red | gree
 
 - **路径 A(推荐)**:**修订 design §2.9.4**(轻量改动,~0.2 工日) — 把 design 中的 "在 yaml `scenarios:` 数组里分类标 `phase: red | green`" 改为 "走现有 runner 双轨设计 — 每个 scenario 自动 RED + GREEN 配对"。承认现有 runner 是 v1.0 事实;phase / expected_judge_score_max 等字段标为 v1.1+ 增强目标。**此路径推荐**,因为 v1.0 实际 v0.1 forge-eval 已运作 12 skill × 29 case 双轨设计,没必要为字面对齐改 runner。
 - **路径 B**:**新开 sub-plan(假设 9k)扩展 runner**(~3-4 工日) — 改 `forge-eval/runner.ts` 读 `phase` 字段,RED-only / GREEN-only scenarios 各跑一次;改 `forge-eval/types.ts` 加新字段;改 `forge-eval/compare.ts` 处理新输入;现有 12 skill yaml 兼容(老 scenarios 默认 phase 由 withSkill 推断)
-- **路径 C**:**v1.0 显式承认不实施 phase 字段,推迟到 v1.1+**(~0.3 工日,v6 修订上调) — **必须同时改三处**(沿 codex 五轮 review M-C):
+- **路径 C**:**v1.0 显式承认不实施 phase / bootstrap_exception runner 字段,推迟到 v1.1+**(~0.4 工日,v7 修订上调) — **必须同时改五处**(沿 codex 五轮 M-C + 六轮 M-C-残留):
   1. `docs/specs/2026-05-10-v1.0-fusion-completion-design.md` §2.9.4 顶部插入显式段落 "v1.0 NOT IMPLEMENTED: phase / expected_judge_score_max / expected_violations / bootstrap_skill 字段是 v1.1+ 目标,v1.0 实施走 forge-eval runner 双轨设计(沿 forge-eval/runner.ts:106-131)"
   2. **同步改 design §2.9.4 line 1573-1577**:把"必须配 phase: red | green"改为"现有 runner 双轨,phase 字段是 v1.1+ 目标";`expected_judge_score_max` / `expected_violations` 标 v1.1+ optional
-  3. **同步改 design §2.9.7 line 1620-1624 实施清单**:删除 "phase: red 标记 / phase: green 标记" + "expected_violations / expected_judge_score_max" 强制项,标"v1.1+";否则 design 内部 §2.9.4 顶部说不实施但 §2.9.7 仍要求 → 自相矛盾
-  4. CHANGELOG / release-notes 标注同样信息
+  3. **同步改 design §2.9.5 line 1590-1592**(v7 新增,codex 六轮 M-C-残留):line 1592 说"forge-eval runner 知道此 yaml 不强制" — 但实际 runner 不读 `bootstrap_exception` 字段(`forge-eval/types.ts` 无此字段)。改为"`bootstrap_exception: true` 是 yaml 顶层文档元数据(runner 忽略未识别字段);bootstrap exception 真实在 SKILL.md body 内显式声明 + plan-9i §8.4.6 记录,不依赖 runner 字段读取"
+  4. **同步改 design §2.9.7 line 1620-1624 + line 1625 实施清单**:删除 "phase: red 标记 / phase: green 标记" + "expected_violations / expected_judge_score_max" 强制项,标"v1.1+";line 1625 `bootstrap_exception: true` 标"文档元数据,runner 忽略"
+  5. CHANGELOG / release-notes 标注同样信息
 
-  **仅改 CHANGELOG / design 顶部不算真正 reconcile**(沿 codex 五轮 review M-C — design §2.9.7 line 1620-1624 内部 reference 必须同步)
+  **仅改 CHANGELOG / design 顶部不算真正 reconcile**(沿 codex 五轮 M-C + 六轮 M-C-残留 — design §2.9.4 / §2.9.5 / §2.9.7 内部 reference 必须全同步,否则 design 内部自相矛盾)
 
 **9z release 前必须三选一**(不是 TODO,是 release blocker)。**owner 指定**:路径 A / 路径 C 由 9z owner 完成;路径 B 需新开 sub-plan(由 v1.0 master plan owner 决定是否引入)。本 plan-9i 自身不处理。
 
@@ -1189,6 +1192,10 @@ v3 plan 后 codex 三轮 review 又发现 2 BLOCKER + 4 MAJOR + 1 MINOR:
   - **M-C**(路径 C 连锁未估全):design §2.9.7 line 1620-1624 实施清单仍 reference phase 字段,路径 C 工日 0.1→0.3,加同步改 §2.9.4 line 1573-1577 + §2.9.7 line 1620-1624 两处
   - **Mi-1**(PowerShell 兼容):Task 1 Step 6 加注"必须在 Git-Bash 执行,PowerShell 用 `$LASTEXITCODE`"
   - **P50 工日**:维持 3.0(v6 修订全是文档细节修正,不增 task)
+- **v7**(2026-05-11):codex **七轮** adversarial review 全采纳(独立对照 docs/specs §2.9.5 line 1590-1592 + §2.9.7 line 1625 + plan §1 文件总表验证):
+  - **M-C-残留**(路径 C 漏 bootstrap_exception runner 字段冲突):design §2.9.5 line 1592 说"forge-eval runner 知道 bootstrap_exception",但实际 runner 不读 — 路径 C 必须同步改 §2.9.5 + §2.9.7 line 1625。v7 修:路径 C 从"改三处"扩到"改五处"(加 §2.9.5 line 1590-1592 改写说明 + §2.9.7 line 1625 标"文档元数据,runner 忽略"),工日 0.3→0.4
+  - **Mi-FS-1**(§1 文件总表漏列 v6 新增):Task 0 正文已加 registry.test.ts + smoke.test.ts,但 §1 修改文件总表漏列。v7 修:§1 修改文件段补两行 + v6 修订溯源注
+  - **P50 工日**:维持 3.0(v7 修订全是文档细节修正,不增 task;路径 C 工日是 9z 范围,不计入 9i)
 
 #### 8.4.10 v5 修订(codex 四轮 review)
 

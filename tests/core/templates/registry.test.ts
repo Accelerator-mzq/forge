@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 import { SKILL_NAMES, COMMAND_NAMES } from '../../../src/core/templates/index.js';
 
 describe('templates registry', () => {
-  // 验证 spec §2.2 表里의 12 个 skill + plan-9i writing-skills + plan-9d verifying-three-dimensions 共 14 项全到位
+  // 验证 spec §2.2 表里的 12 个 skill + plan-9i writing-skills + plan-9d verifying-three-dimensions 共 14 项全到位
   it('SKILL_NAMES 含 14 个不重复 skill', () => {
     expect(SKILL_NAMES).toHaveLength(14);
     expect(new Set(SKILL_NAMES).size).toBe(14);

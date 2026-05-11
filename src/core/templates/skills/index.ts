@@ -1,4 +1,4 @@
-// 13 个 skill 真实文本的 registry — Plan 4 + plan-9i
+// 14 个 skill 真实文本的 registry — Plan 4 + plan-9i + plan-9d
 // 文件实体 .md 由 Task B 逐个填实
 
 import { readFile, readdir } from 'node:fs/promises';

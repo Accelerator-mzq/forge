@@ -10,3 +10,7 @@ export * from './finding-hash.js';
 export * from './candidate-validators.js';
 // plan-9b Task 4: scope YAML block 校验
 export * from './scope-entries.js';
+// plan-9d Task 4 v2 新增
+export * from './auto-findings.js';
+export * from './coverage-gap.js';
+export * from './test-failure-stub.js';

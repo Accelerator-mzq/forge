@@ -1,6 +1,7 @@
 // src/core/validate/change.ts — 顶层 validateChange，读取 change 目录，跑所有 artifact 校验，合并结果
 // v2 B1 + v3 B1 修订:计算真实运行时 ctx(contentHash + gitHead),不含 ephemeral runId
 // v3 B2 修订:fs 错(cannot read X)不标 severity + [fs] message 前缀;business-fail 标 CRITICAL
+// plan-9d Task 4 v2 B-2 修订:加 coverage_gap finding 自动产 + test_failure stub warning
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -11,9 +12,15 @@ import { validateTasks } from './tasks.js';
 import { validateScopeEntries } from './scope-entries.js';
 import { computeContentHash } from '../hash/content.js';
 import { type ValidationResult, ok, failed, mergeResults } from './types.js';
+// plan-9d Task 4 v2:auto-findings + coverage-gap + test-failure-stub
+import { buildAutoCriticalFinding, FindingIdSequence } from './auto-findings.js';
+import { scanCoverageGaps } from './coverage-gap.js';
+import { checkTestFailureStub } from './test-failure-stub.js';
 
 export async function validateChange(changeDir: string): Promise<ValidationResult> {
   const results: ValidationResult[] = [];
+  // plan-9d Task 4 v2 m-2:独立 id 计数器,避免 fs error 也算进 finding id 跳号
+  const findingIds = new FindingIdSequence();
 
   // v2 B1 + v3 B1 修订:计算真实稳定运行时 ctx(不含 ephemeral runId)
   // 用于 validateScopeEntries 的 finding_hash 绑定
@@ -94,13 +101,23 @@ export async function validateChange(changeDir: string): Promise<ValidationResul
     const entries = await readdir(specsDir);
     const mdFiles = entries.filter((n) => n.endsWith('.md'));
     if (mdFiles.length === 0) {
-      // v3 B2 修订:specs/ 存在但空 — business-fail,标 CRITICAL → exit 1
+      // v3 B2 修订 + plan-9d Task 4:specs/ 存在但空 — 产 spec-files-missing CRITICAL finding(含 finding_hash)
+      const finding = buildAutoCriticalFinding({
+        id: findingIds.next(),
+        dimension: 'completeness',
+        check_type: 'spec-files-missing',
+        evidence: `specs/ 目录存在但 0 个 .md 文件 (${specsDir})`,
+        recommendation: '在 specs/ 下添加至少一个 spec .md 文件,或修订 proposal 移除 specs 需求',
+        contentHash: ctx.contentHash,
+        gitHead: ctx.gitHead,
+      });
       results.push(
         failed({
           artifact: 'specs',
           message: 'no spec files in specs/',
           file: specsDir,
           severity: 'CRITICAL',
+          finding_hash: finding.finding_hash,
         }),
       );
     }
@@ -118,6 +135,60 @@ export async function validateChange(changeDir: string): Promise<ValidationResul
         file: specsDir,
       }),
     );
+  }
+
+  // plan-9d Task 4 v2 B-2 修订:coverage_gap 扫描(spec Requirement grep 0 命中 → CRITICAL finding)
+  // 从 changeDir 推断 codebase root:forge/changes/<id>/ 上两级 = cwd
+  const codebaseRoot = changeDir.includes('forge/changes/')
+    ? (changeDir.split('forge/changes/')[0] ?? process.cwd())
+    : process.cwd();
+  try {
+    const gaps = await scanCoverageGaps(changeDir, codebaseRoot);
+    for (const gap of gaps) {
+      const finding = buildAutoCriticalFinding({
+        id: findingIds.next(),
+        dimension: 'completeness',
+        check_type: 'spec-coverage',
+        evidence: `spec ${gap.spec_file} 的 Requirement '${gap.requirement_id}' 在 codebase 完全 0 命中(keywords: ${gap.searched_keywords.join(', ')}, results: ${JSON.stringify(gap.grep_results)})`,
+        recommendation: `实施该 Requirement,或修订 spec 移除/拆分该项;或确认 keyword 抽取不够准(在 spec 标题用更具体的实施关键词)`,
+        contentHash: ctx.contentHash,
+        gitHead: ctx.gitHead,
+      });
+      results.push(
+        failed({
+          artifact: 'specs',
+          field: `requirement.${gap.requirement_id}`,
+          message: `coverage_gap: spec Requirement '${gap.requirement_id}' 在 codebase 完全 0 命中(candidate_type=coverage_gap,沿 design line 446)`,
+          file: gap.spec_file,
+          severity: 'CRITICAL',
+          finding_hash: finding.finding_hash,
+        }),
+      );
+    }
+  } catch (err) {
+    // coverage_gap 扫描异常不阻断;记录 fs 警告
+    results.push(
+      failed({
+        artifact: 'specs',
+        message: `[fs] coverage_gap 扫描失败: ${(err as Error).message}`,
+      }),
+    );
+  }
+
+  // plan-9d Task 4 v2 B-2 修订:test_failure stub(9g 完成后接 reporter parser)
+  const testStub = await checkTestFailureStub();
+  if (testStub.status === 'not_implemented') {
+    // stub 不产 finding,只在 ValidationResult.warnings 标记
+    results.push({
+      valid: true,
+      errors: [],
+      warnings: [
+        {
+          artifact: 'change',
+          message: `[stub] ${testStub.message}`,
+        },
+      ],
+    });
   }
 
   // 没有任何结果表示空目录，直接返回 ok；否则合并所有结果

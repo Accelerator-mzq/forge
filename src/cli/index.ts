@@ -14,6 +14,7 @@ import { buildMigrateCommand } from './commands/migrate.js';
 import { buildAckCommand } from './commands/ack.js';
 import { buildEvidenceCommand } from './commands/evidence.js';
 import { buildScopeCommand } from './commands/scope.js';
+import { buildFindingCommand } from './commands/finding.js';
 
 // 创建主命令
 const program = new Command();
@@ -55,6 +56,9 @@ program.addCommand(buildEvidenceCommand());
 
 // 注册 scope 子命令(plan-9b Task 5 — scope aggregator)
 program.addCommand(buildScopeCommand());
+
+// 注册 finding 子命令(plan-9d Task 4 — finding hash helper)
+program.addCommand(buildFindingCommand());
 
 // 解析命令行参数,遇到错误时打印并退出
 program.parseAsync(process.argv).catch((err: unknown) => {

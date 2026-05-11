@@ -18,6 +18,11 @@ export function buildValidateCommand(): Command {
       if (result.valid) {
         // 验证成功 → stdout + exit 0
         console.log(`✓ ${changeId}: valid`);
+        // v4 D-3 修订:打印 warnings(stub 提示等),让 CI 用户看到 not_implemented 信号
+        for (const w of result.warnings) {
+          const prefix = w.message.startsWith('[stub]') ? '⚠' : 'ℹ';
+          console.warn(`  ${prefix} [${w.artifact}] ${w.message}`);
+        }
         process.exit(0);
       }
 
@@ -32,6 +37,10 @@ export function buildValidateCommand(): Command {
         console.error(
           `  - ${sevPrefix}[${e.artifact}] ${e.field ?? ''}: ${e.message}${e.file ? ` (${e.file}${e.line ? `:${e.line}` : ''})` : ''}${hashSuffix}`,
         );
+      }
+      // v4 D-3:invalid 也输出 warnings
+      for (const w of result.warnings) {
+        console.warn(`  ⚠ [${w.artifact}] ${w.message}`);
       }
       process.exit(exitCode);
     });

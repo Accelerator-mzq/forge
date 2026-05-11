@@ -35,14 +35,14 @@ forge v0.4 的 verify 阶段退化为"测试 pass + log_hash"二值判定(沿 de
 
 ## 三维度协议
 
-| 维度 | 检查项 | 自动 / LLM | 产 finding 路径 |
-|---|---|---|---|
-| **Completeness** | task 完成度(checkbox 计数) | 自动 | `forge validate` 已做(走 ValidationError → Finding;沿 plan-9d Task 4) |
-| | spec 覆盖度(每个 Requirement 在 codebase 有实施证据) | 自动 + LLM | `forge validate` 已做(走 coverage_gap candidate,沿 §11.1bis;grep + 0 命中);AI 调本 skill 在 grep 命中后再判语义偏离 |
-| **Correctness** | requirement 实施映射(file:line) | LLM(本 skill) | AI 调本 skill 给具体 file:line |
-| | scenario 覆盖(WHEN/THEN/AND 条件在 code 或 test 中体现) | LLM(本 skill) | AI 调本 skill 给 file:line + scenario-id |
-| **Coherence** | design 决策追溯(design.md `## Decision:` / `## Approach:` 段是否被实施) | LLM(本 skill) | AI 调本 skill grep design.md 关键词 + 比对 codebase |
-| | 代码 pattern 一致性(命名 / 目录 / 风格 vs 项目惯例) | LLM(本 skill) | AI 调本 skill 比对项目惯例 → 通常产 SUGGESTION |
+| 维度             | 检查项                                                                  | 自动 / LLM    | 产 finding 路径                                                                                                     |
+| ---------------- | ----------------------------------------------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------- |
+| **Completeness** | task 完成度(checkbox 计数)                                              | 自动          | `forge validate` 已做(走 ValidationError → Finding;沿 plan-9d Task 4)                                               |
+|                  | spec 覆盖度(每个 Requirement 在 codebase 有实施证据)                    | 自动 + LLM    | `forge validate` 已做(走 coverage_gap candidate,沿 §11.1bis;grep + 0 命中);AI 调本 skill 在 grep 命中后再判语义偏离 |
+| **Correctness**  | requirement 实施映射(file:line)                                         | LLM(本 skill) | AI 调本 skill 给具体 file:line                                                                                      |
+|                  | scenario 覆盖(WHEN/THEN/AND 条件在 code 或 test 中体现)                 | LLM(本 skill) | AI 调本 skill 给 file:line + scenario-id                                                                            |
+| **Coherence**    | design 决策追溯(design.md `## Decision:` / `## Approach:` 段是否被实施) | LLM(本 skill) | AI 调本 skill grep design.md 关键词 + 比对 codebase                                                                 |
+|                  | 代码 pattern 一致性(命名 / 目录 / 风格 vs 项目惯例)                     | LLM(本 skill) | AI 调本 skill 比对项目惯例 → 通常产 SUGGESTION                                                                      |
 
 ### 主流程
 
@@ -56,7 +56,7 @@ forge v0.4 的 verify 阶段退化为"测试 pass + log_hash"二值判定(沿 de
    - 对 spec 每个 Requirement,定位实施 file:line;**WHEN/THEN/AND scenario 在 test 或 code 中找证据;若找不到 → WARNING `scenario-coverage`**
 3. **Coherence**:
    - design.md `## Decision:` / `## Approach:` 段提到的关键词,grep codebase 比对;**实施偏离决策 → WARNING `design-traceability`**
-   - 命名 / 目录 / 风格比对项目惯例;**偏离 → SUGGESTION `pattern-consistency`**(沿 _shared/scope-category-guidance.md)
+   - 命名 / 目录 / 风格比对项目惯例;**偏离 → SUGGESTION `pattern-consistency`**(沿 \_shared/scope-category-guidance.md)
 
 每个 finding 必须填(8 必填字段沿 design §2.2.3 + master §3.12.1):
 
@@ -78,9 +78,9 @@ forge v0.4 的 verify 阶段退化为"测试 pass + log_hash"二值判定(沿 de
   dimension: completeness
   check_type: spec-coverage
   severity: CRITICAL
-  automated: true                  # 工具可判 — codebase grep 0 个 file 提及该 Requirement 关键词
+  automated: true # 工具可判 — codebase grep 0 个 file 提及该 Requirement 关键词
   evidence: "specs/auth/spec.md Requirement #3 'refresh rate limit' 在 src/auth/ 0 个 file 提及 'rate-limit' / 'rateLimit' / 'throttle' 关键词"
-  recommendation: "在 src/auth/rate-limit.ts 实现 sliding-window 限流,或修订 spec 移除 #3"
+  recommendation: '在 src/auth/rate-limit.ts 实现 sliding-window 限流,或修订 spec 移除 #3'
   resolved: false
 ```
 
@@ -93,11 +93,11 @@ forge v0.4 的 verify 阶段退化为"测试 pass + log_hash"二值判定(沿 de
   dimension: correctness
   check_type: requirement-mapping
   severity: WARNING
-  automated: false                 # LLM 判 — 需 AI 比对 spec 描述 vs 实施语义
+  automated: false # LLM 判 — 需 AI 比对 spec 描述 vs 实施语义
   evidence: "specs/auth/spec.md Requirement #2 'expiry window 默认 24h' 在 src/auth/refresh.ts:42 实现为 expiryHours = 12(与 spec 不一致)"
-  recommendation: "改 expiryHours = 24,或修订 spec 改默认值"
+  recommendation: '改 expiryHours = 24,或修订 spec 改默认值'
   resolved: false
-  severity_acked_by: null          # WARNING 必须 ack 才能 archive
+  severity_acked_by: null # WARNING 必须 ack 才能 archive
   severity_acked_at: null
 ```
 
@@ -112,7 +112,7 @@ forge v0.4 的 verify 阶段退化为"测试 pass + log_hash"二值判定(沿 de
   severity: WARNING
   automated: false
   evidence: "design.md '## Decision: 选用 sliding-window 限流' 在 src/auth/ 实施为 fixed-window(rate-limit.ts:15 用 expiryAt + bucket 模式,sliding-window 关键词 0 命中)"
-  recommendation: "实施 sliding-window(按 design 决策),或修订 design.md 改决策为 fixed-window 并写理由"
+  recommendation: '实施 sliding-window(按 design 决策),或修订 design.md 改决策为 fixed-window 并写理由'
   resolved: false
   severity_acked_by: null
   severity_acked_at: null
@@ -128,12 +128,12 @@ forge v0.4 的 verify 阶段退化为"测试 pass + log_hash"二值判定(沿 de
   check_type: pattern-consistency
   severity: SUGGESTION
   automated: false
-  evidence: "src/auth/login.ts:23 函数名 doLogin 与项目 7 个 handler 文件 (src/handlers/) 统一 handleXxx 命名风格不一致"
-  recommendation: "rename doLogin → handleLogin"
-  resolved: false                  # SUGGESTION 不要求 resolved,允许带 finding archive
+  evidence: 'src/auth/login.ts:23 函数名 doLogin 与项目 7 个 handler 文件 (src/handlers/) 统一 handleXxx 命名风格不一致'
+  recommendation: 'rename doLogin → handleLogin'
+  resolved: false # SUGGESTION 不要求 resolved,允许带 finding archive
 ```
 
-**为什么 SUGGESTION**:命名风格非核心目标 + 可不改 + 改起来简单,符合 _shared/scope-category-guidance.md "本 change 内 nice-to-have" 判定。
+**为什么 SUGGESTION**:命名风格非核心目标 + 可不改 + 改起来简单,符合 \_shared/scope-category-guidance.md "本 change 内 nice-to-have" 判定。
 
 ### Example 5 — Completeness/task-completion CRITICAL(automated,verify slash 阶段产)
 
@@ -142,10 +142,10 @@ forge v0.4 的 verify 阶段退化为"测试 pass + log_hash"二值判定(沿 de
   dimension: completeness
   check_type: task-completion
   severity: CRITICAL
-  automated: true                  # 工具自动判 — git diff 是机器判定
+  automated: true # 工具自动判 — git diff 是机器判定
   # 注:candidate_type 字段不填(下文解释)
   evidence: "tasks.md#task-4 '加 rate-limit middleware' 标 [x] 但 git diff src/middleware/ 无相关改动(命令:git diff HEAD~1 -- src/middleware/)"
-  recommendation: "完成 task-4 实施,或把 task-4 改回 [ ]"
+  recommendation: '完成 task-4 实施,或把 task-4 改回 [ ]'
   resolved: false
 ```
 
@@ -217,15 +217,15 @@ OpenSpec verify-change.ts:152 "When uncertain, prefer SUGGESTION over WARNING" �
 
 ## 红旗清单 — STOP and Start Over
 
-| 想法 | 现实 |
-|---|---|
-| "测试都 pass 了,跳 Correctness/Coherence" | 测试 pass 只覆盖被写出来的 test。spec 里没测试覆盖的 Requirement 完全 silent。**跳维度 = 重新走第 1 维度** |
+| 想法                                                             | 现实                                                                                                                                                                                      |
+| ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| "测试都 pass 了,跳 Correctness/Coherence"                        | 测试 pass 只覆盖被写出来的 test。spec 里没测试覆盖的 Requirement 完全 silent。**跳维度 = 重新走第 1 维度**                                                                                |
 | "这个 Requirement 在 codebase 没找到,但应该不重要,推 SUGGESTION" | `coverage_gap` 是 automated CRITICAL candidate(沿 §11.1bis;evidence_missing 仅指 evidence.log_path 文件缺失);推 SUGGESTION = 偷懒。fence 拒签的不是你判定 SUGGESTION,而是你没让工具自动判 |
-| "vague 'consider reviewing X'" | fence 看不到具体证据 → recommendation 等价无效。重写带 file:line / spec:Requirement-id |
-| "WARNING 我直接给 severity_acked_by = ai-agent 算自 ack" | WARNING ack 必须走 `forge ack propose` 两步流程(沿 9a),AI 自 ack 不存在;archive fence 校验 ack-log.jsonl 一致性 |
-| "automated=true CRITICAL 我改成 false 让 LLM 判" | finding_hash 重算 + 比对会拒签。修法是让工具自动产,不是改 automated 字段 |
-| "三个维度合并写成一段总论" | finding 是结构化数组,每项必须明确 dimension / check_type;合并 = 工具无法解析,fence 报 schema 错 |
-| "时间紧,只跑 Completeness" | 跳维度是 baseline AI 的典型失败模式(沿 plan-9d scenario pressure-skip-coherence)。本 skill 存在的全部理由就是挡这个 |
+| "vague 'consider reviewing X'"                                   | fence 看不到具体证据 → recommendation 等价无效。重写带 file:line / spec:Requirement-id                                                                                                    |
+| "WARNING 我直接给 severity_acked_by = ai-agent 算自 ack"         | WARNING ack 必须走 `forge ack propose` 两步流程(沿 9a),AI 自 ack 不存在;archive fence 校验 ack-log.jsonl 一致性                                                                           |
+| "automated=true CRITICAL 我改成 false 让 LLM 判"                 | finding_hash 重算 + 比对会拒签。修法是让工具自动产,不是改 automated 字段                                                                                                                  |
+| "三个维度合并写成一段总论"                                       | finding 是结构化数组,每项必须明确 dimension / check_type;合并 = 工具无法解析,fence 报 schema 错                                                                                           |
+| "时间紧,只跑 Completeness"                                       | 跳维度是 baseline AI 的典型失败模式(沿 plan-9d scenario pressure-skip-coherence)。本 skill 存在的全部理由就是挡这个                                                                       |
 
 **全部触发表示:回归三维度协议,从 Completeness 开始**。
 

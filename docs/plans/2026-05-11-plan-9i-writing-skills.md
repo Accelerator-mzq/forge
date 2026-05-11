@@ -43,8 +43,8 @@
 
 | Task | 名称 | 工日 P50 | 关键交付 |
 |------|------|---------|---------|
-| 0 | SKILL_NAMES registry 扩展 + skill 模板实体 | 0.4 | `src/core/templates/skills/index.ts` 加 `'writing-skills'` + `src/core/templates/skills/writing-skills.md` 实体(forge update 部署路径)+ 现有 12 skill registry test 更新 |
-| 1 | scenarios.yaml 初稿(写 SKILL.md 之前的 baseline) | 0.4 | `forge-eval/scenarios/writing-skills.yaml`:2 个 scenarios(走现有 runner 双轨)+ `bootstrap_exception` 注释 + scenarios 设计目标"baseline 没 skill 时必失败"(必须先跑 RED leg 确认 < 6 分) |
+| 0 | SKILL_NAMES registry 扩展(单点改动) | 0.3 | `src/core/templates/skills/index.ts` 加 `'writing-skills'` + vitest 单测断言 13 项;**不写 placeholder**(`scripts/copy-templates.mjs` build 时反向同步,沿 v3 修订) |
+| 1 | scenarios.yaml + 最小骨架 SKILL.md + 跑 baseline | 0.5 | `forge-eval/scenarios/writing-skills.yaml` 2 个 scenarios + `skills/writing-skills/SKILL.md` 最小骨架(~10-15 行让 GREEN leg 不 ENOENT)+ `pnpm build` reverse-sync + 跑 full RED+GREEN eval 看 RED ≤ 5(沿 v3 修订 B-1) |
 | 2 | SKILL.md(production code,与 Task 1 同在 bootstrap exception 范围) | 0.6 | `skills/writing-skills/SKILL.md` ~150-200 行,reference superpowers + forge 化五步骤 |
 | 3 | 配套文件 frontmatter-conventions.md | 0.3 | `skills/writing-skills/frontmatter-conventions.md` ~60 行 |
 | 4 | 配套文件 forge-eval-integration.md | 0.4 | `skills/writing-skills/forge-eval-integration.md` ~80 行 |
@@ -65,19 +65,28 @@
 ### 新增文件
 
 ```
-skills/writing-skills/SKILL.md                       ← Task 2:~150-200 行,主协议
+skills/writing-skills/SKILL.md                       ← Task 1:最小骨架(~10-15 行,让 GREEN leg 不 ENOENT)→ Task 2:~150-200 行完整协议
 skills/writing-skills/frontmatter-conventions.md     ← Task 3:~60 行,name/description 规范 + 反例
 skills/writing-skills/forge-eval-integration.md      ← Task 4:~80 行,新 skill 接入 forge-eval 步骤
-src/core/templates/skills/writing-skills.md          ← Task 0:registry 实体(forge update 部署 — 沿 v0.1 12-skill 模式)
 forge-eval/scenarios/writing-skills.yaml             ← Task 1+5:scenarios(走现有 runner 双轨)
 tests/forge-eval/writing-skills-protocol.test.ts     ← Task 6:yaml 结构合约 fixture 验证(路径修正:tests/forge-eval/ 而非 tests/eval/)
 ```
+
+**v3 修订**:不再 Create `src/core/templates/skills/writing-skills.md` placeholder — 由 `pnpm build` 反向同步自动生成(沿 §8.4.2 B-2 修订)
 
 ### 修改文件
 
 ```
 skills/using-forge/SKILL.md                          ← Task 6:在红旗清单段之前(line 142 前)新增 §"meta-development entry" 段
 src/core/templates/skills/index.ts                   ← Task 0:SKILL_NAMES 加 'writing-skills'(从 12 → 13);loadAllSkills 自动覆盖
+tests/core/templates/skills.test.ts                  ← Task 0:加 SKILL_NAMES registry 单测(参与 v3 修订 M-2 验收)
+```
+
+### Build 自动生成文件(commit 时 stage,不手写)
+
+```
+src/core/templates/skills/writing-skills.md          ← scripts/copy-templates.mjs 反向同步(自动加 forge: 前缀;Task 1 build 时生成)
+dist/core/templates/skills/writing-skills.md         ← build 输出(若 .gitignore 不排除则 stage)
 ```
 
 ### 不修改文件(明确边界)
@@ -94,14 +103,15 @@ src/cli/commands/                                    ← 9i 不引入新 CLI 命
 
 ---
 
-## 2. Task 0 — SKILL_NAMES registry 扩展 + skill 模板实体
+## 2. Task 0 — SKILL_NAMES registry 扩展(单点改动,不写 placeholder)
 
 **Files:**
 - Modify: `src/core/templates/skills/index.ts`(SKILL_NAMES 数组加 `'writing-skills'`)
-- Create: `src/core/templates/skills/writing-skills.md`(占位 placeholder,Task 2 完成后替换为 SKILL.md 内容副本)
-- Modify: `tests/core/templates/registry.test.ts`(若存在,验证 SKILL_NAMES 13 项;若不存在跳过此 step)
+- Modify: `tests/core/templates/skills.test.ts`(若有 length 断言更新)
 
-**Goal**:让 `pnpm eval:skill writing-skills` 不被 CLI 校验拒绝(`forge-eval/index.ts:34` 要求 `--skill` 值在 SKILL_NAMES 内)+ `forge update` 部署路径覆盖新 skill。
+**Goal**:让 `pnpm eval:skill writing-skills` 不被 CLI 校验拒绝(`forge-eval/index.ts:34` 要求 `--skill` 值在 SKILL_NAMES 内)。
+
+**v3 重要修订**(codex 二轮 review B-2):**不创建 `src/core/templates/skills/writing-skills.md` placeholder**。`scripts/copy-templates.mjs:46` 会在 build 时 `clearMarkdownFiles` 清空整个 `src/core/templates/skills/*.md` 然后从 `skills/<name>/SKILL.md` **反向同步**(line 49 自动加 `forge:` 前缀以满足 `tests/core/templates/skills.test.ts:12` 的 `name: forge:<name>` 断言)。Task 0 只改 registry 数组;runtime 副本由 Task 1/2 创建 `skills/writing-skills/SKILL.md` 后 `pnpm build` 自动生成。
 
 - [ ] **Step 1: 读现有 SKILL_NAMES registry**
 
@@ -128,44 +138,47 @@ export const SKILL_NAMES = [
 ] as const;
 ```
 
-- [ ] **Step 3: Create placeholder skill .md**
+- [ ] **Step 3: 用单测验证 SKILL_NAMES 接受 writing-skills(parser-only,不跑 CLI)**
 
-`src/core/templates/skills/writing-skills.md`(占位内容,Task 2 完成后将 SKILL.md 复制至此 — 沿现有 12 skill 双源模式:`skills/<name>/SKILL.md` 是开发源,`src/core/templates/skills/<name>.md` 是 runtime 部署副本):
+加测试到 `tests/core/templates/skills.test.ts`(或新建 `tests/core/templates/registry.test.ts`):
 
-```markdown
----
-name: writing-skills
-description: Placeholder — Task 2 will replace with actual SKILL.md content (sync from skills/writing-skills/SKILL.md after Task 2 commit)
----
+```typescript
+import { describe, it, expect } from 'vitest';
+import { SKILL_NAMES } from '../../../src/core/templates/skills/index.js';
 
-# writing-skills (placeholder)
+describe('SKILL_NAMES registry (9i)', () => {
+  it('includes writing-skills (sole self-bootstrapped skill, design §2.9.5)', () => {
+    expect(SKILL_NAMES).toContain('writing-skills');
+  });
 
-This file is a placeholder. Actual content is committed in Task 2 by `cp skills/writing-skills/SKILL.md src/core/templates/skills/writing-skills.md`.
+  it('has 13 entries (v0.1 12 + 9i writing-skills)', () => {
+    expect(SKILL_NAMES.length).toBe(13);
+  });
+});
 ```
 
-- [ ] **Step 4: Verify SKILL_NAMES test passes**
+跑:
 
 ```bash
 pnpm vitest tests/core/templates/
 ```
 
-若 `tests/core/templates/registry.test.ts` 测了 SKILL_NAMES.length 等于 12,改为 13;否则跳过。
+**v3 修订**(codex 二轮 review M-2):**不跑 `pnpm build && node forge-eval/... --help`** — 因 `forge-eval/index.ts` 没实现 `--help`,该命令会走到 `loadEnv()` + scenario loading,不能干净证明 registry 接受。改单测断言更精确。
 
-- [ ] **Step 5: Verify `pnpm eval:skill writing-skills` CLI 接受**
+**预期失败模式**:`pnpm vitest tests/core/templates/skills.test.ts` 会因 `loadSkill('writing-skills')` ENOENT 而部分挂(`skills.test.ts:9` 的 `it.each(SKILL_NAMES)` 会尝试加载所有 13 个 skill 内容)。这是 Task 0 完成 → Task 1/2 完成前的**预期中间态**:新 registry 单测 PASS,旧通用断言因 writing-skills.md 还没建反向同步缺文件而 FAIL。Task 0 commit 时**只跑新加的 registry 单测**(精确 grep `--testNamePattern "SKILL_NAMES registry"`);通用断言由 Task 2 完成后(写完 `skills/writing-skills/SKILL.md` + `pnpm build`)重跑覆盖。
 
 ```bash
-pnpm build && node forge-eval/dist/index.js --skill writing-skills --help 2>&1 | head -5
-# 或:pnpm eval:skill writing-skills(若有此 npm script)
+pnpm vitest tests/core/templates/ --testNamePattern "SKILL_NAMES registry"
 ```
 
-预期:CLI 不再报"--skill 后必须跟合法 skill 名;可选:..."(因为 writing-skills 现已在 SKILL_NAMES)。**但**:此时 `forge-eval/scenarios/writing-skills.yaml` 还没建 → CLI 跑到 `loadScenarioFile` 会抛"scenario 文件不存在" — 这是预期的,Task 1 创建 yaml 后解除。
+预期:2 tests PASS。
 
-- [ ] **Step 6: format:check + commit**
+- [ ] **Step 4: format:check + commit**
 
 ```bash
 pnpm format:check
-git add src/core/templates/skills/index.ts src/core/templates/skills/writing-skills.md
-git commit -m "feat(9i): SKILL_NAMES + writing-skills.md placeholder — registry 12→13"
+git add src/core/templates/skills/index.ts tests/core/templates/skills.test.ts
+git commit -m "feat(9i): SKILL_NAMES registry 12→13 — add writing-skills"
 ```
 
 ---
@@ -255,23 +268,72 @@ scenarios:
           delta ≥ 1.5 表示 writing-skills 真挡住压力鼓励。
 ```
 
-- [ ] **Step 4: 跑 baseline 半轨验证 RED leg 真失败**
+- [ ] **Step 4: 写最小合规骨架 `skills/writing-skills/SKILL.md`(让 GREEN leg 不抛 ENOENT)**
 
-```bash
-pnpm build && pnpm eval:skill writing-skills
+**v3 修订**(codex 二轮 review B-1 + RQ-5):原 plan "只看 RED leg" 不可行 — `forge-eval/runner.ts:106-131` 的 `orchestrateRun` 每个 scenario 串行跑 RED → GREEN,GREEN 跑 `loadSkillBootstrap('writing-skills')`(`forge-eval/runner.ts:27`)→ `readFile(src/core/templates/skills/writing-skills.md)` ENOENT → bubble 到 `forge-eval/index.ts:88` main.catch exit 2,**无 eval-report.md 落盘**。
+
+正确路径:**先写骨架 SKILL.md 让 GREEN leg 加载 skill 文本不抛错**(skill 内容是空骨架,刻意让 GREEN judge 分数也低,这样能干净观察 RED leg 的真分数)。完整 SKILL.md 由 Task 2 替换。
+
+`skills/writing-skills/SKILL.md`(Task 1 阶段的最小合规骨架,~10-15 行):
+
+```markdown
+---
+name: writing-skills
+description: Use when creating or modifying a forge skill — RED-GREEN-REFACTOR + frontmatter + forge-eval integration discipline (v3 Task 1 skeleton, Task 2 will replace with full content)
+---
+
+# forge:writing-skills (Task 1 skeleton)
+
+This skeleton exists so `forge-eval` runner's GREEN leg does not ENOENT on `loadSkillBootstrap('writing-skills')`. Task 2 replaces this with the full ~150-200 line protocol.
+
+Methodology TBD by Task 2 — refer to `superpowers:writing-skills` as bootstrap exception.
 ```
 
-注意:此时 SKILL.md 还没建,runner 跑 GREEN leg(有 skill bootstrap)会因 `loadSkill('writing-skills')` 找不到 `skills/writing-skills/SKILL.md` 而失败 — 这是预期的。**只看 RED leg(stdout 区分 `withSkill: false`)的 judge score** ≤ 5 即可。**若 RED leg ≥ 6 → 选项 A 收紧 must_match / judge_rubric;选项 B 与 plan owner 复审 9i 范围**。
+- [ ] **Step 5: 跑 build 让 reverse-sync 生成 registry 副本**
 
-(实操替代:跑 `pnpm eval:skill writing-skills 2>&1 | grep -A2 "withSkill: false"` 隔离 RED leg 输出。)
+```bash
+pnpm build
+```
 
-- [ ] **Step 5: Commit**
+预期:`scripts/copy-templates.mjs:46-51` 反向同步把 `skills/writing-skills/SKILL.md` 读出 → `src/core/templates/skills/writing-skills.md` 自动加 `forge:` 前缀 + 写入 + `dist/core/templates/skills/writing-skills.md` 同步。stdout 末尾应含 `✓ synced 13 skills (root → src/core/templates/ + dist/)`(从 12 升到 13)。
+
+- [ ] **Step 6: 跑完整 RED+GREEN eval 观察 RED leg score**
+
+```bash
+pnpm eval:skill writing-skills
+```
+
+预期(LLM-judge 跑 2 scenario × 2 leg = 4 turn,~30-60s + ~$0.05 API 成本):
+- RED leg(`withSkill: false`):baseline AI 无 skill bootstrap → 预期 judge ≤ 5
+- GREEN leg(`withSkill: true`):骨架 SKILL.md 内容空 → judge 也低(可能 4-6,因骨架不教协议) — **delta 在本步预期接近 0**(skill 没真起作用)
+- `eval-report.md` 落盘,含 RED + GREEN 双 leg 详细分数 + delta
+
+读 `eval-report.md`(注:Windows + Git-Bash 环境用户可用 `grep`,也可直接 `cat eval-report.md`):
+
+```bash
+cat eval-report.md
+# 或针对性 grep:grep -E "(withSkill|score|delta)" eval-report.md
+```
+
+**判定**:RED leg avg judge ≤ 5 即 Task 1 baseline 失败合规。
+- 若 RED ≥ 6 → 选项 A:收紧 must_match / judge_rubric;选项 B:与 plan owner 复审 9i 范围
+- delta 当前接近 0 是预期(Task 5 会通过完整 SKILL.md 把 delta 拉到 ≥ 1.5)
+
+- [ ] **Step 7: Commit**
 
 ```bash
 pnpm format:check
-git add forge-eval/scenarios/writing-skills.yaml
-git commit -m "feat(9i): writing-skills.yaml — baseline RED leg failure scenarios (frontmatter + time pressure)"
+git add forge-eval/scenarios/writing-skills.yaml skills/writing-skills/SKILL.md
+git commit -m "feat(9i): scenarios.yaml + SKILL.md skeleton — baseline RED leg < 6 verified via full RED+GREEN eval"
 ```
+
+注意:`src/core/templates/skills/writing-skills.md` 和 `dist/core/templates/skills/writing-skills.md` 是 build 生成物(`.gitignore` 通常排除 dist/;src/core/templates/ 是 committed 路径),build 后会出现在 staged 范围,**stage 它们**(沿现有 12 skill 模式 — `git log` 看 `templates/skills/*.md` 历史确认它们是 committed)。命令调整:
+
+```bash
+git add forge-eval/scenarios/writing-skills.yaml skills/writing-skills/SKILL.md src/core/templates/skills/writing-skills.md
+```
+
+`dist/` 通常 gitignore 排除,确认后再决定是否 add。
 
 ---
 
@@ -329,19 +391,23 @@ writing-skills 核心论点和 RED-GREEN-REFACTOR 映射沿 superpowers `writing
 
 ## forge 化适配(五步骤)
 
-### 步骤 1:写 RED scenario(必须先于 SKILL.md)
+> **v3 修订**(沿 plan §8.4.1):本五步骤走 **现有 forge-eval runner 双轨设计**(`forge-eval/runner.ts:106-131` 对每个 scenario 自动 RED+GREEN 配对,`withSkill: false/true` 切换 bootstrap)。**不引入** design §2.9.4 提的 `phase: red/green` / `expected_judge_score_max` / `expected_violations` / `bootstrap_skill` 字段 — 这些 design 字段当前 runner 不读,留 v1.0 之后独立 sub-plan reconcile。
 
-新建 `forge-eval/scenarios/<new-skill-name>.yaml`,在 `scenarios:` 数组里加 `phase: red` 项:
-- 模拟一个 baseline 场景:**没有这个 skill bootstrap 时**,AI 应该犯什么错?
-- 用 forge-eval 既有合约 `must_match` / `must_not_match` / `expected_judge_score_max` 定位犯错信号
-- 列 `expected_violations: [...]`(具体 violation 关键词或行为模式,沿 design §2.9.4 + MAJOR #31 修订)
-- 跑 `pnpm eval:skill <name>` 确认 RED 真的失败(LLM-judge 评分 < 6 或 must_match 命中 violation 关键词)
-- **如果 RED 不失败 → skill 没必要**(沿 superpowers writing-skills line 16);要么收紧 RED,要么放弃此 skill
+### 步骤 1:写 scenarios + 骨架 SKILL.md(baseline 验证)
 
-### 步骤 2:写 SKILL.md(production code)
+新建 `forge-eval/scenarios/<new-skill-name>.yaml`,**每个 scenario 同时是 RED + GREEN 的输入**(runner 自动跑两次):
+- 在 `scenarios:` 数组写至少 1 个 scenario,含 `id` / `turns[]` / `judge_rubric`(沿 `forge-eval/types.ts:13-46` schema)
+- `judge_rubric` 同时给 RED 评判(baseline 没 skill 时该得多少分)+ GREEN 评判(有 skill 后该得多少分)— rubric 一段文字覆盖两侧
+- 用 `must_match` / `must_not_match` 锁结构性信号(都是 RED + GREEN 共享断言)
+- **同时创建 `skills/<new-skill-name>/SKILL.md` 最小骨架**(~10-15 行,仅 frontmatter + 占位 body)— 让 runner GREEN leg 不抛 ENOENT(沿 `loadSkillBootstrap` `readFile` 路径)
+- 跑 `pnpm build && pnpm eval:skill <name>` → 读 `eval-report.md` 看 RED leg(`withSkill: false`)avg judge ≤ 5
+- **如果 RED 不失败 → skill 没必要**(沿 superpowers writing-skills line 16);要么收紧 must_match / judge_rubric,要么放弃此 skill
+- 此阶段 delta 接近 0 是预期(骨架 SKILL.md 不教协议,GREEN 也低)
+
+### 步骤 2:写完整 SKILL.md(production code)
 
 frontmatter 严格约束(详见 `frontmatter-conventions.md`):
-- `name`:小写 + 连字符,无前缀(`forge:` namespace 由 plugin manifest 隐含)
+- `name`:小写 + 连字符,无前缀(`forge:` namespace 由 plugin manifest 隐含;`scripts/copy-templates.mjs:49` 反向同步时自动加 `forge:` 前缀写入 `src/core/templates/skills/`)
 - `description`:第三人称 + "Use when..." 开头 + 描述 **触发条件**(不描述 skill 做什么)+ 500 字内
 - 不允许 frontmatter 含 process 描述(描述 process 是 SKILL.md body 的事)
 
@@ -351,25 +417,35 @@ content 必须包含:
 - 主流程(numbered steps 或 dot graph)
 - forge-specific 反向加固段(若 skill 涉及 AI 不可信前提,如 verify / archive 类)
 
-### 步骤 3:写 GREEN scenario + 跑
+### 步骤 3:跑 GREEN leg 验证 skill 起作用
 
-同 yaml 内加 `phase: green` scenarios:
-- 同样 baseline 输入,但 bootstrap 加新 skill
-- 验证 LLM-judge 评分 ≥ 6 + must_match 命中 compliance 关键词
-- **delta 阈值**:GREEN - RED ≥ 1.5(沿 forge-eval v0.1 默认)
-- 若 GREEN 评分 < 6 或 delta < 1.5 → SKILL.md 写得不到位,回到步骤 2 加红旗清单 / 改示例 / 加反向加固段
+```bash
+pnpm build && pnpm eval:skill <new-skill-name>
+```
+
+read `eval-report.md` 看:
+- GREEN leg(`withSkill: true`)avg judge ≥ 6.5
+- delta = GREEN avg - RED avg ≥ 1.5(沿 `forge-eval/compare.ts:14` `DEFAULT_DELTA_THRESHOLD`)
+- pair pass = `green.scenarioPass && delta >= 1.5`(沿 `compare.ts:28`)
+
+若 GREEN 评分 < 6 或 delta < 1.5 → SKILL.md 写得不到位,回到步骤 2 加红旗清单 / 改示例 / 加反向加固段。
 
 ### 步骤 4:REFACTOR(close rationalization loopholes)
 
-跑 GREEN 时观察 AI 仍有的"借口式"应付:
+跑 GREEN 时观察 AI 仍有的"借口式"应付(可在 `eval-report.md` 的 `assistantResponse` 字段读 LLM 实际输出):
 - 找 AI 用的具体说辞(如"this is just a quick prototype" / "我只是给个 demo")
 - 在 SKILL.md 加红旗清单显式 plug — 把这些借口列为 anti-pattern
-- 重跑 GREEN scenario 验证 plug 起作用(分数提高 / must_not_match 不再命中)
+- 重跑 `pnpm eval:skill <name>` 验证 plug 起作用(分数提高 / must_not_match 不再命中)
 
 ### 步骤 5:集成到 using-forge bootstrap(可选)
 
 - **process discipline 类**(必须主动 invoke,如 verifying-three-dimensions / receiving-code-review):加到 `skills/using-forge/SKILL.md` 的 skill chain 表 + 红旗清单
 - **reference / utility 类**(用户主动 invoke,如 writing-plans):不加 bootstrap,只在 README / docs 引用
+
+**registry 部署**:每加新 forge skill,**还必须**(沿 v3 修订 + codex 二轮 review B-2):
+1. 在 `src/core/templates/skills/index.ts` 的 `SKILL_NAMES` 数组追加 `'<new-skill-name>'`
+2. 跑 `pnpm build` 让 `scripts/copy-templates.mjs` 反向同步生成 `src/core/templates/skills/<name>.md`(自动加 `forge:` 前缀)
+3. 不要手动写 `src/core/templates/skills/<name>.md`(build 时 clearMarkdownFiles 会清掉)
 
 ## forge-specific 反向加固
 
@@ -520,51 +596,62 @@ git commit -m "docs(9i): writing-skills frontmatter conventions — name/descrip
 
 ## YAML 文件位置
 
-`forge-eval/scenarios/<new-skill-name>.yaml`(单文件,含 RED + GREEN scenarios)
+`forge-eval/scenarios/<new-skill-name>.yaml`(单文件;一组 scenarios,**runner 自动对每个 scenario 跑 RED + GREEN 两次** — 沿 `forge-eval/runner.ts:120-123`)
 
-## 顶级元数据字段
+## 顶级元数据字段(沿 `forge-eval/types.ts:41-46` ScenarioFile schema)
 
 ```yaml
-skill: <new-skill-name>          # 与 skills/<new-skill-name>/SKILL.md 的 frontmatter name 一致
-description: <一句话>             # 这个 skill 测试什么
-model: claude-sonnet-4-6          # 默认评估模型;若 skill 涉及高复杂推理可改 claude-opus-4-7
-bootstrap_exception: true         # 仅 forge:writing-skills 自身用,其他 skill 不写此字段(沿 §2.9.5)
+skill: <new-skill-name>          # 与 SKILL_NAMES 一致(`src/core/templates/skills/index.ts:12`)
+description: <一句话>             # 这个 skill 测试什么(可选,但建议)
+model: claude-sonnet-4-6          # 默认评估模型;scenario.model 可覆盖
 ```
 
-## scenarios 数组字段
+**v3 偏差说明**:design §2.9.4 提的 `bootstrap_exception: true` 顶层字段当前 runner 不读(types.ts ScenarioFile interface 没此字段,但 yaml 解析器忽略未识别 key,不报错)。本 plan 在 `forge-eval/scenarios/writing-skills.yaml` 内用 yaml 顶层 comment 或 description 字段文字标注 "bootstrap_exception" 作为文档元数据,沿 plan §8.4.1 偏差决策。其他新 forge skill **不用**这个标注(只有 writing-skills 自身是 bootstrap exception)。
+
+## scenarios 数组字段(沿 `forge-eval/types.ts:25-38` Scenario schema)
 
 每条 scenario 含:
 
 ```yaml
-- id: <scenario-id>               # 唯一 id
-  phase: red | green              # 必须二选一(沿 §2.9.4 v1.0 强制)
-  pressures: [time | sycophancy]  # 可选;空数组 = 无压力 baseline
+- id: <scenario-id>               # 唯一 id(必需)
+  pressures: [time | sycophancy]  # 可选;仅记录维度 tag,不参与判定
   turns:
-    - id: t1-<turn-id>
+    - id: t1-<turn-id>            # 可选;默认按数组索引
       user: |
-        <用户输入>
-      assertions:
+        <用户输入>                # 必需
+      assertions:                 # 可选;模式匹配(skipped=true 时通过)
         must_match:               # AI 输出 必须 包含这些 regex
           - regex: '<pattern>'
         must_not_match:           # AI 输出 不能 包含这些 regex
           - regex: '<pattern>'
-      judge_rubric: |
-        <LLM-judge 评分指引,详细到给分门槛>
-      expected_judge_score_max: 5  # 仅 RED 用,期望分数上限(沿 MAJOR #31 修订)
-      expected_violations:         # 仅 RED 用,期望 AI 犯的具体错
-        - '<violation 描述>'
+      judge_rubric: |             # 必需(spec §5.5.3 合约)
+        <LLM-judge 评分指引,同时给 RED 和 GREEN 评判细则>
+        - RED(无 skill bootstrap)预期 ≤ 5
+        - GREEN(有 skill bootstrap)预期 ≥ 6.5
+        - delta(GREEN avg - RED avg)预期 ≥ 1.5
 ```
+
+**v3 修订**(codex 二轮 review B-3):**不引入** `phase: red/green` / `expected_judge_score_max` / `expected_violations` / `bootstrap_skill` 字段 — 这些在 design §2.9.4 提出但 runner 不读(`forge-eval/types.ts:13` 没定义)。若 9d/9f/9j 等后续 sub-plan 想要这些字段做严格门禁,需要先开独立 sub-plan 扩展 runner + types + compare(超 9i 范围)。
+
+## RED + GREEN 配对工作原理
+
+`forge-eval/runner.ts:120-123`(`orchestrateRun`)对每个 scenario:
+1. **RED leg**:`runScenario(scenario, withSkill=false, client)` — 不加 skill bootstrap,跑 baseline AI
+2. **GREEN leg**:`runScenario(scenario, withSkill=true, client)` — 加载 `skills/<skill-name>/SKILL.md` 作为 system message,跑 with-skill AI
+3. **比较**:`compareScenarioPair(scenario, red, green, threshold=1.5)` → `pairPass = green.scenarioPass && delta >= 1.5`
+
+同一份 scenario.yaml 同时是 RED 和 GREEN 的输入。**rubric 和 assertions 是共享的** — runner 不知道哪一次跑是 RED 哪一次是 GREEN,它只比较分数差。
 
 ## delta 阈值(GREEN - RED 必须 ≥ 1.5)
 
-沿 forge-eval v0.1 默认:
+沿 `forge-eval/compare.ts:14` 默认 `DEFAULT_DELTA_THRESHOLD = 1.5`:
 
 ```
 GREEN avg score - RED avg score ≥ 1.5
 ```
 
 若不达标:
-1. RED 太宽松(AI 没 skill 也没怎么犯错)→ 收紧 must_match / 加 pressure
+1. RED 太宽松(AI 没 skill 也没怎么犯错)→ 收紧 must_match / 加 pressure / 改 judge_rubric 评分门槛
 2. SKILL.md 写得不够强(AI 看了仍犯错)→ REFACTOR 加红旗清单 / 反向加固段
 
 ## runner 调用
@@ -871,6 +958,22 @@ Task 1(RED scenarios)+ Task 2(SKILL.md)+ Task 5(GREEN + REFACTOR)合并为完整
 
 P50 工日从 2.5 上调至 **3.0**(+0.4 工日为 Task 0 SKILL_NAMES 扩展 + design vs runner gap reconciliation 文档对齐工作)。P90 从 3.5 上调至 **4.0**。
 
+#### 8.4.8 v3 修订(codex 三轮 review)
+
+v2 plan 后 codex 三轮 review 发现三个 v2 未消解的 BLOCKER:
+
+**B-1**(Task 1 baseline 半轨不可行):runner.ts:106-131 `orchestrateRun` 串行 RED→GREEN 每个 scenario,GREEN 跑 `loadSkillBootstrap('writing-skills')` 时 readFile ENOENT → main.catch exit 2 → **无 eval-report.md 落盘**,"只看 RED leg" 不可达。**v3 修复**:Task 1 同步建最小骨架 `skills/writing-skills/SKILL.md` 让 GREEN 不抛 ENOENT,跑完整 RED+GREEN eval 后读 eval-report.md。
+
+**B-2**(Task 0 placeholder 与 reverse-sync 冲突):`scripts/copy-templates.mjs:46` build 时 clearMarkdownFiles 清空 + 反向同步;`tests/core/templates/skills.test.ts:12` 断言 `name: forge:<name>`。**v3 修复**:Task 0 删 placeholder 步骤,只改 SKILL_NAMES;副本由 build 自动生成。
+
+**B-3**(Task 2/4 草案仍含 phase 字段教学):v2 改了 plan 顶部但漏改 Task 2/4 内嵌文档草案(plan:334/356/540 仍教 `phase: red/green` / `expected_*` 字段)。**v3 修复**:Task 2 SKILL.md 草案 §"forge 化适配" + Task 4 forge-eval-integration.md 草案全部重写,删 design §2.9.4 不兼容字段,加 "走现有 runner 双轨" + "RED+GREEN 配对工作原理" 段。
+
+**M-1**(Task 5 反向依赖 ownership):fresh-subagent 不会回改上游产物。**v3 修复**:§10 加 ownership 规则,Task 1/2/5 必须同一 owner(`SendMessage(to: A)` 继续)。
+
+**M-2**(CLI 验收不够 parser-only):CLI 没实现 `--help`,`--skill writing-skills --help` 会进 scenario loading。**v3 修复**:Task 0 改用 vitest 单测断言 `SKILL_NAMES.includes` + length === 13。
+
+**Mi-1**(Windows grep):用户环境 Git-Bash 可用 grep;**v3 修复**:Task 1 Step 6 注明 grep 可用 + `cat eval-report.md` 备选。
+
 ### 8.5 跨 sub-plan 依赖
 
 - **后续 9d / 9f 用 forge:writing-skills 的前置**:见 §8.4.5
@@ -888,15 +991,30 @@ P50 工日从 2.5 上调至 **3.0**(+0.4 工日为 Task 0 SKILL_NAMES 扩展 + d
 1. **Subagent-Driven**(推荐):每 task 派 fresh subagent,主代理 review 后进下一 task。
    - REQUIRED SUB-SKILL:`superpowers:subagent-driven-development`
    - Fresh subagent per task + two-stage review(spec → quality)
-   - **特别提醒**:Task 2 必须使用 superpowers:writing-skills bootstrap exception(在子任务 prompt 内强制 invoke `superpowers:writing-skills`)
+   - **特别提醒**:Task 1+2+5 一起处于 bootstrap exception 范围(沿 §8.4.6),在子任务 prompt 内强制 invoke `superpowers:writing-skills`
 
 2. **Inline Execution**:在当前 session 顺序执行 task。
    - REQUIRED SUB-SKILL:`superpowers:executing-plans`
    - Batch execution + checkpoints 主代理 review
 
-**推荐 1**(本 plan 6 task 串行依赖较紧,subagent 隔离上下文 + Task 2 bootstrap exception 隔离更安全)。
+**推荐 1**(本 plan 7 task 串行依赖较紧,subagent 隔离上下文 + Task 1/2/5 bootstrap exception 隔离更安全)。
 
-实施完成后,9i 解锁 9d / 9f 后续 skill 开发。验收通过(全 task 测试 PASS + DoD checklist 全勾)后启动 9d。
+### Ownership rules(v3 修订,codex 二轮 review M-1)
+
+Fresh-subagent-per-task 工作流下,**Task 5 GREEN+REFACTOR 不能由 fresh subagent 独立完成**(因可能回改 Task 2 产出 `skills/writing-skills/SKILL.md`,fresh subagent 不具备"跨 task boundary 改上游"的权限/意愿)。
+
+**强制 ownership 规则**:
+- **Task 0 / 3 / 4 / 6**:fresh subagent 各自执行(独立 task,无回改)
+- **Task 1 / 2 / 5**:**同一 owner**(主代理或同一 named subagent)— 三 task 共享 bootstrap exception 上下文 + Task 5 可回改 Task 2 SKILL.md + 同步 build registry 副本
+
+具体派发模式(子任务 prompt 模板):
+- Task 1 派 subagent A,prompt 含"你将后续在 Task 2 + Task 5 也被叫回继续工作,保持上下文"
+- Task 2 用 `SendMessage(to: A)` 继续 — 不新派 subagent
+- Task 5 用 `SendMessage(to: A)` 继续 — 不新派 subagent
+- Task 3 / 4 派独立 subagents B / C(可并行)
+- Task 6 派独立 subagent D
+
+实施完成后,9i 解锁 9d / 9f 后续 skill 开发(沿 §8.4.5 前置条件)。验收通过(全 task 测试 PASS + DoD checklist 全勾)后启动 9d。
 
 ---
 
@@ -904,3 +1022,11 @@ P50 工日从 2.5 上调至 **3.0**(+0.4 工日为 Task 0 SKILL_NAMES 扩展 + d
 
 - **v1**(2026-05-11):初稿 — 基于 plan-9 master §3.9 + design §2.9 全节拆 6 task。本 sub-plan 实施 §2.9 全节(协议层落地);§3.12 Interface Freeze 不涉及。
 - **v2**(2026-05-11):codex 二轮 adversarial review 全采纳 — 加 Task 0 SKILL_NAMES registry 扩展(B-2)+ 走现有 runner 双轨设计放弃 design §2.9.4 phase 字段(B-1)+ bootstrap exception 覆盖 Task 1+2+5 完整链(B-3)+ P50 2.5→3.0 工日(M-1)+ scope 排除 persuasion / best-practices 文本复制(Mi-2)+ using-forge 插入点修正为 line 141/142 之间(Mi-1)+ Task 5 反向依赖 Task 2 显式说明(M-4)+ 9d/9f unblock 前置条件加(M-5)+ retry 留 v1.1(M-3)。Self-Review §8 全面重写为 v2 修订表。
+- **v3**(2026-05-11):codex **三轮** adversarial review 全采纳(独立对照 forge-eval/runner.ts / forge-eval/index.ts / scripts/copy-templates.mjs / tests/core/templates/skills.test.ts 实际代码验证):
+  - **B-1**(baseline 半轨不可执行):Task 1 改为"先建最小骨架 SKILL.md → `pnpm build` reverse-sync → 跑完整 RED+GREEN eval → 读 eval-report.md 看 RED leg"。原 plan "只看 RED leg" 不可行(runner 串行 RED→GREEN,GREEN ENOENT 时 main.catch exit 2 无 eval-report 落盘)
+  - **B-2**(Task 0 placeholder 与 reverse-sync 冲突):删除 Task 0 写 `src/core/templates/skills/writing-skills.md` placeholder 步骤(`scripts/copy-templates.mjs:46` build 时 clearMarkdownFiles 清空 + 自动加 `forge:` 前缀反向同步;`tests/core/templates/skills.test.ts:12` 断言 `name: forge:<name>` 与 placeholder 不符)。Task 0 只改 SKILL_NAMES,registry 副本由 Task 1 创建 `skills/writing-skills/SKILL.md` + `pnpm build` 自动生成
+  - **B-3**(Task 2/4 草案仍含 phase 字段教学):重写 Task 2 SKILL.md 草案 §"forge 化适配(五步骤)"+ Task 4 forge-eval-integration.md 草案,删除所有 `phase: red/green` / `expected_judge_score_max` / `expected_violations` / `bootstrap_skill` 字段教学,加显式 "走现有 runner 双轨" 段落 + RED+GREEN 配对工作原理段
+  - **M-1**(Task 5 反向依赖 ownership):§10 Execution Handoff 加 "Ownership rules" 段 — Task 1/2/5 必须同一 owner(`SendMessage(to: A)` 继续),Task 3/4/6 独立 fresh subagent
+  - **M-2**(CLI 验收不够 parser-only):Task 0 Step 3 改为 vitest 单测断言 `SKILL_NAMES.includes('writing-skills')` + `SKILL_NAMES.length === 13`,不跑 `pnpm build && node forge-eval/... --help`(CLI 没实现 `--help`)
+  - **Mi-1**(Windows grep):Task 1 Step 6 注明 Windows + Git-Bash 环境 grep 可用(沿用户内存:"Windows 11 + Git-Bash + D: 盘项目"),也允许 `cat eval-report.md` 直接读
+  - **P50 工日**:维持 3.0(B-1 修复加 0.1 抵消 B-2 placeholder 删除 -0.1)

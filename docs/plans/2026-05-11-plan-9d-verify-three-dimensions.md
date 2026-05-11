@@ -3687,3 +3687,9 @@ design §2.3.3 表 line 443-448 列了 6 类 `candidate_type` enum,工程实施�
   - **0 NIT**
   - **工日**:纯文档对齐;**P50 / P90 不变**(7.4 / 9.1)
   - **收敛状态**:全文 `evidence_missing` 残留扫:active 段 0 处(line 36/658 = DoD 正确归属;line 524 = 显式排除;line 556/623 = Example 注释语义对比;line 687/2070/3536 = 已 v9 修订;line 3521 = §11.1bis 真实语义定义);§13 修订记录历史 v3+v8+v9+v10 段保留(合法历史)。**plan-9d v10 达到 ≤ NIT 收敛阈值,active 段 candidate_type 表述全局口径一致**。
+- **v11**(2026-05-11):codex 十轮 fresh review 4 议题全采纳(2 STRAY + 1 self-summary + 1 MINOR-1 + 1 MINOR-2;无 BLOCKER 无 MAJOR 无 NIT)
+  - **2 STRAY + 1 self-summary**:line 3536/3552 v8/v9 加的"防误判"evidence_missing 对比注释,到 v10 全文统一后是 stray pollution + §13 self-summary 矛盾。修法:删对比文字保留"沿 §11.1bis 6 类归属"核心引用。
+  - **MINOR-1**:candidate-validators 边界 line 124 / 3526 / 1158 三处描述矛盾(调骨架 vs 不接入 vs 新建 stub)。实际架构:plan-9d 不调用 9a framework,新建 coverage-gap.ts + test-failure-stub.ts 直接在 change.ts 产 Finding。修法:line 124 改"本 plan 不调用骨架,改新建...";三处统一。
+  - **MINOR-2**:Task 8 测试数量 12 vs 13 表实际 13 case 但文字写 12。修法:全改 13。
+  - **工日**:纯文档对齐;**P50 / P90 不变**(7.4 / 9.1)
+  - **收敛状态**:active 段 candidate_type 描述全口径一致 + Task 8 数字对齐 + §13 self-summary 与实际一致。**plan-9d v11 达到 ≤ NIT 收敛阈值**。

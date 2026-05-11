@@ -842,7 +842,7 @@ proposal.md / design.md 内 {#forge-oos} / {#forge-non-goals} / {#forge-future-w
 **Files:**
 - **Modify(9a 接口冻结修订)**:`src/core/schemas/severity.ts`(`FindingHashPayload` 移除 `validate_run_id` 字段,从 9 字段降为 8 字段;**v3 B1 修订**)
 - **Modify(9a 接口冻结修订)**:`src/core/validate/finding-hash.ts`(`extractHashPayload` 同步去 `validate_run_id`)
-- **Modify**:`tests/core/validate/finding-hash.test.ts`(若已断言 validate_run_id 进 hash — 更新或删该 assertion)
+- **Modify**:`tests/cli/severity-fence.test.ts`(**v5 codex 四轮 MAJOR 2 修订**:9a 已建测试 line 55 在 FindingHashPayload 内含 `validate_run_id: 'run-1'`,必须删除该字段;line 75/102 在 `Finding` 接口内含 `validate_run_id`,因 v3 修订把 `validate_run_id` 改为 Finding-level optional metadata 保留,但若 Finding 没该字段 TS 不报错 — 推荐同时删除避免歧义)
 - Create: `src/core/validate/scope-entries.ts`
 - Modify: `src/core/validate/types.ts`(ValidationError 加 `severity` + `finding_hash`,artifact 加 `'scope'`;**v2 B2 修订**)
 - Modify: `src/core/validate/index.ts`(re-export)
@@ -922,10 +922,13 @@ export function extractHashPayload(finding: Finding): FindingHashPayload {
 跑 9a 现有 test 看是否回归:
 
 ```bash
-pnpm vitest run tests/core/validate/finding-hash.test.ts
+pnpm vitest run tests/cli/severity-fence.test.ts
 ```
 
-若有 assertion 依赖 `validate_run_id` 进 hash → 更新 test(去除该 assertion 或改为"不同 validate_run_id 下同 hash")。
+**v5 codex 四轮 MAJOR 2 修订**:必须在该 test 文件内删除 `validate_run_id` 字段:
+- `tests/cli/severity-fence.test.ts:55`(在 `FindingHashPayload` 构造内,**必须删**;FindingHashPayload 已不含该字段,TS 会报错)
+- `tests/cli/severity-fence.test.ts:75` + `:102`(在 `Finding` 构造内,v3 改 optional 后 TS 不强制 — 可选删,推荐删避免歧义)
+- 同步更新 line 70 的"deterministic" 断言:删 validate_run_id 后两次调 computeFindingHash 仍应输出同 hash(逻辑不变)
 
 commit:
 
@@ -2210,6 +2213,8 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
+// v5 codex 四轮 MINOR 修订:顶部静态 import(沿 update.test.ts:8 / validate.test.ts:8 / archive.test.ts:12 现有 CLI 测试惯例)
+import { runCli } from './helpers.js';
 
 const CLI = join(process.cwd(), 'dist', 'cli', 'index.js');
 
@@ -2291,8 +2296,8 @@ describe('forge scope scan-archived-followups(plan-9b Task 5)', () => {
       ].join('\n'),
     );
     await writeFile(join(dir, 'design.md'), '# D\n');
-    // 用 tests/cli/helpers.ts:runCli(spawnSync 模式)以同时捕 stdout + stderr
-    const { runCli } = await import('./helpers.js');
+    // v5 codex 四轮 MINOR 修订:沿现有 update.test.ts:8 / validate.test.ts:8 / archive.test.ts:12 顶部静态 import 风格
+    // 该 import 在 scope-cli.test.ts 顶部:import { runCli } from './helpers.js';
     const r = runCli(['scope', 'scan-archived-followups', 'new-id'], projectRoot);
     expect(r.exitCode).toBe(0);
     expect(JSON.parse(r.stdout).entries).toEqual([]);
@@ -2795,9 +2800,10 @@ describe('forge update — sharedDocs 部署(v2 plan-9b Task 7b smoke)', () => {
     // v4 codex 三轮 BLOCKER 2 修订:写 forge/config.yaml 必须含 harness 列表,
     // 否则 update.ts:55-59 会 exit 1(`No harness configured`)
     await mkdir(join(projectRoot, 'forge'), { recursive: true });
+    // v5 codex 四轮 MAJOR 1 修订:config schema 字面量应是 `forge-spec-driven/v1`(沿 types.ts:8 注释 + update.test.ts 现有 fixture),不是 `forge-config/v1`
     await writeFile(
       join(projectRoot, 'forge', 'config.yaml'),
-      'schema: forge-config/v1\nharness:\n  - claude\n',
+      'schema: forge-spec-driven/v1\nharness:\n  - claude\n',
     );
   });
   afterEach(async () => {
@@ -3167,6 +3173,14 @@ archived-with-active-entry / archived-with-superseding 两份 fixture
 ## 11. 修订记录
 
 - **v1**(2026-05-11 commit `96b2955`):初稿。沿 master plan §3.2 + §3.12.1bis + §3.12.2 + §3.12.3 锁定的接口写。本 plan 不实施 archive_summary handoff_to_backlog 的真实聚合(那是 9e2),只提供数据源(scanArchivedFollowups)。
+- **v5**(2026-05-11):codex 四轮 adversarial review 全采纳(**0 BLOCKER + 2 MAJOR + 1 MINOR + 2 Confirmed-OK**):
+  - **MAJOR 1 — Task 7b smoke test config schema 字面量错**(v4 写 `forge-config/v1`,但 `src/core/schema/types.ts:8` 注释明确是 `forge-spec-driven/v1`):**v5 修订**:Task 7b Step 5 fixture config 字面量改为 `forge-spec-driven/v1`
+  - **MAJOR 2 — Step 0 漏掉现有 validate_run_id 测试文件**(v3 Step 0 Files 列表只有 severity.ts + finding-hash.ts,但 9a 实际已建 `tests/cli/severity-fence.test.ts` 在 line 55/75/102 含 `validate_run_id` 字段断言。Step 0 不删该 test 字面会让 TS 报错):**v5 修订**:Step 0 Files 列表显式加入 `tests/cli/severity-fence.test.ts`,要求删 line 55 的 FindingHashPayload `validate_run_id` 字段(TS 报错必须改);line 75/102 的 Finding `validate_run_id` 字段推荐删(v3 改 optional 后 TS 不强制)
+  - **MINOR — scope-cli 测试 import 风格偏离现有 CLI 测试惯例**(v4 写 `await import('./helpers.js')`,但 update.test.ts / validate.test.ts / archive.test.ts 全用顶部静态 import):**v5 修订**:scope-cli.test.ts 顶部 import 段加 `import { runCli } from './helpers.js';`,测试体内删动态 import
+  - **Confirmed-OK**(v4 已正确,v5 验证仍 OK,无需改):
+    - Angle 1:change.ts 全 failed() 核对完毕;line 20/35/50/75 是 fs/IO catch 不需 severity;唯一 business-fail 在 line 65,v4 Step 6 注释 (plan-9b:1382-1384) 已点名加 CRITICAL
+    - Angle 5:DoD 顶部已改为 8 字段稳定 payload + 明确禁止 ephemeral runId(plan-9b:23);Step 0 说明本 phase 重定义 9a FindingHashPayload(plan-9b:857)
+  - **工日**:v5 仅 3 处局部修订(2 个 MAJOR 是字面量 / Files 列表 update,1 个 MINOR 是 import 风格),不上调工日
 - **v4**(2026-05-11):codex 三轮 adversarial review 全采纳(**3 BLOCKER + 1 MINOR + 1 NIT + 5 Confirmed-OK**):
   - **BLOCKER 1 — change.ts no-spec-files 业务错未标 CRITICAL,会按 exit 2 误分类**(v3 修了 proposal/specs/tasks validator 但漏了 change.ts:65 内部直接构造的 `no spec files in specs/` failed() 调用):**v4 修订**:Task 4 Step 6 显式补:`change.ts` 内 `no spec files in specs/` 加 `severity: 'CRITICAL'`(business-fail 不是 fs 错)
   - **BLOCKER 2 — Task 7b smoke test 无 harness 配置直接跑 forge update 会触发 update.ts:55-59 exit 1**(v3 plan 写最小 config 只含 `schema: forge-config/v1`,没 harness 字段;update.ts 要求 `--harness` 参数或 config.yaml `harness` 列表):**v4 修订**:smoke test 的 config.yaml 加 `harness:\n  - claude\n`

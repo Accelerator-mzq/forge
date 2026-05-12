@@ -51,6 +51,9 @@ import {
 import { renderArchiveSummaryOutput } from '../../core/archive/summary-render.js';
 // plan-9e1 Task 5:resume-summary 子模式
 import { resumeArchiveSummary } from '../../core/archive/resume-summary.js';
+// plan-9j Task 5:legacy-exemption + version-retrograde fence
+import { validateLegacyExemption } from '../../core/archive/legacy-exemption.js';
+import { validateVersionRetrograde } from '../../core/archive/version-retrograde-fence.js';
 
 /**
  * 检测当前目录是否真实处于 git 工作树中
@@ -356,6 +359,49 @@ export function buildArchiveCommand(): Command {
             );
             // C2 修复:先 release lock 再 exit
             // plan-9d Task 6 v2 M-1 修订:hash mismatch = fence business-fail,exit 1
+            await archiveRelease();
+            process.exit(1);
+          }
+
+          // 步骤 3.4(plan-9j Task 5):legacy-exemption + version-retrograde fence
+          // 沿 design §3.4.4.1 + §3.4.4.3 — 在 evidence 校验之前拦截 legacy marker 异常
+          const legacyVerifyResult = validateLegacyExemption(verifyRec, verifyPath);
+          if (!legacyVerifyResult.valid) {
+            console.error('✗ legacy-exemption fence 拒签(verify-passed):');
+            for (const e of legacyVerifyResult.errors)
+              console.error(`  - ${e.field}: ${e.message}`);
+            await archiveRelease();
+            process.exit(1);
+          }
+          const legacyReviewResult = validateLegacyExemption(reviewRec, reviewPath);
+          if (!legacyReviewResult.valid) {
+            console.error('✗ legacy-exemption fence 拒签(review-passed):');
+            for (const e of legacyReviewResult.errors)
+              console.error(`  - ${e.field}: ${e.message}`);
+            await archiveRelease();
+            process.exit(1);
+          }
+          const retrogradeVerifyResult = await validateVersionRetrograde(
+            verifyPath,
+            verifyRec,
+            process.cwd(),
+          );
+          if (!retrogradeVerifyResult.valid) {
+            console.error('✗ version-retrograde fence 拒签(verify-passed):');
+            for (const e of retrogradeVerifyResult.errors)
+              console.error(`  - ${e.field}: ${e.message}`);
+            await archiveRelease();
+            process.exit(1);
+          }
+          const retrogradeReviewResult = await validateVersionRetrograde(
+            reviewPath,
+            reviewRec,
+            process.cwd(),
+          );
+          if (!retrogradeReviewResult.valid) {
+            console.error('✗ version-retrograde fence 拒签(review-passed):');
+            for (const e of retrogradeReviewResult.errors)
+              console.error(`  - ${e.field}: ${e.message}`);
             await archiveRelease();
             process.exit(1);
           }

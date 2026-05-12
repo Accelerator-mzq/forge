@@ -10,6 +10,14 @@ import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { spawnSync } from 'node:child_process';
 import { appendAckLog } from '../ack-log.js';
 
+/** ack-log 条目 最小结构(Task 5 新增:读取 ack-log 检查 resign-c-simcode confirm) */
+interface AckLogMinimal {
+  kind?: string;
+  action?: string;
+  finding_id?: string | null;
+  target_severity?: string | null;
+}
+
 /** resign-markers 单 marker 处理结果 */
 export interface ResignResult {
   kind: 'resigned' | 'skipped-already-v1' | 'needs-c-propose' | 'failed';
@@ -85,12 +93,21 @@ async function resignOneMarker(
       } else if (o.severity === 'L') {
         o.severity = 'SUGGESTION';
       } else if (o.severity === 'C' || o.severity === 'blocking') {
-        // C 简码 / blocking 字符串 → 走 ack.ts propose 路径(交互式询问 target severity)
-        // v7 BLOCKER 1 修订:传 forgeCliPath(从 resignChangeMarkers 接收的参数),不是 changeDir
-        needsCPropose = true;
-        // exitCode 此处不用(propose 写 pending 后 exit 1 是预期行为,caller 检查 needsCPropose 标志)
-        const { pendingDirAfter } = await proposeForCSimcode(forgeCliPath, changeId, i);
-        pendingPaths.push(pendingDirAfter);
+        // C 简码 / blocking 字符串 — Task 5 修订:先检查 ack-log 是否已有对应 resign-c-simcode confirm
+        // 若已有 confirm 且携带 target_severity → 直接替换 severity,走 resign 路径
+        // 若无 confirm → 走 ack.ts propose 路径(交互式询问 target severity)
+        const confirmedSeverity = await lookupConfirmedCSimcode(changeDir, String(i));
+        if (confirmedSeverity === 'WARNING' || confirmedSeverity === 'SUGGESTION') {
+          // 已 confirm → 用 target_severity 替换 C 简码
+          o.severity = confirmedSeverity;
+        } else {
+          // 尚未 confirm → propose 路径
+          // v7 BLOCKER 1 修订:传 forgeCliPath(从 resignChangeMarkers 接收的参数),不是 changeDir
+          needsCPropose = true;
+          // exitCode 此处不用(propose 写 pending 后 exit 1 是预期行为,caller 检查 needsCPropose 标志)
+          const { pendingDirAfter } = await proposeForCSimcode(forgeCliPath, changeId, i);
+          pendingPaths.push(pendingDirAfter);
+        }
       }
     }
   }
@@ -203,6 +220,49 @@ async function proposeForCSimcode(
     exitCode: res.status ?? -1,
     pendingDirAfter: join(cwd, 'forge', 'changes', changeId, '.evidence', 'pending-acks'),
   };
+}
+
+/**
+ * lookupConfirmedCSimcode — 检查 ack-log.jsonl 是否已有对应 resign-c-simcode confirm 条目
+ *
+ * 沿 Task 5 修订:重跑 forge upgrade --resign-markers 时,若已有 user confirm + target_severity
+ * 则直接用 target_severity 替换 C 简码,无需再 propose。
+ *
+ * @param changeDir change 根目录(含 .evidence/ack-log.jsonl)
+ * @param findingId C 简码 outcome 的 index 字符串(与 propose 时一致)
+ * @returns target_severity('WARNING' | 'SUGGESTION') 若有 confirm,否则 null
+ */
+async function lookupConfirmedCSimcode(
+  changeDir: string,
+  findingId: string,
+): Promise<'WARNING' | 'SUGGESTION' | null> {
+  const ackLogPath = join(changeDir, '.evidence', 'ack-log.jsonl');
+  if (!existsSync(ackLogPath)) return null;
+  try {
+    const text = await readFile(ackLogPath, 'utf8');
+    const entries = text
+      .split('\n')
+      .filter((line) => line.trim())
+      .map((line) => JSON.parse(line) as AckLogMinimal);
+    // 找 action=resign-c-simcode + finding_id 匹配 + target_severity 合法的最新条目
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const e = entries[i];
+      if (
+        e &&
+        e.kind === 'ack' &&
+        e.action === 'resign-c-simcode' &&
+        String(e.finding_id) === findingId
+      ) {
+        if (e.target_severity === 'WARNING' || e.target_severity === 'SUGGESTION') {
+          return e.target_severity;
+        }
+      }
+    }
+    return null;
+  } catch {
+    // ack-log 读取失败 → 保守返回 null,走 propose 路径
+    return null;
+  }
 }
 
 /** 获取 git HEAD(沿 archive.ts:isProjectActuallyGit 同模式) */

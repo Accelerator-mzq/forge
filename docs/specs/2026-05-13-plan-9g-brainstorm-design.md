@@ -85,10 +85,13 @@ src/cli/commands/evidence.ts
 
 src/cli/commands/verify.ts
    .verify-passed 生成路径加 staging → marker freeze(读 staging.yaml + JCS 重算 +
-   复制三数组到 marker.process_evidence 字段 + transaction writeFile)
+   复制三数组到 marker.process_evidence 字段)
+   **freeze 走 transaction**(§9.6 锁定 B):import executeTransaction() from
+   src/core/archive/transaction.ts,沿 plan-9c/9d/9e1 archive 步骤同模式
+   (tmp + rename atomic + crash 回滚保护)
 
 src/cli/commands/review.ts(若有,否则同样模式落在 review-passed 生成位置)
-   .review-passed 同上
+   .review-passed 同上(同 transaction 路径)
 
 src/cli/commands/archive.ts
    步骤 3.5a(field fence)+ 3.5b(rerun fence)新增
@@ -450,7 +453,9 @@ forge verify / review ──→ verify-passed / review-passed 生成路径
                              │ 2. 重算 staging_hash 校验未被中间篡改
                              │ 3. 复制三数组到 marker.process_evidence
                              │ 4. marker 加 process_evidence_staging_hash 快照
-                             │ 5. 一次 fs.writeFile marker(transaction)
+                             │ 5. executeTransaction()(沿 §9.6 锁定 B + 沿
+                             │    src/core/archive/transaction.ts 模式 —
+                             │    tmp + rename atomic + crash 回滚保护)
                              ▼
                     .verify-passed.yaml / .review-passed.yaml(含 process_evidence)
 
@@ -663,7 +668,7 @@ scenarios:
 3. **Plan inline 完整代码范围**:fence/rerun 函数全量 inline 还是仅 signature + 关键 helper?(沿 plan-9j Pattern A 教训:**全量 inline**)
 4. **forge-eval fixture 内容生成策略**(若选 P2 路径):手写 fixture 还是用真 forge 流程跑出来再篡改?— **注**:此项仅当 §9.9 选 P2 时适用;若选 P1 则不需新 fixture(沿现有 skill yaml 加 scenario)
 5. **vitest --reporter=json schema 锁定**:Vitest 不同版本 JSON schema 微调,plan 阶段锁定一个版本 + 兼容窗口
-6. **freeze 时点细节**:verify-passed 生成是单 fs.writeFile 还是 transaction?(沿 archive transaction.ts 模式抽象)
+6. ~~freeze 时点细节~~ — **已锁:走 transaction(选项 B)**。verify-passed 生成的 staging → marker freeze 步骤走 `src/core/archive/transaction.ts` 现有抽象(plan-9c/9d/9e1 archive 步骤已用同模式:tmp + rename atomic + crash 回滚)。**理由**:freeze 失败留半成品 marker 会让下次 `forge archive` 因 yaml 解析失败报错,用户需手动修;transaction 模式代码复用现有 lib 成本低,且 verify-passed 内含 process_evidence 后 schema 复杂度上升,半成品风险变大。**实施**:在 verify.ts 内 freeze 路径 import `executeTransaction()`(沿 plan-9c/9d 调用模式),不重新写 atomic 逻辑
 7. **codex review 轮数预期**:plan-9j 9 轮 / 9e1 12 轮,9g spec 已 v3 充分,预计 5-8 轮
 
 ### 9.8 forge-eval 集成路径 ─ 锁定 P2(brainstorm 阶段已选)

@@ -73,6 +73,15 @@ describe('archive_summary schema validation', () => {
     expect(result.errors.some((e) => e.field === 'verify_passed')).toBe(true);
   });
 
+  it('review_passed 非 object → 拒签', () => {
+    const result = validateArchiveSummarySchema({
+      ...baseSummary,
+      review_passed: 'not-object',
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.field === 'review_passed')).toBe(true);
+  });
+
   it('handoff_to_backlog 非数组 → 拒签', () => {
     const result = validateArchiveSummarySchema({
       ...baseSummary,

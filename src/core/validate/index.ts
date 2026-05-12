@@ -14,3 +14,5 @@ export * from './scope-entries.js';
 export * from './auto-findings.js';
 export * from './coverage-gap.js';
 export * from './test-failure-stub.js';
+// plan-9e1 Task 1: archive summary schema 校验
+export * from './archive-summary-schema.js';

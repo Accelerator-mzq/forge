@@ -24,9 +24,9 @@ import { parseMarkdown } from '../parse/markdown.js';
 import { parseFencedYamlBlocks } from '../parse/fenced-yaml.js';
 import { SCOPE_ANCHOR_IDS, type ScopeAnchorId, type ScopeEntry } from '../schemas/scope-entries.js';
 
-/** review_outcomes 单项最小子集(沿 marker types.ReviewOutcome) */
+/** review_outcomes 单项最小子集(沿 marker types.ReviewOutcome — v3 BLOCKER 4 plan-9j:扩全名双格式) */
 interface ReviewOutcome {
-  severity: 'S' | 'C' | 'L';
+  severity: 'S' | 'C' | 'L' | 'CRITICAL' | 'WARNING' | 'SUGGESTION';
   accepted: boolean;
   resolved: boolean;
   task_ref?: string;
@@ -71,7 +71,7 @@ export async function buildArchiveSummary(
     ? (reviewMarker.review_outcomes as ReviewOutcome[])
     : [];
 
-  const acked_warnings = collectAckedWarnings(verifyFindings);
+  const acked_warnings = collectAckedWarnings(verifyFindings, reviewOutcomes);
   const pending_suggestions = collectPendingSuggestions(verifyFindings, reviewOutcomes);
 
   // 合并 verify + review 的 pause_decisions(去重以 id 为 key,review 镜像优先级低)
@@ -122,9 +122,10 @@ export async function buildArchiveSummary(
   };
 }
 
-/** collector1:**仅 verify_findings** WARNING + resolved=false + 有 ack(v2 BLOCKER 3:review_outcomes C 简码由 fence 拒签,不进 acked_warnings) */
-function collectAckedWarnings(findings: Finding[]): AckedWarningRef[] {
+/** collector1:verify_findings WARNING + ack + review_outcomes WARNING 全名 + acked(v3 BLOCKER 4:resign 后或 v1.0 native 写入) */
+function collectAckedWarnings(findings: Finding[], outcomes: ReviewOutcome[]): AckedWarningRef[] {
   const refs: AckedWarningRef[] = [];
+  // verify_findings WARNING + ack(plan-9e1 v3 BLOCKER 3 已有,不动)
   for (const f of findings) {
     if (
       f.severity === 'WARNING' &&
@@ -143,16 +144,38 @@ function collectAckedWarnings(findings: Finding[]): AckedWarningRef[] {
       });
     }
   }
-  // v2 BLOCKER 3:不再收 review_outcomes(C 简码由 three-level-fence 拒签;9j resign 完成后 review_outcomes 端不再有简码,届时 9e2 可加全名 WARNING 路径)
+  // review_outcomes WARNING 全名 + acked(v3 BLOCKER 4:resign 后或 v1.0 native 写入)
+  for (let i = 0; i < outcomes.length; i++) {
+    const o = outcomes[i] as ReviewOutcome;
+    // C 简码由 fence 拒签,不进 builder(沿 plan-9e1 v3 BLOCKER 3)
+    // S 简码 / CRITICAL 全名由 fence 拒签,不进 builder
+    // 仅 WARNING 全名 + accepted=true + rationale 非空(v0.4 review_outcomes 端的 "acked" 等价路径)
+    if (
+      o.severity === 'WARNING' &&
+      o.resolved === false &&
+      o.accepted === true &&
+      typeof o.rationale === 'string' &&
+      o.rationale.length > 0
+    ) {
+      refs.push({
+        source: 'review_outcomes',
+        id: i,
+        acked_by: 'review-accepted',
+        acked_at: '', // review_outcomes 端无 user 字段,沿 plan-9e1 v1 collector1 review-accepted 标记
+        rationale: o.rationale,
+      });
+    }
+  }
   return refs;
 }
 
-/** collector2:verify_findings + review_outcomes 中 SUGGESTION + resolved=false(v2 BLOCKER 3:仅 L 简码,L → SUGGESTION 直接映射沿 design §2.3.5 line 558) */
+/** collector2:verify_findings + review_outcomes 中 SUGGESTION + resolved=false(v3 BLOCKER 4:L 简码 + SUGGESTION 全名双格式) */
 function collectPendingSuggestions(
   findings: Finding[],
   outcomes: ReviewOutcome[],
 ): SuggestionRef[] {
   const refs: SuggestionRef[] = [];
+  // verify_findings SUGGESTION 全名(plan-9e1 v3 BLOCKER 3 已有,不动)
   for (const f of findings) {
     if (f.severity === 'SUGGESTION' && f.resolved === false) {
       refs.push({
@@ -165,10 +188,10 @@ function collectPendingSuggestions(
       });
     }
   }
-  // review_outcomes 简码 L = SUGGESTION 直接映射(沿 design §2.3.5 line 558);C 简码由 fence 拒签,**不进 builder**
+  // review_outcomes L 简码 + SUGGESTION 全名双格式映射(v3 BLOCKER 4 新增)
   for (let i = 0; i < outcomes.length; i++) {
     const o = outcomes[i] as ReviewOutcome;
-    if (o.severity === 'L' && o.resolved === false) {
+    if ((o.severity === 'L' || o.severity === 'SUGGESTION') && o.resolved === false) {
       refs.push({
         source: 'review_outcomes',
         id: i,

@@ -18,9 +18,9 @@
 import type { Finding } from '../schemas/severity.js';
 import { type ValidationResult, failed, mergeResults } from '../validate/types.js';
 
-/** review_outcomes 子集类型(沿 marker types.ReviewOutcome) */
+/** review_outcomes 子集类型(沿 marker types.ReviewOutcome — v3 BLOCKER 4 plan-9j:扩全名双格式) */
 interface ReviewOutcome {
-  severity: 'S' | 'C' | 'L';
+  severity: 'S' | 'C' | 'L' | 'CRITICAL' | 'WARNING' | 'SUGGESTION';
   accepted: boolean;
   resolved: boolean;
   task_ref?: string;
@@ -62,50 +62,62 @@ export function validateThreeLevelFence(
     // SUGGESTION + resolved=false 由 9e1 builder 进 pending_suggestions 持挂,本 fence 不拦
   }
 
-  // 2. review_outcomes 端:**核心** — S/C/L 三分支裁决(v2 BLOCKER 3)
-  const outcomes = Array.isArray(reviewMarker.review_outcomes)
-    ? (reviewMarker.review_outcomes as ReviewOutcome[])
-    : [];
+  // 2. review_outcomes 端:**核心** — **v6 plan-9j 修订:simcode + 全名双格式裁决**
+  const outcomes = (reviewMarker.review_outcomes as Array<Record<string, unknown>>) ?? [];
+
   for (let i = 0; i < outcomes.length; i++) {
-    const o = outcomes[i] as ReviewOutcome;
+    const o = outcomes[i] as unknown as ReviewOutcome;
+    const sev = o.severity;
     const fieldBase = `review_outcomes[${i}]`;
-    if (o.severity === 'S' && o.resolved === false) {
+
+    // CRITICAL/S(同义)— 拒签
+    if ((sev === 'S' || sev === 'CRITICAL') && !o.resolved) {
       results.push(
         failed({
           artifact: 'marker',
-          field: `${fieldBase}.resolved`,
-          message: `review_outcomes S(CRITICAL 简码)未 resolve(沿 design §2.4.2 + §2.3.5 简码映射);需 resolve 或走 forge upgrade --resign-markers 迁移为全名 CRITICAL`,
+          field: `${fieldBase}.severity`,
+          message: `${sev}(${sev === 'S' ? 'CRITICAL 简码' : 'CRITICAL 全名'})未 resolve,archive 拒签(沿 design §2.4.2 + plan-9j v3 BLOCKER 4 双格式)`,
           file: reviewFile,
         }),
       );
-    } else if (o.severity === 'C') {
-      // v3 BLOCKER 1 + v4 BLOCKER 1:C(clarification)**无视** resolved/accepted/rationale 全拒签
-      // 沿 design §2.3.5 line 559 + line 563:"C 不自动映射;archive 阶段给 CRITICAL finding,
-      //   拒签直到用户走 forge upgrade --resign-markers 处理"
-      // 关键语义:resolved=true 仅表示 v0.4 视角已修,但 v1.0 视角 severity 仍是简码 C —
-      //   archive_summary.yaml 落地后 v1.1 backlog index 读到 C 简码会语义错乱;
-      //   必须经 9j resign 把 C 升级到 WARNING/SUGGESTION 全名后才能 archive
-      //
-      // v4 BLOCKER 1 修订:**删除** v3 "9j 未完成时手动迁移 marker" 路径 — 三道墙都走不通:
-      //   (1) ReviewOutcome 接口 severity: 'S'|'C'|'L' 不接受全名
-      //   (2) marker-schema REVIEW_OUTCOME_SEVERITY_CODES 拒签全名
-      //   (3) WARNING ack 必须 CLI ack-log,违反 AI 反向加固
-      // 9e1 fence 是**硬墙** — 9j 未完成时 archive C 简码 marker 阻塞,必须等 9j 落地
+      continue;
+    }
+
+    // C 简码 — 硬墙拒签(沿 plan-9e1 v4 BLOCKER 1)
+    if (sev === 'C') {
       results.push(
         failed({
           artifact: 'marker',
           field: `${fieldBase}.severity`,
           message:
-            `review_outcomes C(clarification 简码,resolved=${String(o.resolved)})不允许 archive(沿 design §2.3.5 line 559+563:C 不自动映射,必须经 forge upgrade --resign-markers 人工迁移)。\n` +
-            `  **必须等 plan-9j marker version + deprecation 完成后**,运行 \`forge upgrade --resign-markers\` 交互式询问每条 C 的目标 severity(WARNING / SUGGESTION)+ 自动 resign marker 字段 + 写 ack-log.jsonl。\n` +
+            `review_outcomes C(clarification 简码,resolved=${String(o.resolved)})不允许 archive。\n` +
+            `  必须等 plan-9j 完成跑 \`forge upgrade --resign-markers\` 迁移(沿 design §2.3.5)。\n` +
             `  9e1 fence 是硬墙 — 不接受手动编辑 marker(违反 AI 反向加固 + ReviewOutcome 接口不接受全名 + ack-log 协议)。`,
           file: reviewFile,
         }),
       );
+      continue;
     }
-    // L(SUGGESTION 简码)+ 未 resolved → 通过(handoff 进 builder collector2 pending_suggestions)
-    // S 简码 + resolved=true → 通过(常规 archive)
-    // L 简码 + resolved=true → 通过
+
+    // WARNING 全名 — 必须 acked(简码 v0.4 无 WARNING 简码 — 仅 v1.0 全名;沿 design §2.3.5)
+    if (sev === 'WARNING' && !o.resolved) {
+      const acked =
+        o.accepted === true && typeof o.rationale === 'string' && o.rationale.length > 0;
+      if (!acked) {
+        results.push(
+          failed({
+            artifact: 'marker',
+            field: `${fieldBase}.accepted`,
+            message: `review_outcomes WARNING(v1.0 全名)未 resolve + 缺 acked(需 accepted=true + rationale 非空)`,
+            file: reviewFile,
+          }),
+        );
+      }
+      continue;
+    }
+
+    // L/SUGGESTION(同义)+ resolved=false → 通过(handoff to backlog)
+    // 全 resolved=true → 通过(无 fence 动作)
   }
 
   return mergeResults(...results);

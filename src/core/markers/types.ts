@@ -15,6 +15,12 @@ export interface VerifyMarker {
   // plan-9c Task 1 新增 — superset additive,老 marker 缺等价 []
   // apply 阶段 Fluid Pause Decision Point 主代理调 AskUserQuestion 三选项后写入(沿 design §2.1.5)
   pause_decisions?: PauseDecision[];
+  // plan-9j Task 1 新增 — superset additive,老 marker 缺等价 <1.0.0(沿 design §3.4.1)
+  // marker 写入时 forge CLI 的版本号(semver),archive fence 按版本字段判断 marker 行为
+  created_by_tool_version?: string;
+  // v3 BLOCKER 2 新增 — superset additive,沿 v2 选项 C 修订(plan-9j §0)
+  // 仅在 marker 经过 `forge upgrade --resign-markers` 后存在;与 created 配对区分 native v1.0 vs resigned legacy
+  resigned_by_tool_version?: string;
 }
 
 /**
@@ -97,6 +103,10 @@ export interface ReviewMarker {
   review_outcomes: ReviewOutcome[];
   // plan-9c Task 1 新增 — superset additive(verify 端 pause 也镜像到 review marker,沿 design §2.1.6)
   pause_decisions?: PauseDecision[];
+  // plan-9j Task 1 新增
+  created_by_tool_version?: string;
+  // v3 BLOCKER 2 新增 — resigned 字段(沿 v2 选项 C)
+  resigned_by_tool_version?: string;
 }
 
 export interface GitInfo {
@@ -110,7 +120,10 @@ export interface GitInfo {
 }
 
 export interface ReviewOutcome {
-  severity: 'S' | 'C' | 'L';
+  // v3 BLOCKER 4(plan-9j):union 扩 simcode + 全名双格式
+  // 沿 design §2.3.5 简码迁移 — v0.4 simcode S/C/L 兼容老 marker;v1.0 全名 resign 后写入
+  // C 简码硬墙拒签(沿 plan-9e1 v4 BLOCKER 1)+ S→CRITICAL / L→SUGGESTION 直接映射
+  severity: 'S' | 'C' | 'L' | 'CRITICAL' | 'WARNING' | 'SUGGESTION';
   accepted: boolean;
   resolved: boolean;
   task_ref?: string; // accepted=true 时必需
@@ -127,6 +140,10 @@ export interface VerifyFailedMarker {
   verify_findings?: VerifyFinding[];
   // plan-9c Task 1 新增 — verify failed 也可能携带 pause_decisions(本 round verify 失败但已有 pause 记录)
   pause_decisions?: PauseDecision[];
+  // plan-9j Task 1 新增
+  created_by_tool_version?: string;
+  // v3 BLOCKER 2 新增 — resigned 字段(沿 v2 选项 C)
+  resigned_by_tool_version?: string;
 }
 
 export interface ReviewFailedMarker {
@@ -136,6 +153,10 @@ export interface ReviewFailedMarker {
   appended_tasks: string[];
   // plan-9c Task 1 新增
   pause_decisions?: PauseDecision[];
+  // plan-9j Task 1 新增
+  created_by_tool_version?: string;
+  // v3 BLOCKER 2 新增 — resigned 字段(沿 v2 选项 C)
+  resigned_by_tool_version?: string;
 }
 
 export type AnyMarker = VerifyMarker | ReviewMarker | VerifyFailedMarker | ReviewFailedMarker;

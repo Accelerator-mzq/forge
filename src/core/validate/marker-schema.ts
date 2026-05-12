@@ -24,11 +24,22 @@ const SHA256_RE = /^sha256:[a-f0-9]{64}$/;
 const FINDING_HASH_RE = /^[a-f0-9]{64}$/;
 // git commit hash:40 位小写十六进制
 const GIT_HEAD_RE = /^[a-f0-9]{40}$/;
+// plan-9j Task 1 新增:created_by_tool_version semver 校验
+// 沿 archive-summary.ts SEMVER_RE 同模式(major.minor.patch[-prerelease][+build])
+const SEMVER_RE = /^\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)?$/;
 // actor 合法值
 const ACTOR_VALUES = new Set(['ai-agent', 'human-override']);
 // review_outcomes.severity 合法值(S/C/L 简码,语义独立于 9a 三级 enum CRITICAL/WARNING/SUGGESTION)
 // plan-9d Task 3 (v12 REG-IMPORT-001 修订):rename 自 SEVERITY_VALUES → REVIEW_OUTCOME_SEVERITY_CODES
-const REVIEW_OUTCOME_SEVERITY_CODES = new Set(['S', 'C', 'L']);
+// v3 BLOCKER 4(plan-9j):union 扩 simcode + 全名(沿 types.ts ReviewOutcome.severity)
+const REVIEW_OUTCOME_SEVERITY_CODES = new Set([
+  'S',
+  'C',
+  'L', // v0.4 simcode(老 marker 兼容)
+  'CRITICAL',
+  'WARNING',
+  'SUGGESTION', // v1.0 全名(resign 后或 v1.0 native 写入)
+]);
 // verify_findings.dimension 合法值(沿 design §2.2.2 三维度)
 const DIMENSION_VALUES = new Set(['completeness', 'correctness', 'coherence']);
 // plan-9c Task 1 新增:pause_decisions.chosen_option 合法值(1 | 2 | 3 | 4)
@@ -73,6 +84,10 @@ export function validateMarkerSchema(m: unknown, file?: string): ValidationResul
     if (obj.pause_decisions !== undefined) {
       results.push(checkPauseDecisionsArray(obj.pause_decisions, file));
     }
+    // plan-9j Task 1 新增:created_by_tool_version 可选 superset additive 字段
+    results.push(checkSemverString(obj, 'created_by_tool_version', file));
+    // v3 BLOCKER 2 新增:resigned_by_tool_version(沿 v2 选项 C — 区分 created vs resigned)
+    results.push(checkSemverString(obj, 'resigned_by_tool_version', file));
   } else if (schema === 'forge-review/v1') {
     results.push(checkTimestamp(obj, 'reviewed_at', file));
     results.push(checkActor(obj, 'reviewed_by', file));
@@ -84,6 +99,10 @@ export function validateMarkerSchema(m: unknown, file?: string): ValidationResul
     if (obj.pause_decisions !== undefined) {
       results.push(checkPauseDecisionsArray(obj.pause_decisions, file));
     }
+    // plan-9j Task 1 新增:created_by_tool_version 可选 superset additive 字段
+    results.push(checkSemverString(obj, 'created_by_tool_version', file));
+    // v3 BLOCKER 2 新增:resigned_by_tool_version(沿 v2 选项 C — 区分 created vs resigned)
+    results.push(checkSemverString(obj, 'resigned_by_tool_version', file));
   } else if (schema === 'forge-verify-failed/v1') {
     results.push(checkTimestamp(obj, 'failed_at', file));
     results.push(checkStringArray(obj, 'reasons', file));
@@ -97,6 +116,10 @@ export function validateMarkerSchema(m: unknown, file?: string): ValidationResul
     if (obj.pause_decisions !== undefined) {
       results.push(checkPauseDecisionsArray(obj.pause_decisions, file));
     }
+    // plan-9j Task 1 新增:created_by_tool_version 可选 superset additive 字段
+    results.push(checkSemverString(obj, 'created_by_tool_version', file));
+    // v3 BLOCKER 2 新增:resigned_by_tool_version(沿 v2 选项 C — 区分 created vs resigned)
+    results.push(checkSemverString(obj, 'resigned_by_tool_version', file));
   } else if (schema === 'forge-review-failed/v1') {
     results.push(checkTimestamp(obj, 'failed_at', file));
     if (!Array.isArray(obj.unresolved_outcomes)) {
@@ -114,6 +137,10 @@ export function validateMarkerSchema(m: unknown, file?: string): ValidationResul
     if (obj.pause_decisions !== undefined) {
       results.push(checkPauseDecisionsArray(obj.pause_decisions, file));
     }
+    // plan-9j Task 1 新增:created_by_tool_version 可选 superset additive 字段
+    results.push(checkSemverString(obj, 'created_by_tool_version', file));
+    // v3 BLOCKER 2 新增:resigned_by_tool_version(沿 v2 选项 C — 区分 created vs resigned)
+    results.push(checkSemverString(obj, 'resigned_by_tool_version', file));
   }
 
   return mergeResults(...results);
@@ -156,6 +183,27 @@ function checkSha256(obj: Record<string, unknown>, field: string, file?: string)
   const v = obj[field];
   if (typeof v !== 'string' || !SHA256_RE.test(v)) {
     return failed({ artifact: 'marker', field, message: 'must match ^sha256:[a-f0-9]{64}$', file });
+  }
+  return ok();
+}
+
+// plan-9j Task 1 新增:校验 semver 字符串字段(可选字段,缺失等价 <1.0.0)
+function checkSemverString(
+  obj: Record<string, unknown>,
+  field: string,
+  file?: string,
+): ValidationResult {
+  const v = obj[field];
+  if (v === undefined) {
+    return ok(); // 字段缺失等价老 marker(<1.0.0),superset additive 兼容
+  }
+  if (typeof v !== 'string' || !SEMVER_RE.test(v)) {
+    return failed({
+      artifact: 'marker',
+      field,
+      message: `must be semver string (major.minor.patch[-prerelease][+build]) or omitted (老 marker <1.0.0,沿 design §3.4.1)`,
+      file,
+    });
   }
   return ok();
 }

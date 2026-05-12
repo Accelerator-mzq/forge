@@ -40,3 +40,9 @@ describe('release-blocker: 9e1 transaction failure injection paths (9z gate)', (
     '9e1 transaction Sync 失败:反向 Move + restore specs from backup + unlink summary 应原子回滚(plan-9e1 Task 3 v2 MAJOR 2)',
   );
 });
+
+describe('release-blocker: 9j version-retrograde fail-closed git error path (9z gate)', () => {
+  it.todo(
+    'git repo 内 git log 命令失败(模拟 git binary 异常)→ version-retrograde fence fail-closed 拒签(plan-9j Task 4 v3 MAJOR 1;9z release plan 解锁 — 需要 mock spawn 或注入失败 child_process)',
+  );
+});

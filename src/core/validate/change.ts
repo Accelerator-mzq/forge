@@ -16,6 +16,8 @@ import { type ValidationResult, ok, failed, mergeResults } from './types.js';
 import { buildAutoCriticalFinding, FindingIdSequence } from './auto-findings.js';
 import { scanCoverageGaps } from './coverage-gap.js';
 import { checkTestFailureStub } from './test-failure-stub.js';
+// plan-9e1 Task 5:scanOrphanTmp 检测孤立 archive_summary.tmp.yaml
+import { scanOrphanTmp } from './orphan-tmp.js';
 
 export async function validateChange(changeDir: string): Promise<ValidationResult> {
   const results: ValidationResult[] = [];
@@ -189,6 +191,13 @@ export async function validateChange(changeDir: string): Promise<ValidationResul
         },
       ],
     });
+  }
+
+  // plan-9e1 Task 5:扫描孤立 archive_summary.tmp.yaml(active change 目录残留)
+  // 沿 design §2.4.5 line 759 "孤立 .tmp" 行,给 WARNING + 提示
+  const orphanResult = await scanOrphanTmp(changeDir);
+  if (orphanResult.warnings.length > 0) {
+    results.push(orphanResult);
   }
 
   // 没有任何结果表示空目录，直接返回 ok；否则合并所有结果

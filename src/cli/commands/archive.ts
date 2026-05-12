@@ -48,6 +48,8 @@ import {
   ScopeEntriesIntegrityError,
 } from '../../core/archive/summary-builder.js';
 import { renderArchiveSummaryOutput } from '../../core/archive/summary-render.js';
+// plan-9e1 Task 5:resume-summary 子模式
+import { resumeArchiveSummary } from '../../core/archive/resume-summary.js';
 
 /**
  * 检测当前目录是否真实处于 git 工作树中
@@ -82,12 +84,17 @@ export function buildArchiveCommand(): Command {
     )
     .option('--force', 'accept human-override or non-git review markers')
     .option('--recover', 'recover from a half-completed archive transaction')
+    .option(
+      '--resume-summary <archiveId>',
+      'resume rename archive_summary.tmp.yaml → archive_summary.yaml (rare half-completed state, plan-9e1)',
+    )
     .action(
       async (
         changeId: string | undefined,
         opts: {
           force?: boolean;
           recover?: boolean;
+          resumeSummary?: string; // plan-9e1 Task 5
           enableCrossCuttingFence?: boolean;
           allowStubFence?: boolean;
         },
@@ -157,6 +164,45 @@ export function buildArchiveCommand(): Command {
               console.error(err.message);
               // LockHeldError 时 release 未赋值,无需 release
               process.exit(5);
+            }
+            throw err;
+          } finally {
+            if (release) await release();
+          }
+        }
+
+        // —— plan-9e1 Task 5:--resume-summary 独立路径(v2 BLOCKER 1 + 5 修订)——
+        if (opts.resumeSummary) {
+          let release: (() => Promise<void>) | undefined;
+          try {
+            release = await acquireLock(forgeRoot, 'resume-summary');
+            const r = await resumeArchiveSummary(forgeRoot, opts.resumeSummary);
+            if (r.kind === 'ok') {
+              console.log(r.message);
+              const rel = release;
+              release = undefined;
+              if (rel) await rel();
+              process.exit(0);
+            }
+            // v2 BLOCKER 5:corrupt → exit 3(沿 master §3.12.3 corrupt 档)
+            if (r.kind === 'corrupt') {
+              console.error(r.message);
+              const rel = release;
+              release = undefined;
+              if (rel) await rel();
+              process.exit(3);
+            }
+            // conflict / missing 都是 business-fail → exit 1
+            console.error(r.message);
+            const rel = release;
+            release = undefined;
+            if (rel) await rel();
+            process.exit(1);
+          } catch (err) {
+            if (err instanceof LockHeldError) {
+              // v2 BLOCKER 1:lock-held → exit 2(对齐 master §3.12.3 freeze;v0.4 --recover exit 5 是遗留)
+              console.error(err.message);
+              process.exit(2);
             }
             throw err;
           } finally {

@@ -10,6 +10,10 @@ import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { spawnSync } from 'node:child_process';
 import { appendAckLog } from '../ack-log.js';
 
+// v9 round 2 修(plan-9j Task 5 code quality reviewer I-2):SEMVER_MAJOR_RE 提升模块顶层
+// 原在 resignOneMarker 函数体内,每次调用重新编译;模块常量避免重复编译 + 与 sister-pattern 一致
+const SEMVER_MAJOR_RE = /^(\d+)\./;
+
 /** ack-log 条目 最小结构(Task 5 新增:读取 ack-log 检查 resign-c-simcode confirm) */
 interface AckLogMinimal {
   kind?: string;
@@ -66,10 +70,10 @@ async function resignOneMarker(
   // 步骤 0:若已 resigned(`resigned_by_tool_version` 字段存在)或原生 v1.0.0+ → skip
   // v3 BLOCKER 3 修订:判定依据是 `resigned_by_tool_version` 字段(沿 v2 选项 C),
   // 不再用 `created_by_tool_version >= 1.0.0` 判定(原 v1 逻辑覆写 created,v3 改保留)
+  // (SEMVER_MAJOR_RE 已提升到模块顶层 — v9 round 2 修 plan-9j Task 5 reviewer I-2)
   const alreadyResigned = typeof marker.resigned_by_tool_version === 'string';
   // v9 round 2 修(plan-9j code quality reviewer I-1):用 SEMVER 严格判定 + major 比较,防 invalid string 误 skip
   // 沿 marker-schema.ts:29 SEMVER_RE 同模式,只取 major 部分
-  const SEMVER_MAJOR_RE = /^(\d+)\./;
   const createdRaw = marker.created_by_tool_version;
   const createdMatch = typeof createdRaw === 'string' ? SEMVER_MAJOR_RE.exec(createdRaw) : null;
   const isNativeV10 = createdMatch !== null && parseInt(createdMatch[1]!, 10) >= 1;
@@ -240,10 +244,17 @@ async function lookupConfirmedCSimcode(
   if (!existsSync(ackLogPath)) return null;
   try {
     const text = await readFile(ackLogPath, 'utf8');
-    const entries = text
-      .split('\n')
-      .filter((line) => line.trim())
-      .map((line) => JSON.parse(line) as AckLogMinimal);
+    // v9 round 2 修(plan-9j Task 5 code quality reviewer I-1):逐行 try/catch 解析
+    // 原 .map((line) => JSON.parse(line)) 任一行损坏(如写入中断尾行截断)→ 整批 ack-log 不可读 → 用户已 confirm 的 C 简码被忽略 → 重复 propose 困惑
+    const entries: AckLogMinimal[] = [];
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        entries.push(JSON.parse(line) as AckLogMinimal);
+      } catch {
+        // 单行损坏跳过,不影响其他行
+      }
+    }
     // 找 action=resign-c-simcode + finding_id 匹配 + target_severity 合法的最新条目
     for (let i = entries.length - 1; i >= 0; i--) {
       const e = entries[i];

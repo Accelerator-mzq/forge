@@ -54,9 +54,15 @@ export function buildAckCommand(): Command {
     .description('AI 写 pending ack 文件(需 user confirm 才生效)')
     .argument('<changeId>', 'change 目录 ID,如 add-login')
     .requiredOption('--finding <id>', 'finding ID(数字字符串)')
-    .requiredOption('--action <type>', 'ack 类型,如 ack-warning / ack-critical')
+    .requiredOption(
+      '--action <type>',
+      'ack 类型,如 ack-warning / ack-critical / **resign-c-simcode**',
+    )
     .option('--rationale <text>', 'AI 给出的 rationale(可选)')
-    .option('--target-severity <sev>', '目标 severity(可选,供审查参考)')
+    .option(
+      '--target-severity <sev>',
+      'v3 BLOCKER 4(plan-9j):resign-c-simcode action 用 — 目标 severity (WARNING / SUGGESTION)',
+    )
     .action(
       async (
         changeId: string,
@@ -75,10 +81,14 @@ export function buildAckCommand(): Command {
           process.exit(2);
         }
 
-        // --target-severity 仅对 downgrade action 有意义,否则提示忽略(继续执行)
-        if (opts.targetSeverity && opts.action !== 'downgrade') {
+        // --target-severity 对 downgrade 和 resign-c-simcode action 有意义,其他 action 时提示忽略(继续执行)
+        if (
+          opts.targetSeverity &&
+          opts.action !== 'downgrade' &&
+          opts.action !== 'resign-c-simcode'
+        ) {
           process.stderr.write(
-            'Warning: --target-severity only applies to action=downgrade, ignored.\n',
+            'Warning: --target-severity only applies to action=downgrade or resign-c-simcode, ignored.\n',
           );
         }
 
@@ -128,7 +138,11 @@ export function buildAckCommand(): Command {
     .description('User 确认 AI 提议的 ack,写入 ack-log.jsonl 并删除 pending 文件')
     .argument('<changeId>', 'change 目录 ID')
     .argument('<findingId>', 'finding ID(数字字符串)')
-    .action(async (changeId: string, findingId: string) => {
+    .option(
+      '--target-severity <sev>',
+      'v3 BLOCKER 4:仅 resign-c-simcode action 必填;confirm 时 user 指定目标 severity 并写回 marker',
+    )
+    .action(async (changeId: string, findingId: string, opts: { targetSeverity?: string }) => {
       const changeRoot = resolve(process.cwd(), 'forge', 'changes', changeId);
 
       // 查找 pending 文件(按时间戳升序,取最新)
@@ -173,6 +187,8 @@ export function buildAckCommand(): Command {
 
       // 构建正式 AckEntry(写入 ack-log.jsonl)
       // Windows 兼容:process.env.USER 常为 undefined,用 USERNAME 做 fallback
+      // target_severity 优先级:confirm --target-severity option > pending file 中的值
+      const resolvedTargetSeverity = opts.targetSeverity ?? payload.target_severity ?? null;
       const ackEntry: AckEntry = {
         schema: 'forge-ack-log/v1',
         kind: 'ack',
@@ -184,6 +200,10 @@ export function buildAckCommand(): Command {
         rationale: payload.rationale ?? null,
         git_head: getGitHead(changeRoot),
         finding_hash: null,
+        target_severity:
+          resolvedTargetSeverity === 'WARNING' || resolvedTargetSeverity === 'SUGGESTION'
+            ? resolvedTargetSeverity
+            : undefined,
         extra: {
           proposed_at: payload.timestamp,
           target_severity: payload.target_severity ?? null,

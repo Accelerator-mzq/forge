@@ -31,6 +31,8 @@ const ACTOR_VALUES = new Set(['ai-agent', 'human-override']);
 const REVIEW_OUTCOME_SEVERITY_CODES = new Set(['S', 'C', 'L']);
 // verify_findings.dimension 合法值(沿 design §2.2.2 三维度)
 const DIMENSION_VALUES = new Set(['completeness', 'correctness', 'coherence']);
+// plan-9c Task 1 新增:pause_decisions.chosen_option 合法值(1 | 2 | 3 | 4)
+const CHOSEN_OPTION_VALUES = new Set([1, 2, 3, 4]);
 
 /**
  * 校验 marker 对象的 schema 合法性。
@@ -67,6 +69,10 @@ export function validateMarkerSchema(m: unknown, file?: string): ValidationResul
     if (obj.verify_findings !== undefined) {
       results.push(checkVerifyFindingsArray(obj.verify_findings, file));
     }
+    // plan-9c Task 1 新增 — pause_decisions superset additive
+    if (obj.pause_decisions !== undefined) {
+      results.push(checkPauseDecisionsArray(obj.pause_decisions, file));
+    }
   } else if (schema === 'forge-review/v1') {
     results.push(checkTimestamp(obj, 'reviewed_at', file));
     results.push(checkActor(obj, 'reviewed_by', file));
@@ -74,6 +80,10 @@ export function validateMarkerSchema(m: unknown, file?: string): ValidationResul
     results.push(checkSha256(obj, 'content_hash', file));
     results.push(checkGitInfo(obj.git, file));
     results.push(checkReviewOutcomes(obj.review_outcomes, file));
+    // plan-9c Task 1 新增
+    if (obj.pause_decisions !== undefined) {
+      results.push(checkPauseDecisionsArray(obj.pause_decisions, file));
+    }
   } else if (schema === 'forge-verify-failed/v1') {
     results.push(checkTimestamp(obj, 'failed_at', file));
     results.push(checkStringArray(obj, 'reasons', file));
@@ -82,6 +92,10 @@ export function validateMarkerSchema(m: unknown, file?: string): ValidationResul
     // plan-9d Task 3 新增:verify_findings 数组校验(可选 superset)
     if (obj.verify_findings !== undefined) {
       results.push(checkVerifyFindingsArray(obj.verify_findings, file));
+    }
+    // plan-9c Task 1 新增
+    if (obj.pause_decisions !== undefined) {
+      results.push(checkPauseDecisionsArray(obj.pause_decisions, file));
     }
   } else if (schema === 'forge-review-failed/v1') {
     results.push(checkTimestamp(obj, 'failed_at', file));
@@ -96,6 +110,10 @@ export function validateMarkerSchema(m: unknown, file?: string): ValidationResul
       );
     }
     results.push(checkStringArray(obj, 'appended_tasks', file));
+    // plan-9c Task 1 新增
+    if (obj.pause_decisions !== undefined) {
+      results.push(checkPauseDecisionsArray(obj.pause_decisions, file));
+    }
   }
 
   return mergeResults(...results);
@@ -529,6 +547,171 @@ function checkVerifyFindingsArray(v: unknown, file?: string): ValidationResult {
           file,
         }),
       );
+    }
+  }
+  return mergeResults(...results);
+}
+
+// plan-9c Task 1:pause_decisions 数组校验
+// 校验范围:必填字段 / 类型 / 枚举值 / id 唯一性(沿 master §3.12.1 + design §2.1.5)
+// 不校验业务规则(option=3 必须有 non_blocking_rationale 等)— 那是 Task 2 fence 的事
+function checkPauseDecisionsArray(v: unknown, file?: string): ValidationResult {
+  if (!Array.isArray(v)) {
+    return failed({
+      artifact: 'marker',
+      field: 'pause_decisions',
+      message: 'must be array',
+      file,
+    });
+  }
+  const results: ValidationResult[] = [];
+  // id 唯一性校验(沿 checkVerifyFindingsArray 同模式)
+  const seenIds = new Set<number>();
+  for (let i = 0; i < v.length; i++) {
+    const p = v[i] as { id?: unknown };
+    if (typeof p?.id === 'number') {
+      if (seenIds.has(p.id)) {
+        results.push(
+          failed({
+            artifact: 'marker',
+            field: `pause_decisions[${i}].id`,
+            message: `pause_decision id ${p.id} 重复(同一 marker 内 id 必须唯一)`,
+            file,
+          }),
+        );
+      }
+      seenIds.add(p.id);
+    }
+  }
+  for (let i = 0; i < v.length; i++) {
+    const p = v[i] as Record<string, unknown> | null;
+    if (!p || typeof p !== 'object') {
+      results.push(
+        failed({
+          artifact: 'marker',
+          field: `pause_decisions[${i}]`,
+          message: 'must be object',
+          file,
+        }),
+      );
+      continue;
+    }
+    const fieldBase = `pause_decisions[${i}]`;
+    // 必填 8 字段(沿 design §2.1.5,v3 codex NIT 11 修订:7 → 8):id / paused_at / task_ref / issue_summary / severity / chosen_option / target_artifact / target_anchor
+    if (typeof p.id !== 'number') {
+      results.push(
+        failed({ artifact: 'marker', field: `${fieldBase}.id`, message: 'required number', file }),
+      );
+    }
+    if (typeof p.paused_at !== 'string' || !ISO_8601_RE.test(p.paused_at)) {
+      results.push(
+        failed({
+          artifact: 'marker',
+          field: `${fieldBase}.paused_at`,
+          message: 'must be ISO 8601 UTC (YYYY-MM-DDTHH:MM:SSZ)',
+          file,
+        }),
+      );
+    }
+    if (typeof p.task_ref !== 'string' || !p.task_ref) {
+      results.push(
+        failed({
+          artifact: 'marker',
+          field: `${fieldBase}.task_ref`,
+          message: 'required string (e.g., tasks.md#task-3)',
+          file,
+        }),
+      );
+    }
+    if (typeof p.issue_summary !== 'string' || !p.issue_summary) {
+      results.push(
+        failed({
+          artifact: 'marker',
+          field: `${fieldBase}.issue_summary`,
+          message: 'required non-empty string',
+          file,
+        }),
+      );
+    }
+    if (!isSeverity(p.severity)) {
+      results.push(
+        failed({
+          artifact: 'marker',
+          field: `${fieldBase}.severity`,
+          message: `must be one of ${[...SEVERITY_VALUES].join(', ')}`,
+          file,
+        }),
+      );
+    }
+    if (typeof p.chosen_option !== 'number' || !CHOSEN_OPTION_VALUES.has(p.chosen_option)) {
+      results.push(
+        failed({
+          artifact: 'marker',
+          field: `${fieldBase}.chosen_option`,
+          message: 'must be number in {1, 2, 3, 4}',
+          file,
+        }),
+      );
+    }
+    if (typeof p.target_artifact !== 'string' || !p.target_artifact) {
+      results.push(
+        failed({
+          artifact: 'marker',
+          field: `${fieldBase}.target_artifact`,
+          message: 'required string (e.g., proposal.md / tasks.md / design.md)',
+          file,
+        }),
+      );
+    }
+    if (typeof p.target_anchor !== 'string' || !p.target_anchor) {
+      results.push(
+        failed({
+          artifact: 'marker',
+          field: `${fieldBase}.target_anchor`,
+          message: 'required string (e.g., "## Out of Scope")',
+          file,
+        }),
+      );
+    }
+    // severity_acked_by / severity_acked_at 类型校验(null 或 string)
+    if (
+      p.severity_acked_by !== null &&
+      (typeof p.severity_acked_by !== 'string' || !p.severity_acked_by)
+    ) {
+      results.push(
+        failed({
+          artifact: 'marker',
+          field: `${fieldBase}.severity_acked_by`,
+          message: 'must be null or non-empty string',
+          file,
+        }),
+      );
+    }
+    if (p.severity_acked_at !== null) {
+      if (typeof p.severity_acked_at !== 'string' || !ISO_8601_RE.test(p.severity_acked_at)) {
+        results.push(
+          failed({
+            artifact: 'marker',
+            field: `${fieldBase}.severity_acked_at`,
+            message: 'must be null or ISO 8601 UTC',
+            file,
+          }),
+        );
+      }
+    }
+    // non_blocking_rationale / other_rationale / other_acked_by 类型校验(null 或 string;业务规则在 fence)
+    for (const field of ['non_blocking_rationale', 'other_rationale', 'other_acked_by']) {
+      const val = p[field];
+      if (val !== null && (typeof val !== 'string' || !val)) {
+        results.push(
+          failed({
+            artifact: 'marker',
+            field: `${fieldBase}.${field}`,
+            message: 'must be null or non-empty string',
+            file,
+          }),
+        );
+      }
     }
   }
   return mergeResults(...results);

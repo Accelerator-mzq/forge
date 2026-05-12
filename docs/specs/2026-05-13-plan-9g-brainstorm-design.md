@@ -91,7 +91,7 @@ src/cli/commands/review.ts(若有,否则同样模式落在 review-passed 生成�
    .review-passed 同上
 
 src/cli/commands/archive.ts
-   步骤 3.5b(field fence)+ 3.5c(rerun fence)新增
+   步骤 3.5a(field fence)+ 3.5b(rerun fence)新增
    不动:3.4 legacy/retrograde(plan-9j)/ 3.5 evidence(v0.4)/
         3.6 verify_findings(plan-9d)/ 3.7 pause(plan-9c)/
         3.8 ack-log(plan-9d)/ 3.9 three-level(plan-9e1)
@@ -251,16 +251,167 @@ mode 分支处理:
 
 ---
 
-## 4. process_evidence schema(沿 spec §2.7.2 + archive-summary.ts 风格)
+## 4. process_evidence schema(沿 spec §2.7.2 行 1097-1161 + archive-summary.ts 风格)
 
-详细字段字面沿 master spec `docs/specs/2026-05-10-v1.0-fusion-completion-design.md` §2.7.2(行 1097-1161 YAML 字面定义);本文档不重复 ~100 行字面,只列 TS interface 落地的关键决策:
+完整 TS interface 内联(沿 plan-9j Pattern A 教训 — plan 阶段字面不可省,避免下游 emergent fix):
+
+```typescript
+// src/core/schemas/process-evidence.ts — plan-9g Task 1
+// §2.7.2 forge-process-evidence/v1 schema:13 不变量字段 + 三源 cross-check
+// 沿 archive-summary.ts 模式:schema literal + 手写 interface + JSDoc
+
+/** ProcessEvidence 顶级 schema(沿 design §2.7.2 字段表) */
+export interface ProcessEvidence {
+  /** YAML schema identifier(沿 forge marker schema 同约定) */
+  schema: 'forge-process-evidence/v1';
+
+  /** 模式:full(默认重跑全部)| sample(抽样)| hash-only(仅 hash 校验,等同 v0.4 弱 fence) */
+  process_verification_mode: 'full' | 'sample' | 'hash-only';
+  /** mode != full 时必填 — ack-log 含对应 ack-mode 条目;CI 模式拒签 mode != full(沿 §2.7.4 B) */
+  process_verification_mode_acked_by: string | null;
+  /** ISO 8601 UTC */
+  process_verification_mode_acked_at: string | null;
+
+  /** 环境三因子(MAJOR #23 — 重跑前 env 一致校验,不一致 → WARNING) */
+  env_hash: EnvHash;
+
+  /** TDD RED→GREEN 事件序列(每 task 一条;沿 §2.7.2 + 不变量 1-6 + 11) */
+  tdd_event_chain: TddEventChain[];
+
+  /** verify 命令每次跑都 append(沿 §2.7.6 helper append-only;不变量 7) */
+  verify_invocations: VerifyInvocation[];
+
+  /** subagent 二段 review 痕迹(不变量 8) */
+  subagent_review_chain: SubagentReviewChain[];
+}
+
+/** 环境三因子哈希(MAJOR #23) */
+export interface EnvHash {
+  /** sha256(pnpm-lock.yaml 或 package-lock.json) */
+  lockfile_hash: string;
+  /** semver,e.g. "20.10.0" */
+  node_version: string;
+  /** "win32" | "darwin" | "linux"(沿 Node os.platform()) */
+  os_platform: 'win32' | 'darwin' | 'linux';
+}
+
+/** TDD 单 task RED→GREEN 事件链(每 task 一条) */
+export interface TddEventChain {
+  /** task 引用(沿 tasks.md 锚点) */
+  task_ref: string;
+  /** RED 阶段记录(tdd_exemption 非空时可省) */
+  red_commit: TddCommitRecord | null;
+  /** GREEN 阶段记录(必填) */
+  green_commit: TddCommitRecord;
+  /** light mode trivial change 免 RED 的 ack 引用(沿 §2.7.2 MAJOR #37;不变量 11) */
+  tdd_exemption: TddExemption | null;
+  /** tdd_exemption 非空时必填 — ack-log 中对应 user ack 的 acked_by */
+  tdd_exemption_acked_by: string | null;
+}
+
+/** RED / GREEN 单 commit 记录 */
+export interface TddCommitRecord {
+  /** git sha(40 hex) */
+  sha: string;
+  /** ISO 8601 UTC */
+  timestamp: string;
+  /** plain log 路径(forge/changes/<id>/.evidence/ 相对路径) */
+  log_path: string;
+  /** sha256(log content) */
+  log_hash: string;
+  /** 进程 exit code — RED 必 != 0 / GREEN 必 == 0(MAJOR #19,不变量 3/4) */
+  exit_code: number;
+  /** 结构化 reporter 报告路径(JUnit XML / TAP / Vitest JSON;MAJOR #20) */
+  runner_report_path: string;
+  /** sha256(reporter content) */
+  runner_report_hash: string;
+  /** RED 阶段必填:绑定具体失败的 test(MAJOR #24;不变量 5);GREEN 阶段 null */
+  expected_failures: ExpectedFailure[] | null;
+}
+
+/** RED 阶段期望失败的 test(MAJOR #24) */
+export interface ExpectedFailure {
+  /** 相对 repo 根 */
+  test_file: string;
+  /** 测试名(对应 reporter 中的 test 标识) */
+  test_name: string;
+  /** 失败类型 */
+  failure_type: 'assertion' | 'timeout' | 'error' | 'not-implemented';
+}
+
+/** light mode trivial change 免 RED(沿 §2.7.2 MAJOR #37) */
+export interface TddExemption {
+  /** 沿 config.yaml#writing_plans.light_threshold 触发(默认 200 行) */
+  reason: 'light-mode-trivial';
+  /** 变更行数 */
+  loc_delta: number;
+}
+
+/** verify 命令单次调用记录(沿 §2.7.6 helper append-only) */
+export interface VerifyInvocation {
+  /** ISO 8601 UTC */
+  invoked_at: string;
+  /** 涉及的 task(MAJOR #22:list,支持 per-task / change-level) */
+  task_refs: string[];
+  /** per-task = subagent 实施完单 task 立即跑;change-level = 主代理统一跑 */
+  verify_scope: 'per-task' | 'change-level';
+  /** pass | fail | skip */
+  result: 'pass' | 'fail' | 'skip';
+  /** 进程 exit code */
+  exit_code: number;
+  /** plain log 路径 */
+  log_path: string;
+  log_hash: string;
+  /** 结构化 reporter 报告路径 */
+  runner_report_path: string;
+  runner_report_hash: string;
+}
+
+/** subagent 二段 review 链(沿 §2.7.2 + 不变量 8) */
+export interface SubagentReviewChain {
+  task_ref: string;
+  /** subagent 实施的 commit */
+  implementer_commit: string;
+  /** spec 维度 review 多次迭代(每次都 append) */
+  spec_reviewer_iterations: ReviewIteration[];
+  /** quality 维度 review 多次迭代 */
+  quality_reviewer_iterations: ReviewIteration[];
+  /** 主代理 check-off 时间(ISO 8601 UTC) */
+  main_agent_check_off_at: string;
+}
+
+/** 单次 reviewer 迭代 */
+export interface ReviewIteration {
+  /** reviewer subagent 跑完时的 commit sha */
+  reviewer_commit: string;
+  /** needs-fix 走下一轮;approved 终态 */
+  outcome: 'needs-fix' | 'approved';
+  /** review 笔记 log 路径(forge/changes/<id>/.evidence/ 相对) */
+  notes_log_path: string;
+}
+
+/** ProcessVerificationConfig:forge/config.yaml#process_verification 字段类型 */
+export interface ProcessVerificationConfig {
+  /** 默认 'full' */
+  mode: 'full' | 'sample' | 'hash-only';
+  /** sample 模式抽样比例(0..1,默认 0.3) */
+  sample_ratio: number;
+  /** 单 task 重跑超时秒(默认 300) */
+  test_timeout_per_task: number;
+  /** 并发 worktree 上限(默认 2) */
+  max_parallel_reruns: number;
+}
+```
+
+### 4.0 关键决策点(沿 spec §2.7.2 字面 + 落地选型)
 
 - `schema: 'forge-process-evidence/v1'` literal(沿 forge marker schema 同约定)
-- 5 大类型 + 4 辅助:`ProcessEvidence`(顶级)/ `TddEventChain` / `TddCommitRecord` / `ExpectedFailure` / `TddExemption` / `VerifyInvocation` / `SubagentReviewChain` / `ReviewIteration` / `EnvHash` / `ProcessVerificationConfig`
-- 字段命名沿 spec §2.7.2 字面(`tdd_event_chain` / `verify_invocations` / `subagent_review_chain` / `env_hash` / `process_verification_mode` / `process_verification_mode_acked_by` / `tdd_exemption` / `expected_failures` / `runner_report_path` / `runner_report_hash` / `task_refs` / `verify_scope` 等)
-- `process_verification_mode: 'full' | 'sample' | 'hash-only'` 三档 literal union
+- 5 大类型(`ProcessEvidence` / `TddEventChain` / `VerifyInvocation` / `SubagentReviewChain` / `EnvHash`)+ 4 辅助类型(`TddCommitRecord` / `ExpectedFailure` / `TddExemption` / `ReviewIteration`)+ 1 config 类型(`ProcessVerificationConfig`)
+- 字段命名沿 spec §2.7.2 字面 snake_case(`tdd_event_chain` / `verify_invocations` / `subagent_review_chain` / `env_hash` / `process_verification_mode` / `process_verification_mode_acked_by` / `tdd_exemption` / `expected_failures` / `runner_report_path` / `runner_report_hash` / `task_refs` / `verify_scope` 等)
+- `process_verification_mode: 'full' | 'sample' | 'hash-only'` 三档 literal union(不留 string fallback)
 - `failure_type: 'assertion' | 'timeout' | 'error' | 'not-implemented'` 四档 literal union
-- 全 optional 字段在 fence ctx 构建时显式补默认或视为缺失 finding
+- `red_commit: TddCommitRecord | null`(tdd_exemption 非空时 null)+ `green_commit: TddCommitRecord`(必填)— 显式 null 表达 RED 缺失,fence 据此分支
+- `expected_failures: ExpectedFailure[] | null`(RED 必填,GREEN null)— null 表达"非 RED 阶段"语义
 
 ### 4.1 staging file schema
 
@@ -303,7 +454,7 @@ forge verify / review ──→ verify-passed / review-passed 生成路径
                              ▼
                     .verify-passed.yaml / .review-passed.yaml(含 process_evidence)
 
-[forge archive — archive.ts 步骤 3.5b/3.5c]
+[forge archive — archive.ts 步骤 3.5a/3.5b]
 
 archive 流程:
   ├── 读 marker.process_evidence
@@ -374,14 +525,14 @@ ack?: {
 
 **插入位**:步骤 3.5(v0.4 evidence 完整性,既有)之后,步骤 3.6(plan-9d verify_findings,既有)之前。
 
-**编号策略**:9g 新增 3.5b + 3.5c,**不改既有 3.4 / 3.5 / 3.6 / 3.7 / 3.8 / 3.9 编号**。
+**编号策略**:9g 新增 3.5a + 3.5b,**不改既有 3.4 / 3.5 / 3.6 / 3.7 / 3.8 / 3.9 编号**。
 
 ```typescript
 // 步骤 3.5 已有(v0.4)─ 不动 ──────────────────────────────────────────
 const evResult = await validateEvidence(verifyRec, verifyPath);
 // ... fail-fast ...
 
-// 步骤 3.5b(plan-9g):process-evidence field fence ─ 同步
+// 步骤 3.5a(plan-9g):process-evidence field fence ─ 同步
 const fieldCtx = await buildProcessEvidenceFenceContext({ ... });
 const fieldFenceResult = runFieldFence(fieldCtx);
 const fieldCritical = fieldFenceResult.filter(f => f.severity === 'CRITICAL');
@@ -392,7 +543,7 @@ if (fieldCritical.length > 0) {
   process.exit(1);
 }
 
-// 步骤 3.5c(plan-9g):process-evidence rerun fence ─ async,mode 分支
+// 步骤 3.5b(plan-9g):process-evidence rerun fence ─ async,mode 分支
 const rerunFenceResult = await runRerunFence(fieldCtx);
 const rerunCritical = rerunFenceResult.filter(f => f.severity === 'CRITICAL');
 if (rerunCritical.length > 0) {

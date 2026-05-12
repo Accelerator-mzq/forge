@@ -59,9 +59,12 @@ export async function validateVersionRetrograde(
   let logOutput: string;
   try {
     const relPath = relative(gitDir, markerPath);
+    // v9 round 2 修(plan-9j code quality reviewer I-1):maxBuffer 50MB 沿 src/core/hash/diff.ts 同 sister-pattern
+    // 默认 1MB 在 marker 历史大量 commit 时易超额触发 ERR_CHILD_PROCESS_STDIO_MAXBUFFER → 误 fail-closed 拒签
     const { stdout } = await execFileAsync('git', ['log', '-p', '--no-color', '--', relPath], {
       cwd: gitDir,
       encoding: 'utf8',
+      maxBuffer: 50 * 1024 * 1024,
     });
     logOutput = stdout;
   } catch (err) {
@@ -78,6 +81,8 @@ export async function validateVersionRetrograde(
   }
 
   // 4. 从 diff 中抽取所有 `created_by_tool_version: <semver>` 历史值
+  // [+\-] 前缀匹配 git diff 行首的 + / - 标记(对应该次 commit 增/删的 marker 字段值);
+  // 整块 stdout 非逐行匹配 — `+++ / ---` 文件头不含 `created_by_tool_version` 字段不会误匹
   const versionRegex = /[+\-]\s*created_by_tool_version:\s*['"]?([\d.\-+a-zA-Z]+)['"]?/g;
   const historyVersions: string[] = [];
   let m: RegExpExecArray | null;

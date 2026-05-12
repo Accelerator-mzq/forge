@@ -1,10 +1,11 @@
 // src/core/archive/resume-summary.ts — plan-9e1 Task 5(v2 BLOCKER 5)
 // forge archive --resume-summary <archive-id> 子流程实施
-// 四场景(v1 三场景 → v2 BLOCKER 5 +1 corrupt 路径):
+// 五场景(v1 三场景 → v2 BLOCKER 5 +1 corrupt 路径 → Task 6 Minor 1 +1 already-done 路径):
 //   1. archive 目录有 .tmp 无正式 .yaml + .tmp 内容合法 → rename(ok)
 //   2. archive 目录有 .tmp 无正式 .yaml + .tmp 内容损坏 → 拒签(corrupt,沿 master §3.12.3 exit 3)
 //   3. 都存在 → 拒签(conflict,无法判断 ground truth)
-//   4. 都不存在 → 报错(missing,状态损坏 / 无 summary 需要 resume)
+//   4. 无 .tmp 有正式 .yaml → ok(archive 已成功完成,无需 resume)— Task 6 Minor 1 修复
+//   5. 都不存在 → 报错(missing,状态损坏 / 无 summary 需要 resume)
 
 import { rename, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -37,12 +38,20 @@ export async function resumeArchiveSummary(
   const hasFinal = existsSync(finalPath);
 
   if (hasTmp && !hasFinal) {
+    // 场景 1/2:有 .tmp 无正式 .yaml → validate + rename
     // v2 BLOCKER 5:rename 前 readFile + parseYaml + schema 校验
     let parsed: unknown;
     try {
       const content = await readFile(tmpPath, 'utf8');
       parsed = parseYaml(content);
     } catch (err) {
+      // Minor 3 修复:ENOENT 归 missing,其他归 corrupt
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        return {
+          kind: 'missing',
+          message: `✗ 找不到 archive_summary.tmp.yaml(${tmpPath});文件在 existsSync 后消失(race condition)`,
+        };
+      }
       return {
         kind: 'corrupt',
         message: `✗ archive_summary.tmp.yaml YAML 解析失败(${tmpPath}):${(err as Error).message}`,
@@ -63,6 +72,13 @@ export async function resumeArchiveSummary(
       message: `✓ archive_summary.tmp.yaml → archive_summary.yaml (${archiveDir})`,
     };
   }
+  if (!hasTmp && hasFinal) {
+    // 场景 4(Task 6 Minor 1 修复):archive 已成功完成,无需 resume
+    return {
+      kind: 'ok',
+      message: `✓ archive_summary.yaml 已存在,无需 resume(${archiveDir})`,
+    };
+  }
   if (hasTmp && hasFinal) {
     // 场景 3:冲突,无法判断 ground truth
     return {
@@ -70,7 +86,7 @@ export async function resumeArchiveSummary(
       message: `✗ 两个 archive_summary 都存在(${archiveDir}/archive_summary.{tmp.,}yaml),无法判断哪个是 ground truth — 用户需手动检查后删一个再重跑(沿 design §2.4.5 .tmp 生命周期表)`,
     };
   }
-  // 场景 4:都不存在
+  // 场景 5:都不存在
   return {
     kind: 'missing',
     message: `✗ 找不到 archive_summary.{tmp.,}yaml(${archiveDir});该 archive 可能从未生成 summary(v0.4 老归档),或目录损坏`,

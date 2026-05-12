@@ -3,6 +3,7 @@
 //   forge archive <changeId>             — 正常归档(检查 marker + hash + lock)
 //   forge archive <changeId> --force     — 接受 human-override 标记 或 非 git 项目
 //   forge archive --recover              — 从半完成状态恢复
+//   forge archive --resume-summary <archiveId> — 恢复半完成 .tmp summary rename
 
 import { Command } from 'commander';
 import { readFile, rm, rename, readdir, copyFile, mkdir, writeFile } from 'node:fs/promises';

@@ -18,7 +18,9 @@
   ],
   "scripts": {
     "build": "node scripts/copy-templates.mjs && tsc -p tsconfig.json",
-    "test": "vitest run",
+    "test": "vitest run && pnpm test:gate",
+    "test:gate": "node scripts/check-release-gate.mjs",
+    "test:gate:release": "node scripts/check-release-gate.mjs --release",
     "test:watch": "vitest",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",

@@ -7,7 +7,7 @@ metadata:
   author: forgeue project (extracted to generic)
   version: "1.0-generic"
   scenario_subtype_count: 28
-  case_study_count: 3
+  case_study_count: 4
   retrospect_protocol: trigger-type-matrix(5 types × per-type intensity)
 ---
 
@@ -710,6 +710,124 @@ git update-ref refs/heads/<wrong-branch> <prior-base-sha>
 
 ---
 
+### Case 04: forge-repo / Plan 9j / marker version + deprecation 全 6 task + Task 6.2
+
+**Date**:2026-05-13
+**Trigger Type**:Type 1(3-stage full retrospect)
+**Project context**:TS/Node monorepo(opsp/forge-repo),plan-9j 6 Task + Task 6.2(marker schema 加 created/resigned_by_tool_version + `forge upgrade --resign-markers` option 形态 + archive.ts 集成 legacy-exemption + version-retrograde fence + 53 new tests + 9a interface freeze 例外:ack.ts 扩 --target-severity + resign-c-simcode action + 用户工作流真闭环 e2e);plan-9j v9 经 9 轮 codex review 收敛,P50 4.8d 实际同
+
+**Subagent dispatch**:
+| Subagent | Scenario subtype(§1.X.Y)| Model | $cost | Verdict |
+|---|---|---|---|---|
+| Task 6.1 implementer | §1.1.3 Multi-file integration | sonnet | ~$0.20 | DONE |
+| Task 6.1 spec_reviewer | §1.2.3 cross-phase reasoning | sonnet | ~$0.10 | ✅ 11/11 |
+| Task 6.1 code_quality_reviewer | §1.3.4 runtime correctness | sonnet | ~$0.15 | ⚠️ 0C/2I/3M |
+| Task 6.1 round 2 + re-review | §1.1.3 + §1.3.4 | sonnet | ~$0.30 | ✅ 4/4 |
+| Task 1 implementer | §1.1.3 Multi-file integration | sonnet | ~$0.20 | DONE |
+| Task 1 spec_reviewer | §1.2.3 cross-phase reasoning | sonnet | ~$0.10 | ✅ 7/7 |
+| Task 1 code_quality_reviewer | §1.3.4 | sonnet | ~$0.20 | ⚠️ 0C/2I/2M |
+| Task 1 inline chore | direct | controller(opus) | ~$0.05 | I-1 + M-4 fix |
+| Task 2 implementer | §1.1.3 Multi-file integration | sonnet | ~$0.30 | DONE |
+| Task 2 spec_reviewer | §1.2.4 acceptance criteria | sonnet | ~$0.15 | ✅ 5/5 |
+| Task 2 code_quality_reviewer | §1.3.4 | sonnet | ~$0.20 | ⚠️ 0C/3I/4M |
+| Task 2 round 2 + re-review | §1.1.3 + §1.3.4 | sonnet | ~$0.30 | ✅ 6/6 |
+| Task 3 implementer | §1.1.2 pattern matching + §1.1.3 | sonnet | ~$0.15 | DONE |
+| Task 3 spec_reviewer | §1.2.1 string matching | sonnet | ~$0.10 | ✅ 4/4 |
+| Task 3 code_quality_reviewer | §1.3.4 | sonnet | ~$0.15 | ⚠️ 0C/2I/3M |
+| Task 4 implementer | §1.1.3 + sister-pattern lookup | sonnet | ~$0.25 | DONE(plan inline 2 漏 import 自修) |
+| Task 4 spec_reviewer | §1.2.4 | sonnet | ~$0.10 | ✅ 5/5 |
+| Task 4 code_quality_reviewer | §1.3.4 | sonnet | ~$0.15 | ⚠️ 0C/2I/3M |
+| Task 4 inline chore | direct | controller(opus) | ~$0.05 | I-1 maxBuffer + I-2 注释 fix |
+| Task 5 implementer | §1.1.3 + §1.4.2 integration test(大 scope) | sonnet | ~$0.50 | **DONE_WITH_CONCERNS** — emergent fix on Task 2 文件 |
+| Task 5 spec_reviewer | §1.2.4 | sonnet | ~$0.15 | ✅ 8/8 |
+| Task 5 code_quality_reviewer | §1.3.4 | sonnet | ~$0.25 | ⚠️ 0C/2I/4M |
+| Task 5 inline chore | direct | controller(opus) | ~$0.05 | I-1 JSON parse 容错 + I-2 SEMVER 顶层 |
+| Task 6.2(合 Task 5 dispatch)| §1.5.2 doc rewrite | sonnet | included | DONE |
+| Task 6.2 template sync chore | direct | controller(opus) | ~$0.05 | working tree modified template 兜底 fix |
+| Final reviewer | cross-task synthesis | sonnet | ~$0.50 | ⚠️ Approved with caveats(全 Minor 无阻塞) |
+| Retrospect(本次)| Type 1 mandatory | controller(opus) | ~$0.50 | Q1/Q3/Q4 YES → add Case 04 + §6 2 rows |
+
+**Real issues caught / failed**:
+| Issue | Severity | Caught by | Scenario subtype 验证 |
+|---|---|---|---|
+| Task 6.1 confirm invalid --target-severity silent discard(下游 Task 2 真调 CLI 会触发) | Important | Task 6.1 code_quality reviewer round 1 | §1.3.4 runtime correctness silent failure ✓ |
+| Task 6.1 extra.target_severity 双存储语义注释缺 | Important | Task 6.1 code_quality reviewer | §1.3.3 maintainability sync drift |
+| Task 6.1 CLI help markdown `**resign-c-simcode**` 字面渲染 + `v3 BLOCKER 4` plan-internal ref | Minor(user-facing)| Task 6.1 code_quality reviewer | §1.3.1 style/UX |
+| Task 1 marker-schema 错误消息 "must be S/C/L" 未随 Set 扩 6 元素更新 | Important | Task 1 code_quality reviewer | §1.3.4 user-facing UX gap |
+| Task 1 three-level-fence outcomes `?? []` 不严谨(falsy 非 nullish 误读)| Minor | Task 1 code_quality reviewer | §1.3.3 maintainability |
+| Task 1 collect outcomes `acked_at: ''` placeholder 长期隐患 | Important | Task 1 code_quality reviewer | §1.3.3 sync drift |
+| **Task 2 isNativeV10 invalid string `''` / `'invalid'` 误判 silent skip** | **Important runtime correctness** | Task 2 code_quality reviewer | §1.3.4 silent failure |
+| Task 2 proposeForCSimcode 漏 spawn cwd 显式绑定 | Important | Task 2 code_quality reviewer | §1.3.3 maintainability + sync drift |
+| Task 2 forgeCliPath `?? ''` 兜底空字符串 → spawn ENOENT 误导 | Important | Task 2 code_quality reviewer | §1.3.3 UX |
+| Task 3 legacy-exemption null message 显示 `实际:object` 误导 | Important(reviewer)/ Minor(实操) | Task 3 code_quality reviewer | §1.3.3 UX |
+| Task 3 V10_SEMVER_RE vs Task 2 SEMVER_MAJOR_RE 跨模块 drift | Important | Task 3 code_quality reviewer | §1.3.3 cross-module drift |
+| **Task 4 version-retrograde maxBuffer 缺失 → 大 git history 误 fail-closed** | **Important runtime correctness 生产 false positive** | Task 4 code_quality reviewer | §1.3.4 silent failure |
+| Task 4 versionRegex `[+\-]` 前缀注释意图不明确 | Important(spec 上是 maintainability) | Task 4 code_quality reviewer | §1.3.1 注释质量 |
+| **Task 2 plan inline 漏实现 v2 BLOCKER 4 line 102 "confirm 后 marker 写回 lookupConfirmedCSimcode"** | **Critical(plan 字面要求但 inline 缺;若不修则用户工作流闭环不通,Task 5 e2e case 5 死循环)** | **Task 5 implementer e2e case 5 实施时发现** | **NEW Pattern A:下游 Task implementer 兜底跨 Task scope 修上游 Task plan inline latent gap** |
+| Task 5 lookupConfirmedCSimcode 单行 JSON 损坏 → 整批 ack-log 不可读 → 重复 propose 困惑 user | Important | Task 5 code_quality reviewer | §1.3.4 defensive coding edge case |
+| Task 5 SEMVER_MAJOR_RE 函数体内定义(应模块顶层) | Important(reviewer)/ Minor(实操) | Task 5 code_quality reviewer | §1.3.3 maintainability |
+| **Task 6.2 漏 sync `src/core/templates/commands/archive.md`(build script copy 自动产物未 commit)** | **Important(controller push 前 git status -sb 发现)** | **controller cross-verify** | **NEW Pattern B:implementer 漏 sync build script auto-copy 副本** |
+| 2 commits subject 含 "@" cosmetic(Task 1 + Task 1 chore PowerShell here-string 残留) | Minor cosmetic | Task 1 spec reviewer + final reviewer | §1.3.1 commit message style — Implementer Shell 适配能力不一致 |
+
+**Lesson**(reinforce / new pattern / 边界 refinement):
+
+1. **NEW Pattern A — 下游 Task implementer 跨 Task scope 兜底修上游 Task plan inline latent gap**(plan-9j 首次实证,§6 catalog 加新行)
+   - 实证:plan-9j v2 BLOCKER 4 line 102 plan 字面写"confirm 后 ack-log 读 → 改回 marker severity 写回",但 Task 2 plan inline code 块**只给 spawn `forge ack propose` 真调代码**,没给 lookupConfirmedCSimcode helper 字面 inline。Task 2 implementer 按 plan 字面 transcribe → 实施完整(propose 阶段);Task 2 spec/code_quality reviewer 对照"已 implemented 字面"全 ✓(因 plan 字面没有该 helper 让 reviewer 找)。Task 5 e2e case 5 (propose → confirm → 重跑) 闭环时死循环 — implementer 诊断为缺 helper → 跨 Task scope 修 resign-markers.ts。
+   - **与 §6 catalog "Plan inline code 含 latent bug" 行的区别**:那行是 "plan inline code 自带 bug,Sonnet code_quality 兜底"。本次 Pattern A 是**"plan 字面要求行为但 inline 缺完整实现"**— reviewer 找不到(因没字面 inline 可对照),只有下游 Task 集成 e2e 真跑时才暴露。
+   - **修复约束**(已成功实操):
+     - implementer 主动 escalate(observation 段 + commit message 自报 "Task X 发现 Task Y 实现缺口")
+     - controller 接受 + 透明记录(plan-9j Task 5 commit 71e9181 自报)
+     - **preferred**:e2e 测试设计成"发现 plan inline gap 的 ground truth"— plan-9j Task 5 e2e case 5 闭环测试就是该 ground truth(propose → confirm → 重跑 → archive 必须全过)
+   - **§3 cross-scenario discipline 加**:dispatch implementer prompt escape valve 第二条:"若 plan 字面要求 X 但 inline 缺该实现(eg. plan 写 'confirm 后 X 处理' 但 inline 没该 X 处理 code),implementer **不擅自加** — self-review 标 observation。若后续 Task 集成必依赖,explicit BLOCKED + escalate"
+   - **§2.1 implementer playbook 加**:Self-Review checklist "对照 plan 字面要求行为列表,inline 是否有对应代码实现?若 plan 写 '行为 X' 但 inline 缺 X code → 标 observation"
+
+2. **NEW Pattern B — implementer 漏 sync build script auto-copy 副本**(plan-9j Task 6.2 实证,§6 catalog 加新行)
+   - 实证:Task 6.2 implementer 改 commands/archive.md(顶层)但漏 sync src/core/templates/commands/archive.md(项目 build script `scripts/copy-templates.mjs` 自动 copy 副本)。pnpm build 在后续 Task 5 inline verify 时自动触发 sync,working tree modified 但 implementer 未 add+commit。Controller push 前 `git status -sb` 兜底发现 → 单独 chore commit `chore(9j Task 6.2 sync)`。
+   - **类比 Case 01 Lesson 5 chore commit infra fix**:但 Case 01 是 prettierignore 配置 fix,本次是 implementer 实施时本应同步两文件却漏一,controller 兜底 commit。
+   - **§2.1 implementer playbook 加**:Self-Review checklist 最后一条:"**`git status -sb` 检查无 modified file**;若 build script(如 `copy-templates.mjs` / dist build / generated docs)自动 sync 副本 → 一并 `git add` + commit"
+   - **dispatch prompt 加**:列出项目所有自动 copy script 路径(`scripts/copy-templates.mjs` / `pnpm build` 后产生 dist/ / 其他生成 generated_docs/)— 让 implementer 知晓哪些路径 build 后会被自动同步
+   - **preferred long-term**:改 build script — 不生成副本,直接 commit 副本(eliminate auto-copy ambiguity);或者把 templates/dist/generated_docs 全部 .gitignore + .gitattributes(只 tracked 原文件)
+
+3. **REINFORCE — Important issue inline fix 模式高效率**(plan-9e1 Case 01 + plan-9j Case 04 累计)
+   - plan-9j 6 个 inline chore commits(Task 1 / Task 4 / Task 5 / Task 6.2 template sync + 2 个 round 2):**全是 trivial 1-3 line trivial fix 不值得 dispatch round 2 implementer**
+   - plan-9j inline fix 比例:6/13 commits = 46% chore;比 Case 01 (1/6 chore prettierignore) 比例高 — 因 plan-9j code quality reviewer 抓到 Important 数量多(总 13 Important);严格 user 偏好"Important 必修" → inline 高效率
+   - **§3.3 inline vs round 2 决策表 reinforce**:trivial Important(单行注释 / message text / 常量提升 / maxBuffer 加 1 option)→ inline;logic 改动 / 多 line 重写(invalid 校验 + 类型守卫 + spawn cwd)→ round 2
+
+4. **REINFORCE — §1.3.4 Sonnet code_quality reviewer 兜底有效**(plan-9j 累计 14 Important caught 中 12 个由 code_quality reviewer 抓,其余 2 个由 controller cross-verify + downstream Task implementer 抓)
+   - Task 6.1 confirm invalid silent discard / extra 注释 / CLI help cleanup
+   - Task 1 错误消息双格式扩 / outcomes guard / acked_at placeholder
+   - Task 2 isNativeV10 invalid / cwd / forgeCliPath
+   - Task 3 null message / V10 vs SEMVER drift
+   - Task 4 maxBuffer / versionRegex 注释
+   - Task 5 lookupConfirmedCSimcode JSON / SEMVER 顶层
+   - **强化 plan-7 Case 01-03 + plan-9j Case 04 总结**:§1.3.4 Sonnet code_quality MANDATORY 是 plan-9j 实操高 Important caught 的核心 dependency
+   - **§1.3.4 不可降级 Haiku 再次实证**
+
+5. **REINFORCE — Sonnet implementer emergent fix 自报 + escalate 机制有效**(plan-9j 首次实证;plan-7 系列未见)
+   - Task 5 implementer 自报 "在 Task 5 范围内修复(修改了 Task 2 已完成的文件 resign-markers.ts)" — implementer 自身合规度评估(超 anti-pattern 但合理逻辑)
+   - 合规链路:implementer 写 e2e → e2e fail → 诊断为 plan v2 BLOCKER 4 line 102 字面要求未实现 → 修 Task 2 文件 + Observation 段 escalate + commit message 透明记录
+   - controller(本次)接受 + commit message 自报 → plan-9 系列首次跨 Task emergent fix,留 retrospect 标 NEW Pattern A
+   - **强化**:implementer 自报 emergent fix 必经 controller 接受 / 退回路径,不可悄悄改
+
+6. **REINFORCE — controller `git status -sb` push 前 cross-verify 防漏 sync**(plan-9j Pattern B 实证)
+   - Task 6.2 commit d8a2ca5 后 controller push 前 `git status -sb` 看到 modified `src/core/templates/commands/archive.md` — 兜底 chore commit
+   - **强化 §3.2 cross-verify 5 类**:加第 6 类:**push 前 `git status -sb` 必跑**(空 working tree 是 push 前置)— Pattern B 防御
+
+7. **NEW observation — 2 commit subject "@" 字符 cosmetic(Implementer PowerShell here-string 适配)**
+   - Task 1 implementer + Task 1 inline chore 用 PowerShell `git commit -m @'...'@` here-string 但 subject 含 "@" 前缀(`@'` / `'@` 字面 leak 进 subject 字符)
+   - Task 1 round 1 implementer 用 here-string,Task 6.1 round 1 同;但 Task 6.1 commits 是 PowerShell 友好的 here-string syntax;Task 1 implementer 写法导致 @ leak
+   - **后续 Task** controller 改 dispatch prompt 用 `git commit -F .git/COMMIT_MSG_xxx.txt` 文件模式 — 完全消除 @ 字符 leak。Task 2-Task 6.2 全 PASS(0 commit 含 @)
+   - **§2.1 implementer playbook 加(Windows + PowerShell environment)**:"commit message 用 `git commit -F <file>` 文件模式,避免 PowerShell here-string `@'...'@` 残留 @ 字符泄漏 subject"
+
+**Cost vs all-Opus alternative**:
+- 实际:7 implementer × 1-2 round(sonnet $0.15-0.50)+ 14 reviewer(sonnet $0.10-0.50)+ 4 inline chore(opus controller $0.05 ea)+ 1 final reviewer(sonnet $0.50)+ 1 retrospect(opus controller $0.50)≈ **$5.50**
+- 全 Opus 假设:7 implementer + 14 reviewer + final + retrospect ≈ **$22-30**
+- 节省 ratio:~78%
+- **质量**:13 commits 全 commit + push origin/feature/v1.0-fusion-completion-design + 0 regression(926 PASS) + e2e case 5 真闭环 verified + plan-9j 完成 + Final reviewer ⚠️ Approved with caveats(全 Minor 无阻塞)
+- **emergent fix 价值**:Task 5 implementer 兜底 Task 2 plan inline gap,otherwise 用户工作流闭环不通(需 plan 修订 + Task 2 重跑 → 多至少 0.5 day);Sonnet implementer 的 reasoning + self-escalate 路径直接 unblock plan-9j 整体闭环
+
+---
+
 ## §6 Pattern Catalog(failure mode → scenario subtype + recovery)
 
 | Subagent failure mode | Root cause(scenario subtype 误配)| Prevention | Recovery |
@@ -729,6 +847,8 @@ git update-ref refs/heads/<wrong-branch> <prior-base-sha>
 | **Plan inline 跨 build/runtime 边界(rootDir / outDir / package boundary)— controller pre-dispatch signature check 漏(see §5 Case 03 Pattern D)**| controller 只 grep export + signature,**未读 tsconfig.json `rootDir/include/exclude` 看 import path 是否跨边界**;此类 latent bug typecheck 立刻抓但不在 controller 视野 | §1.1.3 Multi-file integration dispatch 前 mandatory step:**read tsconfig.json + 检查 plan inline import path 是否跨 rootDir(典型征兆:含 `../../../` + 跨包名)** → 跨边界 → 标 NEEDS_REWRITE 给 implementer dynamic import workaround 或调 build 配置 | Sonnet implementer 自修(dynamic import + new URL workaround;但留 prod build 风险 — see Pattern E) |
 | **CLI flag/option 死代码(option declared 但 action 不引用 → silent no-op;see §5 Case 03 Pattern F)**| §1.2.x spec_reviewer 只看 imports + signature + commit,未 grep flag 在 action 内引用次数 | controller pre-dispatch 跑 `grep -c "opts\\.<flagName>" <action-file>` 给 spec-reviewer;§1.2.4 acceptance reviewer 加"flag 实际被 action 引用"verify 项 | code_quality reviewer 兜底抓到;round 2 implementer 实现 flag 的真实逻辑 |
 | **Spike workaround 留 prod build 风险(dynamic import / `as unknown as` / `// @ts-ignore` / `/* @vite-ignore */` 解 typecheck 但不解 runtime;see §5 Case 03 Pattern E)**| 短期 unblock 但 dist/ build 不含跨包源 → ERR_MODULE_NOT_FOUND / runtime type error | Phase final reviewer **必扫**所有 escape hatch(grep `as unknown as / @ts-ignore / @vite-ignore / await import\\(`)→ PR description 必标 "release 前 follow-up: <issue>";不阻塞 PR merge 但记入 Phase F gate | Phase F release 前修(迁移到 src/ 内 / 改 build script 复制 / 改正式 env 加载) |
+| **下游 Task implementer 兜底跨 Task scope 修上游 Task plan 字面要求但 inline 缺实现的 latent gap(see §5 Case 04 Pattern A)**| 上游 Task plan 字面要求某 helper / 行为(eg. "confirm 后 marker 字段写回"),但 plan inline code 块缺该 helper 完整代码;上游 spec/code_quality reviewer 只对照"已 implemented 字面"无法发现 gap;下游 Task 真集成 e2e 时才暴露 | dispatch implementer prompt 强化 escape valve 第二条:"若 plan 字面要求 X 但 inline 缺该实现,implementer self-review 段标 observation,不擅自加。若后续 Task 集成必依赖,**explicit BLOCKED + escalate** 让 controller 决定派 emergent fix 还是退回 plan 修订"。Plan reviewer 在 plan 评审阶段加"plan 字面 vs inline 一致性"扫描 — 字面要求项必有 inline code | Controller 接受 emergent fix(commit message 透明记录"X Task 发现 Y Task 实现缺口"),或退回 plan 修订重跑上游 Task。**preferred**: e2e 测试设计成发现 plan inline gap 的 ground truth |
+| **implementer 改顶层 file 漏 sync build script auto-copy 副本(see §5 Case 04 Pattern B)**| 项目含 build script 自动 copy 顶层 file 到 generated/templates 目录(`scripts/copy-templates.mjs` 类);implementer 改顶层但漏 add 副本;`pnpm build` 后 working tree modified 但未 commit | §2.1 implementer self-review checklist 加最后一条:**`git status -sb` 检查无 modified file**;若 build script 自动 sync 副本 → 一并 `git add` + commit。Dispatch prompt 列出项目所有自动 copy script 路径让 implementer 知晓 | controller push 前 `git status -sb` 兜底发现 → 单独 chore commit `chore(sync): xxx-副本 同步顶层` 显式记录;**preferred**: 改 build script 直接 commit 副本而非生成(eliminate auto-copy ambiguity) |
 
 ---
 

@@ -55,7 +55,14 @@ export function buildUpgradeCommand(): Command {
         const { resignChangeMarkers } = await import('../../core/upgrade/resign-markers.js');
         // v7 BLOCKER 1:计算 forgeCliPath(dist/cli/index.js 真路径,沿 process.argv[1] 或 import.meta.url 推导)
         // process.argv[1] 是当前运行的入口脚本(即 dist/cli/index.js;npx forge 时同);测试可 mock
-        const forgeCliPath = process.argv[1] ?? '';
+        // v9 round 2 修(plan-9j code quality reviewer I-3):空 forgeCliPath 显式抛错,避免后续 spawn ENOENT 误导
+        const forgeCliPath = process.argv[1];
+        if (!forgeCliPath) {
+          process.stderr.write(
+            'forge upgrade --resign-markers: forge CLI path unavailable (process.argv[1] is empty);请通过 node 或 npx 调用\n',
+          );
+          process.exit(2);
+        }
         const results = await resignChangeMarkers(forgeRoot, opts.resignMarkers, forgeCliPath);
 
         // 输出报告

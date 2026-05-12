@@ -59,9 +59,12 @@ async function resignOneMarker(
   // v3 BLOCKER 3 修订:判定依据是 `resigned_by_tool_version` 字段(沿 v2 选项 C),
   // 不再用 `created_by_tool_version >= 1.0.0` 判定(原 v1 逻辑覆写 created,v3 改保留)
   const alreadyResigned = typeof marker.resigned_by_tool_version === 'string';
-  const isNativeV10 =
-    typeof marker.created_by_tool_version === 'string' &&
-    !marker.created_by_tool_version.startsWith('0.');
+  // v9 round 2 修(plan-9j code quality reviewer I-1):用 SEMVER 严格判定 + major 比较,防 invalid string 误 skip
+  // 沿 marker-schema.ts:29 SEMVER_RE 同模式,只取 major 部分
+  const SEMVER_MAJOR_RE = /^(\d+)\./;
+  const createdRaw = marker.created_by_tool_version;
+  const createdMatch = typeof createdRaw === 'string' ? SEMVER_MAJOR_RE.exec(createdRaw) : null;
+  const isNativeV10 = createdMatch !== null && parseInt(createdMatch[1]!, 10) >= 1;
   if (alreadyResigned || isNativeV10) {
     return {
       kind: 'skipped-already-v1',
@@ -86,7 +89,7 @@ async function resignOneMarker(
         // v7 BLOCKER 1 修订:传 forgeCliPath(从 resignChangeMarkers 接收的参数),不是 changeDir
         needsCPropose = true;
         // exitCode 此处不用(propose 写 pending 后 exit 1 是预期行为,caller 检查 needsCPropose 标志)
-        const { pendingDirAfter } = await proposeForCSimcode(forgeCliPath, changeId, i, o);
+        const { pendingDirAfter } = await proposeForCSimcode(forgeCliPath, changeId, i);
         pendingPaths.push(pendingDirAfter);
       }
     }
@@ -111,11 +114,9 @@ async function resignOneMarker(
   await copyFile(markerPath, stashPath);
 
   // 步骤 2:加 resigned_by_tool_version 字段(superset additive),保留 created 不变
-  // v3 BLOCKER 2 修订:**不覆写** created_by_tool_version(保留原值),**加** resigned_by_tool_version 新字段
-  // 沿 design §3.4.4 修订:resign 后 marker 区分 created(原始) vs resigned(升级时机)
-  if (typeof marker.created_by_tool_version !== 'string') {
-    // 老 marker 缺字段时,只设 resigned 字段(created 隐含 <1.0.0)
-  }
+  // v3 BLOCKER 2 修订:不覆写原 created_by_tool_version(保留原值),加 resigned_by_tool_version 新字段
+  // 沿 design §3.4.4:resign 后 marker 区分 created(原始)vs resigned(升级时机)
+  // 老 marker 缺 created 字段时,只设 resigned 字段(created 隐含 <1.0.0)
   marker.resigned_by_tool_version = cliVersion;
 
   // 步骤 3:改标 process_evidence_unavailable_legacy meta(不自动填空 verify_findings/pause_decisions/process_evidence)
@@ -176,10 +177,11 @@ async function proposeForCSimcode(
   forgeCliPath: string, // dist/cli/index.js 路径(测试可注入 mock)
   changeId: string,
   outcomeIndex: number,
-  outcome: Record<string, unknown>,
 ): Promise<{ exitCode: number; pendingDirAfter: string }> {
   // v3 BLOCKER 4:findingId 用数字索引(Windows 路径合规 + 9a listPending 正则匹配)
   const findingId = String(outcomeIndex);
+  // v9 round 2 修(plan-9j code quality reviewer I-2):显式 cwd 绑定,消除父子 cwd 隐式继承依赖
+  const cwd = process.cwd();
   // v6 BLOCKER 1:真 spawn forge ack propose(CI=false 让 propose 不被 9a CI 拒绝)
   const res = spawnSync(
     'node',
@@ -195,13 +197,11 @@ async function proposeForCSimcode(
       '--rationale',
       `forge upgrade --resign-markers: C 简码需 user 判定 target severity`,
     ],
-    { encoding: 'utf8', env: { ...process.env, CI: 'false' } },
+    { encoding: 'utf8', env: { ...process.env, CI: 'false' }, cwd },
   );
-  // outcome 参数在 v6 BLOCKER 1 修订后不再直接用(只传 findingId + action + rationale 给 ack CLI)
-  void outcome;
   return {
     exitCode: res.status ?? -1,
-    pendingDirAfter: join(process.cwd(), 'forge', 'changes', changeId, '.evidence', 'pending-acks'),
+    pendingDirAfter: join(cwd, 'forge', 'changes', changeId, '.evidence', 'pending-acks'),
   };
 }
 

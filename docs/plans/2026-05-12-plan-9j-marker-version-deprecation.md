@@ -2,18 +2,69 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development(推荐)或 superpowers:executing-plans。Steps 用 checkbox(`- [ ]`)语法跟踪。沿 plan-9c / plan-9e1 同模式,**不必 invoke `forge:writing-skills`**(本 plan 不是新 skill 开发);走标准 TDD/SDD。
 
-**Goal**:落地 v1.0 §3.4 *marker version + deprecation 完整协议* — marker schema 加 `created_by_tool_version` semver 字段(超集兼容,老 marker 缺等价 `<1.0.0`);`forge upgrade --resign-markers` 子命令一次性升级 v0.4 marker 到 v1.0(简码 S/L 自动映射 + C 走 ack.ts propose/confirm 协议交互式询问 / 不自动填空 process_evidence/verify_findings/pause_decisions 改标 `process_evidence_unavailable_legacy: true`);archive.ts 加 legacy 精确豁免表(13 不变量中 #1-8/10/13 跳过,**#9/11/12 保留 + 反向加固**)+ version retrograde fence(git history 检查 + `legacy=true ⊥ version>=1.0.0` 互斥)+ exit code 对齐 master §3.12.3(0/1/2 三档,沿 NIT 二轮 #10)。
+**Goal**:落地 v1.0 §3.4 *marker version + deprecation 完整协议* — marker schema 加 `created_by_tool_version` + `resigned_by_tool_version` semver 字段(超集兼容,老 marker 缺等价 `<1.0.0`);`forge upgrade --resign-markers <changeId>` **option** flag(对齐 spec line 1763 + master line 503 冻结,不是 subcommand)一次性升级 v0.4 marker 到 v1.0(简码 S/L 自动映射 + C 走 ack.ts propose/confirm 协议交互式询问 / 不自动填空 process_evidence/verify_findings/pause_decisions 改标 `process_evidence_unavailable_legacy: true`);archive.ts 加 legacy 精确豁免表(13 不变量中 #1-8/10/13 跳过,**#9/11/12 保留 + 反向加固**)+ version retrograde fence(git history 检查 + **resigned-aware 互斥**:`legacy=true ⊥ (created_by_tool_version >= 1.0.0 且 resigned_by_tool_version 缺失)`,沿 v2 选项 C)+ exit code 对齐 master §3.12.3(0/1/2 三档,沿 NIT 二轮 #10)。
 
-**Architecture**:五层 — (1) **Marker schema 层**:`src/core/markers/types.ts` 四 marker interface 加 `created_by_tool_version?: string` 字段(superset additive,老 marker 缺等价 `<1.0.0`);`src/core/validate/marker-schema.ts` 加 `checkSemverString` helper(沿 ARCHIVE_SUMMARY_SEMVER_RE 同模式)+ 四 schema 分支 optional 字段校验。 (2) **Upgrade CLI 层**:`src/cli/commands/upgrade.ts` 扩 `.command('resign-markers')` 子命令(沿 v0.3 现有 5 阶段事务模式拆分新路径);`src/core/upgrade/resign-markers.ts` 模块化实施(SCAN markers → 简码映射 → C 简码 propose ack.ts → 改字段 → 写 ack-log resign 行);**不自动填空数组字段**(填空=工具帮 AI 伪造证据,违反 AI 反向加固) — 改标 `process_evidence_unavailable_legacy: true` meta 字段。 (3) **Archive legacy 豁免层**:`src/core/archive/legacy-exemption.ts` 模块(沿 plan-9d verify-findings-fence.ts / plan-9c pause-decisions-fence.ts 同模式)— `validateLegacyExemption(marker, processEvidence?)` 函数,按 13 不变量精确豁免表(design §3.4.4.1)裁决;**`legacy=true ⊥ version>=1.0.0` 互斥校验**(v1.0 创建的 marker 不允许 legacy 标记)。 (4) **Archive version retrograde fence 层**:`src/core/archive/version-retrograde-fence.ts` 模块 — `validateVersionRetrograde(markerPath, marker, gitDir?)` 函数,扫 `git log -p <marker-file>` 历史中 `created_by_tool_version` 字段值,若历史最高值 > 当前值则视为 tamper 拒签;非 git 项目走 best-effort 跳过(沿 v0.4 git fence 同模式)。 (5) **archive.ts 集成 + CLI 测试层**:archive.ts 步骤 3.5(在 verify-findings fence 之前)插入 `validateLegacyExemption` + `validateVersionRetrograde` 两 fence 调用;`commands/upgrade.md` 加 §"--resign-markers 用法" 段;fixture 含三类 marker 情景(archived old / active old / new)+ 'C' 简码交互式 propose/confirm 流真实样本。
+**Architecture**:五层 — (1) **Marker schema 层**:`src/core/markers/types.ts` 四 marker interface 加 `created_by_tool_version?: string` + `resigned_by_tool_version?: string` 字段(superset additive,老 marker 缺等价 `<1.0.0`);`src/core/validate/marker-schema.ts` 加 `checkSemverString` helper(沿 ARCHIVE_SUMMARY_SEMVER_RE 同模式)+ 四 schema 分支 optional 字段校验。 (2) **Upgrade CLI 层**:`src/cli/commands/upgrade.ts` 加 `.option('--resign-markers <changeId>', ...)` flag(option 形态对齐 spec line 1763 + master line 503 冻结);`src/core/upgrade/resign-markers.ts` 模块化实施(SCAN markers → 简码映射 → C 简码真调 ack.ts CLI → stash → writeFile → ack-log resign 行 → 失败 restore stash);**不自动填空数组字段**(填空=工具帮 AI 伪造证据,违反 AI 反向加固) — 改标 `process_evidence_unavailable_legacy: true` meta 字段。 (3) **Archive legacy 豁免层**:`src/core/archive/legacy-exemption.ts` 模块(沿 plan-9d verify-findings-fence.ts / plan-9c pause-decisions-fence.ts 同模式)— `validateLegacyExemption(marker, processEvidence?)` 函数,按 13 不变量精确豁免表(design §3.4.4.1)裁决;**`legacy=true ⊥ (created_by_tool_version >= 1.0.0 且 resigned_by_tool_version 缺失)` 互斥校验**(原生 v1.0 marker 不允许 legacy 标记;resigned 后 marker 允许 legacy + version 共存,沿 v2 选项 C)。 (4) **Archive version retrograde fence 层**:`src/core/archive/version-retrograde-fence.ts` 模块 — `validateVersionRetrograde(markerPath, marker, gitDir?)` 函数,扫 `git log -p <marker-file>` 历史中 `created_by_tool_version` 字段值,若历史最高值 > 当前值则视为 tamper 拒签;non-git 用 `git rev-parse --is-inside-work-tree` 区分,git error 在 git repo 内 fail-closed(沿 v3 MAJOR 1)。 (5) **archive.ts 集成 + CLI 测试层**:archive.ts 步骤 3.4(在 verify-findings fence 之前)插入 `validateLegacyExemption` + `validateVersionRetrograde` 两 fence 调用;`commands/upgrade.md` 加 §"--resign-markers 用法" 段;fixture 含三类 marker 情景(archived old / active old / new)+ 'C' 简码交互式 propose/confirm 流真实样本。
 
-**Tech Stack**:Node 20+ / TypeScript ESM / commander 12 / `yaml` v2 / vitest / `@anthropic-ai/sdk`(plan-9d 已用,本 plan 不直接调)/ 现有 `src/core/schemas/severity.ts`(9a Severity / Finding)+ `src/core/markers/types.ts`(9c/9d/9e1 已扩 marker 字段,本 plan 沿 superset additive 模式加 `created_by_tool_version?` 第 5 个 optional 字段)+ `src/core/ack-log.ts`(9a propose/confirm + ackEntry)+ `src/cli/commands/ack.ts`(9a 现状 propose/confirm/reject 三子命令,本 plan resign-markers 调 propose 路径)+ `src/cli/commands/upgrade.ts`(v0.3 现状 258 行 SCAN→DIFF→ASK→STASH→VERIFY→COMMIT 阶段事务,本 plan 加新子命令路径不动既有 legacy-adapter 清理流)+ `src/cli/commands/archive.ts`(plan-9e1 已扩,本 plan 步骤 3.5 插入新 fence)。**不引入新 npm 依赖**。
+**Tech Stack**:Node 20+ / TypeScript ESM / commander 12 / `yaml` v2 / vitest / `@anthropic-ai/sdk`(plan-9d 已用,本 plan 不直接调)/ 现有 `src/core/schemas/severity.ts`(9a Severity / Finding)+ `src/core/markers/types.ts`(9c/9d/9e1 已扩 marker 字段,本 plan 沿 superset additive 模式加 `created_by_tool_version?` 第 5 个 optional 字段)+ `src/core/ack-log.ts`(9a propose/confirm + ackEntry)+ `src/cli/commands/ack.ts`(9a 现状 propose/confirm/reject 三子命令,本 plan resign-markers 调 propose 路径)+ `src/cli/commands/upgrade.ts`(v0.3 现状 258 行 SCAN→DIFF→ASK→STASH→VERIFY→COMMIT 阶段事务,本 plan 加新 `--resign-markers` option flag 不动既有 legacy-adapter 清理流)+ `src/cli/commands/archive.ts`(plan-9e1 已扩,本 plan 步骤 3.5 插入新 fence)。**不引入新 npm 依赖**。
 
 **Spec 引用**:
 - design v3 [`2026-05-10-v1.0-fusion-completion-design.md`](../specs/2026-05-10-v1.0-fusion-completion-design.md) §3.4 全节(§3.4.1 marker `created_by_tool_version` 字段 / §3.4.2 三类 marker 情景 deprecation 路径 / §3.4.3 字段 deprecation 表 / §3.4.4 `--resign-markers` 行为 / §3.4.4.1 legacy 精确豁免表 / §3.4.4.2 sunset policy / §3.4.4.3 version retrograde fence + hash 关系)+ §2.3.5 简码迁移(C 不自动映射,走 propose/confirm)
-- master plan §3.10(plan-9j 概览 P50 2.5 / P90 3.5;BLOCKER #2 修订:从 9z release 分出独立 phase)+ §3.12.1bis(marker 字段冻结 — `created_by_tool_version` 已在 9j 范围)+ §3.12.3 CLI exit code 冻结(`forge upgrade --resign-markers` 0/1/2 三档)+ master §6 修订记录(plan-9e1 v3.1 已加;本 plan v12 收敛后再加 v3.2)
+- master plan §3.10(plan-9j 概览 P50 2.5 / P90 3.5;BLOCKER #2 修订:从 9z release 分出独立 phase)+ §3.12.1bis(marker 字段冻结 — `created_by_tool_version` 已在 9j 范围)+ §3.12.3 CLI exit code 冻结(`forge upgrade --resign-markers` 0/1/2 三档)+ master §6 修订记录(plan-9e1 v3.1 已加;本 plan 收敛后由 Task 6.1 Step 6.1.6 加 v3.2)
 - plan-9e1 v12 cross-plan reflection:plan-9e1 fence C 简码硬墙 → 9j `--resign-markers` 是唯一合规出口(commands/archive.md / three-level-fence.ts 已明示;9j 落地后用户工作流解锁)
 
-**P50 工日**:**4.8**(v2 修订:codex 1 轮 review 6 BLOCKER + 3 MAJOR + 3 MINOR + 2 NIT 全采纳;v1 2.7 → v2 +2.1d 主要在 Task 2 重写(option 形态 + 真调 ack CLI + stash/rollback;0.5 → 2.0d)+ 新增 Task 6 cross-plan 修订 spec/master);**P90 工日**:**6.0**(P50 + 1.2d buffer)
+**P50 工日**:**4.8**(v2-v6 codex 累计 5 轮 review 修订采纳;v1 2.7 → v2 +2.1d 主要在 Task 2 重写 option 形态 + 真调 ack CLI + stash/rollback + 新增 Task 6 cross-plan;v3-v6 工日不变,仅文档闭环修订);**P90 工日**:**6.3**(P50 + 1.5d buffer ~ 31%;沿 §10 工日表 Task 6 P90 0.7 合计闭合)
+
+**v8 → v9 关键修订**(codex 8 轮 review 0 BLOCKER + 2 MAJOR + 2 MINOR 部分采纳;**0 BLOCKER 已 2 连**;MAJOR 1 评估为 codex 误读 — markdown 文件本该 markdown fenced;sha256:placeholder 是 e2e helper 设计 非占位符):
+- **MAJOR 1(误读修正 + 注脚补)**:codex 评 Step 3.5 "6 个 fenced 应全 yaml" — 误读,markdown 4 个文件本就 markdown fenced;.verify-passed/.review-passed 已是 yaml fenced ✓。**v9 修订**:.verify-passed marker 段 sha256:placeholder 加注脚 "e2e setupFixture helper 运行时重算填" 沿 plan-9c/9e1 同模式
+- **MAJOR 2**:Task 1 Files 列表 line 281 改 `12 case` → `14 case`,line 279 加 `resigned_by_tool_version?: string` 字段;line 280 加"两个 version 字段调用"
+- **MINOR 1**:line 13 引用 "本 plan v12 收敛后再加 v3.2" → "本 plan 收敛后由 Task 6.1 Step 6.1.6 加 v3.2"(版本号不写死)
+- **MINOR 2**:commands/archive.md 段 line 2540 "plan-9j v2 完成后" → "plan-9j 落地完成后"(版本号不写死)
+
+**v7 → v8 关键修订**(codex 7 轮 review 0 BLOCKER + 2 MAJOR 全采纳;**0 BLOCKER 首次出现** — 主体收敛,仅文档清理):
+- **MAJOR 1**:Task 5 Step 4.2 release-gate 预期值 5 → **6**(对齐 Task 4 Step 2.2 加 it.todo 后的 EXPECTED_TODO_COUNT_SOFT)
+- **MAJOR 2**:Task 5 Step 3.5 为 `resign-c-simcode-with-confirm` fixture 补完整 YAML fenced 字面(proposal.md / design.md / tasks.md / specs/x.md / .verify-passed / .review-passed 全 6 文件),implementer 可直接复制
+
+**v6 → v7 关键修订**(codex 6 轮 review 1 BLOCKER + 2 MAJOR + 1 NIT 全采纳):
+- **B1(NEW)**:`resignChangeMarkers` + `resignOneMarker` 函数签名加 `forgeCliPath: string` 参数;caller line 1205 调用 `proposeForCSimcode(forgeCliPath, ...)` 而非 `changeDir`;upgrade.ts action handler 用 `process.argv[1]` 推 dist/cli/index.js 真路径
+- **MAJOR 1(NEW)**:Task 4 case 7 name/body 名实对齐 — 改为 "非 git path best-effort 真实测";真 git repo 内 fail-closed 留 it.todo(9z release plan 解锁);Task 4 case 数 `7 PASS + 1 it.todo`;release-blocker gate `EXPECTED_TODO_COUNT_SOFT` 5 → 6 同步
+- **MAJOR 2(NEW)**:Task 5 加 Step 3.5 创建 `resign-c-simcode-with-confirm` fixture 内容字面(沿 plan-9e1 fixture 同模式 — 4 件套 + .verify-passed 缺字段 + .review-passed C 简码)
+- **NIT 1(NEW)**:删 v5→v6 修订摘要中辩护性措辞("合规" / "估算过乐观" 等),保留事实型描述
+
+**v5 → v6 关键修订**(codex 5 轮 review 2 BLOCKER + 4 MAJOR + 4 MINOR + 1 NIT 全采纳):
+- **B1**:Task 2 `proposeForCSimcode` 函数从自写 pending YAML 改为**真 spawn `forge ack propose`** CLI(沿 9a 协议);旧 helper 注释保留供历史叙事
+- **B2**:Task 2 resign-markers.ts import 补齐 `mkdir, copyFile, rm`(node:fs/promises)+ `basename`(node:path),修正 typecheck 错
+- **MAJOR 1**:Task 1 Step 3.5.3 字面补丁完整化 — 给完整 `validateThreeLevelFence` 函数体(含 import / 参数 / return / `for` 循环);明示替换范围(plan-9e1 现状 ~ line 65-105)
+- **MAJOR 2**:Task 4 +1 case 凑 7(fail-closed git error case;非 git path best-effort 验证);commit message + Step 2.2 同步 7 PASS
+- **MAJOR 3**:Task 5 fixture 4 → 5 + e2e 4 case → 5 case;commit message 同步;Step 4.1 描述补完整 C confirm 流程
+- **MAJOR 4**:commands/upgrade.md 嵌入段 line 2243 互斥规则改 resigned-aware
+- **MINOR 1**:DoD 加 `resigned_by_tool_version?` 字段 + 互斥规则改 resigned-aware
+- **MINOR 2**:Task 3 red 预期 15 ERROR → 17 ERROR
+- **MINOR 4**:commands/upgrade.md argument-hint 从 `<sub-command>` 改 `[--resign-markers <changeId>] [...]` option 形态
+- **NIT 1**:Header P90 6.0 → 6.3(对齐 §10 工日表合计 6.3)
+- MINOR 3 注释残留:v6 修订摘要段(line 1466 等)引用旧规则,属历史叙事,plan 字面已统一
+
+**v4 → v5 关键修订**(codex 4 轮 review 5 BLOCKER + 3 MAJOR 全采纳;**5 BLOCKER 仍是 REGRESSION + 系统性扫漏**(v4 改了一部分但 Header Goal/Architecture + Task 2 case + Task 3 Step+commit + §8 编号没全改);v5 系统性收尾):
+- **B1(REGRESSION)**:Header Goal(line 5)/ Architecture(line 7)/ File Structure(line 175)/ Task 2 Step 1.2 spawn 描述(line 910)/ resign-markers.ts 代码注释 — 全改"子命令"→ "option flag"
+- **B2(REGRESSION)**:Task 2 字面 +2 case(8 → **10**):case 9 = 原 marker 含 `created_by_tool_version=0.4.0` → resign 后 created 保留 0.4.0(B3 字面 expect);case 10 = C 简码 pending file 数字 findingId 跨平台兼容
+- **B3(REGRESSION)**:Task 2 字面已有 case 1 加 `expect(review.created_by_tool_version)` 断言(B2 case 9 完整覆盖)
+- **B4(REGRESSION)**:Task 1 Step 3.5 字面补丁完整化 — three-level-fence + summary-builder collector1/2 给出可粘贴 TS 字面(不再 prose 占位 + 不留 implementer 自补)
+- **B5(REGRESSION)**:Task 3 Step 2.2 预期 → 17 case;commit message → 17 case + resigned-aware 互斥 + process_evidence fail-closed
+- **MAJOR 1(NEW)**:`## 8` 编号冲突修(`### 8.0` → `### 8.1` + 后续 `### 7.1-7.4` → `### 8.2-8.5`;`## 8. Self-Review` → `## 9.`;`## 9. 工日核算` → `## 10.`)
+- **MAJOR 2(REMAINING)**:File Structure "不修改文件" 列表移除 three-level-fence + summary-builder + ack-log + ack.ts(沿 v5 修订标 freeze 例外)
+- **MAJOR 3(REMAINING)**:顶层 Goal/Architecture 互斥规则改 resigned-aware(原 `legacy=true ⊥ version>=1.0.0` → `legacy=true ⊥ (created>=1.0.0 且 resigned 缺失)`)
+
+**v3 → v4 关键修订**(codex 3 轮 review 5 BLOCKER + 4 MAJOR + 1 MINOR 全采纳;**5 BLOCKER 全是 REGRESSION**(v3 修订只动了一部分代码块);v4 系统性扫全文修):
+- **B1(REGRESSION)**:8 处 `forge upgrade resign-markers` subcommand 字面残留全改 option 形态 `forge upgrade --resign-markers`(commit message + commands/upgrade.md + e2e spawn + Step 1.2 段)
+- **B2(REGRESSION)**:Task 1 字面真补 +2 case(`resigned_by_tool_version` 合法 + 拒签)+ 4 marker interface 加 `resigned_by_tool_version?: string` 字段 + marker-schema 加第二个 `checkSemverString` 调用
+- **B3(REGRESSION)**:Task 2 测试断言改 `created_by_tool_version` 保留 + `resigned_by_tool_version=1.0.0`;resignOneMarker 内 "already resigned" 判定改 `resigned_by_tool_version` 字段存在性(沿 v2 选项 C)
+- **B4(REMAINING)**:Task 1 加新 Step 3.5 plan-9e1 4 文件同步补丁(types.ts ReviewOutcome union 扩 + marker-schema REVIEW_OUTCOME_SEVERITY_CODES 扩 + three-level-fence simcode+全名双格式 + summary-builder collector2 全名映射)
+- **B5(REGRESSION)**:Task 3 字面真补 +2 case(resigned-aware 允许通过 + process_evidence fail-closed)case 数 15 → 17
+- **MAJOR 1(NEW)**:Task 6.1 加 Step 6.1.6.5 cross-plan 修订 rollback 指南(Case A 未 commit `git restore` / Case B 已 commit `git revert`;禁 reset --hard / push --force)
+- **MAJOR 2(NEW)**:Task 6 commit message 加 "9a interface freeze 例外" 字样 + Step 6.1.5 加显式声明
+- **MAJOR 3(NEW)**:plan §8.0 新增 v0.4 native marker 语义边界条款(沿 design §3.4.2 三类 marker 路径,v0.4 native 不被 9j 拦,走 strict path + 9e1/9d/9c 现有 fence superset additive 兼容)
+- **MAJOR 4(NEW)**:resignOneMarker 函数签名加 `forgeRoot: string` 参数;stash 路径从 `join(changeDir, '..', '..', '.cache', ...)` 改 `join(forgeRoot, '.cache', ...)`(沿 upgrade.ts:95 同模式,避免 .. 跳出)
+- **MINOR 1(误报)**:codex 第 3 轮报"docs/master.md / docs/design.md 简写引用错误",grep 确认 plan 实际用全路径,无残留
 
 **v2 → v3 关键修订**(codex 2 轮 review 8 BLOCKER + 3 MAJOR + 1 NIT 全采纳;**8 BLOCKER 全是 REGRESSION** — v2 修订仅 Header 声明,代码块字面未更新;v3 全部代码块字面真改):
 - **B1(REGRESSION)**:Task 2 Step 2.2 代码块从 `.command('resign-markers')` 真改为 `.option('--resign-markers <changeId>', ...)` + `.action(opts => if (opts.resignMarkers) { ... })` 主 action 体内分支
@@ -99,17 +150,17 @@
 - 9z release(v1.0 收尾;统一全路径 lock exit 5 → 2 沿 master §3.12.3 known limitation)
 
 **DoD**(完成定义,沿 master §3.10 NIT 二轮 #10 修订):
-- `src/core/markers/types.ts` 四 marker interface 加 `created_by_tool_version?: string` 字段(superset additive,老 marker 缺等价 `<1.0.0`)
-- `src/core/validate/marker-schema.ts` 加 `checkSemverString` helper + 四 schema 分支可选字段校验(沿 plan-9c checkPauseDecisionsArray 同模式 — 字段缺失等价不校验,字段存在则严格 semver)
+- `src/core/markers/types.ts` 四 marker interface 加 `created_by_tool_version?: string` + `resigned_by_tool_version?: string` 字段(superset additive,老 marker 缺等价 `<1.0.0`;沿 v2 选项 C)
+- `src/core/validate/marker-schema.ts` 加 `checkSemverString` helper + 四 schema 分支两个 optional 字段校验(沿 plan-9c checkPauseDecisionsArray 同模式 — 字段缺失等价不校验,字段存在则严格 semver)
 - `src/cli/commands/upgrade.ts` 加 `.option('--resign-markers <changeId>', ...)`(**v3:option 形态对齐 spec line 1763 + master line 503**)+ 阶段事务(SCAN markers → 简码映射 → 真调 ack CLI → stash → writeFile → ack-log → 失败 restore)
 - `src/core/upgrade/resign-markers.ts` 新建 module(主流程 + helpers — sub-skill 设计避免 upgrade.ts 单文件膨胀)
-- `src/core/archive/legacy-exemption.ts` 新建 module — `validateLegacyExemption(marker, processEvidence?)` 13 不变量精确豁免表;`legacy=true ⊥ version>=1.0.0` 互斥校验
+- `src/core/archive/legacy-exemption.ts` 新建 module — `validateLegacyExemption(marker, processEvidence?)` 13 不变量精确豁免表;**`legacy=true ⊥ (created_by_tool_version >= 1.0.0 且 resigned_by_tool_version 缺失)`** 互斥校验(沿 v2 选项 C resigned-aware)
 - `src/core/archive/version-retrograde-fence.ts` 新建 module — `validateVersionRetrograde(markerPath, marker, gitDir?)` git history 扫描 + semver 比对
 - `src/cli/commands/archive.ts` 步骤 3.5 之前(verify-findings fence 之前)插入新 fence 调用:`validateLegacyExemption` + `validateVersionRetrograde`(失败 exit 1 沿 master §3.12.3)
 - `commands/upgrade.md` 加 §"--resign-markers 用法"段(模板 + 简码迁移规则 + C propose/confirm 引用 + sunset policy 引用)
 - 测试:
   - `tests/core/markers/marker-version-schema.test.ts`(checkSemverString 校验 12 case:合法 semver / 缺字段兼容 / `<1.0.0` / `>=1.0.0` / prerelease+build / 非 semver 拒签 / 等)
-  - `tests/cli/upgrade-resign-markers.test.ts`(resign-markers 子命令端到端 8 case:S/L 自动 / C 走 propose / 不自动填空 / legacy 标记 / ack-log 写 / 阶段事务回滚 / 干净状态跳过 / CI 模式拒绝)
+  - `tests/cli/upgrade-resign-markers.test.ts`(resign-markers option flag 端到端 **10 case**:S/L 自动 / C 走 propose / 不自动填空 / legacy 标记 / ack-log 写 / 阶段事务回滚 / 干净状态跳过 / CI 模式拒绝 / **created 字段保留 / 真调 ack CLI**)
   - `tests/core/archive/legacy-exemption.test.ts`(**v3:17 case** — 13 不变量豁免 + 互斥校验 resigned-aware + process_evidence 反向加固)
   - `tests/core/archive/version-retrograde-fence.test.ts`(retrograde 拒签 / 非 git 跳过 / 合法 semver / tamper 检测 6 case)
   - `tests/integration/marker-version-end-to-end.test.ts`(**v3:5 fixture** — archived-old / active-old-need-resign / new-v1.0 / corrupt-version-retrograde + **resign-c-simcode-with-confirm**)
@@ -160,7 +211,7 @@
 **与其他 sub-plan 合并点**(参考 master plan §3.10):
 - `src/core/markers/types.ts`:9c(PauseDecision)+ 9d(VerifyFinding)+ 9j(`created_by_tool_version`)三方修改;无字段重叠,均 superset additive
 - `src/cli/commands/archive.ts`:plan-9e1 已加步骤 3.5(verify-findings)+ 3.9(三级 fence)+ 4.5(buildArchiveSummary);9j 在步骤 3.5 **之前**新加 legacy-exemption + version-retrograde fence;9g 在 9j 之后(步骤 3 区段)再加 worktree 重跑阶段
-- `src/cli/commands/upgrade.ts`:v0.3 legacy adapter 清理 + 9j 新 `--resign-markers` 子命令;沿 commander 同 group 加 sub-command 模式,无冲突
+- `src/cli/commands/upgrade.ts`:v0.3 legacy adapter 清理 + 9j 新 `--resign-markers <changeId>` option flag(沿 v3 BLOCKER 1 — 不是 subcommand);commander 同 group 加 option,在主 `.action` 体内分支处理
 
 ---
 
@@ -209,11 +260,9 @@ src/core/markers/parse.ts                          ← 9a/9c/9d 锁死(YAML 解�
 src/core/archive/transaction.ts                    ← plan-9e1 锁死,本 plan 不动(legacy 豁免 + version retrograde 是 archive 主路径 fence,不动 transaction 阶段)
 src/core/archive/verify-findings-fence.ts          ← plan-9d 锁死,本 plan 沿用模块化模板不动(legacy-exemption / version-retrograde-fence 独立模块)
 src/core/archive/pause-decisions-fence.ts          ← plan-9c 锁死,沿用不动
-src/core/archive/three-level-fence.ts              ← plan-9e1 锁死,沿用不动
-src/core/archive/summary-builder.ts                ← plan-9e1 锁死,沿用不动
 src/core/archive/ack-log-consistency.ts            ← plan-9d 锁死,沿用不动
-src/core/ack-log.ts                                ← 9a 锁死,resign 写 ack-log 走 appendAckLog 现状接口(action=resign 是新 kind 但 schema 已 superset support)
-src/cli/commands/ack.ts                            ← 9a 锁死,resign-markers C 简码走 ack propose/confirm 现状协议,不重定义
+# v5 MAJOR 2 修订:three-level-fence.ts + summary-builder.ts 从"不修改文件"移除 — Task 1 Step 3.5 同步扩双格式(plan-9e1 freeze 例外,沿 v3 BLOCKER 4)
+# v5 MAJOR 2 修订:ack-log.ts + ack.ts 从"不修改文件"移除 — Task 6.1 Step 6.1.5 扩 --target-severity flag + resign-c-simcode action(9a freeze 例外,沿 v3 MAJOR 2)
 src/cli/commands/validate.ts                       ← 不改(validate 调 validateChange,marker version 字段校验由 marker-schema 自动 propagate)
 forge-eval/scenarios/                              ← 不加 forge-eval scenario(本 plan 不是新 skill 开发,沿 plan-9c / plan-9d / plan-9e1 同模式)
 ```
@@ -233,9 +282,9 @@ forge-eval/scenarios/                              ← 不加 forge-eval scenari
 
 
 **Files**:
-- Modify: `src/core/markers/types.ts:1-141`(四 marker interface 加 `created_by_tool_version?: string` 字段)
-- Modify: `src/core/validate/marker-schema.ts`(加 `checkSemverString` helper + 四 schema 分支调用)
-- Create: `tests/core/markers/marker-version-schema.test.ts`(12 case)
+- Modify: `src/core/markers/types.ts:1-141`(四 marker interface 加 `created_by_tool_version?: string` + `resigned_by_tool_version?: string` 字段,沿 v3 BLOCKER 2 选项 C)
+- Modify: `src/core/validate/marker-schema.ts`(加 `checkSemverString` helper + 四 schema 分支调用两个 version 字段)
+- Create: `tests/core/markers/marker-version-schema.test.ts`(**14 case**;v3 BLOCKER 2 修订:12 baseline + 2 resigned 字段)
 
 ### Step 1: 先写 schema 校验失败测试(TDD red)
 
@@ -372,6 +421,26 @@ describe('created_by_tool_version schema validation', () => {
     });
     expect(result.valid).toBe(true);
   });
+
+  // v3 BLOCKER 2 修订:加 resigned_by_tool_version 字段 +2 case(沿 v2 选项 C)
+  it('合法 resigned_by_tool_version 1.0.0 → 通过(resign 后 marker)', () => {
+    const result = validateMarkerSchema({
+      ...baseVerifyMarker,
+      created_by_tool_version: '0.4.0',
+      resigned_by_tool_version: '1.0.0',
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it('resigned_by_tool_version 非 semver → 拒签', () => {
+    const result = validateMarkerSchema({
+      ...baseVerifyMarker,
+      created_by_tool_version: '0.4.0',
+      resigned_by_tool_version: 'not-semver',
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.field === 'resigned_by_tool_version')).toBe(true);
+  });
 });
 ```
 
@@ -381,7 +450,7 @@ describe('created_by_tool_version schema validation', () => {
 cd D:/ClaudeProject/opsp/forge-repo && pnpm test tests/core/markers/marker-version-schema.test.ts
 ```
 
-预期:12 case 中 `created_by_tool_version` 字段未被识别 — 大部分 case 默认通过(因 marker-schema 未校验该字段);只有 superset additive case + 含合法 semver case 看起来过 → 总体大约 8 case fail / 4 pass(沿 plan-9c v2 同模式 baseline 红验证)。
+预期:**14 case**(v3 +2 resigned_by_tool_version);大部分 case 默认通过(因 marker-schema 未校验字段),仅 `非 semver 字符串 → 拒签` / `数字而非字符串 → 拒签` / `空字符串 → 拒签` / `resigned_by_tool_version 非 semver → 拒签` 期望 valid=false 的 case 失败。沿 plan-9c v2 同模式 baseline 红验证。
 
 ### Step 2: 加 checkSemverString helper + 四 schema 分支调用(TDD green Part 1)
 
@@ -431,19 +500,21 @@ function checkSemverString(
 ```typescript
     // plan-9j Task 1 新增:created_by_tool_version 可选 superset additive 字段
     results.push(checkSemverString(obj, 'created_by_tool_version', file));
+    // v3 BLOCKER 2 新增:resigned_by_tool_version(沿 v2 选项 C — 区分 created vs resigned)
+    results.push(checkSemverString(obj, 'resigned_by_tool_version', file));
 ```
 
 (注:四 schema 分支末尾追加同一行,沿 plan-9c / plan-9d 同模式)
 
-- [ ] **Step 2.4: 跑测试确认 12 case 全 PASS**
+- [ ] **Step 2.4: 跑测试确认 14 case 全 PASS**
 
 ```bash
 cd D:/ClaudeProject/opsp/forge-repo && pnpm test tests/core/markers/marker-version-schema.test.ts
 ```
 
-预期:12 PASS / 0 FAIL。
+预期:**14 PASS** / 0 FAIL(v3 +2 case)。
 
-### Step 3: 加 `created_by_tool_version?` 字段到四 marker interface
+### Step 3: 加 `created_by_tool_version?` + `resigned_by_tool_version?`(v3 BLOCKER 2)字段到四 marker interface
 
 - [ ] **Step 3.1: 修改 `src/core/markers/types.ts:6-18` VerifyMarker 加字段**
 
@@ -462,6 +533,9 @@ export interface VerifyMarker {
   // plan-9j Task 1 新增 — superset additive,老 marker 缺等价 <1.0.0(沿 design §3.4.1)
   // marker 写入时 forge CLI 的版本号(semver),archive fence 按版本字段判断 marker 行为
   created_by_tool_version?: string;
+  // v3 BLOCKER 2 新增 — superset additive,沿 v2 选项 C 修订(plan-9j §0)
+  // 仅在 marker 经过 `forge upgrade --resign-markers` 后存在;与 created 配对区分 native v1.0 vs resigned legacy
+  resigned_by_tool_version?: string;
 }
 ```
 
@@ -480,6 +554,8 @@ export interface ReviewMarker {
   pause_decisions?: PauseDecision[];
   // plan-9j Task 1 新增
   created_by_tool_version?: string;
+  // v3 BLOCKER 2 新增 — resigned 字段(沿 v2 选项 C)
+  resigned_by_tool_version?: string;
 }
 ```
 
@@ -498,6 +574,8 @@ export interface VerifyFailedMarker {
   pause_decisions?: PauseDecision[];
   // plan-9j Task 1 新增
   created_by_tool_version?: string;
+  // v3 BLOCKER 2 新增 — resigned 字段(沿 v2 选项 C)
+  resigned_by_tool_version?: string;
 }
 ```
 
@@ -513,6 +591,8 @@ export interface ReviewFailedMarker {
   pause_decisions?: PauseDecision[];
   // plan-9j Task 1 新增
   created_by_tool_version?: string;
+  // v3 BLOCKER 2 新增 — resigned 字段(沿 v2 选项 C)
+  resigned_by_tool_version?: string;
 }
 ```
 
@@ -523,6 +603,210 @@ cd D:/ClaudeProject/opsp/forge-repo && pnpm typecheck
 ```
 
 预期:全过(可选字段不破任何现有代码)。
+
+### Step 3.5(v3 BLOCKER 4 新增):plan-9e1 4 文件同步补丁 — ReviewOutcome union 扩 simcode + 全名双格式
+
+**为什么**:plan-9j Task 2 resign 后 marker `review_outcomes[i].severity` 会写 `'CRITICAL' | 'WARNING' | 'SUGGESTION'` 全名(沿 design §2.3.5 简码迁移);但 plan-9e1 现状 4 文件锁死 simcode `'S' | 'C' | 'L'`,resign 产物会被 schema step 2a 直接拒签。本 Step 同步扩 4 文件接受双格式。
+
+- [ ] **Step 3.5.1**:修改 `src/core/markers/types.ts:112` ReviewOutcome.severity union
+
+定位:`src/core/markers/types.ts` ReviewOutcome interface `severity` 字段:
+
+```typescript
+export interface ReviewOutcome {
+  // v3 BLOCKER 4(plan-9j):union 扩 simcode + 全名双格式
+  // 沿 design §2.3.5 简码迁移 — v0.4 simcode S/C/L 兼容老 marker;v1.0 全名 resign 后写入
+  // C 简码硬墙拒签(沿 plan-9e1 v4 BLOCKER 1)+ S→CRITICAL / L→SUGGESTION 直接映射
+  severity: 'S' | 'C' | 'L' | 'CRITICAL' | 'WARNING' | 'SUGGESTION';
+  accepted: boolean;
+  resolved: boolean;
+  task_ref?: string;
+  rationale?: string;
+}
+```
+
+- [ ] **Step 3.5.2**:修改 `src/core/validate/marker-schema.ts:31` REVIEW_OUTCOME_SEVERITY_CODES Set 扩
+
+```typescript
+// v3 BLOCKER 4(plan-9j):union 扩 simcode + 全名(沿 types.ts ReviewOutcome.severity)
+const REVIEW_OUTCOME_SEVERITY_CODES = new Set([
+  'S', 'C', 'L',                              // v0.4 simcode(老 marker 兼容)
+  'CRITICAL', 'WARNING', 'SUGGESTION',        // v1.0 全名(resign 后或 v1.0 native 写入)
+]);
+```
+
+- [ ] **Step 3.5.3**:修改 `src/core/archive/three-level-fence.ts` S/L/C 简码 + 全名双格式裁决
+
+**v6 MAJOR 1 修订**:给完整可粘贴函数体 + 替换范围。
+
+**定位**:`src/core/archive/three-level-fence.ts` 现有 `validateThreeLevelFence` 函数(plan-9e1 v4 BLOCKER 1 落地;line ~25-110)。**整段替换** `for (let i = 0; i < outcomes.length; i++) { ... }` 循环体(plan-9e1 现状 ~ line 65-105),用下面字面 patch:
+
+**Patch 上下文**(展示完整函数,implementer 找到 `// 处理 review_outcomes` 注释下方循环替换):
+
+```typescript
+// src/core/archive/three-level-fence.ts(plan-9e1 现状 + v6 plan-9j 同步扩双格式)
+import { type ValidationResult, failed, mergeResults } from '../validate/types.js';
+import type { ReviewMarker, VerifyMarker } from '../markers/types.js';
+
+export function validateThreeLevelFence(
+  verifyMarker: Record<string, unknown>,
+  reviewMarker: Record<string, unknown>,
+  verifyFile?: string,
+  reviewFile?: string,
+): ValidationResult {
+  const results: ValidationResult[] = [];
+  const outcomes = (reviewMarker.review_outcomes as Array<Record<string, unknown>>) ?? [];
+
+  // === verify_findings 循环(plan-9e1 v4 BLOCKER 1 现状,本次不动)===
+  // ... 沿 plan-9e1 v12 文件现状,本 plan 仅扩 review_outcomes 端
+
+  // === review_outcomes 循环 — **v6 plan-9j 修订:simcode + 全名双格式裁决** ===
+  for (let i = 0; i < outcomes.length; i++) {
+    const o = outcomes[i] as { severity: string; resolved: boolean; accepted?: boolean; rationale?: string };
+    const sev = o.severity;
+    const fieldBase = `review_outcomes[${i}]`;
+
+    // CRITICAL/S(同义)— 拒签
+    if ((sev === 'S' || sev === 'CRITICAL') && !o.resolved) {
+      results.push(failed({
+        artifact: 'marker',
+        field: `${fieldBase}.severity`,
+        message: `${sev}(${sev === 'S' ? 'CRITICAL 简码' : 'CRITICAL 全名'})未 resolve,archive 拒签(沿 design §2.4.2 + plan-9j v3 BLOCKER 4 双格式)`,
+        file: reviewFile,
+      }));
+      continue;
+    }
+
+    // C 简码 — 硬墙拒签(沿 plan-9e1 v4 BLOCKER 1)
+    if (sev === 'C') {
+      results.push(failed({
+        artifact: 'marker',
+        field: `${fieldBase}.severity`,
+        message:
+          `review_outcomes C(clarification 简码,resolved=${String(o.resolved)})不允许 archive。\n` +
+          `  必须等 plan-9j 完成跑 \`forge upgrade --resign-markers\` 迁移(沿 design §2.3.5)。\n` +
+          `  9e1 fence 是硬墙 — 不接受手动编辑 marker(违反 AI 反向加固 + ReviewOutcome 接口不接受全名 + ack-log 协议)。`,
+        file: reviewFile,
+      }));
+      continue;
+    }
+
+    // WARNING 全名 — 必须 acked(简码 v0.4 无 WARNING 简码 — 仅 v1.0 全名;沿 design §2.3.5)
+    if (sev === 'WARNING' && !o.resolved) {
+      const acked = o.accepted === true && typeof o.rationale === 'string' && o.rationale.length > 0;
+      if (!acked) {
+        results.push(failed({
+          artifact: 'marker',
+          field: `${fieldBase}.accepted`,
+          message: `review_outcomes WARNING(v1.0 全名)未 resolve + 缺 acked(需 accepted=true + rationale 非空)`,
+          file: reviewFile,
+        }));
+      }
+      continue;
+    }
+
+    // L/SUGGESTION(同义)+ resolved=false → 通过(handoff to backlog)
+    // 全 resolved=true → 通过(无 fence 动作)
+  }
+  return mergeResults(...results);
+}
+```
+
+- [ ] **Step 3.5.4**:修改 `src/core/archive/summary-builder.ts` collector1/2 全名映射(沿 plan-9e1 v3 BLOCKER 3)
+
+定位:`buildArchiveSummary` 内 collector2 `collectPendingSuggestions` 中 review_outcomes 处理。**加全名分支**:
+
+```typescript
+// 完整可粘贴字面补丁(沿 plan-9e1 v3 BLOCKER 3 collector 模式):
+
+// === collector2 collectPendingSuggestions —— 加全名分支 ===
+function collectPendingSuggestions(
+  findings: Finding[],
+  outcomes: ReviewOutcome[],
+): SuggestionRef[] {
+  const refs: SuggestionRef[] = [];
+  // verify_findings SUGGESTION 全名(plan-9e1 v3 BLOCKER 3 已有,不动)
+  for (const f of findings) {
+    if (f.severity === 'SUGGESTION' && f.resolved === false) {
+      refs.push({
+        source: 'verify_findings',
+        id: f.id,
+        dimension: f.dimension,
+        check_type: f.check_type,
+        evidence: f.evidence,
+        recommendation: f.recommendation,
+      });
+    }
+  }
+  // review_outcomes L 简码 + SUGGESTION 全名双格式映射(v3 BLOCKER 4 新增)
+  for (let i = 0; i < outcomes.length; i++) {
+    const o = outcomes[i] as ReviewOutcome;
+    if ((o.severity === 'L' || o.severity === 'SUGGESTION') && o.resolved === false) {
+      refs.push({
+        source: 'review_outcomes',
+        id: i,
+        recommendation: o.rationale,
+      });
+    }
+  }
+  return refs;
+}
+
+// === collector1 collectAckedWarnings —— review_outcomes 端 WARNING 全名 + acked 进(v3 BLOCKER 4 新增) ===
+function collectAckedWarnings(findings: Finding[], outcomes: ReviewOutcome[]): AckedWarningRef[] {
+  const refs: AckedWarningRef[] = [];
+  // verify_findings WARNING + ack(plan-9e1 v3 BLOCKER 3 已有,不动)
+  for (const f of findings) {
+    if (
+      f.severity === 'WARNING' &&
+      f.resolved === false &&
+      f.severity_acked_by &&
+      f.severity_acked_at
+    ) {
+      refs.push({
+        source: 'verify_findings',
+        id: f.id,
+        dimension: f.dimension,
+        check_type: f.check_type,
+        evidence: f.evidence,
+        acked_by: f.severity_acked_by,
+        acked_at: f.severity_acked_at,
+      });
+    }
+  }
+  // review_outcomes WARNING 全名 + acked(v3 BLOCKER 4:resign 后或 v1.0 native 写入)
+  for (let i = 0; i < outcomes.length; i++) {
+    const o = outcomes[i] as ReviewOutcome;
+    // C 简码由 fence 拒签,不进 builder(沿 plan-9e1 v3 BLOCKER 3)
+    // S 简码 / CRITICAL 全名由 fence 拒签,不进 builder
+    // 仅 WARNING 全名 + accepted=true + rationale 非空(v0.4 review_outcomes 端的 "acked" 等价路径)
+    if (
+      o.severity === 'WARNING' &&
+      o.resolved === false &&
+      o.accepted === true &&
+      typeof o.rationale === 'string' &&
+      o.rationale.length > 0
+    ) {
+      refs.push({
+        source: 'review_outcomes',
+        id: i,
+        acked_by: 'review-accepted',
+        acked_at: '', // review_outcomes 端无 user 字段,沿 plan-9e1 v1 collector1 review-accepted 标记
+        rationale: o.rationale,
+      });
+    }
+  }
+  return refs;
+}
+```
+
+- [ ] **Step 3.5.5**:跑 plan-9e1 现有测试确保不回归
+
+```bash
+cd D:/ClaudeProject/opsp/forge-repo && pnpm test tests/cli/archive-three-level-fence.test.ts tests/core/archive/summary-builder.test.ts tests/integration/archive-summary-end-to-end.test.ts
+```
+
+预期:plan-9e1 现有 19 + 10 + 7 = 36 case 全 PASS(simcode 路径不破)。**若回归**:plan-9j Task 1 字面 4 文件改动需修订(下个 codex 轮迭代)。
 
 ### Step 4: Typecheck + format + commit
 
@@ -537,13 +821,14 @@ cd D:/ClaudeProject/opsp/forge-repo && pnpm typecheck && pnpm lint && pnpm forma
 - [ ] **Step 4.2: commit Task 1**
 
 ```bash
-git -C D:/ClaudeProject/opsp/forge-repo add src/core/markers/types.ts src/core/validate/marker-schema.ts tests/core/markers/marker-version-schema.test.ts
+git -C D:/ClaudeProject/opsp/forge-repo add src/core/markers/types.ts src/core/validate/marker-schema.ts src/core/archive/three-level-fence.ts src/core/archive/summary-builder.ts tests/core/markers/marker-version-schema.test.ts
 git -C D:/ClaudeProject/opsp/forge-repo commit -m "$(cat <<'EOF'
-feat(9j Task 1): marker schema 加 created_by_tool_version 字段 + 12 case 单测
+feat(9j Task 1): marker schema 加 created_by_tool_version + resigned_by_tool_version + plan-9e1 4 文件双格式扩 + 14 case 单测
 
-沿 design §3.4.1 superset additive — 四 marker interface 加 optional semver 字段;
-marker-schema 加 checkSemverString helper + 四 schema 分支调用;
-缺字段等价 <1.0.0(老兼容路径);合法 semver 含 prerelease/build 可选。
+沿 design §3.4.1 superset additive — 四 marker interface 加 optional semver 字段(created + resigned);
+marker-schema 加 checkSemverString helper + 四 schema 分支调用 + 两 version 字段校验;
+v3 BLOCKER 4 同步扩 plan-9e1 4 文件 ReviewOutcome.severity union: simcode + 全名双格式
+(types.ts / marker-schema.ts / three-level-fence.ts / summary-builder.ts)。
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
@@ -570,7 +855,7 @@ EOF
 **Files**:
 - Create: `src/core/upgrade/resign-markers.ts`(新建 module:主流程 + helpers)
 - Modify: `src/cli/commands/upgrade.ts`(**v3:加 `.option('--resign-markers <changeId>', ...)`** option 形态对齐 spec/master 冻结;不是 subcommand)
-- Create: `tests/cli/upgrade-resign-markers.test.ts`(8 case)
+- Create: `tests/cli/upgrade-resign-markers.test.ts`(**10 case**;v5 BLOCKER 2 修订:8 + 2 = 10)
 
 ### Step 1: 先写 resign-markers 端到端测试(TDD red)
 
@@ -578,7 +863,7 @@ EOF
 
 ```typescript
 // upgrade-resign-markers.test.ts — plan-9j Task 2 单测
-// 8 case 覆盖:S/L 自动 / C 走 propose / 不自动填空 / legacy 标记 / ack-log 写 /
+// 10 case 覆盖:S/L 自动 / C 走 propose / 不自动填空 / legacy 标记 / ack-log 写 /
 //             阶段事务回滚 / 干净状态跳过 / CI 模式拒绝
 
 import { describe, it, expect, afterAll } from 'vitest';
@@ -637,10 +922,11 @@ evidence: []
   return { tmpRoot, changeDir };
 }
 
-function runResign(tmpRoot: string, args: string[] = []): { code: number; stderr: string; stdout: string } {
+function runResign(tmpRoot: string, changeId: string): { code: number; stderr: string; stdout: string } {
+  // v3 BLOCKER 1:option 形态 — `forge upgrade --resign-markers <changeId>`(对齐 spec line 1763 / master line 503)
   const res = spawnSync(
     'node',
-    [FORGE_CLI, 'upgrade', 'resign-markers', ...args],
+    [FORGE_CLI, 'upgrade', '--resign-markers', changeId],
     {
       cwd: tmpRoot,
       encoding: 'utf8',
@@ -656,15 +942,17 @@ describe('forge upgrade --resign-markers', () => {
     for (const d of cleanupDirs) rmSync(d, { recursive: true, force: true });
   });
 
-  it('S 简码 → 自动映射 CRITICAL + 加 created_by_tool_version=1.0.0(exit 0)', () => {
+  it('S 简码 → 自动映射 CRITICAL + 加 resigned_by_tool_version=1.0.0(保留 created,v3 BLOCKER 2/3)', () => {
     const ctx = setupV04Marker({ schema: 'forge-review/v1', severity: 'S' });
     cleanupDirs.push(ctx.tmpRoot);
-    const r = runResign(ctx.tmpRoot, ['add-x']);
+    const r = runResign(ctx.tmpRoot, 'add-x');
     expect(r.code).toBe(0);
-    // 验证 .review-passed 已 resign:severity S → CRITICAL,字段加上
+    // 验证 .review-passed 已 resign:severity S → CRITICAL,resigned 字段加上;created 保留(原 v0.4 marker 缺,沿用 undefined 或 0.4.0)
     const reviewText = readFileSync(join(ctx.changeDir, '.review-passed'), 'utf8');
     const review = parseYaml(reviewText) as Record<string, unknown>;
-    expect(review.created_by_tool_version).toBe('1.0.0');
+    expect(review.resigned_by_tool_version).toBe('1.0.0'); // v3 BLOCKER 2:resign 加新字段
+    // v3 BLOCKER 2:created_by_tool_version 保留(若原 v0.4 marker 含字段则不变;若原缺则仍缺)
+    // v0.4 marker fixture 不写 created_by_tool_version 字段 → resign 后仍是 undefined(sparse-add)
     const outcomes = review.review_outcomes as Array<Record<string, string>>;
     expect(outcomes[0]?.severity).toBe('CRITICAL');
   });
@@ -672,7 +960,7 @@ describe('forge upgrade --resign-markers', () => {
   it('L 简码 → 自动映射 SUGGESTION', () => {
     const ctx = setupV04Marker({ schema: 'forge-review/v1', severity: 'L' });
     cleanupDirs.push(ctx.tmpRoot);
-    const r = runResign(ctx.tmpRoot, ['add-x']);
+    const r = runResign(ctx.tmpRoot, 'add-x');
     expect(r.code).toBe(0);
     const review = parseYaml(
       readFileSync(join(ctx.changeDir, '.review-passed'), 'utf8'),
@@ -685,7 +973,7 @@ describe('forge upgrade --resign-markers', () => {
   it('C 简码 → 走 ack.ts propose 路径 + exit 1 提示 user 走 confirm', () => {
     const ctx = setupV04Marker({ schema: 'forge-review/v1', severity: 'C' });
     cleanupDirs.push(ctx.tmpRoot);
-    const r = runResign(ctx.tmpRoot, ['add-x']);
+    const r = runResign(ctx.tmpRoot, 'add-x');
     expect(r.code).toBe(1);
     expect(r.stderr).toMatch(/C 简码|clarification|forge ack confirm|propose/);
     // pending file 已写到 .evidence/pending-acks/(沿 9a 协议)
@@ -696,7 +984,7 @@ describe('forge upgrade --resign-markers', () => {
   it('不自动填空 verify_findings / pause_decisions / process_evidence — 改标 legacy', () => {
     const ctx = setupV04Marker({ schema: 'forge-review/v1', severity: 'S' });
     cleanupDirs.push(ctx.tmpRoot);
-    const r = runResign(ctx.tmpRoot, ['add-x']);
+    const r = runResign(ctx.tmpRoot, 'add-x');
     expect(r.code).toBe(0);
     const verify = parseYaml(
       readFileSync(join(ctx.changeDir, '.verify-passed'), 'utf8'),
@@ -709,7 +997,7 @@ describe('forge upgrade --resign-markers', () => {
   it('ack-log.jsonl 写入 action=resign 行', () => {
     const ctx = setupV04Marker({ schema: 'forge-review/v1', severity: 'S' });
     cleanupDirs.push(ctx.tmpRoot);
-    runResign(ctx.tmpRoot, ['add-x']);
+    runResign(ctx.tmpRoot, 'add-x');
     const ackLogPath = join(ctx.changeDir, '.evidence', 'ack-log.jsonl');
     expect(existsSync(ackLogPath)).toBe(true);
     const lines = readFileSync(ackLogPath, 'utf8')
@@ -725,9 +1013,9 @@ describe('forge upgrade --resign-markers', () => {
     const ctx = setupV04Marker({ schema: 'forge-review/v1', severity: 'S' });
     cleanupDirs.push(ctx.tmpRoot);
     // 先跑一次 resign 后 marker 已是 v1.0.0
-    runResign(ctx.tmpRoot, ['add-x']);
+    runResign(ctx.tmpRoot, 'add-x');
     // 再跑一次应 skip
-    const r = runResign(ctx.tmpRoot, ['add-x']);
+    const r = runResign(ctx.tmpRoot, 'add-x');
     expect(r.code).toBe(0);
     expect(r.stdout).toMatch(/无需 resign|already v1\.0\.0|skip/i);
   });
@@ -737,7 +1025,7 @@ describe('forge upgrade --resign-markers', () => {
     cleanupDirs.push(ctx.tmpRoot);
     const res = spawnSync(
       'node',
-      [FORGE_CLI, 'upgrade', 'resign-markers', 'add-x'],
+      [FORGE_CLI, 'upgrade', '--resign-markers', 'add-x'],
       {
         cwd: ctx.tmpRoot,
         encoding: 'utf8',
@@ -756,7 +1044,7 @@ describe('forge upgrade --resign-markers', () => {
       const { chmodSync } = require('node:fs');
       mkdirSync(join(ctx.changeDir, '.evidence'), { recursive: true });
       chmodSync(join(ctx.changeDir, '.evidence'), 0o555);
-      const r = runResign(ctx.tmpRoot, ['add-x']);
+      const r = runResign(ctx.tmpRoot, 'add-x');
       expect(r.code).toBeGreaterThan(0); // 失败
       // 验证 marker 未改(因事务回滚)
       const review = parseYaml(
@@ -767,6 +1055,75 @@ describe('forge upgrade --resign-markers', () => {
       chmodSync(join(ctx.changeDir, '.evidence'), 0o755);
     }
   });
+
+  // v5 BLOCKER 2 + B3:补 +2 case 凑 10 case
+  it('S 简码 + 原 marker 含 created_by_tool_version=0.4.0 → resign 后 created 保留 0.4.0(v3 BLOCKER 2)', () => {
+    // 自定义 fixture:不用 default setupV04Marker(它写 created 缺失);此 case 显式 init created=0.4.0
+    const tmpRoot = mkdtempSync(join(tmpdir(), 'forge-9j-resign-created-'));
+    cleanupDirs.push(tmpRoot);
+    const changeDir = join(tmpRoot, 'forge', 'changes', 'add-x');
+    mkdirSync(join(changeDir, 'specs'), { recursive: true });
+    mkdirSync(join(tmpRoot, 'forge', '.cache'), { recursive: true });
+    writeFileSync(
+      join(tmpRoot, 'forge', 'config.yaml'),
+      'schema: forge-spec-driven/v1\nharness:\n  - claude\n',
+      'utf8',
+    );
+    writeFileSync(join(changeDir, 'proposal.md'), '# X\n## Why\nr\n', 'utf8');
+    writeFileSync(join(changeDir, 'design.md'), '# Design\n', 'utf8');
+    writeFileSync(join(changeDir, 'tasks.md'), '# Tasks\n- [x] t1\n', 'utf8');
+    writeFileSync(join(changeDir, 'specs', 'x.md'), '# X Spec\n', 'utf8');
+    writeFileSync(
+      join(changeDir, '.review-passed'),
+      `schema: forge-review/v1
+reviewed_at: 2025-08-01T10:00:00Z
+reviewed_by: ai-agent
+tasks_hash: sha256:placeholder
+content_hash: sha256:placeholder
+created_by_tool_version: '0.4.0'
+git:
+  is_git_repo: false
+review_outcomes:
+  - severity: S
+    accepted: true
+    resolved: false
+    rationale: legacy v0.4 marker with created field
+`,
+      'utf8',
+    );
+    writeFileSync(
+      join(changeDir, '.verify-passed'),
+      `schema: forge-verify/v1
+verified_at: 2025-08-01T10:00:00Z
+verified_by: ai-agent
+tasks_hash: sha256:placeholder
+content_hash: sha256:placeholder
+created_by_tool_version: '0.4.0'
+evidence: []
+`,
+      'utf8',
+    );
+    const r = runResign(tmpRoot, 'add-x');
+    expect(r.code).toBe(0);
+    const review = parseYaml(readFileSync(join(changeDir, '.review-passed'), 'utf8')) as Record<string, unknown>;
+    expect(review.created_by_tool_version).toBe('0.4.0'); // **保留不变**
+    expect(review.resigned_by_tool_version).toBe('1.0.0'); // 加上
+  });
+
+  it('C 简码 propose 真调 9a ack CLI 路径(不自写 pending YAML,v3 BLOCKER 4)', () => {
+    const ctx = setupV04Marker({ schema: 'forge-review/v1', severity: 'C' });
+    cleanupDirs.push(ctx.tmpRoot);
+    const r = runResign(ctx.tmpRoot, 'add-x');
+    expect(r.code).toBe(1);
+    // 验证 pending file 名为数字 findingId(沿 v3 BLOCKER 4:String(outcomeIndex)),不是 review-outcome:0 含冒号
+    const pendingDir = join(ctx.changeDir, '.evidence', 'pending-acks');
+    expect(existsSync(pendingDir)).toBe(true);
+    const { readdirSync } = require('node:fs');
+    const files = readdirSync(pendingDir) as string[];
+    // pending file 名应是数字 findingId 开头(如 '0-<timestamp>.yaml'),不含冒号
+    expect(files.some((f) => /^\d+-/.test(f))).toBe(true);
+    expect(files.every((f) => !f.includes(':'))).toBe(true); // Windows 路径合规
+  });
 });
 ```
 
@@ -776,7 +1133,7 @@ describe('forge upgrade --resign-markers', () => {
 cd D:/ClaudeProject/opsp/forge-repo && pnpm build && pnpm test tests/cli/upgrade-resign-markers.test.ts
 ```
 
-预期:resign-markers 子命令未实现 → spawn 都返非 0 exit + stderr 含 "unknown command"。
+预期:--resign-markers option flag 未实现 → spawn 都返非 0 exit + stderr 含 "unknown option" 或 "--resign-markers 未实现"(沿 commander 默认 unknown option 输出)。
 
 ### Step 2: 实现 resign-markers module
 
@@ -784,12 +1141,13 @@ cd D:/ClaudeProject/opsp/forge-repo && pnpm build && pnpm test tests/cli/upgrade
 
 ```typescript
 // src/core/upgrade/resign-markers.ts — plan-9j Task 2
-// `forge upgrade --resign-markers <changeId>` 子命令主流程
+// `forge upgrade --resign-markers <changeId>` option flag 主流程(沿 v3 BLOCKER 1 — 不是 subcommand)
 // 沿 design §3.4.4 行为表 + §2.3.5 简码迁移 + §3.4.4.1 精确豁免
 
-import { readFile, writeFile } from 'node:fs/promises';
+// v6 BLOCKER 2 修订:补齐所有 import(v5 stash 路径用 copyFile/mkdir/rm + basename 但没 import)
+import { readFile, writeFile, mkdir, copyFile, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, basename } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { spawnSync } from 'node:child_process';
 import { appendAckLog } from '../ack-log.js';
@@ -802,10 +1160,15 @@ export interface ResignResult {
   pendingPaths?: string[]; // C 简码 propose 后写的 pending file 路径
 }
 
-/** 一次性入口 — 对 change 目录两 marker(.verify-passed + .review-passed)处理 */
+/** 一次性入口 — 对 change 目录两 marker(.verify-passed + .review-passed)处理
+ *
+ * v7 BLOCKER 1 修订:加 forgeCliPath 参数(沿调用链传到 proposeForCSimcode 真调 ack CLI)
+ * caller(upgrade.ts action handler)需传 dist/cli/index.js 真实路径;测试可注入 mock CLI 路径
+ */
 export async function resignChangeMarkers(
   forgeRoot: string,
   changeId: string,
+  forgeCliPath: string,
   cliVersion: string = '1.0.0',
 ): Promise<ResignResult[]> {
   const changeDir = join(forgeRoot, 'changes', changeId);
@@ -813,29 +1176,37 @@ export async function resignChangeMarkers(
   for (const markerName of ['.verify-passed', '.review-passed']) {
     const markerPath = join(changeDir, markerName);
     if (!existsSync(markerPath)) continue;
-    results.push(await resignOneMarker(markerPath, changeDir, changeId, cliVersion));
+    // v3 MAJOR 4:传 forgeRoot 入,resignOneMarker 用 forgeRoot 拼 stash 路径
+    // v7 BLOCKER 1:传 forgeCliPath 入,resignOneMarker → proposeForCSimcode spawn 真 ack CLI
+    results.push(await resignOneMarker(markerPath, changeDir, changeId, forgeRoot, forgeCliPath, cliVersion));
   }
   return results;
 }
 
-/** 单 marker resign — 三步:简码映射 / 字段添加 / ack-log 写入 */
+/** 单 marker resign — 三步:简码映射 / 字段添加 / ack-log 写入(v3 MAJOR 4 + v7 BLOCKER 1:加 forgeRoot + forgeCliPath 参数) */
 async function resignOneMarker(
   markerPath: string,
   changeDir: string,
   changeId: string,
+  forgeRoot: string,
+  forgeCliPath: string,
   cliVersion: string,
 ): Promise<ResignResult> {
   const text = await readFile(markerPath, 'utf8');
   const marker = parseYaml(text) as Record<string, unknown>;
 
-  // 步骤 0:若已是 v1.0.0(或更高)→ skip(沿 plan §6 Step 1.1.6 干净状态 case)
-  if (
+  // 步骤 0:若已 resigned(`resigned_by_tool_version` 字段存在)或原生 v1.0.0+ → skip
+  // v3 BLOCKER 3 修订:判定依据是 `resigned_by_tool_version` 字段(沿 v2 选项 C),
+  // 不再用 `created_by_tool_version >= 1.0.0` 判定(原 v1 逻辑覆写 created,v3 改保留)
+  const alreadyResigned = typeof marker.resigned_by_tool_version === 'string';
+  const isNativeV10 =
     typeof marker.created_by_tool_version === 'string' &&
-    !marker.created_by_tool_version.startsWith('0.')
-  ) {
+    !marker.created_by_tool_version.startsWith('0.');
+  if (alreadyResigned || isNativeV10) {
+    const ver = marker.resigned_by_tool_version ?? marker.created_by_tool_version;
     return {
       kind: 'skipped-already-v1',
-      message: `${markerPath}: 已是 ${marker.created_by_tool_version},无需 resign`,
+      message: `${markerPath}: 已是 v1.0+(resigned=${marker.resigned_by_tool_version ?? '<none>'} / created=${marker.created_by_tool_version ?? '<none>'}),无需 resign`,
       markerPath,
     };
   }
@@ -853,9 +1224,10 @@ async function resignOneMarker(
         o.severity = 'SUGGESTION';
       } else if (o.severity === 'C' || o.severity === 'blocking') {
         // C 简码 / blocking 字符串 → 走 ack.ts propose 路径(交互式询问 target severity)
+        // v7 BLOCKER 1 修订:传 forgeCliPath(从 resignChangeMarkers 接收的参数),不是 changeDir
         needsCPropose = true;
-        const pendingPath = await proposeForCSimcode(changeDir, changeId, i, o);
-        pendingPaths.push(pendingPath);
+        const { exitCode, pendingDirAfter } = await proposeForCSimcode(forgeCliPath, changeId, i, o);
+        pendingPaths.push(pendingDirAfter);
       }
     }
   }
@@ -870,9 +1242,10 @@ async function resignOneMarker(
     };
   }
 
-  // v3 BLOCKER 5:阶段事务 stash/rollback — 先 stash 原 marker 到 .cache/resign-markers-stash-<pid>/
-  // 沿 upgrade.ts:95 现有 STASH 模式
-  const stashDir = join(changeDir, '..', '..', '.cache', `resign-markers-stash-${process.pid}`);
+  // v3 BLOCKER 5 + v3 MAJOR 4:阶段事务 stash/rollback — 用 forgeRoot 拼 stash 路径
+  // 沿 upgrade.ts:95 现有 STASH 模式(projectRoot/.cache),保持模块入口接收 forgeRoot 参数
+  // 而非 changeDir 相对路径(避免 `..`/`..` 跳出 changeDir 后路径 fragile)
+  const stashDir = join(forgeRoot, '.cache', `resign-markers-stash-${process.pid}`);
   await mkdir(stashDir, { recursive: true });
   const stashPath = join(stashDir, basename(markerPath));
   await copyFile(markerPath, stashPath);
@@ -932,15 +1305,51 @@ async function resignOneMarker(
   };
 }
 
-/** C 简码 propose — 调 ack.ts propose 接口写 pending file */
+/**
+ * C 简码 propose — **真调** `forge ack propose` CLI(沿 v6 BLOCKER 1 修订 + v3 BLOCKER 4 数字 findingId)
+ *
+ * v6 BLOCKER 1:不再自写 pending YAML — 真 spawn forge ack propose 子命令(沿 9a propose/confirm 协议)
+ * 让 ack-log + pending file 完全走 9a 现状路径,plan-9j 仅提供 changeId + findingId + action,
+ * --target-severity 由 user 在后续 ack confirm 时指定(Task 6.1 已扩 9a 加该 flag)
+ */
 async function proposeForCSimcode(
+  forgeCliPath: string,  // dist/cli/index.js 路径(测试可注入 mock)
+  changeId: string,
+  outcomeIndex: number,
+  outcome: Record<string, unknown>,
+): Promise<{ exitCode: number; pendingDirAfter: string }> {
+  // v3 BLOCKER 4:findingId 用数字索引(Windows 路径合规 + 9a listPending 正则匹配)
+  const findingId = String(outcomeIndex);
+  // v6 BLOCKER 1:真 spawn forge ack propose(CI=false 让 propose 不被 9a CI 拒绝)
+  const res = spawnSync(
+    'node',
+    [
+      forgeCliPath,
+      'ack',
+      'propose',
+      changeId,
+      '--finding',
+      findingId,
+      '--action',
+      'resign-c-simcode',
+      '--rationale',
+      `forge upgrade --resign-markers: C 简码需 user 判定 target severity`,
+    ],
+    { encoding: 'utf8', env: { ...process.env, CI: 'false' } },
+  );
+  return {
+    exitCode: res.status ?? -1,
+    pendingDirAfter: join(process.cwd(), 'forge', 'changes', changeId, '.evidence', 'pending-acks'),
+  };
+}
+
+/* v6 BLOCKER 1 旧版自写 pending YAML 已**移除** — 真调 ack CLI 走 9a 协议
+function _legacyProposeForCSimcodeRemoved(
   changeDir: string,
   changeId: string,
   outcomeIndex: number,
   outcome: Record<string, unknown>,
 ): Promise<string> {
-  // 沿 9a ack-log.ts getPendingPath 接口
-  // v3 BLOCKER 4 修订:findingId 用数字索引避免 Windows 路径冒号非法 + 9a listPending 正则匹配
   const findingId = String(outcomeIndex);
   const pendingPath = join(
     changeDir,
@@ -966,6 +1375,7 @@ async function proposeForCSimcode(
   await writeFile(pendingPath, pendingContent, 'utf8');
   return pendingPath;
 }
+v6 BLOCKER 1 旧版结束 */
 
 /** 获取 git HEAD(沿 archive.ts:isProjectActuallyGit 同模式) */
 function getGitHeadOrNull(cwd: string): string | null {
@@ -1013,7 +1423,10 @@ function getGitHeadOrNull(cwd: string): string | null {
         }
         const forgeRoot = join(process.cwd(), 'forge');
         const { resignChangeMarkers } = await import('../../core/upgrade/resign-markers.js');
-        const results = await resignChangeMarkers(forgeRoot, opts.resignMarkers);
+        // v7 BLOCKER 1:计算 forgeCliPath(dist/cli/index.js 真路径,沿 process.argv[1] 或 import.meta.url 推导)
+        // process.argv[1] 是当前运行的入口脚本(即 dist/cli/index.js;npx forge 时同);测试可 mock
+        const forgeCliPath = process.argv[1] ?? '';
+        const results = await resignChangeMarkers(forgeRoot, opts.resignMarkers, forgeCliPath);
 
         // 输出报告
         let allResigned = true;
@@ -1051,7 +1464,7 @@ function getGitHeadOrNull(cwd: string): string | null {
 cd D:/ClaudeProject/opsp/forge-repo && pnpm build && pnpm test tests/cli/upgrade-resign-markers.test.ts
 ```
 
-预期:8 case PASS。注意 stage 8(事务回滚)在 Windows 端 chmod 模拟不工作,会 skip;POSIX 端跑实测。
+预期:**10 case PASS**(v5 修订)。stage 8(事务回滚)在 Windows 端 chmod 模拟不工作,会 skip;POSIX 端跑实测。其余 +2 case(created 保留 + 真调 ack CLI pending file 数字 findingId)跨平台跑。
 
 ### Step 3: Typecheck + format + commit
 
@@ -1068,7 +1481,7 @@ cd D:/ClaudeProject/opsp/forge-repo && pnpm typecheck && pnpm lint && pnpm forma
 ```bash
 git -C D:/ClaudeProject/opsp/forge-repo add src/core/upgrade/resign-markers.ts src/cli/commands/upgrade.ts tests/cli/upgrade-resign-markers.test.ts
 git -C D:/ClaudeProject/opsp/forge-repo commit -m "$(cat <<'EOF'
-feat(9j Task 2): forge upgrade resign-markers 子命令 + 8 case 单测
+feat(9j Task 2): forge upgrade --resign-markers option + 10 case 单测
 
 沿 design §3.4.4 + §2.3.5 简码迁移:
 - S → CRITICAL / L → SUGGESTION 自动映射
@@ -1250,6 +1663,28 @@ describe('validateLegacyExemption', () => {
       true,
     );
   });
+
+  // v3 BLOCKER 5 新增:resigned-aware 互斥 allow + process_evidence 反向加固
+  it('legacy=true + created_by_tool_version=1.0.0 + resigned_by_tool_version=1.0.0 → **允许通过**(resigned-aware,v3 BLOCKER 2)', () => {
+    const result = validateLegacyExemption({
+      ...baseLegacyMarker,
+      process_evidence_unavailable_legacy: true,
+      created_by_tool_version: '1.0.0',  // 注意:created 1.0.0(原本应互斥)
+      resigned_by_tool_version: '1.0.0', // 但 resigned 字段存在 → 允许通过
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it('legacy=true + process_evidence 整字段(伪造)→ **fail-closed 反向加固**(v3 BLOCKER 6)', () => {
+    const result = validateLegacyExemption({
+      ...baseLegacyMarker,
+      process_evidence: { fake: 'tampered process_evidence' }, // 试图加 process_evidence 绕开 fence
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => /process_evidence.*legacy|integrity|tamper/.test(e.message))).toBe(
+      true,
+    );
+  });
 });
 ```
 
@@ -1259,7 +1694,7 @@ describe('validateLegacyExemption', () => {
 cd D:/ClaudeProject/opsp/forge-repo && pnpm test tests/core/archive/legacy-exemption.test.ts
 ```
 
-预期:模块未实现 → 15 ERROR。
+预期:模块未实现 → **17 ERROR**(v3 BLOCKER 5+6 修订:15 + 2 = 17)。
 
 ### Step 2: 实现 legacy-exemption module
 
@@ -1268,7 +1703,7 @@ cd D:/ClaudeProject/opsp/forge-repo && pnpm test tests/core/archive/legacy-exemp
 ```typescript
 // src/core/archive/legacy-exemption.ts — plan-9j Task 3
 // 沿 design §3.4.4.1 精确豁免表 + 反向加固
-// 13 不变量中 #1-8/10/13 跳过;#9/11/12 保留 + 反向加固;legacy=true ⊥ version>=1.0.0 互斥
+// 13 不变量中 #1-8/10/13 跳过;#9/11/12 保留 + 反向加固;legacy=true ⊥ (created>=1.0.0 且 resigned 缺失) 互斥(v6 修订 resigned-aware)
 
 import { type ValidationResult, ok, failed, mergeResults } from '../validate/types.js';
 
@@ -1379,13 +1814,13 @@ export function validateLegacyExemption(
 }
 ```
 
-- [ ] **Step 2.2: 跑 15 case 测试 → PASS**
+- [ ] **Step 2.2: 跑 17 case 测试 → PASS**(v5 BLOCKER 4 修订:含 +2 case resigned-aware + process_evidence fail-closed)
 
 ```bash
 cd D:/ClaudeProject/opsp/forge-repo && pnpm test tests/core/archive/legacy-exemption.test.ts
 ```
 
-预期:15 PASS。
+预期:**17 PASS**(v3 BLOCKER 5 + 6 修订:15 baseline + 2 新加 resigned-aware + process_evidence fail-closed)。
 
 ### Step 3: Typecheck + format + commit
 
@@ -1400,12 +1835,14 @@ cd D:/ClaudeProject/opsp/forge-repo && pnpm typecheck && pnpm lint && pnpm forma
 ```bash
 git -C D:/ClaudeProject/opsp/forge-repo add src/core/archive/legacy-exemption.ts tests/core/archive/legacy-exemption.test.ts
 git -C D:/ClaudeProject/opsp/forge-repo commit -m "$(cat <<'EOF'
-feat(9j Task 3): archive legacy-exemption 模块 + 15 case 单测
+feat(9j Task 3): archive legacy-exemption 模块 + 17 case 单测(v5 修订)
 
-沿 design §3.4.4.1 精确豁免表:
+沿 design §3.4.4.1 精确豁免表 + v3 BLOCKER 5/6 修订:
 - 13 不变量中 #1-8/10/13 跳过(legacy marker 无 process_evidence 子字段)
 - #9/11/12 保留 + 反向加固(legacy marker 不应有 tdd_exemption / process_verification_mode 字段)
-- legacy=true ⊥ created_by_tool_version >= 1.0.0 互斥(v1.0 marker 不允许 legacy 标记)
+- **legacy=true ⊥ (created_by_tool_version >= 1.0.0 且 resigned_by_tool_version 缺失)** 互斥
+  (resigned-aware:resigned 后 marker 允许 legacy + version 共存,沿 v2 选项 C)
+- **legacy=true + process_evidence 整字段 → fail-closed 拒签**(v3 BLOCKER 6 反向加固 #9 placeholder)
 
 archive.ts 集成在 Task 5。
 
@@ -1428,7 +1865,7 @@ EOF
 
 **Files**:
 - Create: `src/core/archive/version-retrograde-fence.ts`(新建 module)
-- Create: `tests/core/archive/version-retrograde-fence.test.ts`(6 case)
+- Create: `tests/core/archive/version-retrograde-fence.test.ts`(**7 case 实测 + 1 it.todo**;v3 MAJOR 1 + v7 MAJOR 1 修订:case 7 = non-git best-effort 真实测,fail-closed git error 留 it.todo 9z release 解锁)
 
 ### Step 1: 先写 retrograde fence 测试(TDD red)
 
@@ -1436,7 +1873,7 @@ EOF
 
 ```typescript
 // version-retrograde-fence.test.ts — plan-9j Task 4 单测
-// 6 case:retrograde 拒签 / 非 git 跳过 / 合法 semver / tamper 检测 / 缺字段 / git log 错误
+// 7 case 实测 + 1 it.todo:retrograde 拒签 / 非 git 跳过 / 合法 semver / tamper 检测 / 缺字段 / 上升路径 / **non-git fake gitDir best-effort**(v7 MAJOR 1 真名实对齐)+ it.todo: git repo 内 log 失败 fail-closed
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -1521,6 +1958,23 @@ describe('validateVersionRetrograde', () => {
     const result = await validateVersionRetrograde(ctx.markerPath, marker, ctx.tmpRoot);
     expect(result.valid).toBe(true);
   });
+
+  // v7 MAJOR 1 修订(名实对齐):case 7 改为 non-git best-effort 真实测;
+  //   真 git repo 内 git log 失败的 fail-closed 路径留作 it.todo + 9z release 解锁
+  it('非 git path(fake gitDir,rev-parse 失败)→ best-effort 跳过(返 ok)— v3 MAJOR 1 非 git 路径', async () => {
+    const fakeGitDir = mkdtempSync(join(tmpdir(), 'forge-9j-fake-git-'));
+    cleanupDirs.push(fakeGitDir);
+    const markerPath = join(fakeGitDir, '.verify-passed');
+    writeFileSync(markerPath, 'schema: forge-verify/v1\ncreated_by_tool_version: 1.0.0\n');
+    const marker = { created_by_tool_version: '1.0.0' };
+    const result = await validateVersionRetrograde(markerPath, marker, fakeGitDir);
+    expect(result.valid).toBe(true); // non-git best-effort
+  });
+
+  // v7 MAJOR 1:真 git repo 内 git log 失败 fail-closed 路径 — 用文件操作难模拟,留 it.todo + 9z release gate 解锁
+  it.todo(
+    'git repo 内 git log 命令失败(模拟 git binary 异常)→ fail-closed 拒签(v3 MAJOR 1;9z release plan 解锁 — 需要 mock spawn 或注入失败 child_process)',
+  );
 
   it('历史含 2.0.0 prerelease,当前 1.0.0 → 拒签(prerelease 也算 retrograde)', async () => {
     const ctx = setupGitRepoWithMarker(['2.0.0-alpha.1', '1.0.0']);
@@ -1653,13 +2107,13 @@ export async function validateVersionRetrograde(
 }
 ```
 
-- [ ] **Step 2.2: 跑测试 → 7 PASS**(v3 +1 case:fail-closed git error)
+- [ ] **Step 2.2: 跑测试 → 7 PASS + 1 it.todo**(v7 MAJOR 1 修订:non-git fake gitDir 真测 + git repo 内 fail-closed 留 it.todo;同步加 release-blocker gate todo count)
 
 ```bash
 cd D:/ClaudeProject/opsp/forge-repo && pnpm test tests/core/archive/version-retrograde-fence.test.ts
 ```
 
-预期:6 PASS。
+预期:**7 PASS + 1 it.todo**(v7 MAJOR 1 修订)。同步加 release-blocker `EXPECTED_TODO_COUNT_SOFT` 5 → 6(plan-9e1 3 + plan-9j 1 + plan-9c 2);沿 plan-9e1 Task 3 + plan-9c 同模式 release-blocker-attack-path.test.ts 加 9j it.todo 占位。
 
 ### Step 3: Typecheck + commit
 
@@ -1674,7 +2128,7 @@ cd D:/ClaudeProject/opsp/forge-repo && pnpm typecheck && pnpm lint && pnpm forma
 ```bash
 git -C D:/ClaudeProject/opsp/forge-repo add src/core/archive/version-retrograde-fence.ts tests/core/archive/version-retrograde-fence.test.ts
 git -C D:/ClaudeProject/opsp/forge-repo commit -m "$(cat <<'EOF'
-feat(9j Task 4): archive version-retrograde-fence 模块 + 6 case 单测
+feat(9j Task 4): archive version-retrograde-fence 模块 + 7 case 单测(v6 修订:+ fail-closed git error)
 
 沿 design §3.4.4.3:
 - git log -p <marker-file> 扫描历史中 created_by_tool_version 字段
@@ -1775,22 +2229,22 @@ import { validateVersionRetrograde } from '../../core/archive/version-retrograde
 ```markdown
 ---
 description: 调 forge upgrade CLI(legacy adapter 清理 + marker resign)
-argument-hint: '<sub-command> [args...]'
+argument-hint: '[--resign-markers <changeId>] [--recover] [--gc] [--dry-run]'
 ---
 
 # /forge:upgrade
 
 包装 `forge upgrade` CLI(v0.3 / plan-9j 落地)。
 
-## 子命令
+## 用法 / 选项(v6 MINOR 4:option flag 形态,不是 subcommand)
 
-- `forge upgrade`(无子命令,沿 v0.3):清理 legacy v0.2 harness adapter 产物
-- `forge upgrade resign-markers <changeId>`(plan-9j 新):升级 v0.4 marker 到 v1.0 schema
+- `forge upgrade`(无 flag,沿 v0.3):清理 legacy v0.2 harness adapter 产物
+- `forge upgrade --resign-markers <changeId>`(plan-9j 新增 option):升级 v0.4 marker 到 v1.0 schema
 
 ## --resign-markers 用法(plan-9j Task 2 落地)
 
 ```bash
-forge upgrade resign-markers add-oauth-refresh
+forge upgrade --resign-markers add-oauth-refresh
 ```
 
 行为:
@@ -1810,9 +2264,9 @@ forge upgrade resign-markers add-oauth-refresh
 
 C 简码(clarification)不自动映射(沿 design §2.3.5):用户必须判断目标 severity:
 
-1. 跑 `forge upgrade resign-markers <changeId>` — 若含 C 简码,exit 1 + 写 pending file
+1. 跑 `forge upgrade --resign-markers <changeId>` — 若含 C 简码,exit 1 + 写 pending file
 2. 跑 `forge ack confirm <changeId> <findingId> --target-severity WARNING|SUGGESTION`(或走 `/forge:ack-confirm` slash)
-3. 重跑 `forge upgrade resign-markers <changeId>` 完成 resign
+3. 重跑 `forge upgrade --resign-markers <changeId>` 完成 resign
 
 ## sunset policy
 
@@ -1825,11 +2279,11 @@ C 简码(clarification)不自动映射(沿 design §2.3.5):用户必须判断目
 
 archive.ts 步骤 3.4 在 evidence 校验之前先跑 legacy-exemption + version-retrograde fence:
 - legacy marker 缺 created_by_tool_version 字段或 `<1.0.0` → 走 legacy 路径(13 不变量精确豁免)
-- `legacy=true ⊥ created_by_tool_version>=1.0.0` 互斥(沿 §3.4.4.1)
+- **`legacy=true ⊥ (created_by_tool_version >= 1.0.0 且 resigned_by_tool_version 缺失)`** 互斥(沿 §3.4.4.1 + v6 选项 C resigned-aware):原生 v1.0 marker 不允许 legacy 标记;resigned 后 marker(含 resigned_by_tool_version 字段)允许 legacy + version 共存
 - version retrograde(高版本 → 低版本)→ 拒签(沿 §3.4.4.3)
 ```
 
-### Step 3: 创建 4 fixture
+### Step 3: 创建 5 fixture(v3 MAJOR 2 + v6 MAJOR 3)
 
 - [ ] **Step 3.1: 创建 `tests/fixtures/marker-version/archived-old/`(已 archived 的 v0.4 marker,冻结不动)**
 
@@ -1845,11 +2299,83 @@ mkdir -p tests/fixtures/marker-version/archived-old/specs
 - [ ] **Step 3.3: 创建 `tests/fixtures/marker-version/new-v1.0/`(v1.0 创建的 marker)**
 - [ ] **Step 3.4: 创建 `tests/fixtures/marker-version/corrupt-version-retrograde/`(`created_by_tool_version` 被改 1.0.0 → 0.4.0)**
 
+- [ ] **Step 3.5(v6 MAJOR 3 + v7 MAJOR 2 + v8 MAJOR 2):创建 `tests/fixtures/marker-version/resign-c-simcode-with-confirm/`(C 简码 + user confirm 完整闭环 e2e fixture)**
+
+  目录结构:`proposal.md` / `design.md` / `tasks.md` / `specs/x.md` / `.verify-passed` / `.review-passed`(不预置 `.evidence/`,propose 阶段动态生成)。
+
+  `proposal.md`:
+
+  ```markdown
+  # C 简码迁移 Fixture
+
+  ## Why
+  test resign-c-simcode 完整 propose → confirm → rerun → archive 闭环
+
+  ## What
+  v0.4 marker 含 C 简码 review_outcome,需 user 走 forge ack confirm --target-severity 迁移
+  ```
+
+  `design.md`:
+
+  ```markdown
+  # Design
+  ```
+
+  `tasks.md`:
+
+  ```markdown
+  # Tasks
+
+  - [x] t1: implement
+  ```
+
+  `specs/x.md`:
+
+  ```markdown
+  # X Spec
+
+  ## Scenario: X
+
+  **Given** y
+  **When** z
+  **Then** w
+  ```
+
+  `.verify-passed`(legacy v0.4 marker,缺 `created_by_tool_version` 字段):
+
+  ```yaml
+  schema: forge-verify/v1
+  verified_at: 2025-08-01T10:00:00Z
+  verified_by: ai-agent
+  tasks_hash: sha256:placeholder   # e2e setupFixture helper 运行时重算填(沿 plan-9c/plan-9e1 同模式)
+  content_hash: sha256:placeholder # 同上
+  evidence: []
+  ```
+
+  `.review-passed`(含 C 简码 + accepted+rationale 但 unresolved;9j fence 应拦):
+
+  ```yaml
+  schema: forge-review/v1
+  reviewed_at: 2025-08-01T10:00:00Z
+  reviewed_by: ai-agent
+  tasks_hash: sha256:placeholder
+  content_hash: sha256:placeholder
+  git:
+    is_git_repo: false
+  review_outcomes:
+    - severity: C
+      accepted: true
+      resolved: false
+      rationale: v0.4 clarification 需 user 判定 target severity
+  ```
+
+  e2e 测试用此 fixture 验证完整 propose→confirm→rerun→archive 链路(详 Step 4.1)。
+
 ### Step 4: 创建 e2e 测试 + 跑
 
-- [ ] **Step 4.1: 创建 `tests/integration/marker-version-end-to-end.test.ts`(4 case)**
+- [ ] **Step 4.1: 创建 `tests/integration/marker-version-end-to-end.test.ts`(5 case)**(v6 MAJOR 3 修订:含 resign-c-simcode-with-confirm 完整 e2e:动态 git init → spawn `forge upgrade --resign-markers` → exit 1 + pending file 写 → spawn `forge ack confirm <changeId> 0 --target-severity WARNING` → 重跑 `forge upgrade --resign-markers` → marker 字段写回 WARNING + resigned_by_tool_version=1.0.0 → spawn `forge archive` exit 0)
 
-(测试用 spawn dist binary 真跑 `forge upgrade resign-markers` + `forge archive`,沿 plan-9e1 e2e 同模式)
+(测试用 spawn dist binary 真跑 `forge upgrade --resign-markers` + `forge archive`,沿 plan-9e1 e2e 同模式)
 
 - [ ] **Step 4.2: build + 跑 e2e + 全本地 verify**
 
@@ -1857,18 +2383,18 @@ mkdir -p tests/fixtures/marker-version/archived-old/specs
 cd D:/ClaudeProject/opsp/forge-repo && pnpm typecheck && pnpm lint && pnpm format:check && pnpm build && pnpm test
 ```
 
-预期:全 PASS;release-gate `PASS: 5 it.todo(s) = expected 5`。
+预期:全 PASS;release-gate **`PASS: 6 it.todo(s) = expected 6`**(v7 MAJOR 1:plan-9c 2 + plan-9e1 3 + plan-9j 1 = 6)。Task 4 Step 2.2 已同步修 `scripts/check-release-gate.mjs` `EXPECTED_TODO_COUNT_SOFT` 5 → 6;Task 5 e2e 通过 release-gate post-hook 验证一致性。
 
 - [ ] **Step 4.3: commit Task 5**
 
 ```bash
 git -C D:/ClaudeProject/opsp/forge-repo add src/cli/commands/archive.ts commands/upgrade.md tests/fixtures/marker-version/ tests/integration/marker-version-end-to-end.test.ts
 git -C D:/ClaudeProject/opsp/forge-repo commit -m "$(cat <<'EOF'
-feat(9j Task 5): archive.ts 集成 legacy + retrograde fence + commands/upgrade.md + 4 fixture e2e + 全本地 verify PASS
+feat(9j Task 5): archive.ts 集成 legacy + retrograde fence + commands/upgrade.md + 5 fixture e2e + 全本地 verify PASS(v6 修订)
 
 - archive.ts 步骤 3.4 插入 legacy-exemption + version-retrograde fence(verify+review marker 两端)
 - commands/upgrade.md 加 §"--resign-markers 用法" + C 简码迁移协议 + sunset policy
-- 4 fixture:archived-old / active-old-need-resign / new-v1.0 / corrupt-version-retrograde
+- **5 fixture**:archived-old / active-old-need-resign / new-v1.0 / corrupt-version-retrograde / **resign-c-simcode-with-confirm**(v6 MAJOR 3:完整 propose→confirm→rerun→archive e2e)
 
 plan-9j 完成 → plan-9e1 三级 fence C 简码硬墙用户工作流解锁。
 
@@ -1938,7 +2464,33 @@ created_at: 2026-05-12T16:00:00Z
 
 #### Step 6.1.5:扩 `src/cli/commands/ack.ts` 加 `--target-severity` flag + `resign-c-simcode` action(v2 BLOCKER 4)
 
-修改 `ack.ts` line ~57 `propose` 子命令 + line ~150 `confirm` 子命令,加 `.option('--target-severity <sev>', '...')` flag(propose / confirm 两端);action 类型扩 `'resign-c-simcode'`;`appendAckLog` AckEntry interface 加可选 `target_severity?: string` 字段。
+**9a freeze 例外声明**(v3 MAJOR 2):`src/cli/commands/ack.ts` 是 9a 锁死接口(plan-9j File Structure §1.3 "不修改文件" 中曾列);本 Step 是 **9a interface freeze 显式例外** — 沿 plan-9j v2 BLOCKER 4 + plan-9e1 v5 选项 C 同模式(实施时实际改 9a-frozen 文件,plan-9j 范围内的合规跨越)。**理由**:plan-9j C 简码 resign 路径 需要 user 在 ack confirm 时指定 target severity(WARNING/SUGGESTION),9a 现状 ack propose/confirm 不支持该参数。
+
+具体修改:
+
+```typescript
+// src/cli/commands/ack.ts line ~57 propose 子命令加 option
+ack.command('propose')
+  .description('...')
+  .argument('<changeId>', '...')
+  .requiredOption('--finding <id>', '...')
+  .requiredOption('--action <type>', 'ack 类型,如 ack-warning / ack-critical / **resign-c-simcode**')  // v3 BLOCKER 4 加新 action
+  .option('--rationale <text>', '...')
+  .option('--target-severity <sev>', 'v3 BLOCKER 4(plan-9j):resign-c-simcode action 用 — 目标 severity (WARNING / SUGGESTION)');
+
+// confirm 子命令同步加 --target-severity option(让 user 在 confirm 时指定)
+ack.command('confirm')
+  .description('...')
+  .argument('<changeId>', '...')
+  .argument('<findingId>', '...')
+  .option('--target-severity <sev>', 'v3 BLOCKER 4:仅 resign-c-simcode action 必填;confirm 时 user 指定目标 severity 并写回 marker');
+
+// src/core/ack-log.ts AckEntry interface 加可选字段
+export interface AckEntry {
+  // ... 现有字段
+  target_severity?: 'WARNING' | 'SUGGESTION';  // v3 BLOCKER 4:仅 resign-c-simcode action 时非空
+}
+```
 
 #### Step 6.1.6:修改 master `§6` 修订记录加 v3.2 行
 
@@ -1947,6 +2499,32 @@ created_at: 2026-05-12T16:00:00Z
 ```markdown
 - **v3.2**(2026-05-12,plan-9j v2 选项 C 修订):§3.4.1 加 `resigned_by_tool_version` 字段定义 + §3.4.4 行为修订(保留原 version + 加 resigned 字段)+ §3.4.4.1 互斥规则改 resigned-aware;§3.12.1 加 marker 字段注脚;`src/cli/commands/ack.ts` 扩 `--target-severity` flag + `resign-c-simcode` action 类型
 ```
+
+#### Step 6.1.6.5(v3 MAJOR 1 新增):cross-plan 修订 rollback 指南
+
+Task 6.1 同时改 4 个文件(spec / master / ack.ts / ack-log.ts),实施中任一步失败 → **回滚路径**:
+
+**Case A:未 commit 时失败**(`git restore` 即可):
+
+```bash
+cd D:/ClaudeProject/opsp/forge-repo
+git restore docs/specs/2026-05-10-v1.0-fusion-completion-design.md
+git restore docs/plans/2026-05-10-plan-9-v1.0-fusion-completion-master.md
+git restore src/cli/commands/ack.ts
+git restore src/core/ack-log.ts
+# 重新开始 Step 6.1.1
+```
+
+**Case B:已 commit 时失败**(发现错误后):
+
+```bash
+cd D:/ClaudeProject/opsp/forge-repo
+git log --oneline -3  # 找 Task 6.1 commit hash
+git revert <commit-hash>  # 创建 revert commit(不重写历史,保留审计)
+# 修订错误后重新提交 Task 6.1
+```
+
+**禁止**:不要 `git reset --hard` 或 `git push --force`(沿用户偏好 — 任何 git 撤销操作走显式 revert 不重写历史)。
 
 #### Step 6.1.7:跑 grep 验证 cross-plan 修订无遗漏
 
@@ -1965,7 +2543,7 @@ cd D:/ClaudeProject/opsp/forge-repo && grep -n "resigned_by_tool_version" docs/s
 
 `review_outcomes[i].severity = 'C'`(v0.4 clarification 简码)在 v1.0 三级体系中**不直接对应**;archive 阶段会**硬拒签**。
 
-**plan-9j v2 完成后**:用户工作流解锁路径:
+**plan-9j 落地完成后**:用户工作流解锁路径:
 1. 跑 `forge upgrade --resign-markers <change-id>` — 若含 C 简码,exit 1 + 写 pending file
 2. 跑 `forge ack confirm <change-id> <findingId> --target-severity <WARNING|SUGGESTION>` — user 判定目标 severity
 3. 重跑 `forge upgrade --resign-markers <change-id>` — confirm 后 marker `severity` 字段改回全名,archive 通过
@@ -1978,12 +2556,12 @@ cd D:/ClaudeProject/opsp/forge-repo && grep -n "resigned_by_tool_version" docs/s
 ```bash
 git -C D:/ClaudeProject/opsp/forge-repo add docs/plans/2026-05-10-plan-9-v1.0-fusion-completion-master.md docs/specs/2026-05-10-v1.0-fusion-completion-design.md src/cli/commands/ack.ts commands/archive.md
 git -C D:/ClaudeProject/opsp/forge-repo commit -m "$(cat <<'EOF'
-feat(9j Task 6): cross-plan 修订 spec/master + 9a ack.ts 扩 --target-severity + commands/archive.md 9j 解锁声明
+feat(9j Task 6): cross-plan 修订 spec/master + 9a freeze 例外:ack.ts 扩 --target-severity + commands/archive.md 9j 解锁声明
 
 沿 plan-9j v2 选项 C(plan-9e1 v5 同模式 — reflection 真落地):
 - design §3.4.1 + §3.4.4 + §3.4.4.1:加 resigned_by_tool_version 字段 + 互斥规则 resigned-aware
 - master §3.12.1 marker schema 字段注脚 + §6 修订记录 v3.2 行
-- src/cli/commands/ack.ts:加 --target-severity flag + resign-c-simcode action(plan-9j v2 BLOCKER 4)
+- **9a interface freeze 例外**(沿 plan-9j v3 MAJOR 2 声明):src/cli/commands/ack.ts 加 --target-severity flag + resign-c-simcode action + AckEntry interface target_severity 字段(plan-9j v2 BLOCKER 4 修复路径需要)
 - commands/archive.md:C 简码迁移协议段加 9j 解锁三步流程
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
@@ -1995,7 +2573,28 @@ EOF
 
 ## 8. 已知降级与风险
 
-### 7.1 9g 未完成时 legacy 豁免表 #9 不变量 placeholder
+### 8.1(v3 MAJOR 3 新增)v0.4 native marker 语义边界条款
+
+**定义**:**v0.4 native marker** = 同时满足三条件:
+1. 缺 `process_evidence_unavailable_legacy` 字段(或 = false)
+2. 缺 `resigned_by_tool_version` 字段
+3. 缺 `created_by_tool_version` 字段(或 `<1.0.0`)
+
+**这种 marker 在 archive fence 中行为**:
+- **不被 plan-9j legacy-exemption 拦截**(沿 §1.3 函数注释:`legacyMeta !== true` 时 return ok());走 strict path
+- **不被 plan-9j version-retrograde fence 拦截**(沿 Task 4 字段缺失跳过);
+- **走 plan-9e1 三级 fence + plan-9d verify-findings fence + plan-9c pause-decisions fence**(superset additive 兼容,老 marker 缺字段等价 [])
+- 若含 simcode S/L → 沿 plan-9e1 v4 BLOCKER 1 全名扩 + plan-9j v3 BLOCKER 4 双格式 schema 处理;若含 simcode C → 9e1 三级 fence 硬墙拒签 + 9j C 简码 resign 路径解锁
+- 若 schema 校验通过 + 业务 fence 通过 → 可 archive(v0.4 marker 自然过渡到 v1.0 archive 流程)
+
+**为什么不强制 v0.4 marker 走 resign**:用户 v0.4 active change 在 9j 落地前可能积累很多 marker;若 9j 强拦,用户全要回去跑 `forge upgrade --resign-markers` — 高成本。**沿 design §3.4.2 三类 marker 情景 deprecation 路径**:v0.4 marker on v1.0 active change 是 warning(提示 resign),不强制(v1.2 才强制)。
+
+**plan-9j 不拦 v0.4 native 的理由总结**:
+- legacy-exemption 仅校验 `legacy=true` 路径,v0.4 native 走 strict(沿 design §3.4.4.1 + plan-9e1 v3 superset additive)
+- version-retrograde 仅校验有 created_by_tool_version 字段的 retrograde,v0.4 native 字段缺失跳过(沿 §3.4.4.3)
+- 业务 fence(plan-9e1 三级)处理 v0.4 marker 的 simcode → 全名映射 + C 硬墙(沿 §2.3.5 简码迁移)
+
+### 8.2 9g 未完成时 legacy 豁免表 #9 不变量 placeholder
 
 **降级**:design §3.4.4.1 不变量 #9(process_evidence JCS hash 校验 marker 整体完整性)在 9g 未完成时无法实施(因 9g 才会引入 process_evidence 字段 + JCS hash 算法)。
 
@@ -2003,13 +2602,13 @@ EOF
 
 **风险评估**:低 — 9g 是后续 sub-plan,plan-9j 范围正交;不变量 #9 是 "整体完整性"校验,plan-9j 的 retrograde fence 已覆盖一部分(version 字段不能 retrograde)。
 
-### 7.2 Windows 端 spawn ack confirm 测试受限
+### 8.3 Windows 端 spawn ack confirm 测试受限
 
-**降级**:`forge upgrade resign-markers` 在 Windows 端 spawn 测试不能模拟 readonly 目录(chmod 0o555 在 Windows 不生效)— Task 2 Step 8 测试在 Windows 跳过。
+**降级**:`forge upgrade --resign-markers` 在 Windows 端 spawn 测试不能模拟 readonly 目录(chmod 0o555 在 Windows 不生效)— Task 2 Step 8 测试在 Windows 跳过。
 
 **兜底**:plan-9c v6 同模式 — Windows 跳过的 case 沿 release-blocker `it.todo` 占位策略(若有);本 plan 这一 case 直接条件 skip(`if (process.platform === 'win32') return;`)。
 
-### 7.3 prerelease 版本比较语义弱
+### 8.4 prerelease 版本比较语义弱
 
 **降级**:`compareSemver` 当前只比较 major.minor.patch,忽略 prerelease 后缀。`1.0.0-alpha.1` 与 `1.0.0` 视为相等。
 
@@ -2017,7 +2616,7 @@ EOF
 
 **v2.0 升级**:若未来用 prerelease 链,这条比较逻辑需扩展(用 `semver` npm 包替代手写)。
 
-### 7.4 git log 扫描性能
+### 8.5 git log 扫描性能
 
 **降级**:`git log -p <marker-file>` 在 marker 文件大量改动时输出可能很大(每次 archive 都跑)。
 
@@ -2025,7 +2624,7 @@ EOF
 
 ---
 
-## 8. Self-Review checklist
+## 9. Self-Review checklist
 
 实施者完成 Task 5 后,**实施前自查**:
 
@@ -2058,7 +2657,7 @@ EOF
 
 ---
 
-## 9. 沿 master plan §3.10 工日核算(v2 修订)
+## 10. 沿 master plan §3.10 工日核算(v5 修订)
 
 | Phase | 子任务 | 工日 P50(v2) | 工日 P90(v2) |
 |------|------|---------|---------|
@@ -2078,4 +2677,4 @@ master §3.10 给 9j ~ 2.5d(line 377),v2 +2.3d(P50)— codex 第 1 轮 review 6 
 
 ---
 
-(Plan v3 — codex 2 轮 review 8 BLOCKER + 3 MAJOR + 1 NIT 全采纳;**8 BLOCKER 全是 REGRESSION**(v2 仅 Header 声明未真改代码块,v3 全部字面修);**待第 3 轮 codex review**)
+(Plan v9 — codex 8 轮 review 0 BLOCKER + 2 MAJOR(1 误读 + 1 真,文档清理)+ 2 MINOR 全采纳;**0 BLOCKER 2 连保持**;**待第 9 轮 codex review 确认收敛**;主体逻辑稳定)

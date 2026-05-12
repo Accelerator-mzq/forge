@@ -143,19 +143,17 @@ archive 成功后,**调用 `forge:finishing-a-development-branch` skill** 提示
 
 merge 顺序推荐:**9e1 → 9g → 9e2**(本顺序保证 archive_summary placeholder 在 9g 真实 13 不变量统计完成后才接,避免 placeholder 与真实统计在中间状态混淆)
 
-## C 简码迁移协议(plan-9e1 v4 BLOCKER 1 修订:9j 完成是硬前置,无 manual 出口)
+## C 简码迁移协议(plan-9e1 v4 BLOCKER 1 落地 + plan-9j v2 解锁)
 
-`review_outcomes[i].severity = 'C'`(v0.4 clarification 简码)在 v1.0 三级体系中**不直接对应**(沿 design §2.3.5 line 559+563);archive 阶段会**硬拒签**,**必须**经 9j 迁移:
+`review_outcomes[i].severity = 'C'`(v0.4 clarification 简码)在 v1.0 三级体系中**不直接对应**;archive 阶段会**硬拒签**。
 
-- **唯一合规路径** — 等 plan-9j(marker version + deprecation)完成,跑 `forge upgrade --resign-markers` 交互式询问每条 C 的目标 severity(WARNING / SUGGESTION 由用户判断)+ 自动 resign marker 字段 + 写 ack-log.jsonl
+**plan-9j 落地完成后**:用户工作流解锁路径:
 
-**为什么不支持手动编辑 marker**(v4 BLOCKER 1 修订理由):
+1. 跑 `forge upgrade --resign-markers <change-id>` — 若含 C 简码,exit 1 + 写 pending file
+2. 跑 `forge ack confirm <change-id> <findingId> --target-severity <WARNING|SUGGESTION>` — user 判定目标 severity
+3. 重跑 `forge upgrade --resign-markers <change-id>` — confirm 后 marker `severity` 字段改回全名,archive 通过
 
-1. `ReviewOutcome` 接口字面 `severity: 'S' | 'C' | 'L'`,不接受 'WARNING' / 'SUGGESTION' 全名(types.ts:112)
-2. marker-schema `REVIEW_OUTCOME_SEVERITY_CODES = ['S','C','L']`,手动改成全名 schema 拒签(marker-schema.ts:336)
-3. 即使前两墙绕过,WARNING ack 必须 CLI ack-log 触发(design §1.5.2 反向加固);手动加 `severity_acked_by` 字段违反协议
-
-**9j 未完成时,archive C 简码 marker 是阻塞性硬墙** — 用户必须等 9j 落地。9e1 fence 错误提示会明确这一点。
+**plan-9j 未完成时**(本 plan 实施期间):archive 含 C 简码 marker 仍是阻塞性硬墙(无 manual edit 出口,沿 v4 BLOCKER 1 三道墙)。
 
 ## exit code 遗留声明(plan-9e1 v3 MAJOR 1 / v5 MINOR 3 修订:口径统一)
 

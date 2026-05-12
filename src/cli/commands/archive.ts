@@ -39,6 +39,8 @@ import { crossCuttingFenceCheck } from '../../core/archive/fence.js';
 // plan-9d Task 6:verify_findings fence + ack-log consistency
 import { validateVerifyFindingsFence } from '../../core/archive/verify-findings-fence.js';
 import { validateAckLogConsistency } from '../../core/archive/ack-log-consistency.js';
+// plan-9c Task 2:pause_decisions fence
+import { validatePauseDecisionsFence } from '../../core/archive/pause-decisions-fence.js';
 
 /**
  * 检测当前目录是否真实处于 git 工作树中
@@ -323,11 +325,47 @@ export function buildArchiveCommand(): Command {
             process.exit(1);
           }
 
-          // 步骤 3.7:plan-9d Task 6 v2 B-4 — ack-log 一致性 cross-check
-          const ackResult = await validateAckLogConsistency(changeDir, verifyRec, changeId);
-          if (!ackResult.valid) {
-            console.error('✗ ack-log 一致性校验失败:');
-            for (const e of ackResult.errors) console.error(`  - ${e.field}: ${e.message}`);
+          // 步骤 3.7:plan-9c Task 2 — pause_decisions fence(option 1-4 五类业务校验 + CRITICAL 重定向)
+          // v2 codex MAJOR 4 修订:对 verifyRec + reviewRec 都跑 fence
+          // v4 codex NEW-MAJOR A6 + B4 联动:fence 不再需要 ctx 参数(B4 改用 parseMarkdown 局部段校验,
+          //   不再调 validateScopeEntries → ctx unused → 沿 YAGNI 移除)
+          const pdVerifyResult = await validatePauseDecisionsFence(
+            verifyRec,
+            changeDir,
+            verifyPath,
+          );
+          if (!pdVerifyResult.valid) {
+            console.error('✗ pause_decisions fence 拒签(verify-passed):');
+            for (const e of pdVerifyResult.errors) console.error(`  - ${e.field}: ${e.message}`);
+            await archiveRelease();
+            process.exit(1);
+          }
+          const pdReviewResult = await validatePauseDecisionsFence(
+            reviewRec,
+            changeDir,
+            reviewPath,
+          );
+          if (!pdReviewResult.valid) {
+            console.error('✗ pause_decisions fence 拒签(review-passed):');
+            for (const e of pdReviewResult.errors) console.error(`  - ${e.field}: ${e.message}`);
+            await archiveRelease();
+            process.exit(1);
+          }
+
+          // 步骤 3.8:plan-9d Task 6 v2 B-4 — ack-log 一致性 cross-check
+          // v3 codex BLOCKER 2 修订:对 verifyRec + reviewRec 都跑 cross-check
+          // (review marker 同样可承载 pause_decisions superset additive,沿 9c Task 1 schema)
+          const ackVerifyResult = await validateAckLogConsistency(changeDir, verifyRec, changeId);
+          if (!ackVerifyResult.valid) {
+            console.error('✗ ack-log 一致性校验失败(verify-passed):');
+            for (const e of ackVerifyResult.errors) console.error(`  - ${e.field}: ${e.message}`);
+            await archiveRelease();
+            process.exit(1);
+          }
+          const ackReviewResult = await validateAckLogConsistency(changeDir, reviewRec, changeId);
+          if (!ackReviewResult.valid) {
+            console.error('✗ ack-log 一致性校验失败(review-passed):');
+            for (const e of ackReviewResult.errors) console.error(`  - ${e.field}: ${e.message}`);
             await archiveRelease();
             process.exit(1);
           }

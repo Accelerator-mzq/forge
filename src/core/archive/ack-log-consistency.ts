@@ -42,8 +42,20 @@ export async function validateAckLogConsistency(
   verifyMarker: Record<string, unknown>,
   changeId: string,
 ): Promise<ValidationResult> {
-  const findings = verifyMarker.verify_findings;
-  if (!Array.isArray(findings)) return ok();
+  // v3 codex BLOCKER 1 修订:findings / pauseDecisions 都 normalize 为数组(防止 pause-only marker 进入后续 findings.length 循环崩溃)
+  const findingsArr: unknown[] = Array.isArray(verifyMarker.verify_findings)
+    ? (verifyMarker.verify_findings as unknown[])
+    : [];
+  const pauseDecisionsArr: unknown[] = Array.isArray(verifyMarker.pause_decisions)
+    ? (verifyMarker.pause_decisions as unknown[])
+    : [];
+  // 两个字段都缺失(非数组) → 老兼容通过(沿 baseline !Array.isArray(findings) 语义)
+  if (
+    !Array.isArray(verifyMarker.verify_findings) &&
+    !Array.isArray(verifyMarker.pause_decisions)
+  ) {
+    return ok();
+  }
 
   const evidenceDir = join(changeDir, '.evidence');
   const ackLogPath = join(evidenceDir, 'ack-log.jsonl');
@@ -98,8 +110,8 @@ export async function validateAckLogConsistency(
     // ack-log 不存在但 marker 有 ack 字段非空 → 拒签(下面循环处理)
   }
 
-  for (let i = 0; i < findings.length; i++) {
-    const f = findings[i] as Finding;
+  for (let i = 0; i < findingsArr.length; i++) {
+    const f = findingsArr[i] as Finding;
     const fieldBase = `verify_findings[${i}]`;
 
     // 规则 1 + 4:WARNING ack 字段非空必须有 ack-log 匹配条目
@@ -164,6 +176,47 @@ export async function validateAckLogConsistency(
             file: ackLogPath,
           }),
         );
+      }
+    }
+  }
+
+  // —— v2 codex BLOCKER 1 新增:pause_decisions ack-log 一致性 ——
+  // 规则:WARNING + severity_acked_by 非空 → ack-log 必须有匹配 action=ack-pause-warning + finding_id=pause_decisions:<id> 条目
+  // 沿 design §2.1.5 "WARNING 必须有 severity_acked_by" + design line 496-500 ack-log cross-check
+  if (pauseDecisionsArr.length > 0) {
+    for (let i = 0; i < pauseDecisionsArr.length; i++) {
+      const p = pauseDecisionsArr[i] as Record<string, unknown>;
+      const fieldBase = `pause_decisions[${i}]`;
+      // 仅校验 WARNING ack 路径(SUGGESTION 允许空 ack;CRITICAL 由 fence 重定向拒签)
+      if (p.severity === 'WARNING' && (p.severity_acked_by || p.severity_acked_at)) {
+        const findingId = `pause_decisions:${p.id}`;
+        const matchAck = ackEntries.find(
+          (e) =>
+            e.change_id === changeId &&
+            e.finding_id === findingId &&
+            e.action === 'ack-pause-warning',
+        );
+        if (!matchAck) {
+          results.push(
+            failed({
+              artifact: 'marker',
+              field: `${fieldBase}.severity_acked_by`,
+              message: `marker pause_decision id=${p.id} ack 字段非空但 ack-log.jsonl 无对应 kind=ack + action=ack-pause-warning + finding_id=${findingId} 条目;AI 不能跨过 user 直接写 pause_decision ack(沿 design §2.1.5 + 9d v2 B-4 同模式)`,
+              file: ackLogPath,
+            }),
+          );
+          continue;
+        }
+        if (matchAck.user !== p.severity_acked_by) {
+          results.push(
+            failed({
+              artifact: 'marker',
+              field: `${fieldBase}.severity_acked_by`,
+              message: `ack-log user (${matchAck.user}) 与 pause_decision severity_acked_by (${p.severity_acked_by}) 不一致 — ack 主体不匹配,拒签`,
+              file: ackLogPath,
+            }),
+          );
+        }
       }
     }
   }

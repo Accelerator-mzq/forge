@@ -137,7 +137,8 @@ describe('forge archive', () => {
       // is_git_repo: false → 需要 --force
       const r = runCli(['archive', 'add-login', '--force'], join(projectRoot));
       expect(r.exitCode).toBe(0);
-      expect(r.stdout).toContain('archived');
+      // plan-9e1 Task 4:渲染输出改为 renderArchiveSummaryOutput(含 ## Archive Complete)
+      expect(r.stdout).toMatch(/Archive Complete|archived/);
       expect(r.stdout).toContain('add-login');
 
       // change 已从 changes/ 移走
@@ -241,7 +242,8 @@ describe('forge archive', () => {
 
       const r = runCli(['archive', 'add-login', '--force'], projectRoot);
       expect(r.exitCode).toBe(0);
-      expect(r.stdout).toContain('archived');
+      // plan-9e1 Task 4:渲染输出改为 renderArchiveSummaryOutput(含 ## Archive Complete)
+      expect(r.stdout).toMatch(/Archive Complete|archived/);
 
       // change 已从 changes/ 移走
       expect(existsSync(join(changesDir, 'add-login'))).toBe(false);
@@ -487,7 +489,8 @@ describe('forge archive', () => {
 
       const r = runCli(['archive', 'add-login', '--force'], projectRoot);
       expect(r.exitCode).toBe(0);
-      expect(r.stdout).toContain('archived');
+      // plan-9e1 Task 4:渲染输出改为 renderArchiveSummaryOutput(含 ## Archive Complete)
+      expect(r.stdout).toMatch(/Archive Complete|archived/);
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
     }
@@ -531,7 +534,8 @@ describe('forge archive', () => {
 
       const r = runCli(['archive', 'add-login', '--force'], projectRoot);
       expect(r.exitCode).toBe(0);
-      expect(r.stdout).toContain('archived');
+      // plan-9e1 Task 4:渲染输出改为 renderArchiveSummaryOutput(含 ## Archive Complete)
+      expect(r.stdout).toMatch(/Archive Complete|archived/);
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
     }
@@ -571,7 +575,8 @@ describe('forge archive', () => {
       writeFileSync(reviewPath, stringifyYAML(badReviewMarker), 'utf8');
 
       const r = runCli(['archive', 'add-login', '--force'], projectRoot);
-      expect(r.exitCode).toBe(2);
+      // plan-9e1 Task 4:S + resolved=false 被三级 fence step 3.9 拦截(exit 1),早于原 step 4e(exit 2)
+      expect(r.exitCode).toBe(1);
       expect(r.stderr).toMatch(/review_outcomes|resolved/);
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });

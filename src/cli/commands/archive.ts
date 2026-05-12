@@ -41,6 +41,13 @@ import { validateVerifyFindingsFence } from '../../core/archive/verify-findings-
 import { validateAckLogConsistency } from '../../core/archive/ack-log-consistency.js';
 // plan-9c Task 2:pause_decisions fence
 import { validatePauseDecisionsFence } from '../../core/archive/pause-decisions-fence.js';
+// plan-9e1 Task 4:三级 fence + summary builder + render + ScopeEntriesIntegrityError(v2 BLOCKER 4)
+import { validateThreeLevelFence } from '../../core/archive/three-level-fence.js';
+import {
+  buildArchiveSummary,
+  ScopeEntriesIntegrityError,
+} from '../../core/archive/summary-builder.js';
+import { renderArchiveSummaryOutput } from '../../core/archive/summary-render.js';
 
 /**
  * 检测当前目录是否真实处于 git 工作树中
@@ -370,6 +377,17 @@ export function buildArchiveCommand(): Command {
             process.exit(1);
           }
 
+          // 步骤 3.9:plan-9e1 Task 4 — 三级业务行为 fence(沿 design §2.4.2)
+          // CRITICAL+resolved=false 拒签(sanity 双重保险)/ WARNING+resolved=false+无 ack 拒签 /
+          // WARNING+resolved=false+acked 通过 / SUGGESTION+resolved=false 通过(handoff to backlog)
+          const tlfResult = validateThreeLevelFence(verifyRec, reviewRec, verifyPath, reviewPath);
+          if (!tlfResult.valid) {
+            console.error('✗ 三级业务行为 fence 拒签:');
+            for (const e of tlfResult.errors) console.error(`  - ${e.field}: ${e.message}`);
+            await archiveRelease();
+            process.exit(1);
+          }
+
           // 步骤 4:human-override + 真实 git 状态校验 + outcomes 校验
           const verifyBy = vRec['verified_by'];
           const reviewBy = rRec['reviewed_by'];
@@ -441,14 +459,37 @@ export function buildArchiveCommand(): Command {
             process.exit(2);
           }
 
-          // 步骤 5:调 archiveTransaction(Move→Sync)
+          // 步骤 4.5:plan-9e1 Task 4 — 构造 archive_summary(传给 transaction 落 .tmp)
+          // v2 BLOCKER 4 修订:try/catch ScopeEntriesIntegrityError → fence business-fail exit 1
           const archiveDate = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-          await archiveTransaction({ forgeRoot, changeId, archiveDate });
+          let archiveSummary;
+          try {
+            archiveSummary = await buildArchiveSummary(
+              verifyRec,
+              reviewRec,
+              changeDir, // 沿用 line 213 已定义的 changeDir
+              changeId,
+            );
+          } catch (err) {
+            if (err instanceof ScopeEntriesIntegrityError) {
+              console.error(
+                `✗ scope-entries 完整性 fence 拒签(${err.artifactName} section ${err.anchorId}):${err.message}`,
+              );
+              await archiveRelease();
+              process.exit(1);
+            }
+            throw err;
+          }
+
+          // 步骤 5:调 archiveTransaction(Move→Sync,含 .tmp 写 / rename / 回滚)
+          await archiveTransaction({ forgeRoot, changeId, archiveDate, archiveSummary });
 
           // 步骤 5.5:Plan 7 post-archive hook(enforce_sync=false 时不阻塞,只产报告)
           await runArchivePostHook(forgeRoot, changeId);
 
-          console.log(`✓ archived ${changeId} → changes/archive/${archiveDate}-${changeId}`);
+          // 步骤 6:plan-9e1 Task 4 — 渲染 archive_summary 输出(沿 design §2.4.4)
+          const archiveDirName = `${archiveDate}-${changeId}`;
+          console.log(renderArchiveSummaryOutput(archiveSummary, archiveDirName));
         } catch (err) {
           // exit code 映射 — spec §3.5
           if (err instanceof LockHeldError) {

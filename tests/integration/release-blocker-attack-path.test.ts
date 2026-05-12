@@ -28,3 +28,15 @@ describe('release-blocker: pause_decisions option=1/2 attack paths (9z gate)', (
     'option=2 attack: marker 写 task_ref=tasks.md#task-2 + 该 task 已勾选,但 git log 显示该 task 在 paused_at 之前已存在(非新增) → fence 应拒签(沿 9c §7.5.2 + design §2.1.5 line 263)',
   );
 });
+
+describe('release-blocker: 9e1 transaction failure injection paths (9z gate)', () => {
+  it.todo(
+    '9e1 transaction rename .tmp → 正式名失败:archive dir 注入失败 → archive 数据已 move,fence 应明确抛错提示 --resume-summary(plan-9e1 Task 3 v2 MAJOR 2)',
+  );
+  it.todo(
+    '9e1 transaction Backup 失败:反向 Move 后 unlink summary 应清理 source 目录残留(plan-9e1 Task 3 v2 MAJOR 2)',
+  );
+  it.todo(
+    '9e1 transaction Sync 失败:反向 Move + restore specs from backup + unlink summary 应原子回滚(plan-9e1 Task 3 v2 MAJOR 2)',
+  );
+});

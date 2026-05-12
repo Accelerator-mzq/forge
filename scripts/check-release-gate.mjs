@@ -24,10 +24,11 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FILE = resolve(__dirname, '../tests/integration/release-blocker-attack-path.test.ts');
 
-// **soft 模式** EXPECTED:9c=2(已知 release-blocker);9z plan 实施者**不需要**改这里,
-//                       9z plan 应改 release CI 配置调 --release flag
+// **soft 模式** EXPECTED:9c=2(已知 release-blocker);9e1=5(plan-9c 2 + plan-9e1 3 failure-injection);
+//                       9z plan 实施者**不需要**改这里,9z plan 应改 release CI 配置调 --release flag
 // **release 模式**(--release flag):忽略 EXPECTED,强制 actual=0
-const EXPECTED_TODO_COUNT_SOFT = 2;
+// v2 MAJOR 2(plan-9e1):2 → 5(plan-9c 2 个 + plan-9e1 3 个 failure-injection it.todo)
+const EXPECTED_TODO_COUNT_SOFT = 5;
 const isRelease = process.argv.includes('--release');
 
 // v6 codex NIT 修订:readFileSync 加 try/catch,文件不存在(中间状态)给清晰错误而非 stack trace

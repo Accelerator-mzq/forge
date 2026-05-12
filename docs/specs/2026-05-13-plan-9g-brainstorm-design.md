@@ -35,7 +35,7 @@
 
 ## 2. 架构 + 模块边界 + 文件清单
 
-### 2.1 新增文件(8 个)
+### 2.1 新增文件(11 个 — 含 P2 路径 §9.8 锁定的 3 个 skill/eval 文件)
 
 ```
 src/core/schemas/process-evidence.ts
@@ -60,9 +60,24 @@ src/core/archive/process-evidence-fence.ts
 
 src/core/archive/process-evidence-rerun.ts
    runRerunFence(ctx) → Promise<ProcessEvidenceFinding[]>   不变量 5-6 / 13
+
+# ─── §9.8 P2 路径新增(skill 总数 14 → 15,9g 工日 +1d)──────────────
+src/core/templates/skills/process-evidence.md
+   新 skill 文本:process_evidence 协议(走 helper / 不直写 marker /
+   不静默切 mode / RED commit 不可省略 / staging append-only)
+   沿 §2.9 writing-skills 协议产出
+
+skills/process-evidence/SKILL.md
+   顶层同步(沿 plan-9j Task 6.2 commands 双同步模式)
+
+forge-eval/scenarios/process-evidence.yaml
+   3 个 scenario(tempted-to-skip-red-commit / tempted-to-switch-hash-only /
+   tempted-to-fake-marker),RED/GREEN 双跑 + judge 评分
 ```
 
-### 2.2 修改文件(7 个)
+### 2.2 修改文件(15 个 — v2 修订:补 spec §2.7.8 漏列的 marker schema + init.ts + slash/skill 模板双同步)
+
+#### 2.2.1 代码层(6 个)
 
 ```
 src/cli/commands/evidence.ts
@@ -85,16 +100,68 @@ src/cli/commands/validate.ts
    加 --verify-process flag 单独跑 process_evidence 子检
    CRITICAL finding 输出 finding_hash(JCS,沿 §2.3.6)
 
+src/cli/commands/init.ts(行 38 附近,沿 spec §2.7.8 B-7 修订)
+   deprecation 文本 "will be removed in v0.4" → "will be removed in v1.2"
+```
+
+#### 2.2.2 Marker schema(1 个,plan-9c/9d/9j 沿同模式 superset additive 扩字段)
+
+```
+src/core/markers/types.ts
+   VerifyMarker / ReviewMarker 加 process_evidence?: ProcessEvidence(superset additive,
+   老 marker 缺等价 undefined,沿 plan-9c pause_decisions / plan-9d verify_findings /
+   plan-9j created_by_tool_version 同模式)
+   + process_evidence_staging_hash?: string(freeze 时 snapshot,archive fence cross-check)
+```
+
+#### 2.2.3 Config schema(2 个)
+
+```
 src/core/schema/types.ts
    扩 ForgeConfig 加 process_verification / test / ack 三 optional 子树
    + DEFAULT_PROCESS_VERIFICATION / DEFAULT_TEST_REPORTER / DEFAULT_ACK_ALLOW_CI_MODE 常量
 
 src/core/schema/process-verification-config.ts(新文件,沿 writing-plans-config.ts 模式)
    validateProcessVerificationConfig() 阈值校验
+```
 
+#### 2.2.4 Slash 模板双同步(4 个,沿 plan-9j Task 6.2 同步模式)
+
+forge 项目 slash/skill 模板有**两套并存**(`src/core/templates/` 是源,顶层 `commands/` `skills/` 是构建产物;plan-9j Task 6.2 commit 780be79 确认要同步两边):
+
+```
+src/core/templates/commands/apply.md  +  commands/apply.md(顶层同步)
+   主代理改为调 forge evidence record-tdd helper(不再直接写 marker);
+   加禁止行为段落"不允许绕过 helper 直接写 process_evidence"
+   (沿 spec §2.7.8 MAJOR #26 — apply 是 slash 不是 CLI)
+
+src/core/templates/commands/verify.md  +  commands/verify.md(顶层同步)
+   verify 命令每次跑都调 forge evidence record-verify helper
+   加 freeze 段落:verify-passed 生成时自动 staging → marker freeze
+```
+
+#### 2.2.5 Skill 模板双同步(4 个,沿同模式)
+
+```
+src/core/templates/skills/subagent-driven-development.md  +  skills/subagent-driven-development/SKILL.md
+   subagent 报告 DONE 时**必须含**:RED commit sha / GREEN commit sha /
+   log paths / expected_failures(test_file + test_name + failure_type)
+   供主代理调 record-tdd helper 用
+
+src/core/templates/skills/test-driven-development.md  +  skills/test-driven-development/SKILL.md
+   加"RED commit 不可省略"硬约束(沿 spec §2.7.5 攻击 A3 防御)
+   light mode trivial change 走 tdd_exemption ack 路径
+   (沿 spec §2.7.2 MAJOR #37 + config.yaml#writing_plans.light_threshold)
+```
+
+#### 2.2.6 依赖(1 个)
+
+```
 package.json
    加 fast-xml-parser + tap-parser 两 deps
 ```
+
+**注**:§2.2.4 + §2.2.5 共 8 个 slash/skill 模板修改 — 会触发 forge-eval CI(若配 ANTHROPIC_API_KEY)。沿 §9.9 策略决定要不要在 9g 实施期配 key。
 
 ### 2.3 新增测试(8 类)
 
@@ -448,24 +515,21 @@ scenarios:
 6. **freeze 时点细节**:verify-passed 生成是单 fs.writeFile 还是 transaction?(沿 archive transaction.ts 模式抽象)
 7. **codex review 轮数预期**:plan-9j 9 轮 / 9e1 12 轮,9g spec 已 v3 充分,预计 5-8 轮
 
-### 9.8 forge-eval 集成路径选型(P1 vs P2)
+### 9.8 forge-eval 集成路径 ─ 锁定 P2(brainstorm 阶段已选)
 
-§2.7 process_evidence 行为约束(走 helper / 不跳 RED / 不静默切 mode)的 skill-level 测试集成路径:
+§2.7 process_evidence 行为约束(走 helper / 不跳 RED / 不静默切 mode)的 skill-level 测试集成路径,brainstorm 阶段锁定 **P2:新增 process-evidence skill + 独立 yaml**。
 
-**P1 — 加 scenario 到 3 个现有 skill yaml**(不增 skill 总数):
-- `forge-eval/scenarios/test-driven-development.yaml` 加 `tempted-to-skip-red-commit`
-- `forge-eval/scenarios/verification-before-completion.yaml` 加 `tempted-to-switch-hash-only`
-- `forge-eval/scenarios/subagent-driven-development.yaml` 加 `tempted-to-fake-marker`
-- skill 文本不增加,但 3 个现有 skill 文档要补 process_evidence 行为段落
-- 9g 工日 +0.5d(写 3 scenario + 校验 RED/GREEN delta)
+**P2 选定理由**:
+- 协议独立成形 — process_evidence 是 §2.7 完整一节(13 不变量 + 三 helper + 三档 mode + worktree + reporter),作为独立 skill 文本比拆散到 SDD/TDD/verification 三 skill 段落更清晰
+- 沿 forge §2.9 writing-skills 协议路径(plan-9i 9g 实施前已完成,提供新 skill 创建协议)
+- 长期可维护性优:后续 v1.1 / v1.2 增删 process_evidence 不变量时只动一个 skill 文档
 
-**P2 — 新增 process-evidence skill + 独立 yaml**(skill 总数 14 → 15):
-- 新 `src/core/templates/skills/process-evidence.md`(独立 skill 描述协议)
-- 新 `forge-eval/scenarios/process-evidence.yaml`(3 scenarios)
-- 协议独立成形,概念清晰
-- 9g 工日 +1d(写 skill 文本 + 3 scenario + RED/GREEN delta)
+**P2 代价**:
+- skill 总数 14 → 15
+- 9g P50 工日 7d → **8d**(P90 9d 范围内,master plan §0 总计不变)
+- 8 个 slash/skill 模板修改(§2.2.4 + §2.2.5 + §2.1 新增 process-evidence)触发 forge-eval CI(若配 ANTHROPIC_API_KEY,沿 §9.9)
 
-**决策点**:writing-plans 阶段定。**brainstorm 阶段倾向 P1**(避免 skill 总数变动 + 9g 工日不超 §0 锁定的 P50 7d / P90 9d);P2 留给后续 v1.1 minor revision 若 P1 实测 skill 弱化时再升级。
+**P1 已弃**(避免分散语义 + skill 文档 review 难追溯)。
 
 ### 9.9 forge-eval ANTHROPIC_API_KEY 策略(release 前决定)
 
@@ -488,18 +552,22 @@ skill-eval CI workflow(`.github/workflows/skill-eval.yml`)第一步检测 `ANTHR
 - **plan-9h / 9f**:可并行(独立模块)
 - **plan-9z**(release):最终阶段,需 9a-9j 全部完成
 
-**plan-9 master line 30 工日不变**:P50 7d / P90 9d。
+**plan-9 master line 30 工日**:§9.8 锁定 P2 后,P50 7d → **8d**;P90 9d 不变(§0 总计闭合受 P90 范围内吸收 +0.5d skill 文本工日,master plan §0 总和无需更新)。
+
+**注**:P50 +1d 来自 P2 路径新 skill 文本写作 + RED/GREEN delta 校验;若 9z release 前 §9.9 选策略 A(不配 key)则跳过 RED/GREEN 实跑,实际工日回落 P50 7.5d。
 
 ---
 
 ## 11. 引用与版本对齐
 
 - master spec §2.7 全节(行 1076-1342)
+- master spec §2.9 全节(writing-skills 协议 — §9.8 P2 路径 process-evidence skill 创建依此协议)
 - master plan §0 总览表 line 30
 - plan-9a Task 5(evidence CLI 骨架 + ack-log + canonical hash)
 - plan-9d Task 6(verify_findings fence + finding_hash + ack-log consistency)
 - plan-9e1 Task 4(三级业务行为 fence + archive_summary.ProcessEvidenceSummary placeholder)
-- plan-9j Task 5(legacy-exemption + version-retrograde fence + Pattern A 教训)
+- plan-9i(writing-skills 协议落地,9g P2 路径前置依赖)
+- plan-9j Task 5 + Task 6.2(legacy/retrograde fence + Pattern A 教训 + slash 模板双同步模式)
 
 ---
 

@@ -21,7 +21,7 @@ export interface AckEntry {
   rationale: string | null;
   git_head: string | null;
   finding_hash: string | null;
-  target_severity?: 'WARNING' | 'SUGGESTION'; // v3 BLOCKER 4:仅 resign-c-simcode action 时非空
+  target_severity?: 'WARNING' | 'SUGGESTION'; // v3 BLOCKER 4:resign-c-simcode 或 downgrade action 时可能非空
   extra: Record<string, unknown>;
 }
 

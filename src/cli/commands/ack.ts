@@ -54,14 +54,11 @@ export function buildAckCommand(): Command {
     .description('AI 写 pending ack 文件(需 user confirm 才生效)')
     .argument('<changeId>', 'change 目录 ID,如 add-login')
     .requiredOption('--finding <id>', 'finding ID(数字字符串)')
-    .requiredOption(
-      '--action <type>',
-      'ack 类型,如 ack-warning / ack-critical / **resign-c-simcode**',
-    )
+    .requiredOption('--action <type>', 'ack 类型,如 ack-warning / ack-critical / resign-c-simcode')
     .option('--rationale <text>', 'AI 给出的 rationale(可选)')
     .option(
       '--target-severity <sev>',
-      'v3 BLOCKER 4(plan-9j):resign-c-simcode action 用 — 目标 severity (WARNING / SUGGESTION)',
+      'resign-c-simcode action 专用 — 目标 severity (WARNING / SUGGESTION)',
     )
     .action(
       async (
@@ -140,7 +137,7 @@ export function buildAckCommand(): Command {
     .argument('<findingId>', 'finding ID(数字字符串)')
     .option(
       '--target-severity <sev>',
-      'v3 BLOCKER 4:仅 resign-c-simcode action 必填;confirm 时 user 指定目标 severity 并写回 marker',
+      '仅 resign-c-simcode action 必填;confirm 时 user 指定目标 severity 并写回 marker',
     )
     .action(async (changeId: string, findingId: string, opts: { targetSeverity?: string }) => {
       const changeRoot = resolve(process.cwd(), 'forge', 'changes', changeId);
@@ -189,6 +186,20 @@ export function buildAckCommand(): Command {
       // Windows 兼容:process.env.USER 常为 undefined,用 USERNAME 做 fallback
       // target_severity 优先级:confirm --target-severity option > pending file 中的值
       const resolvedTargetSeverity = opts.targetSeverity ?? payload.target_severity ?? null;
+
+      // v9 round 2 修(plan-9j code quality reviewer I-2):invalid 枚举值 fail-closed,避免 silent inconsistency
+      // 非 null 且非合法枚举值(WARNING / SUGGESTION)→ exit 2 拒绝,而非静默把顶层设 undefined
+      if (
+        resolvedTargetSeverity !== null &&
+        resolvedTargetSeverity !== 'WARNING' &&
+        resolvedTargetSeverity !== 'SUGGESTION'
+      ) {
+        process.stderr.write(
+          `forge ack confirm: invalid --target-severity "${resolvedTargetSeverity}" (must be WARNING or SUGGESTION)\n`,
+        );
+        process.exit(2);
+      }
+
       const ackEntry: AckEntry = {
         schema: 'forge-ack-log/v1',
         kind: 'ack',
@@ -206,6 +217,7 @@ export function buildAckCommand(): Command {
             : undefined,
         extra: {
           proposed_at: payload.timestamp,
+          // 保留 propose-time 原值用于审计;顶层 target_severity 已含 confirm-time --target-severity override 解析后值,reader 优先用顶层
           target_severity: payload.target_severity ?? null,
         },
       };

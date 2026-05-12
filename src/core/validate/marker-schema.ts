@@ -381,13 +381,14 @@ function checkReviewOutcomes(v: unknown, file?: string): ValidationResult {
       );
       continue;
     }
-    // severity 必须是 S/C/L 之一(review_outcomes 简码,沿 v12 REG-IMPORT-001 修订:rename)
+    // severity 必须是 6 元素之一(v0.4 simcode S/C/L + v1.0 全名 CRITICAL/WARNING/SUGGESTION;沿 plan-9j v3 BLOCKER 4 双格式扩)
     if (typeof o.severity !== 'string' || !REVIEW_OUTCOME_SEVERITY_CODES.has(o.severity)) {
       results.push(
         failed({
           artifact: 'marker',
           field: `review_outcomes[${i}].severity`,
-          message: 'must be S/C/L',
+          message:
+            'must be one of: S / C / L (v0.4 simcode) or CRITICAL / WARNING / SUGGESTION (v1.0 全名)',
           file,
         }),
       );

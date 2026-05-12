@@ -63,7 +63,10 @@ export function validateThreeLevelFence(
   }
 
   // 2. review_outcomes 端:**核心** — **v6 plan-9j 修订:simcode + 全名双格式裁决**
-  const outcomes = (reviewMarker.review_outcomes as Array<Record<string, unknown>>) ?? [];
+  // 沿 summary-builder.ts:70-72 同 Array.isArray guard 模式(非 array 严格视为空数组,不接受 falsy 误读)
+  const outcomes: Array<Record<string, unknown>> = Array.isArray(reviewMarker.review_outcomes)
+    ? (reviewMarker.review_outcomes as Array<Record<string, unknown>>)
+    : [];
 
   for (let i = 0; i < outcomes.length; i++) {
     const o = outcomes[i] as unknown as ReviewOutcome;

@@ -95,11 +95,15 @@ Use the least powerful model that can handle each role to conserve cost and incr
 
 ## Handling Implementer Status
 
-Implementer subagents report one of four statuses. Handle each appropriately:
+Implementer subagents report one of **five** statuses (forge v1.0 沿 design §2.1.2 加第 5 档 `DESIGN_ISSUE_FOUND`)。Handle each appropriately:
 
 **DONE:** Proceed to spec compliance review.
 
-**DONE_WITH_CONCERNS:** The implementer completed the work but flagged doubts. Read the concerns before proceeding. If the concerns are about correctness or scope, address them before review. If they're observations (e.g., "this file is getting large"), note them and proceed to review.
+**DONE_WITH_CONCERNS:** The implementer completed the work but flagged doubts. Read the concerns before proceeding:
+
+- **CRITICAL concerns**(测试 fail / hash mismatch / evidence 丢)→ 走 forge 强 fence 拒签路径(原 v0.4 行为不变)
+- **WARNING / SUGGESTION concerns about correctness or scope**(非 CRITICAL)→ **invoke Fluid Pause Decision Point**(沿 `commands/apply.md` §"Fluid Pause Decision Point" 段;主代理调 AskUserQuestion 四选项)
+- **Observations**(e.g., "this file is getting large")→ note them and proceed to review
 
 **NEEDS_CONTEXT:** The implementer needs information that wasn't provided. Provide the missing context and re-dispatch.
 
@@ -108,9 +112,11 @@ Implementer subagents report one of four statuses. Handle each appropriately:
 1. If it's a context problem, provide more context and re-dispatch with the same model
 2. If the task requires more reasoning, re-dispatch with a more capable model
 3. If the task is too large, break it into smaller pieces
-4. If the plan itself is wrong, escalate to the human
+4. If the **plan itself is wrong** → **invoke Fluid Pause Decision Point**(沿 forge v1.0;原 "escalate to human" 现有合规通道,沿 `commands/apply.md` §"Fluid Pause Decision Point" 段)
 
-**Never** ignore an escalation or force the same model to retry without changes. If the implementer said it's stuck, something needs to change.
+**`DESIGN_ISSUE_FOUND`**(v1.0 新增第 5 档,沿 forge design §2.1.2):The implementer is reporting that the current task requires functionality that's part of the change but **not covered by the spec**(spec 未覆盖但本 change 应做的需求)。This is **not BLOCKED**(还能干活)和 **not DONE_WITH_CONCERNS**(主体功能没完工就发现 spec 缺口)。Handle by **invoking Fluid Pause Decision Point**(沿 `commands/apply.md` §"Fluid Pause Decision Point" 段;典型走 option=1 扩 scope 或 option=3 转 out-of-scope)。
+
+**Never** ignore an escalation or force the same model to retry without changes. If the implementer said it's stuck or surfaced a design issue, something needs to change.
 
 ## Example Workflow
 
@@ -266,3 +272,27 @@ Done!
 **Subagents should use:**
 
 - **forge:test-driven-development** - Subagents follow TDD for each task
+
+## forge-specific 反向加固(v1.0)
+
+forge v1.0 在本 skill 基础上加以下反向加固协议(与上游 superpowers 兼容、不冲突):
+
+### Fluid Pause 不可绕过的不变量
+
+主代理在调 AskUserQuestion 并写入 `pause_decisions` marker 字段时**不可**:
+
+1. **伪造 `severity_acked_by`** — WARNING pause_decision 的 `severity_acked_by` 必须是真实用户响应,且 `.evidence/ack-log.jsonl` 必须有对应 `kind=ack` + `action=ack-pause-warning` + `finding_id=pause_decisions:<id>` + `user=<同 marker>` 条目。若 marker 直填 `severity_acked_by: msc` 但 ack-log.jsonl 无该条目 → `validateAckLogConsistency`(v2 codex BLOCKER 1 扩展)拒签;若 ack-log `user` 与 marker `severity_acked_by` 不一致(如 marker 写 `msc`,ack-log 写 `ai-agent`)→ 拒签。**SUGGESTION 例外**:fence 不要求 ack 一致性(沿 design §2.1.5 SUGGESTION 允许空 ack)
+
+2. **CRITICAL 走 pause 路径** — 主代理判定 severity=CRITICAL 时**禁止**调 AskUserQuestion 让用户在 1-4 间选;CRITICAL 必须走 forge 强 fence 拒签(沿 design §2.1.2)。`forge archive` 步骤 3.7 任一 `pause_decisions[].severity === 'CRITICAL'` → exit 1
+
+3. **option=3 没 `non_blocking_rationale`** — `option=3` 转 out-of-scope 必须配 `non_blocking_rationale` 论证"为什么 subagent 能跳过该 issue 完成主体 task"。fence 拒签缺失
+
+4. **option=2 不勾选新 task** — `option=2` 加 task 时,主代理 append 新 task 到 tasks.md 后 subagent 重派实施;实施完成后**必须**改 `[ ]` → `[x]`。fence 校验 `tasks.md` 中 `task_ref` 末段对应行已勾选
+
+### 红旗清单(借口模式)
+
+| AI 借口                                                  | 反向加固                                                                                         |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| "用户在对话中确认过,我直接写 ack 就好"                   | `forge archive` ack-log 一致性 cross-check 会发现 marker ack ↔ ack-log 不一致(沿 plan-9d v2 B-4) |
+| "CRITICAL 太严了,我降级为 WARNING 让用户 ack"            | fence 在 `severity` 字段重算 finding_hash(沿 plan-9d Task 6),篡改任一 hash payload 字段 → 拒签   |
+| "option=3 转 out-of-scope 时 rationale 写"用户决定即可"" | rationale 必须论证"为什么 subagent 能跳过"— 不是"用户决定"是答案                                 |

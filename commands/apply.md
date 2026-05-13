@@ -13,9 +13,33 @@ You are about to handle `/forge:apply $ARGUMENTS`.
 
 ## 步骤
 
+0. **前置 branch-check**(plan-9h §2.8.3 C):调 `forge preflight branch-check <change-id>`
+   - exit 0 → 继续步骤 1
+   - exit 2 → **必须停下**,按 stderr 建议切 feature branch(`git checkout -b feature/<change-id>`)或显式传 `--allow-protected-branch`(后者需用户确认 build/CI 风险)
+   - 非 git 项目:helper 自动跳过 exit 0(沿 v0.4 graceful 降级)
 1. **必须调用 `forge:subagent-driven-development` skill**(无 inline 模式)。
 2. **必须调用 `forge:test-driven-development` skill** 作为每个 subagent 的实施纲领。
 3. 若 `--parallel`,**追加调用 `forge:dispatching-parallel-agents` 和 `forge:using-git-worktrees`**。
+
+3.5. **Critical Plan Review**(主代理 dispatch subagent 前必做,沿 design §2.8.3 A):
+
+主代理读 `forge/changes/<id>/{proposal, design, tasks, specs/*}.md` 全套,**按 4 类维度逐条检查**(不允许 vague pass-through,沿反向加固):
+
+| 维度   | 检查问题                                                            |
+| ------ | ------------------------------------------------------------------- |
+| 完整性 | tasks 是否覆盖 specs 所有 requirement?(对照 specs requirement 计数) |
+| 顺序   | tasks 依赖关系是否合理?(标 dependency 的 task 是否先于被依赖)       |
+| 清晰度 | 是否有 tasks 描述 vague(如"处理边界情况" / "加测试")?               |
+| scope  | 是否有 tasks 应该是 §2.6 out-of-scope 而非本 change?                |
+
+- **若有 concerns** → AskUserQuestion 列 concerns,等用户决策:
+  - 改 plan(回 propose 修)
+  - 接受当前 plan(继续 dispatch)
+  - 走 §2.5 explore 重新评估
+- **无 concerns** → 主代理**必须显式输出 4 类维度的结论**(可以是"无问题"但按维度逐条说),然后进步骤 4 dispatch
+
+**反向加固**:Critical Plan Review **不允许 vague pass-through** — 主代理必须显式输出 4 类检查结果(可以是"无问题"但必须按维度逐条说),不允许跳过整段 review。
+
 4. 读 `forge/changes/<id>/tasks.md`,识别未勾选 tasks。
 5. **顺序模式**:
    - for each task:派 fresh subagent(主工作区),subagent 拿 [task + 相关 specs/<sub-area>.md + design.md] 启动
@@ -133,6 +157,14 @@ pause_decisions:
 - 不允许主代理直接写代码 — 所有 task 实施必须通过 subagent
 - 不允许 subagent 改 tasks.md(写入是主代理单点串行职责)
 - 不允许跳过 TDD 的 red 步骤(verify 阶段会发现并 append 修复 task)
+
+## 禁止行为(plan-9h §2.8.3 B 主代理 STOP 协议)
+
+主代理 dispatch 阶段必须停下问用户的场景(不允许自动绕过 / 不允许重试,沿 `skills/subagent-driven-development/SKILL.md` §"Main Agent STOP Triggers"):
+
+- ✗ **不允许"绕过失败 task 跑下一个"**(同 task BLOCKED 后必须 STOP)
+- ✗ **不允许"修改 task 描述让它能过"**(改 task 描述需经 §"Fluid Pause Decision Point" 走选项 1/2)
+- ✗ **不允许"重试同一 task ≥ 3 次不停下"**(verify 命令重试 ≥ 3 次仍失败 / subagent BLOCKED ≥ 2 次 → STOP 问用户,沿 SDD STOP triggers 表)
 
 ## 禁止行为(plan-9g §2.7 process_evidence 协议)
 

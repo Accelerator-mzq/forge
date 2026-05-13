@@ -28,21 +28,24 @@
 | 3 | Worktree helper 接口抽象层 | **高阶 `runInWorktree(sha, fn, opts)`** | try/finally 强制 cleanup,丢 cleanup 不可能;test 时 mock 整个 helper 简单;sample 模式多 task 重跑可通过 `max_parallel_reruns` 并发 gate |
 | 4 | process_evidence helper append-only 写入路径 | **staging 文件 + archive 聚合(三源 cross-check)** | helper 调用不依赖 marker 存在;marker 字段是凝固快照;**marker == staging == ack-log 三源 cross-check 反伪造强度最高**;不动现有 marker reader 代码(archive/validate/recover) |
 | 5 | forge-eval RED scenario 组织 | **7 个独立 attack scenario + 1 GREEN(含三档 mode sub-fixture)** | 沿 v0.4 forge-eval/scenarios/ 模式,目录隔离;debug 时一眼看出当前测哪类攻击;改一个不连累别的 |
-| 6 | Staging → marker freeze 触发点 | **verify.ts / review CLI 内联自动 freeze** | UX 连贯(用户只敲 `forge verify` / `forge review`),不引入新概念;反伪造强度与独立 freeze 命令等同(staging 已被 helper 锁住,freeze 只是搬运) |
+| 6 | Staging → marker freeze 触发点 | **新 CLI 子命令 `forge evidence freeze`**(v6 修订,Codex BLOCKER #1) | 原 v5 锁"verify.ts/review CLI 内联"基于错误假设(verify.ts/review.ts 不存在);v6 改为新 CLI 子命令挂 evidence Command 下,主代理在 commands/verify.md 步骤 4.3 写完 .verify-passed.yaml 后显式调 |
 | 7 | Schema 校验工具 | **手写 TS interface + 沿 archive-summary.ts JSDoc 风格** | 现有 src/core/schemas/ 全用手写 interface(无 zod),沿同风格一致;运行时校验由 fence 函数显式做 |
 
 ---
 
 ## 2. 架构 + 模块边界 + 文件清单
 
-### 2.1 新增文件(11 个 — 含 P2 路径 §9.8 锁定的 3 个 skill/eval 文件)
+### 2.1 新增文件(11 个 — v6 修订:freeze 落到 evidence CLI 子命令 + fence 复用 plan-9a stub framework)
 
 ```
 src/core/schemas/process-evidence.ts
-   ProcessEvidence / TddEventChain / TddCommitRecord / ExpectedFailure /
-   TddExemption / VerifyInvocation / SubagentReviewChain / ReviewIteration /
-   EnvHash / ProcessVerificationConfig
+   ProcessEvidence / TddEventChain / RedCommitRecord / GreenCommitRecord /
+   ExpectedFailure / TddExemption / VerifyInvocation / SubagentReviewChain /
+   ReviewIteration / EnvHash / ProcessVerificationConfig
    schema literal: 'forge-process-evidence/v1'
+   (v6 修订:RedCommitRecord/GreenCommitRecord 分两个 interface,
+   字段名 red_log_path/red_log_hash + green_log_path/green_log_hash
+   严格沿 master spec §2.7.2 行 1115/1127 字面)
 
 src/core/worktree.ts
    runInWorktree(sha, fn, opts) — 高阶 helper
@@ -56,16 +59,18 @@ src/core/test-reporters/vitest-json.ts  — JSON.parse + Vitest schema
 
 src/core/archive/process-evidence-fence.ts
    buildProcessEvidenceFenceContext(args)
-   runFieldFence(ctx) → ProcessEvidenceFinding[]   不变量 1-4 / 7-12
+   runFieldFence(ctx) → ProcessEvidenceFinding[]   不变量 1-4 / 7-12 / 14
+   (v6 修订:加不变量 14 — green_commit.sha ↞ archive HEAD ancestor,
+   挡 Codex BLOCKER #2 旁支绕过)
 
 src/core/archive/process-evidence-rerun.ts
    runRerunFence(ctx) → Promise<ProcessEvidenceFinding[]>   不变量 5-6 / 13
 
-# ─── §9.8 P2 路径新增(skill 总数 14 → 15,9g 工日 +1d)──────────────
+# ─── §9.8 P2 路径新增(skill 总数 14 → 15,9g 工日 +1d;已锁,前置 plan-9i v7 commit 7862862)
 src/core/templates/skills/process-evidence.md
    新 skill 文本:process_evidence 协议(走 helper / 不直写 marker /
    不静默切 mode / RED commit 不可省略 / staging append-only)
-   沿 §2.9 writing-skills 协议产出
+   沿 §2.9 writing-skills 协议产出(plan-9i 已完成,提供 skill 创建协议)
 
 skills/process-evidence/SKILL.md
    顶层同步(沿 plan-9j Task 6.2 commands 双同步模式)
@@ -75,29 +80,44 @@ forge-eval/scenarios/process-evidence.yaml
    tempted-to-fake-marker),RED/GREEN 双跑 + judge 评分
 ```
 
-### 2.2 修改文件(15 个 — v2 修订:补 spec §2.7.8 漏列的 marker schema + init.ts + slash/skill 模板双同步)
+**架构关键**(v6 修订,挡 Codex MAJOR #4 双 fence + BLOCKER #1 freeze 落点):
 
-#### 2.2.1 代码层(6 个)
+- `process-evidence-fence.ts` / `process-evidence-rerun.ts` 是 **plan-9a `src/core/archive/fence.ts` `crossCuttingFenceCheck()` 的内部实现**,不另起平行系统(沿 plan-9a Task 8 stub framework,9g 把 13 stub 填实)
+- freeze 步骤实现为新 CLI 子命令 `forge evidence freeze <changeId>`(挂在 `src/cli/commands/evidence.ts` 现有 evidence Command 下,与 record-tdd/record-verify/record-review 平级),**不依赖不存在的 verify.ts/review.ts**;主代理在 `commands/verify.md` 步骤 4.3 写完 .verify-passed YAML 后显式调用 `forge evidence freeze`(slash 模板而非 CLI 接管 marker 生成,沿 v0.4 marker-from-template 协议)
+
+### 2.2 修改文件(16 个 — v6 修订:删 verify.ts/review.ts 错误条目 + 加 fence.ts/ack-log.ts 扩展 + 修 archive.ts 移除 opt-in flag)
+
+#### 2.2.1 CLI 命令层(4 个,Codex BLOCKER #1 修复:freeze 落到 evidence 子命令)
 
 ```
 src/cli/commands/evidence.ts
-   plan-9a 已搭骨架(ack-log + canonical hash);9g 补三 helper marker staging 写入
-
-src/cli/commands/verify.ts
-   .verify-passed 生成路径加 staging → marker freeze(读 staging.yaml + JCS 重算 +
-   复制三数组到 marker.process_evidence 字段)
-   **freeze 走 transaction**(§9.6 锁定 B):import executeTransaction() from
-   src/core/archive/transaction.ts,沿 plan-9c/9d/9e1 archive 步骤同模式
-   (tmp + rename atomic + crash 回滚保护)
-
-src/cli/commands/review.ts(若有,否则同样模式落在 review-passed 生成位置)
-   .review-passed 同上(同 transaction 路径)
+   plan-9a 已搭 record-tdd/record-verify/record-review 三骨架;9g 改动:
+   1. 三 helper commander options 大幅扩(Codex MAJOR #3 修复):
+      record-tdd 加 --red-log/--red-log-hash/--red-report-hash/--red-exit/--red-timestamp +
+                    --green-log/--green-log-hash/--green-report/--green-report-hash/--green-exit/--green-timestamp
+                    (共 +11 option,完整覆盖 master spec §2.7.2 RED/GREEN 字段)
+      record-verify 加 --log/--log-hash/--report-hash/--exit-code/--invoked-at(+5 option)
+      record-review 加 --spec-iterations/--quality-iterations/--main-check-off-at(+3 option,
+                    spec/quality iteration 用 JSON array string 传入)
+   2. helper 写入路径扩(Codex BLOCKER #1):
+      原本只写 ack-log.jsonl 一行;9g 加 staging.yaml 同步 append(read-modify-write 模式)
+      staging 写入走文件锁(Codex MAJOR #2 修复:.evidence/.staging.lock)
+   3. 新增子命令 forge evidence freeze <changeId>:
+      读 staging.yaml + 校验 staging_hash + 读 .verify-passed.yaml(或 .review-passed) +
+      复制三数组到 marker.process_evidence 字段 + 写 process_evidence_staging_hash 快照 +
+      transaction 落盘(§9.6 锁定 B:tmp + rename atomic,沿 archive transaction.ts 模式)
+      主代理在 commands/verify.md 步骤 4.3 写完 marker YAML 后显式调
 
 src/cli/commands/archive.ts
-   步骤 3.5a(field fence)+ 3.5b(rerun fence)新增
-   不动:3.4 legacy/retrograde(plan-9j)/ 3.5 evidence(v0.4)/
-        3.6 verify_findings(plan-9d)/ 3.7 pause(plan-9c)/
-        3.8 ack-log(plan-9d)/ 3.9 three-level(plan-9e1)
+   1. 9g 填实 src/core/archive/fence.ts 的 13 stub(Codex MAJOR #4 修复)
+   2. 移除 --enable-cross-cutting-fence opt-in flag(默认开启)
+   3. 移除 --allow-stub-fence opt-in flag(stub 已实,不需要)
+   4. archive.ts:240 现有 crossCuttingFenceCheck() 调用保留不动(默认开启 = 默认跑 13 不变量)
+   5. WARNING 处理(Codex BLOCKER #3 修复):fence 返回的 WARNING finding 转 VerifyFinding
+      schema(沿 plan-9d Task 3)+ 写入 marker.verify_findings(superset additive 扩),
+      archive 步骤 3.6 verify_findings fence + 步骤 3.9 three-level fence 自动接 ack 流程
+   6. 不动:3.4 legacy/retrograde(plan-9j)/ 3.5 evidence(v0.4)/ 3.6 verify_findings(plan-9d)/
+        3.7 pause(plan-9c)/ 3.8 ack-log(plan-9d)/ 3.9 three-level(plan-9e1)
 
 src/cli/commands/validate.ts
    加 --verify-process flag 单独跑 process_evidence 子检
@@ -107,9 +127,23 @@ src/cli/commands/init.ts(行 38 附近,沿 spec §2.7.8 B-7 修订)
    deprecation 文本 "will be removed in v0.4" → "will be removed in v1.2"
 ```
 
-#### 2.2.2 Marker schema(1 个,plan-9c/9d/9j 沿同模式 superset additive 扩字段)
+#### 2.2.2 Core 层(3 个,Codex BLOCKER #2 + MAJOR #2 + MAJOR #4 + SUGGESTION #1 修复)
 
 ```
+src/core/archive/fence.ts(plan-9a Task 8 stub framework,9g 填实)
+   1. FENCE_INVARIANT_NAMES 扩到 14 项('fence-1' .. 'fence-14';不变量 14 是
+      Codex BLOCKER #2 修复:green_commit ↞ archive HEAD ancestor 校验)
+   2. checkInvariantStub 替换为真实分发:fence-1/2/3/4/7/8/9/10/11/12/14 → process-evidence-fence.ts
+      runFieldFence;fence-5/6/13 → process-evidence-rerun.ts runRerunFence
+   3. crossCuttingFenceCheck 签名稳定不动(plan-9a 已锁,archive.ts:240 调用点保留)
+
+src/core/ack-log.ts(扩 EvidenceHelperEntry,Codex SUGGESTION #1 修复)
+   EvidenceHelperEntry 加 prev_entry_hash: string | null 字段(链头为 null,其余指向上一条
+   ack-log entry 的 canonicalHash(entry))
+   appendAckLog 算 prev_entry_hash 时读最后一行(若文件不存在 → null,链头)
+   fence 验证 ack-log 文件完整性:逐行重算 prev_entry_hash 必匹配上一行 hash
+   (反伪造关键:AI 删一行 / 改一行 ack-log 会让后续 entry prev_entry_hash 失配)
+
 src/core/markers/types.ts
    VerifyMarker / ReviewMarker 加 process_evidence?: ProcessEvidence(superset additive,
    老 marker 缺等价 undefined,沿 plan-9c pause_decisions / plan-9d verify_findings /
@@ -117,7 +151,7 @@ src/core/markers/types.ts
    + process_evidence_staging_hash?: string(freeze 时 snapshot,archive fence cross-check)
 ```
 
-#### 2.2.3 Config schema(2 个)
+#### 2.2.3 Config schema(2 个;v6 编号不变)
 
 ```
 src/core/schema/types.ts
@@ -172,7 +206,7 @@ package.json
 tests/cli/process-evidence-fence.test.ts      — fieldFence 13×7 + 三档 mode + WARNING/CRITICAL
 tests/cli/process-evidence-rerun.test.ts      — rerunFence 不变量 5/6/13 + worktree + timeout
 tests/cli/evidence-helpers.test.ts            — 三 helper staging append-only + freeze
-tests/cli/verify-freeze.test.ts               — verify.ts 内联 freeze staging → marker
+tests/cli/evidence-freeze.test.ts             — forge evidence freeze 子命令(v6 修订):staging → marker 拷贝 + transaction 回滚 + WARNING 转 VerifyFinding + 锁
 tests/cli/ack-cli-mode.test.ts                — CI + mode != full 拒签 + ack-mode action
 
 tests/core/test-reporters/junit.test.ts       — Jest/Vitest/Mocha 三 framework JUnit XML
@@ -193,9 +227,9 @@ forge-eval/scenarios/(沿 forge-eval §5.5 现有约定:单 yaml per skill,RED/G
 
 ---
 
-## 3. 13 不变量到 fence.ts / rerun.ts 映射
+## 3. 14 不变量到 fence.ts / rerun.ts 映射(v6 修订:13 → 14,加 Codex BLOCKER #2 修复)
 
-| # | 不变量(沿 spec §2.7.3 字面) | severity | 落到 | 关键依赖 |
+| # | 不变量(沿 spec §2.7.3 字面 + v6 新增 #14) | severity | 落到 | 关键依赖 |
 |---|---|---|---|---|
 | 1 | `red_commit.timestamp < green_commit.timestamp` | CRITICAL | fence.ts | `Date.parse()` 比对 |
 | 2 | `red_commit.sha` 是 `green_commit.sha` 祖先 | CRITICAL | fence.ts | `git merge-base --is-ancestor`(execFileSync) |
@@ -203,13 +237,16 @@ forge-eval/scenarios/(沿 forge-eval §5.5 现有约定:单 yaml per skill,RED/G
 | 4 | GREEN `exit_code == 0` | CRITICAL | fence.ts | 字段值断言 |
 | **5** | **RED worktree 实际 fail + `expected_failures` 命中** | **CRITICAL** | **rerun.ts** | **runInWorktree + parseReporter** |
 | **6** | **GREEN worktree 实际 pass** | **CRITICAL** | **rerun.ts** | **runInWorktree + parseReporter** |
-| 7 | `verify_invocations 总数 ≥ task 数` | WARNING | fence.ts | 计数 + parseTasks(tasks.md) |
+| 7 | `verify_invocations 总数 ≥ task 数` | WARNING → marker.verify_findings | fence.ts | 计数 + parseTasks(tasks.md);WARNING 转 VerifyFinding(Codex BLOCKER #3) |
 | 8 | `subagent_review_chain` 顺序合理 | CRITICAL | fence.ts | git ancestor + timestamp 链 |
-| 9 | process_evidence JCS hash 三源一致 | CRITICAL | fence.ts | canonicalHash() × 3 源 |
-| 10 | env_hash 一致性 | WARNING | fence.ts | lockfile + node_version + os_platform 比对 |
+| 9 | process_evidence JCS hash 三源一致 + ack-log prev_entry_hash 链完整 | CRITICAL | fence.ts | canonicalHash() × 3 源 + ack-log chain 重算(Codex SUGGESTION #1) |
+| 10 | env_hash 一致性 | WARNING → marker.verify_findings | fence.ts | lockfile + node_version + os_platform 比对;WARNING 转 VerifyFinding |
 | 11 | tdd_exemption 非空时 ack-log 含条目 | CRITICAL | fence.ts | ack-log scan(复用 ack-log-consistency.ts) |
 | 12 | mode != full 时 acked_by 非空 + CI 拒签 | CRITICAL | fence.ts | ack-log scan + `process.env.CI` |
-| **13** | **重跑 timeout** | **full=CRITICAL / 其他=WARNING** | **rerun.ts** | **runInWorktree opts.timeout** |
+| **13** | **重跑 timeout** | **full=CRITICAL / 其他=WARNING → verify_findings** | **rerun.ts** | **runInWorktree opts.timeout** |
+| **14** | **`green_commit.sha` ↞ archive HEAD ancestor**(v6 新增,Codex BLOCKER #2 修复) | **CRITICAL** | **fence.ts** | **`git merge-base --is-ancestor green_commit.sha HEAD`**;挡旁支造合法 RED/GREEN 链 + 主分支换实现的攻击 |
+
+**WARNING 流转**(Codex BLOCKER #3 修复):不变量 7/10/13 产 WARNING 时,fence 不直接 fail,**转 VerifyFinding schema**(沿 plan-9d Task 3)+ 在 `forge evidence freeze` 时写入 marker.verify_findings 数组。archive.ts 步骤 3.6(verify_findings fence)+ 步骤 3.9(three-level fence)自动接 ack 流程 — WARNING+resolved=false+无 ack 拒签 / WARNING+acked 通过(沿 plan-9e1 三级业务行为 fence 字面)。
 
 ### 3.1 fence.ts 关键函数签名
 
@@ -302,34 +339,59 @@ export interface EnvHash {
 export interface TddEventChain {
   /** task 引用(沿 tasks.md 锚点) */
   task_ref: string;
-  /** RED 阶段记录(tdd_exemption 非空时可省) */
-  red_commit: TddCommitRecord | null;
-  /** GREEN 阶段记录(必填) */
-  green_commit: TddCommitRecord;
+  /** RED 阶段记录(tdd_exemption 非空时可省;v6:RedCommitRecord 类型) */
+  red_commit: RedCommitRecord | null;
+  /** GREEN 阶段记录(必填;v6:GreenCommitRecord 类型) */
+  green_commit: GreenCommitRecord;
   /** light mode trivial change 免 RED 的 ack 引用(沿 §2.7.2 MAJOR #37;不变量 11) */
   tdd_exemption: TddExemption | null;
   /** tdd_exemption 非空时必填 — ack-log 中对应 user ack 的 acked_by */
   tdd_exemption_acked_by: string | null;
 }
 
-/** RED / GREEN 单 commit 记录 */
-export interface TddCommitRecord {
+/**
+ * RED commit 记录(v6 修订,Codex MAJOR #1 修复)
+ * 字段名严格沿 master spec §2.7.2 行 1115/1116 字面 — red_commit 节点下的 log/hash 字段
+ * 是 red_log_path / red_log_hash 而非通用 log_path / log_hash
+ */
+export interface RedCommitRecord {
   /** git sha(40 hex) */
   sha: string;
   /** ISO 8601 UTC */
   timestamp: string;
-  /** plain log 路径(forge/changes/<id>/.evidence/ 相对路径) */
-  log_path: string;
-  /** sha256(log content) */
-  log_hash: string;
-  /** 进程 exit code — RED 必 != 0 / GREEN 必 == 0(MAJOR #19,不变量 3/4) */
+  /** RED plain log 路径(forge/changes/<id>/.evidence/ 相对路径;沿 master spec 行 1115) */
+  red_log_path: string;
+  /** sha256(red log content);沿 master spec 行 1116 */
+  red_log_hash: string;
+  /** 进程 exit code — RED 必 != 0(MAJOR #19,不变量 3) */
   exit_code: number;
   /** 结构化 reporter 报告路径(JUnit XML / TAP / Vitest JSON;MAJOR #20) */
   runner_report_path: string;
   /** sha256(reporter content) */
   runner_report_hash: string;
-  /** RED 阶段必填:绑定具体失败的 test(MAJOR #24;不变量 5);GREEN 阶段 null */
-  expected_failures: ExpectedFailure[] | null;
+  /** RED 阶段必填:绑定具体失败的 test(MAJOR #24;不变量 5) */
+  expected_failures: ExpectedFailure[];
+}
+
+/**
+ * GREEN commit 记录(v6 修订,Codex MAJOR #1 修复)
+ * 字段名沿 master spec §2.7.2 行 1127/1128 字面 — green_commit 节点下用 green_log_path/hash
+ */
+export interface GreenCommitRecord {
+  /** git sha(40 hex) */
+  sha: string;
+  /** ISO 8601 UTC */
+  timestamp: string;
+  /** GREEN plain log 路径;沿 master spec 行 1127 */
+  green_log_path: string;
+  /** sha256(green log content);沿 master spec 行 1128 */
+  green_log_hash: string;
+  /** 进程 exit code — GREEN 必 == 0(MAJOR #19,不变量 4) */
+  exit_code: number;
+  /** 结构化 reporter 报告路径 */
+  runner_report_path: string;
+  /** sha256(reporter content) */
+  runner_report_hash: string;
 }
 
 /** RED 阶段期望失败的 test(MAJOR #24) */
@@ -406,15 +468,19 @@ export interface ProcessVerificationConfig {
 }
 ```
 
-### 4.0 关键决策点(沿 spec §2.7.2 字面 + 落地选型)
+### 4.0 关键决策点(v6 修订,Codex MAJOR #1 修复后)
 
 - `schema: 'forge-process-evidence/v1'` literal(沿 forge marker schema 同约定)
-- 5 大类型(`ProcessEvidence` / `TddEventChain` / `VerifyInvocation` / `SubagentReviewChain` / `EnvHash`)+ 4 辅助类型(`TddCommitRecord` / `ExpectedFailure` / `TddExemption` / `ReviewIteration`)+ 1 config 类型(`ProcessVerificationConfig`)
-- 字段命名沿 spec §2.7.2 字面 snake_case(`tdd_event_chain` / `verify_invocations` / `subagent_review_chain` / `env_hash` / `process_verification_mode` / `process_verification_mode_acked_by` / `tdd_exemption` / `expected_failures` / `runner_report_path` / `runner_report_hash` / `task_refs` / `verify_scope` 等)
+- **5 大类型 + 5 辅助类型 + 1 config 类型**(v6 修订:TddCommitRecord 拆为 RedCommitRecord/GreenCommitRecord 两 interface,沿 master spec §2.7.2 字面 red_log_path/green_log_path 命名)
+  - 顶级:`ProcessEvidence`
+  - 三大数组元素:`TddEventChain` / `VerifyInvocation` / `SubagentReviewChain`
+  - 嵌套:`RedCommitRecord` / `GreenCommitRecord`(v6 新增,替换 TddCommitRecord)/ `ExpectedFailure` / `TddExemption` / `ReviewIteration` / `EnvHash`
+  - config:`ProcessVerificationConfig`
+- 字段命名严格沿 master spec §2.7.2 字面(行 1097-1161):`tdd_event_chain` / `verify_invocations` / `subagent_review_chain` / `env_hash` / `process_verification_mode` / `process_verification_mode_acked_by` / `tdd_exemption` / `expected_failures` / **`red_log_path` / `red_log_hash`(red_commit 节点下,行 1115/1116)** / **`green_log_path` / `green_log_hash`(green_commit 节点下,行 1127/1128)** / `runner_report_path` / `runner_report_hash` / `task_refs` / `verify_scope`
 - `process_verification_mode: 'full' | 'sample' | 'hash-only'` 三档 literal union(不留 string fallback)
 - `failure_type: 'assertion' | 'timeout' | 'error' | 'not-implemented'` 四档 literal union
-- `red_commit: TddCommitRecord | null`(tdd_exemption 非空时 null)+ `green_commit: TddCommitRecord`(必填)— 显式 null 表达 RED 缺失,fence 据此分支
-- `expected_failures: ExpectedFailure[] | null`(RED 必填,GREEN null)— null 表达"非 RED 阶段"语义
+- `red_commit: RedCommitRecord | null`(tdd_exemption 非空时 null)+ `green_commit: GreenCommitRecord`(必填)— 显式 null 表达 RED 缺失,fence 据此分支
+- `expected_failures: ExpectedFailure[]`(只在 RedCommitRecord 中,GreenCommitRecord 无此字段 — schema 层面禁止 GREEN 含 expected_failures)
 
 ### 4.1 staging file schema
 
@@ -429,67 +495,89 @@ subagent_review_chain: [...]
 staging_hash: <JCS sha256 of the three arrays above>
 ```
 
-helper 每次 append 后重算 `staging_hash` 覆盖。freeze 时 verify.ts 重算校验未被中间篡改。
+**写入并发保护**(v6 修订,Codex MAJOR #2 修复):staging 文件是"读 YAML + 改 array + 重算 hash + 覆写"非原子操作。主代理多 helper 并发(per-task 实施可能并行)会 lost update。9g 实施时 helper 写 staging 走文件锁:
+
+```
+forge/changes/<id>/.evidence/.staging.lock
+```
+
+仿 archive lock 模式(`src/core/archive/lock.ts`),wrap 整段 read-modify-write 在 `acquireStagingLock(changeRoot) → readStaging → mutate → writeStaging → releaseLock` 内。锁文件 stale detection(进程 pid 死亡 → 强制释放)沿 lock.ts 同模式。freeze 时同样 acquire 锁(防 freeze 期间 helper 再 append)。
+
+helper 每次 append 后重算 `staging_hash` 覆盖。freeze 时 `forge evidence freeze` 子命令重算校验未被中间篡改。
 
 ---
 
-## 5. 数据流(helper → staging → freeze → marker → archive fence)
+## 5. 数据流(v6 修订:helper → staging+ack-log chain → freeze CLI → marker → archive fence)
 
 ```
-[task 实施期间]
+[task 实施期间 — 主代理协调,subagent 不直接调 helper]
 
 主代理读 subagent 报告 ──→ forge evidence record-tdd / record-verify / record-review
+                                          │
+                                          ▼
+                            acquireStagingLock(changeRoot)   ← v6 修订:文件锁
                                           │
                           ┌───────────────┴───────────────┐
                           ▼                                ▼
               append staging.yaml             append ack-log.jsonl
-            (三数组 + staging_hash)          (entry + payload JCS hash)
+            (三数组 + 重算 staging_hash)    (entry + prev_entry_hash chain)
+                          │                                │
+                          └───────────────┬────────────────┘
+                                          ▼
+                            releaseStagingLock(changeRoot)
 
-[verify CLI / review 完成时,verify.ts / review 内联自动 freeze]
+[verify slash 模板完成 — 主代理在 commands/verify.md 步骤 4.3 写完 .verify-passed.yaml 后调]
 
-forge verify / review ──→ verify-passed / review-passed 生成路径
+主代理 ──→ forge evidence freeze <changeId>     ← v6 修订:新 CLI 子命令(挂 evidence Command)
                              │
-                             │ 1. 读 staging.yaml
-                             │ 2. 重算 staging_hash 校验未被中间篡改
-                             │ 3. 复制三数组到 marker.process_evidence
-                             │ 4. marker 加 process_evidence_staging_hash 快照
-                             │ 5. executeTransaction()(沿 §9.6 锁定 B + 沿
-                             │    src/core/archive/transaction.ts 模式 —
-                             │    tmp + rename atomic + crash 回滚保护)
+                             │ 1. acquireStagingLock(防 freeze 期间 helper 再 append)
+                             │ 2. 读 staging.yaml
+                             │ 3. 重算 staging_hash 校验未被中间篡改
+                             │ 4. 读 .verify-passed.yaml(主代理刚写的 marker)
+                             │ 5. 复制三数组到 marker.process_evidence 字段
+                             │ 6. marker 加 process_evidence_staging_hash 快照
+                             │ 7. WARNING 转 VerifyFinding 写入 marker.verify_findings
+                             │    (Codex BLOCKER #3 修复:WARNING 不丢)
+                             │ 8. executeTransaction()(§9.6 锁定 B,沿
+                             │    src/core/archive/transaction.ts:tmp + rename atomic)
+                             │ 9. releaseStagingLock
                              ▼
-                    .verify-passed.yaml / .review-passed.yaml(含 process_evidence)
+                    .verify-passed.yaml / .review-passed.yaml(含 process_evidence + verify_findings)
 
-[forge archive — archive.ts 步骤 3.5a/3.5b]
+[forge archive — archive.ts:240 现有 crossCuttingFenceCheck() 调用,v6 修订:9g 填实 13+1 不变量]
 
 archive 流程:
-  ├── 读 marker.process_evidence
-  ├── 读 staging.yaml → stagingHash
-  ├── 读 ack-log.jsonl → evidence helper entries
-  │
-  ▼
-runFieldFence(ctx)  ──→  不变量 1-4 / 7-12 finding[]
-  │
-  │ 不变量 9 三源 cross-check:
-  │   marker_hash = canonicalHash(marker.process_evidence)
-  │   stagingHash = ctx.stagingHash
-  │   ackLogChainHash = canonicalHash(ackLogEntries 还原的三数组)
-  │   三者不等 → CRITICAL "process_evidence tampered"
-  │
-  ▼
-runRerunFence(ctx)  ──→ 不变量 5-6 / 13 finding[](mode 分支 / 抽样 / timeout 分级)
-  │
-  ▼
-所有 finding 汇入 archive finding 池 → 后续步骤 3.6+ 使用
+  ├── 步骤 3.4 plan-9j legacy/retrograde fence(不动)
+  ├── 步骤 3.5 plan-9d evidence 完整性(不动)
+  ├── 步骤 3.5(同 line)plan-9a crossCuttingFenceCheck() ← v6 修订:9g 填实
+  │      内部:
+  │        buildProcessEvidenceFenceContext(...) 一次读全(marker/staging/ack-log/parseTasks/CI)
+  │        ├── runFieldFence(ctx) → 不变量 1-4 / 7-12 / 14 finding[]
+  │        │   不变量 9 三源 + 链 cross-check:
+  │        │     marker_hash = canonicalHash(marker.process_evidence)
+  │        │     stagingHash = ctx.stagingHash(从 marker.process_evidence_staging_hash 快照对比)
+  │        │     ackLogChainHash = canonicalHash(ack-log evidence-helper entries 还原的三数组)
+  │        │     ack-log 链完整性 = 逐行重算 prev_entry_hash 必匹配上一条 hash
+  │        │     四源不等 → CRITICAL "process_evidence tampered"
+  │        │   不变量 14:git merge-base --is-ancestor green_commit.sha HEAD ≠ 0 → CRITICAL
+  │        └── runRerunFence(ctx) → 不变量 5-6 / 13 finding[](mode 分支 / 抽样 / timeout)
+  │      CRITICAL finding → fence.ok=false → archive.ts process.exit(1)
+  ├── 步骤 3.6 plan-9d verify_findings fence(自动接 9g WARNING,Codex BLOCKER #3 修复)
+  ├── 步骤 3.7 plan-9c pause(不动)
+  ├── 步骤 3.8 plan-9d ack-log consistency(扩 9g 三 helper entries cross-check)
+  └── 步骤 3.9 plan-9e1 three-level fence(自动接 9g WARNING acked 矩阵)
 ```
 
-### 5.1 三源 cross-check 反伪造矩阵
+### 5.1 四源 cross-check 反伪造矩阵(v6 修订:加 ack-log chain 完整性)
 
-| 攻击 | marker | staging | ack-log | 检测点 |
-|---|---|---|---|---|
-| 直接改 marker.process_evidence | ✗ | ✓ | ✓ | 不变量 9 三源不等 |
-| 删/改 staging.yaml 后改 marker | ✗ | ✗ | ✓ | marker_hash != ackLogChainHash |
-| 改 ack-log.jsonl 一行 | ✓ | ✓ | ✗ | hash 重算不匹配 entry |
-| 三源全改 | ✗ | ✗ | ✗ | **不变量 5/6 worktree 重跑** — AI 改不动测试运行结果 |
+| 攻击 | marker | staging | ack-log content | ack-log chain | 检测点 |
+|---|---|---|---|---|---|
+| 直接改 marker.process_evidence | ✗ | ✓ | ✓ | ✓ | 不变量 9 marker hash != staging hash |
+| 删/改 staging.yaml 后改 marker | ✗ | ✗ | ✓ | ✓ | marker hash != ackLogChainHash |
+| 改 ack-log.jsonl 一行内容 | ✓ | ✓ | ✗ | ✗ | prev_entry_hash 链断(下一行 hash mismatch) |
+| 删 ack-log.jsonl 一行 | ✓ | ✓ | ✗ | ✗ | 行数与 staging entries 不一致 + chain 断 |
+| 旁支造 RED/GREEN + 主分支换实现 | ✓ | ✓ | ✓ | ✓ | **不变量 14**:green ↞ HEAD ancestor check 失败 |
+| 四源全改 + 改 git 主分支 | ✗ | ✗ | ✗ | ✗ | **不变量 5/6 worktree 重跑** — AI 改不动测试运行结果 |
 
 ---
 
@@ -526,72 +614,133 @@ ack?: {
 
 ---
 
-## 7. archive.ts 集成切口
+## 7. archive.ts 集成切口(v6 修订,Codex MAJOR #4 修复:复用 plan-9a fence.ts stub framework)
 
-**插入位**:步骤 3.5(v0.4 evidence 完整性,既有)之后,步骤 3.6(plan-9d verify_findings,既有)之前。
+**关键架构变化**(v5 → v6):**不**新加 archive 步骤 3.5a/3.5b 字面,而是**填实 plan-9a 已搭的 `src/core/archive/fence.ts` 13 stub framework**(`crossCuttingFenceCheck()` 在 archive.ts:240 已 wire,默认 opt-in)+ 移除 dev opt-in flag,改为默认开启。
 
-**编号策略**:9g 新增 3.5a + 3.5b,**不改既有 3.4 / 3.5 / 3.6 / 3.7 / 3.8 / 3.9 编号**。
+**plan-9a stub framework 当前状态**(`src/core/archive/fence.ts:25-86`):
+```typescript
+export const FENCE_INVARIANT_NAMES = ['fence-1', ..., 'fence-13'] as const;
+async function checkInvariantStub(name): Promise<FenceInvariantResult> {
+  return { invariant: name, ok: false, reason: 'not_implemented' };
+}
+export async function crossCuttingFenceCheck(changeRoot, options) {
+  // 逐一跑 stub,allowStubFence 时把 not_implemented 视为 skip
+}
+```
+
+**9g 改造**(v6):
+```typescript
+// src/core/archive/fence.ts(9g 填实)
+
+import { buildProcessEvidenceFenceContext } from './process-evidence-fence.js';
+import { runFieldFence } from './process-evidence-fence.js';
+import { runRerunFence } from './process-evidence-rerun.js';
+
+// v6:扩 13 → 14,加 fence-14 ↞HEAD ancestor 不变量(Codex BLOCKER #2 修复)
+export const FENCE_INVARIANT_NAMES = [
+  'fence-1', 'fence-2', 'fence-3', 'fence-4', 'fence-5', 'fence-6', 'fence-7',
+  'fence-8', 'fence-9', 'fence-10', 'fence-11', 'fence-12', 'fence-13', 'fence-14',
+] as const;
+
+export async function crossCuttingFenceCheck(
+  changeRoot: string,
+  options: FenceCheckOptions = {},
+): Promise<FenceCheckResult> {
+  // 一次性 ctx 构建(避免重复 IO)
+  const ctx = await buildProcessEvidenceFenceContext({ changeRoot, /* ... */ });
+
+  // 同步 field fence:不变量 1-4 / 7-12 / 14
+  const fieldFindings = runFieldFence(ctx);
+
+  // async rerun fence:不变量 5-6 / 13(mode 分支:full / sample / hash-only)
+  const rerunFindings = await runRerunFence(ctx);
+
+  const allFindings = [...fieldFindings, ...rerunFindings];
+  const criticalFindings = allFindings.filter(f => f.severity === 'CRITICAL');
+  const warningFindings = allFindings.filter(f => f.severity === 'WARNING');
+
+  // WARNING finding 转 VerifyFinding 在 freeze 时已写入 marker.verify_findings,
+  // archive 此处不再处理 — 交步骤 3.6 verify_findings fence + 步骤 3.9 three-level fence
+  // (Codex BLOCKER #3 修复:WARNING 不丢)
+
+  const results: FenceInvariantResult[] = FENCE_INVARIANT_NAMES.map(name => {
+    const inv = parseInt(name.replace('fence-', ''), 10);
+    const f = criticalFindings.find(f => f.invariant === inv);
+    return { invariant: name, ok: !f, reason: f?.message ?? 'pass' };
+  });
+
+  return {
+    ok: criticalFindings.length === 0,
+    results,
+    notImplementedCount: 0,  // 9g 完成后所有不变量都实现,permanent 0
+  };
+}
+```
+
+**archive.ts 调用点改造**(`src/cli/commands/archive.ts:80-91 + 240-260`):
 
 ```typescript
-// 步骤 3.5 已有(v0.4)─ 不动 ──────────────────────────────────────────
-const evResult = await validateEvidence(verifyRec, verifyPath);
-// ... fail-fast ...
+// archive.ts:80-91 — buildArchiveCommand options 删两个 opt-in flag(v6 Codex MAJOR #4 修复)
 
-// 步骤 3.5a(plan-9g):process-evidence field fence ─ 同步
-const fieldCtx = await buildProcessEvidenceFenceContext({ ... });
-const fieldFenceResult = runFieldFence(fieldCtx);
-const fieldCritical = fieldFenceResult.filter(f => f.severity === 'CRITICAL');
-if (fieldCritical.length > 0) {
-  console.error('✗ process-evidence field fence 拒签:');
-  for (const f of fieldCritical) console.error(`  - 不变量 ${f.invariant}: ${f.message}`);
+return new Command('archive')
+  .argument('[changeId]', '...')
+  .description('...')
+  // .option('--enable-cross-cutting-fence', ...)  ← v6 删除(默认开启)
+  // .option('--allow-stub-fence', ...)             ← v6 删除(stub 已实)
+  .option('--force', '...')
+  .option('--recover', '...')
+  .option('--resume-summary <archiveId>', '...')
+  // ... 其余不动
+
+// archive.ts:240-260 — 9g 改 fence 调用为无条件默认开启
+
+// 步骤 3.4 plan-9j legacy/retrograde(不动)
+// 步骤 3.5 plan-9d evidence 完整性(不动)
+// 步骤 3.5 plan-9a crossCuttingFenceCheck(v6 修订:默认开启)
+const fenceResult = await crossCuttingFenceCheck(join(forgeRoot, 'changes', changeId));
+if (!fenceResult.ok) {
+  console.error('✗ 横切 fence 拒签:');
+  for (const r of fenceResult.results) {
+    if (!r.ok) console.error(`  - ${r.invariant}: ${r.reason}`);
+  }
   await archiveRelease();
   process.exit(1);
 }
 
-// 步骤 3.5b(plan-9g):process-evidence rerun fence ─ async,mode 分支
-const rerunFenceResult = await runRerunFence(fieldCtx);
-const rerunCritical = rerunFenceResult.filter(f => f.severity === 'CRITICAL');
-if (rerunCritical.length > 0) {
-  console.error('✗ process-evidence rerun fence 拒签:');
-  for (const f of rerunCritical)
-    console.error(`  - 不变量 ${f.invariant} [${f.severity}] task=${f.taskRef}: ${f.message}`);
-  await archiveRelease();
-  process.exit(1);
-}
-
-const allProcessEvidenceFindings = [...fieldFenceResult, ...rerunFenceResult];
-
-// 步骤 3.6 已有(plan-9d)─ 不动 ──────────────────────────────────────
-const vfResult = validateVerifyFindingsFence(verifyRec, verifyPath);
-// ...
+// 步骤 3.6 plan-9d verify_findings fence(自动接 9g WARNING)
+// ... 步骤 3.7 / 3.8 / 3.9 不动
 ```
 
 ### 7.1 不动 plan-9j / 9d / 9c / 9e1
 
 - 3.4 legacy + retrograde(plan-9j Task 5):**不动**
 - 3.5 evidence 完整性(v0.4):**不动**
-- 3.6 verify_findings fence(plan-9d):**不动**
+- 3.5(同 line)plan-9a crossCuttingFenceCheck():**调用点不动,内部 stub 填实**(v6 修订)
+- 3.6 verify_findings fence(plan-9d):**不动**(自动接 9g 写入的 WARNING VerifyFinding)
 - 3.7 pause_decisions fence(plan-9c):**不动**
-- 3.8 ack-log consistency(plan-9d v2 B-4):**不动**
-- 3.9 三级业务行为 fence(plan-9e1):**不动**
+- 3.8 ack-log consistency(plan-9d v2 B-4):**扩** — 9g 三 helper entries(record-tdd / record-verify / record-review)+ ack-log chain 完整性 cross-check
+- 3.9 三级业务行为 fence(plan-9e1):**不动**(自动接 9g WARNING acked 矩阵)
 
 ### 7.2 fence ctx 构建集中(避免重复 IO)
 
 ```typescript
-// src/core/archive/process-evidence-fence-ctx.ts(新文件)
+// src/core/archive/process-evidence-fence.ts(新文件,fence.ts 内部实现)
 export async function buildProcessEvidenceFenceContext(args: {
-  changeId: string;
-  changeDir: string;
-  verifyRec: VerifyPassedRecord;
-  verifyPath: string;
-  cwd: string;
+  changeRoot: string;            // <changeDir>;cwd 由 changeRoot 反推
   config: Required<NonNullable<ForgeConfig['process_verification']>>;
   testConfig: NonNullable<ForgeConfig['test']>;
   ackConfig: NonNullable<ForgeConfig['ack']>;
 }): Promise<ProcessEvidenceFenceContext>;
 ```
 
-内部一次读全:marker.process_evidence + staging.yaml + ack-log.jsonl + parseTasks + check `process.env.CI`。
+内部一次读全:
+- `.verify-passed.yaml` / `.review-passed.yaml`(marker.process_evidence + process_evidence_staging_hash)
+- `.evidence/process-evidence.staging.yaml`(staging.staging_hash)
+- `.evidence/ack-log.jsonl`(evidence-helper entries + prev_entry_hash chain)
+- `tasks.md`(parseTasks → tasksCount)
+- `process.env.CI === 'true'` → isCiMode
+- `git rev-parse HEAD`(不变量 14 用,Codex BLOCKER #2)
 
 ---
 
@@ -621,12 +770,15 @@ A6 marker 字段绕 helper 直写 / A7 hash-only 无 ack
 
 | 维度 | 目标 | 验证层 |
 |---|---|---|
-| 13 不变量 fail 路径 | 100%(每不变量 ≥ 1 fixture) | tests/cli/process-evidence-fence.test.ts |
-| 7 attack fence 拦截 | 100%(A1-A7 各一 fixture + happy path) | tests/cli/process-evidence-fence.test.ts |
+| 14 不变量 fail 路径 | 100%(每不变量 ≥ 1 fixture;v6 加不变量 14) | tests/cli/process-evidence-fence.test.ts |
+| 8 attack fence 拦截 | 100%(A1-A7 + v6 新增 A8 旁支造链 + 主分支换实现) | tests/cli/process-evidence-fence.test.ts |
 | 三档 mode happy path | 100%(full / sample / hash-only 各一 it) | tests/cli/process-evidence-fence.test.ts |
 | reporter 三档 parser | 100%(每档 ≥ 3 framework fixture) | tests/core/test-reporters/{junit,tap,vitest-json}.test.ts |
 | worktree cleanup 异常路径 | 100%(timeout / fn throw / git remove fail) | tests/core/worktree.test.ts |
 | CI 模式拒签 | 100%(env.CI=true 三档全测) | tests/cli/ack-cli-mode.test.ts |
+| **freeze CLI 子命令**(v6) | 100%(staging→marker 拷贝 + transaction 回滚 + WARNING 转 VerifyFinding + 锁) | tests/cli/evidence-freeze.test.ts |
+| **staging 写并发**(v6) | 100%(双 helper 并发 read-modify-write 不丢更新) | tests/cli/evidence-staging-concurrency.test.ts |
+| **ack-log chain 完整性**(v6) | 100%(prev_entry_hash 链断检测 + 单行删除检测 + 单行改动检测) | tests/core/ack-log-chain.test.ts |
 
 ### 8.3 forge-eval 端到端布局(沿 forge-eval §5.5 现有约定:单 yaml per skill + RED/GREEN 双跑 + judge 评分)
 
@@ -668,7 +820,7 @@ scenarios:
 3. **Plan inline 完整代码范围**:fence/rerun 函数全量 inline 还是仅 signature + 关键 helper?(沿 plan-9j Pattern A 教训:**全量 inline**)
 4. **forge-eval fixture 内容生成策略**(若选 P2 路径):手写 fixture 还是用真 forge 流程跑出来再篡改?— **注**:此项仅当 §9.9 选 P2 时适用;若选 P1 则不需新 fixture(沿现有 skill yaml 加 scenario)
 5. **vitest --reporter=json schema 锁定**:Vitest 不同版本 JSON schema 微调,plan 阶段锁定一个版本 + 兼容窗口
-6. ~~freeze 时点细节~~ — **已锁:走 transaction(选项 B)**。verify-passed 生成的 staging → marker freeze 步骤走 `src/core/archive/transaction.ts` 现有抽象(plan-9c/9d/9e1 archive 步骤已用同模式:tmp + rename atomic + crash 回滚)。**理由**:freeze 失败留半成品 marker 会让下次 `forge archive` 因 yaml 解析失败报错,用户需手动修;transaction 模式代码复用现有 lib 成本低,且 verify-passed 内含 process_evidence 后 schema 复杂度上升,半成品风险变大。**实施**:在 verify.ts 内 freeze 路径 import `executeTransaction()`(沿 plan-9c/9d 调用模式),不重新写 atomic 逻辑
+6. ~~freeze 时点细节~~ — **已锁:走 transaction(选项 B)**。verify-passed 生成的 staging → marker freeze 步骤走 `src/core/archive/transaction.ts` 现有抽象(plan-9c/9d/9e1 archive 步骤已用同模式:tmp + rename atomic + crash 回滚)。**理由**:freeze 失败留半成品 marker 会让下次 `forge archive` 因 yaml 解析失败报错,用户需手动修;transaction 模式代码复用现有 lib 成本低,且 verify-passed 内含 process_evidence 后 schema 复杂度上升,半成品风险变大。**v6 修订实施位**(原写 verify.ts/review.ts 但这两个文件不存在,Codex BLOCKER #1):freeze 实现在新 CLI 子命令 `forge evidence freeze <changeId>`(挂 evidence Command 下,与 record-tdd/verify/review 平级);主代理在 commands/verify.md 步骤 4.3 写完 .verify-passed.yaml 后显式调;freeze 子命令内 import `executeTransaction()`(沿 plan-9c/9d 调用模式)
 7. **codex review 轮数预期**:plan-9j 9 轮 / 9e1 12 轮,9g spec 已 v3 充分,预计 5-8 轮
 
 ### 9.8 forge-eval 集成路径 ─ 锁定 P2(brainstorm 阶段已选)
@@ -699,32 +851,180 @@ skill-eval CI workflow(`.github/workflows/skill-eval.yml`)第一步检测 `ANTHR
 
 **决策点**:9z release 前定。**brainstorm 阶段倾向 9g 实施期走策略 A**(避免 9g 实施过程被 forge-eval 抖动 + 维护者人工审);9z 阶段升级到 B 或 C。
 
+### 9.10 staging 写入锁实现细节(v6 新增,Codex MAJOR #2 修复)
+
+`forge/changes/<id>/.evidence/.staging.lock` 文件锁仿 archive lock 模式(`src/core/archive/lock.ts`):
+- 锁内容:`{ pid, acquired_at }` JSON,文件存在即视为持有
+- stale detection:`process.kill(pid, 0)` 失败 → 强制释放(沿 archive lock 同模式)
+- helper / freeze 调 `acquireStagingLock(changeRoot, { timeoutMs: 5000 })`,timeout → exit 1 + 友好错误
+- writing-plans 阶段需考虑:lock 文件本身是否需要写入 ack-log?决策:**否**(lock 是 OS 层并发原语,不参与 process_evidence 反伪造)
+
+### 9.11 ack-log prev_entry_hash chain 实现细节(v6 新增,Codex SUGGESTION #1 修复)
+
+EvidenceHelperEntry schema 扩:
+```typescript
+export interface EvidenceHelperEntry {
+  schema: 'forge-ack-log/v1';
+  kind: 'evidence-helper';
+  timestamp: string;
+  helper_name: 'record-tdd' | 'record-verify' | 'record-review';
+  change_id: string;
+  task_ref: string;
+  payload_hash: string;
+  status: 'success' | 'partial' | 'failed';
+  git_head: string | null;
+  prev_entry_hash: string | null;   // v6 新增:链头为 null,其余指向上一条 canonicalHash(entry)
+  extra: Record<string, unknown>;
+}
+```
+
+`appendAckLog` 实现:
+1. 读 ack-log.jsonl 最后一行(若文件不存在 → prev=null)
+2. 算 `prev_entry_hash = canonicalHash(lastEntry)`(若有)
+3. entry.prev_entry_hash = prev_entry_hash(null if 链头)
+4. `appendFile(logPath, JSON.stringify(entry) + '\n')`
+
+Fence 验证(不变量 9 子项):
+```typescript
+function verifyAckLogChain(entries: EvidenceHelperEntry[]): boolean {
+  let expectedPrev: string | null = null;
+  for (const entry of entries) {
+    if (entry.prev_entry_hash !== expectedPrev) return false;
+    expectedPrev = canonicalHash(entry);
+  }
+  return true;
+}
+```
+
+兼容性:plan-9a 已写入的旧 entries 缺 prev_entry_hash 字段 → fence 视为 `undefined`,与 null 等价(链头);9g 第一条新 entry 的 prev_entry_hash 必须等于 plan-9a 最后一条 entry 的 canonicalHash(向后兼容,不重写历史)。
+
+### 9.12 evidence helper option 完整清单(v6 新增,Codex MAJOR #3 修复)
+
+```
+forge evidence record-tdd <changeId>
+  --task <task-ref>
+  --red-commit <sha>
+  --red-timestamp <iso-8601>       (v6 新增)
+  --red-log <path>                  (v6 新增)
+  --red-log-hash <sha256>           (v6 新增)
+  --red-report <path>               (v6 新增,即 runner_report_path)
+  --red-report-hash <sha256>        (v6 新增)
+  --red-exit <int>                  (v6 新增)
+  --green-commit <sha>
+  --green-timestamp <iso-8601>      (v6 新增)
+  --green-log <path>                (v6 新增)
+  --green-log-hash <sha256>         (v6 新增)
+  --green-report <path>             (v6 新增)
+  --green-report-hash <sha256>      (v6 新增)
+  --green-exit <int>                (v6 新增)
+  --expected-failures <json>        (已有,现 JSON array of ExpectedFailure)
+  --tdd-exemption <json>            (v6 新增,可选;light mode trivial)
+
+forge evidence record-verify <changeId>
+  --task-refs <list>                (已有)
+  --scope <type>                    (已有)
+  --report <path>                   (已有)
+  --report-hash <sha256>            (v6 新增)
+  --log <path>                      (v6 新增)
+  --log-hash <sha256>               (v6 新增)
+  --exit-code <int>                 (v6 新增)
+  --invoked-at <iso-8601>           (v6 新增)
+
+forge evidence record-review <changeId>
+  --task <task-ref>
+  --implementer-commit <sha>
+  --spec-iterations <json>          (v6 新增,ReviewIteration[] JSON array)
+  --quality-iterations <json>       (v6 新增)
+  --main-check-off-at <iso-8601>    (v6 新增)
+
+forge evidence freeze <changeId>     (v6 新增子命令)
+  --marker <path>                   (默认 forge/changes/<id>/.verify-passed)
+  --kind <verify|review>            (默认 verify)
+```
+
+### 9.13 不变量 14 实施细节(v6 新增,Codex BLOCKER #2 修复)
+
+```typescript
+// process-evidence-fence.ts 不变量 14:green_commit ↞ archive HEAD
+function checkInvariant14(ctx: ProcessEvidenceFenceContext): ProcessEvidenceFinding | null {
+  const head = ctx.archiveHead;  // ctx 构建时 git rev-parse HEAD 拿
+  for (const chain of ctx.processEvidence.tdd_event_chain) {
+    const green = chain.green_commit.sha;
+    try {
+      execFileSync('git', ['merge-base', '--is-ancestor', green, head], {
+        cwd: ctx.cwd,
+        stdio: 'ignore',
+      });
+    } catch {
+      return {
+        invariant: 14,
+        severity: 'CRITICAL',
+        message: `green_commit ${green} 不是 archive HEAD ${head} 的祖先;旁支造链 + 主分支换实现攻击`,
+        taskRef: chain.task_ref,
+      };
+    }
+  }
+  return null;
+}
+```
+
+非 git 项目处理:`ctx.archiveHead === null` 时跳过不变量 14(沿现有 archive.ts 非 git 路径 `--force` 模式)。
+
 ---
 
-## 10. 后续依赖与解锁
+## 10. 后续依赖与解锁(v6 修订:工日 + master plan 字面同步)
 
 **plan-9g 完成后解锁**:
-- **plan-9e2**(1d):接 plan-9e1 留的 `process_evidence_summary` placeholder,填真实 13 不变量 pass/fail/legacy 统计
+- **plan-9e2**(1d):接 plan-9e1 留的 `process_evidence_summary` placeholder,填真实 14 不变量 pass/fail/legacy 统计(v6:13 → 14)
 - **plan-9h / 9f**:可并行(独立模块)
 - **plan-9z**(release):最终阶段,需 9a-9j 全部完成
 
-**plan-9 master line 30 工日**:§9.8 锁定 P2 后,P50 7d → **8d**;P90 9d 不变(§0 总计闭合受 P90 范围内吸收 +0.5d skill 文本工日,master plan §0 总和无需更新)。
+**plan-9 master line 30 工日**(v6 修订,Codex MAJOR #5 + MINOR #1 修复):§9.8 锁定 P2 + Codex 一轮修复后,9g P50 7d → **8d**;P90 9d → **11d**(原 9d 不够吸收 v6 新增工作:freeze CLI 子命令 + staging lock + ack-log chain + 不变量 14 + WARNING 转换)。
 
-**注**:P50 +1d 来自 P2 路径新 skill 文本写作 + RED/GREEN delta 校验;若 9z release 前 §9.9 选策略 A(不配 key)则跳过 RED/GREEN 实跑,实际工日回落 P50 7.5d。
+**master plan line 30 必须修订**(9g writing-plans 阶段前):
+- 依赖列表:`9a;9d 验收依赖` → `9a; 9d 验收依赖; **9i**(P2 路径前置)`(Codex MAJOR #5 修复:字面补 9i)
+- P50 工日:`7` → `8`
+- P90 工日:`9` → `11`
+- §0 总计:**P50 39.5 → 40.5;P90 52.5 → 54.5**(总和重算)
 
 ---
 
-## 11. 引用与版本对齐
+## 11. 引用与版本对齐(v6 修订)
 
-- master spec §2.7 全节(行 1076-1342)
+- master spec §2.7 全节(行 1076-1342)— 13 不变量字面 + 三 helper 接口签名 + 三档 mode + worktree 重跑
 - master spec §2.9 全节(writing-skills 协议 — §9.8 P2 路径 process-evidence skill 创建依此协议)
-- master plan §0 总览表 line 30
-- plan-9a Task 5(evidence CLI 骨架 + ack-log + canonical hash)
-- plan-9d Task 6(verify_findings fence + finding_hash + ack-log consistency)
-- plan-9e1 Task 4(三级业务行为 fence + archive_summary.ProcessEvidenceSummary placeholder)
-- plan-9i(writing-skills 协议落地,9g P2 路径前置依赖)
+- master plan §0 总览表 line 30(v6 待 9g writing-plans 前修订)
+- **plan-9a Task 5**(evidence CLI 骨架 + ack-log + canonical hash)— 9g 扩三 helper options + 加 freeze 子命令 + ack-log prev_entry_hash chain
+- **plan-9a Task 8**(`src/core/archive/fence.ts` 13 stub framework + `crossCuttingFenceCheck()` API + archive.ts:240 wire)— 9g 填实 stub + 移除 opt-in flag(Codex MAJOR #4)
+- plan-9d Task 3(VerifyFinding schema)— 9g WARNING 转换目标 schema
+- plan-9d Task 6(verify_findings fence + finding_hash + ack-log consistency)— 9g WARNING 自动接 + ack-log chain 扩
+- plan-9e1 Task 4(三级业务行为 fence + archive_summary.ProcessEvidenceSummary placeholder)— 9g WARNING acked 矩阵自动接
+- **plan-9i**(writing-skills 协议落地,commit 7862862 v7 已完成)— 9g P2 路径前置依赖
 - plan-9j Task 5 + Task 6.2(legacy/retrograde fence + Pattern A 教训 + slash 模板双同步模式)
 
 ---
 
-**Status: ready for writing-plans skill 实施**
+## 12. Codex 一轮审查修复摘要(v6 修订,本节供二轮审查 cross-check 用)
+
+**BLOCKER 修复(3 项)**:
+- **B1**(verify.ts/review.ts 不存在):freeze 落点重设为新 CLI 子命令 `forge evidence freeze <changeId>`,挂 evidence Command 下;主代理在 commands/verify.md 步骤 4.3 写完 marker YAML 后调
+- **B2**(green↞HEAD 未绑定):加不变量 14 `git merge-base --is-ancestor green_commit.sha HEAD`,放 fence.ts,CRITICAL;FENCE_INVARIANT_NAMES 13 → 14;§5.1 四源 cross-check 矩阵加新攻击行
+- **B3**(WARNING 丢弃):不变量 7/10/13 产 WARNING 时转 VerifyFinding(沿 plan-9d schema)+ freeze 时写入 marker.verify_findings;archive 步骤 3.6 + 3.9 自动接 ack 流程
+
+**MAJOR 修复(5 项)**:
+- **M1**(字段名偏离):TddCommitRecord 拆为 RedCommitRecord + GreenCommitRecord;字段 `log_path/log_hash` → `red_log_path/red_log_hash` + `green_log_path/green_log_hash`,严格沿 master spec §2.7.2 行 1115/1116/1127/1128
+- **M2**(staging race):staging 写入用文件锁 `.evidence/.staging.lock`(仿 archive lock.ts),helper / freeze 都需 acquire;加 staging 并发测试
+- **M3**(evidence options 不足):record-tdd 加 11 个新 option(red/green × log/log-hash/report-hash/exit/timestamp);record-verify 加 5 个;record-review 加 3 个 — helper 接收完整字段不自跑 worktree(worktree 留 archive 阶段)
+- **M4**(crossCuttingFenceCheck stub):9g 填实 fence.ts 现有 stub framework 而非加 3.5a/3.5b 平行;移除 `--enable-cross-cutting-fence` + `--allow-stub-fence` 两 opt-in flag(默认开启)
+- **M5**(P2 scope creep + 9i 依赖):master plan line 30 依赖列表必须显式加 `9i`;工日同步;§11 引用 + §10 写明 master plan 待修订
+
+**MINOR / SUGGESTION 修复(2 项)**:
+- **MIN1**(工日不一致):同 M5,master plan §0 总计 39.5 → 40.5
+- **SUG1**(ack-log hash chain):EvidenceHelperEntry 加 `prev_entry_hash` 字段;appendAckLog 算链 + fence 重算验证链不断裂(反伪造关键加固);四源 cross-check 矩阵加 ack-log chain 完整性
+
+**未修(brainstorm 阶段不动)**:
+- **MIN2**(Pattern A inline 部分落实):writing-plans 阶段补 runFieldFence / runRerunFence / buildProcessEvidenceFenceContext / staging writer 完整 inline 代码
+
+---
+
+**Status: ready for second-round Codex review**

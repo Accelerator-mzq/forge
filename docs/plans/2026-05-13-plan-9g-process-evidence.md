@@ -4152,7 +4152,7 @@ type SubagentReviewProjection = {
 };
 ```
 
-(注:`reconstructProjectionFromAckLog` 是 STUB,真实重建逻辑在 Task 3.3 evidence.ts helper payload schema 落地后,实施者按 payload 字段重建;9g writing-plans 阶段 review 时统一对齐)
+(注:`reconstructProjectionFromAckLog` v2 修订 Codex 二轮 M-3 后已完整 inline 伪代码 + 3 projection type alias 显式声明;反伪造五源 cross-check 不变量 9 可按 inline 落地。Task 3.3 evidence.ts helper payload schema 落地后,实施者按 payload 字段对齐重建逻辑细节。)
 
 - [ ] **Step 5.1.2:跑 typecheck**
 
@@ -5414,7 +5414,6 @@ Expected: process-evidence + 4 双同步 skill 通过 forge-eval RED/GREEN delta
   - `tests/cli/ack-cli-mode.test.ts`:6 个 it.todo(CI × mode × ack 矩阵)
   - `tests/integration/process-evidence-end-to-end.test.ts`:11 个 it.todo(A1-A8 attack + 3 GREEN mode sub-fixture)
   - 总 29 个 it.todo 完整 fixture 留 writing-plans 阶段 codex review 收敛后 inline(每 fixture ~200-400 行 YAML + git 构造)
-~~- reconstructProjectionFromAckLog STUB~~ — **v2 修**(Codex 二轮 M-3):函数体已给完整伪代码 + 3 projection type alias 显式声明,反伪造五源 cross-check 不变量 9 可按 inline 落地
 - **WARNING dedup 实测**:freeze-time WARNING 与 archive-time rerun WARNING 同 finding_hash dedup(brainstorm spec §9.12 M-2)— v0 plan 写算法,实测在 e2e fixture 阶段验证
 - **rerun-time WARNING 13 stderr 输出格式**:brainstorm v9 简化为 stderr 不阻断,但 archive.ts 实际输出格式留实施者按 plan-9d 现有 stderr 模式(`⚠ ...`)统一
 

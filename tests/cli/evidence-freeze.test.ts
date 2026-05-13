@@ -298,6 +298,69 @@ describe('forge evidence freeze (plan-9g Task 4)', () => {
         (f) => f.dimension === 'process_evidence' && f.check_type === 'invariant-7-verify-count',
       ),
     ).toBe(true);
+    // M-2 fix:断言 severity='WARNING'(非 CRITICAL)
+    const inv7 = findings.find((f) => f.check_type === 'invariant-7-verify-count');
+    expect(inv7?.severity).toBe('WARNING');
+  });
+
+  it('Case 9 (I-1 regression): re-freeze idempotency — ack-log 不长第二条 freeze entry', async () => {
+    // I-1 fix regression:模拟 freeze 成功后再 freeze 一次,
+    //   guard 应识别 last entry 已是相同 payload_hash 的 freeze → 不再 append。
+    //   ack-log entry_count 应保持不变(仍为 1 条 freeze entry)。
+    await writeStaging(changeRoot, {
+      tdd_event_chain: [],
+      verify_invocations: [
+        {
+          invoked_at: '2026-05-13T00:00:00Z',
+          task_refs: ['tasks.md#task-1', 'tasks.md#task-2'],
+          verify_scope: 'change-level',
+          result: 'pass',
+          exit_code: 0,
+          log_path: '.evidence/v.log',
+          log_hash: 'sha256:v',
+          runner_report_path: '.evidence/v.xml',
+          runner_report_hash: 'sha256:vr',
+        },
+        {
+          invoked_at: '2026-05-13T00:01:00Z',
+          task_refs: ['tasks.md#task-2'],
+          verify_scope: 'per-task',
+          result: 'pass',
+          exit_code: 0,
+          log_path: '.evidence/v2.log',
+          log_hash: 'sha256:v2',
+          runner_report_path: '.evidence/v2.xml',
+          runner_report_hash: 'sha256:vr2',
+        },
+      ],
+      subagent_review_chain: [],
+    });
+    await writeMinimalVerifyMarker(changeRoot);
+
+    // 第一次 freeze
+    execFileSync('node', [CLI, 'evidence', 'freeze', changeId, '--kind', 'verify'], {
+      cwd: projectRoot,
+      encoding: 'utf8',
+      stdio: 'pipe',
+    });
+
+    // 读 ack-log 第一次 freeze 后行数
+    const ackLogPath = join(changeRoot, '.evidence', 'ack-log.jsonl');
+    const ackLog1 = await readFile(ackLogPath, 'utf8');
+    const lines1 = ackLog1.split('\n').filter((l) => l.trim().length > 0);
+    expect(lines1.length).toBe(1); // 仅 1 条 freeze entry
+
+    // 第二次 freeze(retry,模拟 transaction 失败后重试)
+    execFileSync('node', [CLI, 'evidence', 'freeze', changeId, '--kind', 'verify'], {
+      cwd: projectRoot,
+      encoding: 'utf8',
+      stdio: 'pipe',
+    });
+
+    // I-1 guard 应识别 replay → ack-log 仍 1 条
+    const ackLog2 = await readFile(ackLogPath, 'utf8');
+    const lines2 = ackLog2.split('\n').filter((l) => l.trim().length > 0);
+    expect(lines2.length).toBe(1); // 仍 1 条(idempotency guard 拦截重复 append)
   });
 
   it('Case 8: CRITICAL 12 mode != full + acked_by 缺 → exit 1 拒绝写 marker', async () => {

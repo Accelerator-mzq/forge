@@ -771,35 +771,56 @@ export function buildEvidenceCommand(): Command {
           process.exit(1);
         }
         // WARNING 7/10 转 VerifyFinding 追加 marker.verify_findings
+        // v8.1 round 2 (I-2 fix):re-freeze 时 dedup by finding_hash,
+        //   防 marker.verify_findings 重复 id(checkVerifyFindingsArray seenIds detection 拒签)
         if (warningFindings.warnings.length > 0) {
           const existingFindings = (marker.verify_findings as VerifyFinding[] | undefined) ?? [];
-          marker.verify_findings = [...existingFindings, ...warningFindings.warnings];
+          const existingHashes = new Set(existingFindings.map((f) => f.finding_hash));
+          const newFindings = warningFindings.warnings.filter(
+            (f) => !existingHashes.has(f.finding_hash),
+          );
+          marker.verify_findings = [...existingFindings, ...newFindings];
         }
 
         // 9. 先 append freeze entry 到 ack-log,再读全文件算 tail/count 固化
         //    freeze entry payload_hash 不含 ack_log_tail_hash(循环依赖避免)
         //    markerPath 跨平台归一化正斜杠(plan-9g 注:Windows 反斜杠路径 hash 不一致)
         const normalizedMarkerPath = markerPath.replace(/\\/g, '/');
-        const freezeEntry: EvidenceHelperEntry = {
-          schema: 'forge-ack-log/v1',
-          kind: 'evidence-helper',
-          timestamp: new Date().toISOString(),
-          helper_name: 'freeze',
+        const freezePayloadHash = canonicalHash({
+          helper: 'freeze',
           change_id: changeId,
-          task_ref: `freeze-${kind}`, // 标志 freeze 而非 record-*
-          payload_hash: canonicalHash({
-            helper: 'freeze',
+          kind,
+          marker_path: normalizedMarkerPath,
+          staging_hash: storedHash,
+          warning_count: warningFindings.warnings.length,
+        });
+
+        // v8.1 round 2 (I-1 fix):idempotency guard 防 retry 时多余 freeze entry
+        // 场景:appendAckLog 成功 → writeFile/rename 失败 → ack-log 已含 freeze entry,marker 未更新。
+        //   Retry freeze 不加 guard 会再 appendAckLog → entry_count mismatch + 链不可信。
+        // 判定:last entry kind=evidence-helper + helper_name=freeze + payload_hash 完全相同 → replay
+        const lastEntry = entriesBeforeFreeze[entriesBeforeFreeze.length - 1];
+        const isReplay =
+          lastEntry?.kind === 'evidence-helper' &&
+          (lastEntry as EvidenceHelperEntry).helper_name === 'freeze' &&
+          (lastEntry as EvidenceHelperEntry).payload_hash === freezePayloadHash;
+
+        if (!isReplay) {
+          const freezeEntry: EvidenceHelperEntry = {
+            schema: 'forge-ack-log/v1',
+            kind: 'evidence-helper',
+            timestamp: new Date().toISOString(),
+            helper_name: 'freeze',
             change_id: changeId,
-            kind,
-            marker_path: normalizedMarkerPath,
-            staging_hash: storedHash,
-            warning_count: warningFindings.warnings.length,
-          }),
-          status: 'success',
-          git_head: getGitHead(changeRoot),
-          extra: { kind, warning_count: warningFindings.warnings.length },
-        };
-        await appendAckLog(changeRoot, freezeEntry);
+            task_ref: `freeze-${kind}`, // 标志 freeze 而非 record-*
+            payload_hash: freezePayloadHash,
+            status: 'success',
+            git_head: getGitHead(changeRoot),
+            extra: { kind, warning_count: warningFindings.warnings.length },
+          };
+          await appendAckLog(changeRoot, freezeEntry);
+        }
+        // 否则:retry 复用已有 freeze entry,不再 append(ack-log 不长第二条)
 
         // 10. 读 entriesAfterFreeze(此时已含 freeze entry)→ 算 tail/count 固化到 marker
         const entriesAfterFreeze = await readAllAckLogEntries(changeRoot);

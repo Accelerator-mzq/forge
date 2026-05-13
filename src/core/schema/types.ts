@@ -55,6 +55,42 @@ export interface ForgeConfig {
      */
     light_threshold?: number;
   };
+
+  /**
+   * v1.0 process_verification(plan-9g §2.7 — 14 不变量 + worktree 重跑配置)
+   * 缺失时调用方应以 `??` fallback 取 DEFAULT_PROCESS_VERIFICATION 值
+   * 或调 validateProcessVerificationConfig 拿 sanitized 完整值
+   */
+  process_verification?: {
+    /** 默认 'full'(沿 §2.7.4 B);mode != full 必须 CLI ack 写 marker */
+    mode?: 'full' | 'sample' | 'hash-only';
+    /** sample 模式抽样比例 [0..1],默认 0.3 */
+    sample_ratio?: number;
+    /** 单 task 重跑 timeout 秒(默认 300;full 模式触发 → CRITICAL,沿 §2.7.4 D) */
+    test_timeout_per_task?: number;
+    /** 并发 worktree 上限(默认 2;Windows 磁盘空间约束更紧) */
+    max_parallel_reruns?: number;
+  };
+
+  /**
+   * v1.0 test reporter(plan-9g §2.7.4 C — 解析结构化测试报告)
+   * 缺失时调用方应以 `??` fallback 'junit'
+   */
+  test?: {
+    /** 默认 'junit';reporter 类型决定 parseReporter 走哪个分支 */
+    reporter?: 'junit' | 'tap' | 'vitest-json';
+    /** 单 task 测试命令(用于 worktree 重跑;沿 commands/verify.md:29) */
+    test_command?: string;
+  };
+
+  /**
+   * v1.0 ack CLI 安全开关(plan-9g §2.7.4 B — CI 模式拒绝 ack 防静默降级)
+   * 缺失时调用方应以 `??` fallback false(更安全)
+   */
+  ack?: {
+    /** false(默认):检测 CI=true 时 `forge ack propose` 拒绝触发 */
+    allow_ci_mode?: boolean;
+  };
 }
 
 /**
@@ -62,6 +98,23 @@ export interface ForgeConfig {
  * 详见 spec §2.3 + Plan 2 Task 2.2。
  */
 export const DEFAULT_LIGHT_THRESHOLD = 200;
+
+/**
+ * 默认 process_verification 配置(plan-9g §6;调用方 fallback 用)
+ * brainstorm spec §6 锁定四档默认值
+ */
+export const DEFAULT_PROCESS_VERIFICATION = {
+  mode: 'full' as const,
+  sample_ratio: 0.3,
+  test_timeout_per_task: 300, // 秒
+  max_parallel_reruns: 2,
+};
+
+/** 默认 test.reporter(plan-9g §6) */
+export const DEFAULT_TEST_REPORTER = 'junit' as const;
+
+/** 默认 ack.allow_ci_mode(plan-9g §6;false 防 CI 静默降级) */
+export const DEFAULT_ACK_ALLOW_CI_MODE = false;
 
 /**
  * 默认 spec-driven schema 的 artifact 列表(决定哪些文件构成一个 change)。

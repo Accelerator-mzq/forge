@@ -67,7 +67,8 @@ function validateFindingHashPayload(p: unknown): FindingHashPayload | null {
   if (
     o.dimension !== 'completeness' &&
     o.dimension !== 'correctness' &&
-    o.dimension !== 'coherence'
+    o.dimension !== 'coherence' &&
+    o.dimension !== 'process_evidence' // plan-9g brainstorm v10 加(freeze-time WARNING 7/10 用)
   )
     return null;
   if (typeof o.check_type !== 'string') return null;

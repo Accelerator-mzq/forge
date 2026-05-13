@@ -53,7 +53,12 @@ export type EvidenceFormat = (typeof EVIDENCE_FORMATS)[number];
 export interface FindingHashPayload {
   content_hash: string;
   git_head: string;
-  dimension: 'completeness' | 'correctness' | 'coherence';
+  /**
+   * dimension enum:plan-9d 三维度 + plan-9g 新增 process_evidence(brainstorm v10 Codex 六轮 M-1)
+   * 'process_evidence' 用于 plan-9g freeze-time WARNING(不变量 7/10)写入 marker.verify_findings;
+   * sub-enum 'invariant-7-verify-count' | 'invariant-10-env-drift' 用 check_type 字段
+   */
+  dimension: 'completeness' | 'correctness' | 'coherence' | 'process_evidence';
   check_type: string;
   severity: Severity;
   automated: boolean;

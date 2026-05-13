@@ -40,8 +40,13 @@ const REVIEW_OUTCOME_SEVERITY_CODES = new Set([
   'WARNING',
   'SUGGESTION', // v1.0 全名(resign 后或 v1.0 native 写入)
 ]);
-// verify_findings.dimension 合法值(沿 design §2.2.2 三维度)
-const DIMENSION_VALUES = new Set(['completeness', 'correctness', 'coherence']);
+// verify_findings.dimension 合法值(沿 design §2.2.2 三维度 + plan-9g brainstorm v10 加 process_evidence)
+const DIMENSION_VALUES = new Set([
+  'completeness',
+  'correctness',
+  'coherence',
+  'process_evidence', // plan-9g freeze-time WARNING 7/10(brainstorm spec §3 修订)
+]);
 // plan-9c Task 1 新增:pause_decisions.chosen_option 合法值(1 | 2 | 3 | 4)
 const CHOSEN_OPTION_VALUES = new Set([1, 2, 3, 4]);
 
@@ -500,7 +505,7 @@ function checkVerifyFindingsArray(v: unknown, file?: string): ValidationResult {
         failed({
           artifact: 'marker',
           field: `verify_findings[${i}].dimension`,
-          message: 'must be completeness|correctness|coherence',
+          message: 'must be completeness|correctness|coherence|process_evidence',
           file,
         }),
       );

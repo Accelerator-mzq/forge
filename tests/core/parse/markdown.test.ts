@@ -46,3 +46,38 @@ describe('parseMarkdown', () => {
     expect(result.sections[1]?.body.trim()).toBe('Body of heading 2.');
   });
 });
+
+// plan-9b Task 2 — anchor ID 识别
+describe('parseMarkdown — anchor ID 识别(plan-9b Task 2)', () => {
+  it('H2 + anchor → Section.anchor = "forge-oos",heading 去掉 anchor 后缀', () => {
+    const text = '## Out of Scope {#forge-oos}\n\n内容\n';
+    const md = parseMarkdown(text);
+    const sec = md.sections[0];
+    expect(sec?.heading).toBe('Out of Scope');
+    expect(sec?.anchor).toBe('forge-oos');
+  });
+
+  it('本地化标题 + anchor → 仍按 anchor 识别', () => {
+    const text = '## 不做项 {#forge-oos}\n\n内容\n';
+    const md = parseMarkdown(text);
+    expect(md.sections[0]?.anchor).toBe('forge-oos');
+    expect(md.sections[0]?.heading).toBe('不做项');
+  });
+
+  it('无 anchor → Section.anchor 为 undefined', () => {
+    const text = '## Future Work\n\n内容\n';
+    const md = parseMarkdown(text);
+    expect(md.sections[0]?.anchor).toBeUndefined();
+  });
+
+  it('多段不同 anchor', () => {
+    const text =
+      '## Out of Scope {#forge-oos}\n\nA\n\n## Non-Goals {#forge-non-goals}\n\nB\n\n## Future Work {#forge-future-work}\n\nC\n';
+    const md = parseMarkdown(text);
+    expect(md.sections.map((s) => s.anchor)).toEqual([
+      'forge-oos',
+      'forge-non-goals',
+      'forge-future-work',
+    ]);
+  });
+});

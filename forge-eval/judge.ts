@@ -39,8 +39,14 @@ export function checkPatterns(response: string, assertions?: Assertions): Patter
 
 // ─── LLM-as-judge 段(Task B2) ────────────────────────────────────────────────
 
-/** judge 调用使用的模型 */
-const JUDGE_MODEL = 'claude-sonnet-4-6';
+/**
+ * judge 调用使用的模型;v1.0(9i):允许 env override 以支持第三方 endpoint 未上线最新 model 的情况
+ * 注:lazy getter — 必须在 loadEnv() 调用后才读 process.env,
+ * 否则 .env 还没加载,env 永远是 undefined → fallback 默认 model
+ */
+function getJudgeModel(): string {
+  return process.env['FORGE_EVAL_JUDGE_MODEL'] ?? 'claude-sonnet-4-6';
+}
 
 /**
  * 用 LLM-as-judge 给 response 打分(0-10)。spec §5.5.3 合约:rubric 必需。
@@ -73,7 +79,7 @@ ${response}
 第二行起:简短理由(1-3 句)`;
 
   const result = await client.messages.create({
-    model: JUDGE_MODEL,
+    model: getJudgeModel(),
     max_tokens: 512,
     messages: [{ role: 'user', content: judgePrompt }],
   });

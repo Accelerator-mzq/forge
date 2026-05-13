@@ -11,6 +11,10 @@ import { buildArchiveCommand } from './commands/archive.js';
 import { buildLegacyBridgeCommand } from './commands/legacy-bridge.js';
 import { buildUpgradeCommand } from './commands/upgrade.js';
 import { buildMigrateCommand } from './commands/migrate.js';
+import { buildAckCommand } from './commands/ack.js';
+import { buildEvidenceCommand } from './commands/evidence.js';
+import { buildScopeCommand } from './commands/scope.js';
+import { buildFindingCommand } from './commands/finding.js';
 
 // 创建主命令
 const program = new Command();
@@ -43,6 +47,18 @@ program.addCommand(buildUpgradeCommand());
 
 // 注册 migrate 子命令(v0.4 — 搬运 OpenSpec / superpowers 项目仓库)
 program.addCommand(buildMigrateCommand());
+
+// 注册 ack 子命令(plan-9a Task 3 — 两步 user 确认协议)
+program.addCommand(buildAckCommand());
+
+// 注册 evidence 子命令(plan-9a Task 5 — evidence helper 记录框架)
+program.addCommand(buildEvidenceCommand());
+
+// 注册 scope 子命令(plan-9b Task 5 — scope aggregator)
+program.addCommand(buildScopeCommand());
+
+// 注册 finding 子命令(plan-9d Task 4 — finding hash helper)
+program.addCommand(buildFindingCommand());
 
 // 解析命令行参数,遇到错误时打印并退出
 program.parseAsync(process.argv).catch((err: unknown) => {

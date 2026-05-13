@@ -1,0 +1,12 @@
+schema: forge-review/v1
+reviewed_at: 2026-05-12T15:00:00Z
+reviewed_by: ai-agent
+tasks_hash: sha256:placeholder
+content_hash: sha256:placeholder
+git:
+  is_git_repo: false
+review_outcomes:
+  - severity: L
+    accepted: false
+    resolved: true
+    rationale: "no issues"

@@ -41,6 +41,14 @@ export class ClaudeAdapter implements HarnessAdapter, LegacyDetector {
         content: cmd.content,
       });
     }
+    // v2 plan-9b Task 7b:共用 reference docs 铺到 forge-_shared/ "skill-like" 容器
+    // 命名约定:.claude/skills/forge-_shared/<name>.md(沿 forge-<name> 风格;_shared 是合法 skill name 字面)
+    for (const doc of input.sharedDocs ?? []) {
+      files.push({
+        relPath: `.claude/skills/forge-_shared/${doc.name}.md`,
+        content: doc.content,
+      });
+    }
     return { files };
   }
 

@@ -1,0 +1,1 @@
+{"schema":"forge-ack-log/v1","kind":"ack","timestamp":"2026-05-12T16:30:00Z","action":"ack-warning","change_id":"<fixture-name>","finding_id":"1","user":"msc","rationale":"spec 描述模糊","git_head":null,"finding_hash":"placeholder-hash-recompute-needed","extra":{}}

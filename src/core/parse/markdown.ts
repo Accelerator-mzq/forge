@@ -18,6 +18,8 @@ export interface Section {
   level: number;
   /** 标题文本(不含 `#` 和空格) */
   heading: string;
+  /** 标题后缀 anchor ID(可选,形如 `{#forge-oos}`) — 被 Task 3/4/5 复用用于剔除/校验/聚合 */
+  anchor?: string;
   /** 该章节正文(到下一个同级或更高级 heading 之前) */
   body: string;
   /** 起始行号(1-indexed,heading 行) */
@@ -45,6 +47,7 @@ export function parseMarkdown(text: string): ParsedMarkdown {
 /**
  * 把 markdown 正文按 ATX heading 切成章节。
  * 每遇到新 heading 就关闭当前 section，开启新 section。
+ * 自动识别 heading 后缀 `{#xxx}` 作为 anchor ID。
  */
 function extractSections(body: string): Section[] {
   const lines = body.split('\n');
@@ -55,7 +58,7 @@ function extractSections(body: string): Section[] {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? '';
     // 匹配 ATX heading：1-6 个 # 后接空格和标题文本
-    const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
+    const headingMatch = line.match(/^(#{1,6})\s+(.+?)(?:\s*)$/);
 
     if (headingMatch) {
       // 关闭当前 section，把缓冲区内容写入 body
@@ -65,10 +68,17 @@ function extractSections(body: string): Section[] {
         sections.push(current);
         buffer.length = 0;
       }
+      // 提取原始 heading 文本
+      const rawHeading = headingMatch[2] ?? '';
+      // 匹配 anchor `{#xxx}` 后缀(charset 仅 ASCII alphanum + `_` + `-`;
+      // v2 codex MINOR 修订:不是 CommonMark heading-id 兼容;forge 只用三个固定 ASCII anchor
+      // (forge-oos / forge-non-goals / forge-future-work),严格 charset 是有意为之 — 阻止"用 unicode 绕过 fence"攻击)
+      const anchorMatch = rawHeading.match(/^(.*?)\s*\{#([A-Za-z0-9_-]+)\}\s*$/);
       // 开始新 section
       current = {
         level: headingMatch[1]?.length ?? 1,
-        heading: headingMatch[2]?.trim() ?? '',
+        heading: anchorMatch ? (anchorMatch[1]?.trim() ?? '') : rawHeading.trim(),
+        anchor: anchorMatch ? anchorMatch[2] : undefined,
         body: '',
         startLine: i + 1, // 1-indexed
         endLine: lines.length, // 默认到文件末尾

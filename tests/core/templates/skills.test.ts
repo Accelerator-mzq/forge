@@ -41,3 +41,21 @@ describe('templates/skills', () => {
     expect(content).toContain('/forge:archive');
   });
 });
+
+// plan-9i Task 0 + plan-9d Task 0 — 验证 SKILL_NAMES registry 扩展(9i:writing-skills 第 13 项 + 9d:verifying-three-dimensions 第 14 项)
+// 注:SKILL_NAMES 已由上方 import 引入,无需重复 import
+describe('SKILL_NAMES registry (9i + 9d)', () => {
+  it('writing-skills 是 SKILL_NAMES 第 13 项', () => {
+    expect(SKILL_NAMES).toContain('writing-skills');
+    expect(SKILL_NAMES.indexOf('writing-skills')).toBe(12); // 0-indexed
+  });
+
+  it('verifying-three-dimensions 是 SKILL_NAMES 第 14 项', () => {
+    expect(SKILL_NAMES).toContain('verifying-three-dimensions');
+    expect(SKILL_NAMES.indexOf('verifying-three-dimensions')).toBe(13); // 0-indexed
+  });
+
+  it('SKILL_NAMES 总数 14', () => {
+    expect(SKILL_NAMES.length).toBe(14);
+  });
+});

@@ -1,0 +1,18 @@
+schema: forge-verify/v1
+verified_at: 2026-05-12T16:30:00Z
+verified_by: ai-agent
+tasks_hash: sha256:placeholder
+content_hash: sha256:placeholder
+evidence: []
+verify_findings:
+  - id: 3
+    dimension: coherence
+    check_type: pattern-consistency
+    severity: SUGGESTION
+    automated: false
+    evidence: "src/x.ts:23"
+    recommendation: "consider rename handleX"
+    resolved: false
+    finding_hash: placeholder-hash-recompute-needed
+    content_hash: sha256:placeholder
+    git_head: "0000000000000000000000000000000000000000"

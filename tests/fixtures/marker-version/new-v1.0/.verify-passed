@@ -1,0 +1,7 @@
+schema: forge-verify/v1
+verified_at: 2025-08-01T10:00:00Z
+verified_by: ai-agent
+tasks_hash: sha256:placeholder
+content_hash: sha256:placeholder
+created_by_tool_version: 1.0.0
+evidence: []

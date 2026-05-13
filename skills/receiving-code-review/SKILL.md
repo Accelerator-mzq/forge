@@ -219,6 +219,66 @@ You understand 1,2,3,6. Unclear on 4,5.
 
 When replying to inline review comments on GitHub, reply in the comment thread (`gh api repos/{owner}/{repo}/pulls/{pr}/comments/{id}/replies`), not as a top-level PR comment.
 
+## Severity 判定指引(forge v1.0 横切层)
+
+review feedback 中的 `severity` 字段不再是装饰,**参与 fence 门禁**(沿 design §2.3.4 review_outcomes 行 + §2.3.2 三级语义)。每条 finding 都属于以下三级之一:
+
+### 三级语义
+
+| 级别           | 语义                                                                                                      | 判定来源                              | 阻塞行为                                                                                 |
+| -------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------- | ---------------------------------------------------------------------------------------- |
+| **CRITICAL**   | 工具拒签级别 — **事实层面客观可验证的不一致**(测试 fail / hash mismatch / evidence 缺失 / API 签名不匹配) | **仅工具自动产生**(`automated: true`) | archive fence 拒签,**不能 ack 通过**                                                     |
+| **WARNING**    | 要做但需决策 — 事实层面可能有问题但需人类判断,或 scope/优先级需确认                                       | **AI 主判**(`automated: false`)       | archive fence 默认拒签,**用户 CLI ack 可放行**(`forge ack propose --action ack-warning`) |
+| **SUGGESTION** | 可改进但不阻塞 — 风格 / 命名 / 微优化 / 未来扩展点                                                        | **AI 主判**,无需 ack                  | archive 直接放行,进 archive_summary `handoff_to_backlog` 累积可见                        |
+
+### AI 反向加固(critical_candidate 协议)
+
+**CRITICAL 永远不能由 AI 直接产生**。AI 在 finding 中**不能写 `severity: CRITICAL`**,只能写:
+
+```yaml
+severity_candidate: CRITICAL
+candidate_type: <test_failure | hash_mismatch | evidence_missing | coverage_gap | api_contract | manual_claim>
+evidence: <定位证据,5 类格式之一>
+```
+
+工具 fence(`forge validate` / `forge archive`)按 `candidate_type` 独立验证:
+
+- 验证通过 → 升级为 `severity: CRITICAL` + `automated: true` + `finding_hash` 锁死
+- 验证失败 → fallback 为 `severity: WARNING` + `automated: false` + `severity_candidate_rejected: true`(给用户提示)
+- AI 跨过 candidate 直接写 `severity: CRITICAL` + `automated: false` → **fence 拒签**
+
+**WARNING / SUGGESTION** 由 AI 直接判定,但 evidence 必须可定位(沿 §2.3.3 D 五类:`file:line` / `artifact:section` / `change-level` / `command-output` / `tests:scenario:<name>`)。无定位的 finding fence 拒签。
+
+### 判定决策树(给 reviewer-receiver)
+
+```
+收到 review finding 后,先看 severity:
+
+IF severity == CRITICAL && automated: true
+  必修。fix → 写 resolution_commit。不能讨价还价(工具客观事实)
+
+IF severity == CRITICAL && automated: false
+  → 这条 finding 不合规(AI 跨过 candidate 直接写)— 报错给 reviewer 重写为 candidate
+
+IF severity == WARNING
+  优先 fix;若有合理理由不 fix(scope 太大 / 实施代价过高 / 决策已被推翻),走 forge ack propose --action ack-warning,user 在 /forge:ack-confirm 中 ack
+
+IF severity == SUGGESTION
+  能 fix 顺手 fix;不 fix 进 backlog,archive 不阻塞
+```
+
+**不要把 CRITICAL 当 WARNING 处理**(走 ack 跳过):CRITICAL 是工具客观事实,无降级语义。若 AI 觉得不应该是 CRITICAL,只能在写入时用 candidate 路径让工具自己验证(沿 §2.3.3 A 不存在 CRITICAL→WARNING 降级路径)。
+
+## v0.4 兼容(severity 简码迁移)
+
+v0.4 的 review_outcomes 用单字母简码:
+
+- `S` = blocking severity(对应 v1.0 `CRITICAL` candidate 路径)
+- `C` = critical accepted(对应 v1.0 已 ack `WARNING`)
+- `L` = low severity(对应 v1.0 `SUGGESTION`)
+
+v1.0 fence 不接受 `S/C/L`,只接受 `CRITICAL/WARNING/SUGGESTION` 完整字符串。**简码 → 完整词的迁移由 9j sub-plan 实施**(`forge upgrade --resign-markers` 路径)。本 skill 在过渡期只接受完整词,遇到简码报错并提示运行 upgrade。
+
 ## The Bottom Line
 
 **External feedback = suggestions to evaluate, not orders to follow.**
@@ -226,3 +286,9 @@ When replying to inline review comments on GitHub, reply in the comment thread (
 Verify. Question. Then implement.
 
 No performative agreement. Technical rigor always.
+
+## Scope Category Guidance(plan-9b 共用 reference)
+
+判定一个 review 意见应走 SUGGESTION 还是 `## Out of Scope` / `## Future Work` / `## Non-Goals` 时,**先参考共用决策表**:`skills/_shared/scope-category-guidance.md`(plugin runtime 下:`_shared/scope-category-guidance.md`)。
+
+特别注意 §"常见误判 → 修正"段 — 不要默认把所有"不做"塞 SUGGESTION;跨 change 项应走 out-of-scope / future-work / non-goal,沿 `forge-scope-entries/v1` YAML 块。

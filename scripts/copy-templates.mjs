@@ -63,6 +63,45 @@ async function syncSkills() {
   return validSkills;
 }
 
+// 同步 skills/_shared/*.md → src/core/templates/skills/_shared/ → dist/core/templates/skills/_shared/
+// plan-9b §2.6.8:跨 skill 共用 reference(被 receiving-code-review / verifying-three-dimensions / exploring 引用)
+// v2 codex MAJOR 4 修订:_shared 缺失 fail-fast — 防止 release CI 静默缺漏 runtime 404
+async function syncSharedSkillDocs() {
+  const srcDir = join(REPO_ROOT, 'skills', '_shared');
+  if (!existsSync(srcDir)) {
+    console.error(`✗ skills/_shared/ 缺失:${srcDir}`);
+    console.error('  plan-9b §2.6.8 要求 _shared 目录在部署清单中存在;请检查是否被误删');
+    process.exit(1);
+  }
+  const mdFiles = (await readdir(srcDir)).filter((n) => n.endsWith('.md'));
+  if (mdFiles.length === 0) {
+    console.error(`✗ skills/_shared/ 为空:期望至少含 scope-category-guidance.md(plan-9b 交付)`);
+    process.exit(1);
+  }
+
+  // 写入 src/core/templates/skills/_shared/
+  const srcTemplatesDir = join(REPO_ROOT, 'src', 'core', 'templates', 'skills', '_shared');
+  await mkdir(srcTemplatesDir, { recursive: true });
+  await clearMarkdownFiles(srcTemplatesDir);
+  for (const name of mdFiles) {
+    const content = await readFile(join(srcDir, name), 'utf8');
+    await writeFile(join(srcTemplatesDir, name), content, 'utf8');
+  }
+
+  // 写入 dist/core/templates/skills/_shared/(npm package 运行时)
+  const distDir = join(REPO_ROOT, 'dist', 'core', 'templates', 'skills', '_shared');
+  await mkdir(distDir, { recursive: true });
+  for (const name of mdFiles) {
+    const content = await readFile(join(srcDir, name), 'utf8');
+    await writeFile(join(distDir, name), content, 'utf8');
+  }
+
+  console.log(
+    `✓ synced ${mdFiles.length} shared skill docs (skills/_shared/ → src/core/templates/skills/_shared/ + dist/)`,
+  );
+  return mdFiles;
+}
+
 // 同步 commands:仓库根 commands/<name>.md → src/core/templates/commands/ → dist/core/templates/commands/
 async function syncCommands() {
   const srcDir = join(REPO_ROOT, 'commands');
@@ -92,4 +131,5 @@ async function syncCommands() {
 }
 
 await syncSkills();
+await syncSharedSkillDocs(); // plan-9b §2.6.8(v2 修订:fail-fast)
 await syncCommands();

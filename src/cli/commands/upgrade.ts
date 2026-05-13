@@ -17,6 +17,7 @@ interface UpgradeOptions {
   dryRun?: boolean;
   recover?: boolean;
   gc?: boolean;
+  resignMarkers?: string; // plan-9j Task 2:option 形态 --resign-markers <changeId>
 }
 
 interface StashManifest {
@@ -34,9 +35,68 @@ export function buildUpgradeCommand(): Command {
     .option('--dry-run', 'SHOW DIFF only, do not stash')
     .option('--recover', 'restore stashed legacy artifacts (24h validity)')
     .option('--gc', 'delete expired stashes (>24h)')
+    // plan-9j v3 BLOCKER 1 新增:option 形态 resign-markers(对齐 spec line 1763 + master line 503)
+    .option(
+      '--resign-markers <changeId>',
+      'plan-9j Task 2:一次性升级 v0.4 change marker 到 v1.0 schema(简码映射 + resigned_by_tool_version 字段)',
+    )
     .action(async (opts: UpgradeOptions) => {
-      const projectRoot = process.cwd();
+      // v3 BLOCKER 1:option 形态 — opts.resignMarkers 而非 subcommand argument
+      // 先处理 v0.3 现有 --recover/--gc/legacy upgrade 路径(不动);若 opts.resignMarkers 非空,走新分支
+      if (opts.resignMarkers) {
+        // CI 模式检测(沿 9a ack propose 同模式)
+        if (process.env['CI'] === 'true') {
+          process.stderr.write(
+            'forge upgrade --resign-markers: CI mode 拒绝(set ack.allow_ci_mode=true to override)\n',
+          );
+          process.exit(2);
+        }
+        const forgeRoot = join(process.cwd(), 'forge');
+        const { resignChangeMarkers } = await import('../../core/upgrade/resign-markers.js');
+        // v7 BLOCKER 1:计算 forgeCliPath(dist/cli/index.js 真路径,沿 process.argv[1] 或 import.meta.url 推导)
+        // process.argv[1] 是当前运行的入口脚本(即 dist/cli/index.js;npx forge 时同);测试可 mock
+        // v9 round 2 修(plan-9j code quality reviewer I-3):空 forgeCliPath 显式抛错,避免后续 spawn ENOENT 误导
+        const forgeCliPath = process.argv[1];
+        if (!forgeCliPath) {
+          process.stderr.write(
+            'forge upgrade --resign-markers: forge CLI path unavailable (process.argv[1] is empty);请通过 node 或 npx 调用\n',
+          );
+          process.exit(2);
+        }
+        const results = await resignChangeMarkers(forgeRoot, opts.resignMarkers, forgeCliPath);
 
+        // 输出报告
+        let allResigned = true;
+        let anyNeedsCPropose = false;
+        for (const r of results) {
+          if (r.kind === 'needs-c-propose') {
+            anyNeedsCPropose = true;
+            allResigned = false;
+            // C 简码需用户介入:输出到 stderr(测试断言 stderr 含 "C 简码")
+            process.stderr.write(r.message + '\n');
+            process.stderr.write(
+              '请运行 `forge ack confirm <changeId> <findingId>` 处理 C 简码 pending ack 后重跑 resign-markers\n',
+            );
+          } else {
+            console.log(r.message);
+          }
+          if (r.kind === 'failed') allResigned = false;
+        }
+
+        if (anyNeedsCPropose) process.exit(1);
+        if (!allResigned) process.exit(1);
+        if (results.every((r) => r.kind === 'skipped-already-v1')) {
+          console.log(`✓ ${opts.resignMarkers}: 全部 marker 已是 v1.0+,无需 resign`);
+        } else {
+          console.log(
+            `✓ ${opts.resignMarkers}: marker 已升级,resigned_by_tool_version=1.0.0 + legacy meta`,
+          );
+        }
+        process.exit(0);
+      }
+
+      // v3:option 形态分支结束;后续走 v0.3 legacy adapter 清理路径
+      const projectRoot = process.cwd();
       if (opts.recover) {
         await runRecover(projectRoot);
         return;

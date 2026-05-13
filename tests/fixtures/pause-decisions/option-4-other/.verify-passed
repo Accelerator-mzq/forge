@@ -1,0 +1,20 @@
+schema: forge-verify/v1
+verified_at: 2026-05-12T14:30:00Z
+verified_by: ai-agent
+tasks_hash: sha256:placeholder
+content_hash: sha256:placeholder
+evidence: []
+pause_decisions:
+  - id: 1
+    paused_at: 2026-05-12T14:25:00Z
+    task_ref: tasks.md#custom-flow
+    issue_summary: "用户提出自定义方案"
+    severity: WARNING
+    severity_acked_by: msc
+    severity_acked_at: 2026-05-12T14:27:00Z
+    chosen_option: 4
+    target_artifact: proposal.md
+    target_anchor: "## What Changes"
+    non_blocking_rationale: null
+    other_rationale: "用户决定走自定义方案:实施完后用 PR 描述说明,而非走标准三选项"
+    other_acked_by: msc

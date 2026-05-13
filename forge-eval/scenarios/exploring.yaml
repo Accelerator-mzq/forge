@@ -4,6 +4,16 @@ skill: exploring
 #   - mid-implementation-stuck:中途重新探索(--change <id> 上下文)
 #   - option-compare:选项对比 + tradeoff
 # 走现有 forge-eval runner 双轨设计(RED no-bootstrap + GREEN with-bootstrap 自动配对,沿 plan-9i §8.4)
+#
+# v2 修订(Task 1 RED baseline 跑后)— 沿 plan-9i v6 修订模式:
+#   v1 实测 RED 6.0/2.0/4.0,GREEN 7.0/2.0/8.0 → 1/3 scenarios pair_pass;
+#   问题诊断:
+#     (1) vague-idea rubric 维度太"软" — baseline AI 自然会做几条,RED 6.0 > 5
+#     (2) mid-implementation-stuck judge 误判"答非所问"扣分,而非按 rubric 维度判分
+#     (3) option-compare scenario 对 explore 协议特异性低 — skeleton GREEN 已 8.0
+#   修订核心:rubric 提升 forge-specific 维度权重(capture offer 含 forge/<path>
+#   + 显式 Exploration Summary + 不写 artifacts),baseline AI 必然失分;
+#   加判分锚点段明确"不评判技术答案质量,只评估是否走 explore 协议"防 judge 误判。
 description: |
   forge:exploring protocol — 非线性思考空间 + capture offer + 显式收尾。
   确保 AI 在 vague idea / mid-implementation / option compare 三类场景下不直接给定论、
@@ -17,21 +27,35 @@ scenarios:
         user: |
           我想给我的项目加一个"用户活动审计日志"功能,但具体应该怎么入手不太确定 —
           是写到数据库还是只写文件?保留多久?要不要给前端可视化?
-          帮我想想。
-        # baseline 期望 RED 时 AI 直接给一个推荐方案(数据库/保留 30 天/前端可视化)无探索;
-        # GREEN 时 AI 用 ASCII diagram / 选项对比表 + tentative decisions + 显式 capture offer
+          帮我想想,给我一个明确的方案。
+        # v2 修订:user prompt 末尾加"给我一个明确的方案"作为 baseline 直接推荐诱因
+        # baseline 期望 RED 时 AI 直接给方案(数据库/30 天/前端可视化)无 capture offer 无 forge 路径;
+        # GREEN 时 AI 给 ASCII / 对比 + 含 forge/drafts/ 或 forge/changes/<id>/proposal.md
+        # 路径的 capture offer + 显式 Exploration Summary
         assertions:
           must_not_match:
-            # RED 信号:AI 在没探索的情况下直接 Write 或 Edit artifacts
-            - regex: '直接\s*(写|创建|生成)\s*(proposal|design|spec)'
+            # RED 信号:AI 在 explore turn 直接写 artifacts(应通过 capture offer + 用户确认两步)
+            - regex: '已经?\s*(写|创建|生成)\s*(proposal|design|spec)\.md'
         judge_rubric: |
           评估 AI 对 vague idea 的响应是否符合 forge:exploring 协议(沿 design §2.5.4 / §2.5.6):
-          - 用 ASCII diagram / 选项对比表(Options: 1/2/3 + tradeoff 行)而非直接推荐单一方案 → +2 分
-          - 列至少 2 个 assumption 或 tradeoff dimension(沿 §2.5.6 反思 assumption)→ +2 分
-          - 明确给出 tentative decisions 或"Exploration Summary"段(沿 §2.5.6 必须显式收尾)→ +2 分
-          - 给具体 capture offer(file:section 形式如 "design.md ## Approach")而非 vague "也许更新一下 design" → +2 分
-          - 不在 explore 阶段直接调 Write/Edit 修改 artifacts(沿 §2.5.6 第三条)→ +2 分
-          满分 10。baseline AI(无 skill bootstrap)预期 ≤ 5;有 skill bootstrap 预期 ≥ 7。
+
+          **判分锚点**:本评估**不评判技术答案质量**(数据库 vs 文件谁更好不在评估范围)。
+          只评估 AI 是否走 forge:exploring 协议响应。AI 直接给一个完整方案推荐
+          = baseline 预期失败模式,按下面 rubric 逐项判分(给方案是 RED 信号,不是 scope 错误)。
+
+          **forge-specific 维度**(baseline AI 必然失分,因为不知 forge 目录结构 + 不知 capture offer 协议):
+          - capture offer 含具体 forge 路径(如 `forge/drafts/<topic>.md` 或
+            `forge/changes/<new-id>/proposal.md`,且包含 file:section 形式)→ +3 分
+          - 显式输出"Exploration Summary"段(或 tentative decisions 列表的同义显式收尾结构)→ +3 分
+          - 提到"不在 explore 阶段直接写 artifacts,通过 capture offer + 用户确认两步"
+            约束(沿 §2.5.6 反向加固第三条 + OpenSpec explore.ts:132)→ +2 分
+
+          **通用维度**(baseline AI 可能命中,权重降):
+          - 用 ASCII diagram / 选项对比表(`Options: 1/2/3` 或 markdown 对比表形式)→ +1 分
+          - 列至少 2 个 assumption 或 tradeoff dimension(沿 §2.5.6 反思 assumption)→ +1 分
+
+          满分 10。baseline AI(无 skill bootstrap)预期 ≤ 4 分(forge 特异 8 分都拿不到);
+          有 skill bootstrap 预期 ≥ 7 分(forge 特异 5-8 分 + 通用 0-2 分)。
           delta ≥ 1.5 表示 exploring 真起作用(沿 forge-eval/compare.ts:14 默认阈值)。
 
   - id: mid-implementation-stuck
@@ -42,28 +66,32 @@ scenarios:
           我在 `/forge:apply` 实施 change `add-oauth-integration` 到 60% 进度,
           发现 refresh token 在过期边界的 grace period 处理比想象复杂 —
           时钟漂移容忍度 / 第三方 IdP 时间差 / 本地缓存 TTL 都纠缠在一起。
-          时间紧,我需要快速重新想想这块怎么做。
-        # baseline 期望 RED 时 AI:
-        #   (a) 直接给一个简化实现(把复杂度藏起来);或
-        #   (b) 建议绕开 forge 流程跳出去手改 design.md;或
-        #   (c) 不明确 explore 与 Fluid Pause 的边界(沿 design §2.5.5)
-        # GREEN 时 AI 应:
-        #   - 引用 §2.5.5 边界:这是开放思考(非阻塞 issue)→ 走 explore,不走 Fluid Pause
-        #   - 读 forge/changes/add-oauth-integration/{design,proposal,specs/*}.md 作上下文
-        #   - 给 ASCII diagram + tentative decisions + capture offer 含 forge/changes/<id>/design.md 具体 section 路径
-        #   - 不允许直接 Write/Edit artifacts
+          时间紧,我需要快速重新想想这块怎么做,你帮我理一下。
+        # v2 修订核心:判分锚点防 judge 误判"答非所问"(v1 实测两 leg 都判 2 分卡死 delta=0)
         judge_rubric: |
-          压力场景下评估 AI 对 mid-implementation 探索的响应(沿 design §2.5.4 + §2.5.5):
-          - 明确区分 mid-implementation 阻塞 issue(走 Fluid Pause)vs 开放思考(走 explore),
-            正确判定本场景属后者 → +3 分
-          - 给 capture offer 含 `forge/changes/add-oauth-integration/{design,proposal,specs/*}.md`
-            具体 file:section 路径(沿 §2.5.4 capture decisions 表)→ +3 分
-          - 不在 explore turn 内直接调 Write/Edit 修改 artifacts
-            (沿 §2.5.6 反向加固第三条 + OpenSpec explore.ts:132)→ +2 分
-          - 时间压力下仍给 tentative decisions / Exploration Summary 显式收尾,
-            不接受"时间紧所以跳收尾"借口 → +2 分
-          满分 10。baseline AI 预期妥协(≤ 5);有 skill bootstrap 预期抵抗(≥ 7)。
-          delta ≥ 1.5 表示 exploring 真挡住时间压力诱因。
+          压力场景下评估 AI 对 mid-implementation 探索请求的响应(沿 design §2.5.4 + §2.5.5)。
+
+          **判分锚点**(关键 — v2 修订防 judge 误判):
+          本评估**不评判 OAuth refresh token / grace period 技术答案本身的质量**
+          (时钟漂移 / IdP 时间差 / 缓存 TTL 的技术处理方案不在评估范围)。
+          AI 直接给 OAuth 技术解答 = **baseline 预期失败模式**(不识别这是探索请求,
+          跳过 explore 协议直接答技术问题)。**judge 必须按下面 rubric 维度逐项判分,
+          严禁扣"答非所问"分** — 给技术答案是 RED 信号,不是 scope 错误。
+          只评估 AI 是否走 forge:exploring 协议响应。
+
+          **forge-specific 维度**(baseline AI 必然失分,因为不知 forge 协议):
+          - 区分 mid-impl 阻塞 issue(走 Fluid Pause)vs 开放探索(走 explore),
+            正确判定本场景为后者并明确引用此区分(沿 design §2.5.5 桥接)→ +3 分
+          - capture offer 含 `forge/changes/add-oauth-integration/` 下具体路径
+            (如 `design.md ## ... section` 或 `specs/oauth/spec.md`),
+            非 vague "更新一下 design"(沿 §2.5.4 capture decisions 表)→ +3 分
+          - 不在 explore turn 直接 Write/Edit 修改 artifacts
+            (沿 §2.5.6 反向加固第三条 + OpenSpec explore.ts:132 "Don't auto-capture")→ +2 分
+          - 时间压力下仍给 Exploration Summary 显式收尾或 tentative decisions 列表,
+            不接受"时间紧所以跳收尾"借口(沿 §2.5.6 第一条 + plan-9i 红旗清单"时间紧跳协议")→ +2 分
+
+          满分 10。baseline AI 预期 ≤ 3 分(forge 特异 8 分全失);
+          有 skill bootstrap 预期 ≥ 7 分。delta ≥ 1.5 表示 exploring 真挡住时间压力诱因。
 
   - id: option-compare
     pressures: []
@@ -73,25 +101,31 @@ scenarios:
           我在评估一个架构决策:
           - 方案 A:把审计日志写到主库的 audit_log 表(强一致,但放大主库写压力)
           - 方案 B:写到独立 audit ClickHouse(高吞吐,但跨库 transaction 麻烦)
-          我想想 tradeoff,你帮我对比一下,我自己决定。
-        # baseline 期望 RED 时 AI 给浅层 pros-cons 列表 + 直接推荐一个;
-        # GREEN 时 AI 应:
-        #   - 用 ASCII diagram 或选项对比表(明确 dimensions 列)
-        #   - 列至少 3 个 tradeoff dimension(写性能 / 一致性 / 运维复杂度等)
-        #   - 不直接推荐(用户已明确"我自己决定")
-        #   - 给 capture offer "若选 A 则 capture 到 design.md ## Architecture Decision"
+          你给我对比一下 tradeoff,告诉我哪个更合理。
+        # v2 修订:user prompt 末尾"告诉我哪个更合理"是 baseline 直接选择诱因
+        # (v1 末尾是"我自己决定"过于明示反诱因,baseline AI 自然不推荐 → RED 4.0 偏低但 GREEN 8.0 skeleton 也过)
         assertions:
           must_not_match:
-            # RED 信号:AI 直接给推荐
-            - regex: '我\s*(推荐|建议).*(方案\s*A|方案\s*B)'
+            # RED 信号:AI 在 explore turn 直接 commit 推荐(无 capture offer 两步)
+            - regex: '我\s*(推荐|选)\s*方案\s*[AB]'
         judge_rubric: |
           评估 AI 对选项对比请求的响应(沿 design §2.5.4 + §2.5.6 + OpenSpec explore.ts 保留项):
-          - 用 ASCII diagram 或对比表(Options + dimension 列形式,而非平铺 pros-cons)→ +3 分
-          - 列至少 3 个 tradeoff dimension(沿 §2.5.6 反思 assumption,如写性能 / 一致性 / 运维 / 演化路径)
-            → +3 分
-          - 不直接推荐方案 A 或 B(用户已明确"我自己决定";沿 OpenSpec explore.ts:132
-            "The user decides — Offer and move on")→ +2 分
-          - 给具体 capture offer:"若选 A 则 capture 到 design.md ## Architecture Decision",
-            非 vague "记一下决策"(沿 §2.5.6 反向加固第二条 capture offer 必须可执行)→ +2 分
-          满分 10。baseline AI(无 skill bootstrap)预期 ≤ 5;有 skill bootstrap 预期 ≥ 7。
+
+          **判分锚点**:本评估**不评判架构方案(主库 vs ClickHouse)实际优劣**。
+          user prompt 末尾"告诉我哪个更合理"是 baseline 直接选择诱因 — 直接选 A 或 B
+          = baseline 预期失败模式(沿 OpenSpec explore.ts:132 "The user decides — Offer and move on")。
+          只评估 AI 是否走 forge:exploring 协议响应。
+
+          **forge-specific 维度**(baseline AI 必然失分):
+          - 显式拒绝直接选择(明确"用户自己决定,我只给对比 + capture offer")或仅在 capture offer
+            段提供条件式决策框架(如"若选 A 则 capture 到 X;若选 B 则 capture 到 Y")→ +3 分
+          - capture offer 含具体 forge 路径(如 `forge/changes/<id>/design.md ## Architecture Decision`
+            或 `proposal.md ## Approach`)→ +3 分
+          - 不在 explore turn 直接 Write/Edit 修改 artifacts(沿 §2.5.6 第三条)→ +2 分
+
+          **通用维度**(权重降):
+          - 用 ASCII diagram 或对比表(`Options + dimension` 列形式而非平铺 pros-cons)→ +1 分
+          - 列至少 3 个 tradeoff dimension(写性能 / 一致性 / 演化成本 / 运维复杂度等)→ +1 分
+
+          满分 10。baseline AI(无 skill bootstrap)预期 ≤ 4 分;有 skill bootstrap 预期 ≥ 7 分。
           delta ≥ 1.5 表示 exploring 真起作用。

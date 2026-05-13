@@ -147,6 +147,7 @@ describe('archive_summary schema validation', () => {
 
     it('placeholder=false 缺 invariants_passed → 拒签', () => {
       const { invariants_passed, ...rest } = realSummaryBaseline;
+      void invariants_passed;
       const result = validateArchiveSummarySchema(buildWithPeSummary(rest));
       expect(result.valid).toBe(false);
       expect(
@@ -156,6 +157,7 @@ describe('archive_summary schema validation', () => {
 
     it('placeholder=false 缺 invariants_with_warning → 拒签(v2 codex 一轮 MAJOR 修订新字段)', () => {
       const { invariants_with_warning, ...rest } = realSummaryBaseline;
+      void invariants_with_warning;
       const result = validateArchiveSummarySchema(buildWithPeSummary(rest));
       expect(result.valid).toBe(false);
       expect(
@@ -165,6 +167,7 @@ describe('archive_summary schema validation', () => {
 
     it('placeholder=false 缺 invariants_failed → 拒签', () => {
       const { invariants_failed, ...rest } = realSummaryBaseline;
+      void invariants_failed;
       const result = validateArchiveSummarySchema(buildWithPeSummary(rest));
       expect(result.valid).toBe(false);
       expect(
@@ -174,16 +177,21 @@ describe('archive_summary schema validation', () => {
 
     it('placeholder=false 缺 legacy_exempt → 拒签', () => {
       const { legacy_exempt, ...rest } = realSummaryBaseline;
+      void legacy_exempt;
       const result = validateArchiveSummarySchema(buildWithPeSummary(rest));
       expect(result.valid).toBe(false);
-      expect(
-        result.errors.some((e) => e.field === 'process_evidence_summary.legacy_exempt'),
-      ).toBe(true);
+      expect(result.errors.some((e) => e.field === 'process_evidence_summary.legacy_exempt')).toBe(
+        true,
+      );
     });
 
     it('placeholder=false invariants_with_warning = -1 → "must be in [0, 14]"', () => {
       const result = validateArchiveSummarySchema(
-        buildWithPeSummary({ ...realSummaryBaseline, invariants_with_warning: -1, invariants_passed: 15 }),
+        buildWithPeSummary({
+          ...realSummaryBaseline,
+          invariants_with_warning: -1,
+          invariants_passed: 15,
+        }),
       );
       // 注:passed=15 也越界,但本 case 主断 with_warning;sum 不变式由后续 case 单独测
       expect(result.valid).toBe(false);

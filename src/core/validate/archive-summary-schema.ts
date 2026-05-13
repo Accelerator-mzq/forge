@@ -5,6 +5,15 @@
 
 import { type ValidationResult, ok, failed, mergeResults } from './types.js';
 import { ARCHIVE_SUMMARY_ISO_8601_RE, SEMVER_RE } from '../schemas/archive-summary.js';
+// plan-9e2 Task 3:派生 EXPECTED_INVARIANT_COUNT 从 FENCE_INVARIANT_NAMES.length(自动跟随 invariant 数演化)
+import { FENCE_INVARIANT_NAMES } from '../archive/fence.js';
+
+/**
+ * plan-9e2 v2 codex 一轮 plan review MAJOR 5 修订:模块级派生常量
+ * 沿 brainstorm spec §3.5 + DoD 显式要求"派生常量"语义 — 不放函数内 const,模块级单源
+ * 后续若 invariant 数演化(plan-v1.1+),本常量自动跟随 FENCE_INVARIANT_NAMES.length
+ */
+const EXPECTED_INVARIANT_COUNT = FENCE_INVARIANT_NAMES.length;
 
 /**
  * 校验 archive_summary 对象的 schema 合法性
@@ -116,6 +125,73 @@ export function validateArchiveSummarySchema(m: unknown, file?: string): Validat
         file,
       }),
     );
+  }
+
+  // plan-9e2 Task 3:placeholder=false 路径严格校验(v2 codex 一轮 MAJOR 修订:4 字段 + sum 不变式)
+  if (
+    obj.process_evidence_summary &&
+    typeof obj.process_evidence_summary === 'object' &&
+    !Array.isArray(obj.process_evidence_summary)
+  ) {
+    const peSummary = obj.process_evidence_summary as Record<string, unknown>;
+    if (peSummary.placeholder === false) {
+      // EXPECTED_INVARIANT_COUNT 从模块顶层 import(v2 codex 一轮 plan review MAJOR 5 修订)
+      const REQUIRED_FIELDS = [
+        'invariants_passed',
+        'invariants_with_warning',
+        'invariants_failed',
+        'legacy_exempt',
+      ] as const;
+
+      // 1. 4 字段必填 + number
+      for (const field of REQUIRED_FIELDS) {
+        if (typeof peSummary[field] !== 'number') {
+          results.push(
+            failed({
+              artifact: 'change',
+              field: `process_evidence_summary.${field}`,
+              message: `required number when placeholder=false`,
+              file,
+            }),
+          );
+        }
+      }
+
+      // 仅当 4 字段全部为 number 才走值域 + sum 不变式(避免 NaN 干扰)
+      if (REQUIRED_FIELDS.every((f) => typeof peSummary[f] === 'number')) {
+        // 2. 值域 [0, EXPECTED_INVARIANT_COUNT]
+        for (const field of REQUIRED_FIELDS) {
+          const v = peSummary[field] as number;
+          if (v < 0 || v > EXPECTED_INVARIANT_COUNT) {
+            results.push(
+              failed({
+                artifact: 'change',
+                field: `process_evidence_summary.${field}`,
+                message: `must be in [0, ${EXPECTED_INVARIANT_COUNT}]`,
+                file,
+              }),
+            );
+          }
+        }
+        // 3. sum 不变式(v2 codex 一轮 MAJOR 修订:4 字段 sum)
+        const sum =
+          (peSummary.invariants_passed as number) +
+          (peSummary.invariants_with_warning as number) +
+          (peSummary.invariants_failed as number) +
+          (peSummary.legacy_exempt as number);
+        if (sum !== EXPECTED_INVARIANT_COUNT) {
+          results.push(
+            failed({
+              artifact: 'change',
+              field: 'process_evidence_summary',
+              message: `sum invariant: ${sum} !== ${EXPECTED_INVARIANT_COUNT}`,
+              file,
+            }),
+          );
+        }
+      }
+    }
+    // placeholder=true 路径不变(9e1 容忍)
   }
 
   // 8-10. 三数组字段

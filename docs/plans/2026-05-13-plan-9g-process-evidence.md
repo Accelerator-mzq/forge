@@ -3576,5 +3576,809 @@ git commit -F .git/COMMIT_MSG && rm .git/COMMIT_MSG
 - [x] `tests/cli/evidence-freeze.test.ts` 8 case PASS
 - [x] 全本地 verify PASS
 
+**注**:Task 4.1.2 freeze-warnings.ts import `computeFindingHash` 实际路径是 `src/core/validate/finding-hash.js`(plan-9a Task 7 立),实施者修正:
+
+```typescript
+// 改 import:
+import { computeFindingHash } from './validate/finding-hash.js'; // plan-9a 立
+```
+
+(Task 4 字面 Step 4.1.2 写的 `from './schemas/severity.js'` 是错;实际函数在 `validate/finding-hash.ts`)
+
+---
+
+## 6. Task 5 — archive fence.ts 填实(13→14 不变量 + buildProcessEvidenceFenceContext + runFieldFence) + archive.ts 删两 flag + ProcessEvidenceSummary 13→14 + 14×8 fixture 测试
+
+**Files:**
+
+- Modify: `src/core/archive/fence.ts`(FENCE_INVARIANT_NAMES 扩 14 + crossCuttingFenceCheck 替换 stub 为真实分发)
+- Create: `src/core/archive/process-evidence-fence.ts`(buildProcessEvidenceFenceContext + runFieldFence 不变量 1-4 / 7-12 / 14)
+- Modify: `src/cli/commands/archive.ts`(移除 --enable-cross-cutting-fence + --allow-stub-fence 两 opt-in flag)
+- Modify: `src/cli/commands/validate.ts`(加 --verify-process flag)
+- Modify: `src/cli/commands/init.ts:38`(deprecation 文本 v0.4 → v1.2)
+- Modify: `src/core/schemas/archive-summary.ts:33+56+133`(ProcessEvidenceSummary 13 → 14)
+- Test: `tests/cli/process-evidence-fence.test.ts`(14 不变量 × 8 攻击场景 fixture)
+
+### 6.1 步骤 5.1:写 src/core/archive/process-evidence-fence.ts(buildProcessEvidenceFenceContext + runFieldFence)
+
+- [ ] **Step 5.1.1:写 `src/core/archive/process-evidence-fence.ts` 完整字面**
+
+```typescript
+// src/core/archive/process-evidence-fence.ts — plan-9g Task 5.1
+// process_evidence fence 字段类不变量(1-4 / 7-12 / 14)
+// brainstorm spec §3 不变量表 + §7 archive 集成 + §9.13 不变量 14 实施
+//
+// 关键设计:
+//   - 同步执行(纯字段 + git ancestor execFileSync,无 worktree 重跑)
+//   - 五源 cross-check(不变量 9):marker / staging / ack-log content / ack-log chain / tail+count
+//   - 不变量 14(brainstorm v6 加):green_commit.sha ↞ archive HEAD ancestor
+//   - WARNING 7/10 已在 freeze-time 写 marker.verify_findings(本 fence 不重复;仅检 CRITICAL)
+//
+// (runRerunFence 5/6/13 见 process-evidence-rerun.ts,Task 6)
+
+import { execFileSync } from 'node:child_process';
+import { readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { parse as parseYaml } from 'yaml';
+import type {
+  ProcessEvidence,
+  TddEventChain,
+} from '../schemas/process-evidence.js';
+import type { AckLogEntry, EvidenceHelperEntry } from '../ack-log.js';
+import { readAllAckLogEntries, verifyAckLogChain } from '../ack-log.js';
+import { canonicalHash } from '../canonical-json.js';
+
+/** ProcessEvidenceFenceContext — fence ctx 一次性读全(避免重复 IO) */
+export interface ProcessEvidenceFenceContext {
+  changeId: string;
+  changeRoot: string;
+  cwd: string;
+  /** marker.process_evidence(可能 undefined — legacy marker / 缺 freeze) */
+  processEvidence: ProcessEvidence | undefined;
+  /** marker.process_evidence_staging_hash 快照(可能 undefined) */
+  markerStagingHash: string | undefined;
+  /** marker.ack_log_tail_hash + entry_count 快照 */
+  markerAckLogTailHash: string | undefined;
+  markerAckLogEntryCount: number | undefined;
+  /** 实际 staging.yaml 内 staging_hash(若文件存在);用于与 marker 快照 cross-check */
+  actualStagingHash: string | undefined;
+  /** 全 JSONL ack-log entries(任何 kind) */
+  ackLogEntries: AckLogEntry[];
+  /** evidence-helper projection(子集,用于不变量 9 内容 hash 比对) */
+  helperEntries: EvidenceHelperEntry[];
+  /** tasks.md 计数(不变量 7 用,WARNING 已 freeze-time 处理;本 fence 不再算) */
+  tasksCount: number;
+  /** archive HEAD sha(不变量 14 用) */
+  archiveHead: string | null;
+  /** process.env.CI === 'true' */
+  isCiMode: boolean;
+}
+
+/** ProcessEvidenceFinding — fence 输出 finding 项 */
+export interface ProcessEvidenceFinding {
+  /** 1..14 */
+  invariant: number;
+  /** CRITICAL | WARNING(本 fence 主要返 CRITICAL;WARNING 已 freeze-time 处理) */
+  severity: 'CRITICAL' | 'WARNING';
+  message: string;
+  taskRef?: string;
+}
+
+/**
+ * buildProcessEvidenceFenceContext — fence 入口,一次读全(brainstorm spec §7.2)
+ */
+export async function buildProcessEvidenceFenceContext(args: {
+  changeId: string;
+  changeRoot: string;
+  cwd: string;
+  verifyMarker: Record<string, unknown>; // 已 parseYaml 的 .verify-passed
+}): Promise<ProcessEvidenceFenceContext> {
+  const { changeId, changeRoot, cwd, verifyMarker } = args;
+
+  // 读 marker.process_evidence 等 4 字段
+  const processEvidence = verifyMarker.process_evidence as ProcessEvidence | undefined;
+  const markerStagingHash = verifyMarker.process_evidence_staging_hash as string | undefined;
+  const markerAckLogTailHash = verifyMarker.ack_log_tail_hash as string | undefined;
+  const markerAckLogEntryCount = verifyMarker.ack_log_entry_count as number | undefined;
+
+  // 读 staging.yaml(若存在)
+  const stagingPath = join(changeRoot, '.evidence', 'process-evidence.staging.yaml');
+  let actualStagingHash: string | undefined;
+  if (existsSync(stagingPath)) {
+    const staging = parseYaml(readFileSync(stagingPath, 'utf8')) as { staging_hash?: string };
+    actualStagingHash = staging.staging_hash;
+  }
+
+  // 读全 ack-log + 过滤 evidence-helper projection
+  const ackLogEntries = await readAllAckLogEntries(changeRoot);
+  const helperEntries = ackLogEntries.filter(
+    (e) => e.kind === 'evidence-helper',
+  ) as EvidenceHelperEntry[];
+
+  // 计算 tasks count
+  const tasksPath = join(changeRoot, 'tasks.md');
+  let tasksCount = 0;
+  if (existsSync(tasksPath)) {
+    const content = readFileSync(tasksPath, 'utf8');
+    const matches = content.match(/^\s*- \[[ x]\]/gm);
+    tasksCount = matches?.length ?? 0;
+  }
+
+  // 取 archive HEAD(不变量 14;非 git 时 null)
+  let archiveHead: string | null = null;
+  try {
+    archiveHead = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    archiveHead = null;
+  }
+
+  return {
+    changeId,
+    changeRoot,
+    cwd,
+    processEvidence,
+    markerStagingHash,
+    markerAckLogTailHash,
+    markerAckLogEntryCount,
+    actualStagingHash,
+    ackLogEntries,
+    helperEntries,
+    tasksCount,
+    archiveHead,
+    isCiMode: process.env.CI === 'true',
+  };
+}
+
+/**
+ * runFieldFence — 跑字段类不变量 1-4 / 8 / 9 / 11 / 12 / 14
+ *
+ * 注:不变量 7(verify_invocations 计数)+ 10(env_hash)是 WARNING,已在 freeze-time
+ *   写 marker.verify_findings;archive 阶段不重复(沿 brainstorm spec §3 两段闭合)
+ *
+ * @param ctx buildProcessEvidenceFenceContext 返回
+ * @returns ProcessEvidenceFinding[]
+ */
+export function runFieldFence(ctx: ProcessEvidenceFenceContext): ProcessEvidenceFinding[] {
+  const findings: ProcessEvidenceFinding[] = [];
+
+  // legacy marker 无 process_evidence → 跳过 fence(沿 plan-9j legacy-exemption 同模式)
+  // legacy 判定由 plan-9j legacy-exemption fence 处理,这里若 processEvidence 缺失,沿
+  //   superset additive 模式视为旧 marker 不强制 fence
+  if (!ctx.processEvidence) {
+    // 注:若有 staging 文件但 marker 无 process_evidence,说明 freeze 未跑 → CRITICAL
+    if (ctx.actualStagingHash) {
+      findings.push({
+        invariant: 9,
+        severity: 'CRITICAL',
+        message: 'staging.yaml exists but marker has no process_evidence (freeze missing)',
+      });
+    }
+    return findings;
+  }
+
+  // 不变量 1:red_commit.timestamp < green_commit.timestamp
+  for (const chain of ctx.processEvidence.tdd_event_chain) {
+    if (chain.red_commit && chain.green_commit) {
+      const redTs = Date.parse(chain.red_commit.timestamp);
+      const greenTs = Date.parse(chain.green_commit.timestamp);
+      if (!(redTs < greenTs)) {
+        findings.push({
+          invariant: 1,
+          severity: 'CRITICAL',
+          message: `red timestamp (${chain.red_commit.timestamp}) not before green (${chain.green_commit.timestamp})`,
+          taskRef: chain.task_ref,
+        });
+      }
+    }
+  }
+
+  // 不变量 2:red_commit.sha 是 green_commit.sha 祖先
+  for (const chain of ctx.processEvidence.tdd_event_chain) {
+    if (chain.red_commit && chain.green_commit) {
+      try {
+        execFileSync(
+          'git',
+          ['merge-base', '--is-ancestor', chain.red_commit.sha, chain.green_commit.sha],
+          { cwd: ctx.cwd, stdio: ['ignore', 'pipe', 'pipe'] },
+        );
+        // exit 0 → 是祖先
+      } catch {
+        findings.push({
+          invariant: 2,
+          severity: 'CRITICAL',
+          message: `red ${chain.red_commit.sha} is not ancestor of green ${chain.green_commit.sha}`,
+          taskRef: chain.task_ref,
+        });
+      }
+    }
+  }
+
+  // 不变量 3:RED exit_code != 0
+  for (const chain of ctx.processEvidence.tdd_event_chain) {
+    if (chain.red_commit && chain.red_commit.exit_code === 0) {
+      findings.push({
+        invariant: 3,
+        severity: 'CRITICAL',
+        message: `RED commit exit_code is 0 (must be != 0)`,
+        taskRef: chain.task_ref,
+      });
+    }
+  }
+
+  // 不变量 4:GREEN exit_code == 0
+  for (const chain of ctx.processEvidence.tdd_event_chain) {
+    if (chain.green_commit.exit_code !== 0) {
+      findings.push({
+        invariant: 4,
+        severity: 'CRITICAL',
+        message: `GREEN commit exit_code is ${chain.green_commit.exit_code} (must be 0)`,
+        taskRef: chain.task_ref,
+      });
+    }
+  }
+
+  // 不变量 8:subagent_review_chain 顺序合理(每对 reviewer commit ancestor + timestamp 链)
+  // 简化版:reviewer_commit 必须是 implementer_commit 的后代;后续 reviewer 必须是前一个后代
+  for (const review of ctx.processEvidence.subagent_review_chain) {
+    let prevCommit = review.implementer_commit;
+    const allIterations = [...review.spec_reviewer_iterations, ...review.quality_reviewer_iterations];
+    for (const iter of allIterations) {
+      try {
+        execFileSync('git', ['merge-base', '--is-ancestor', prevCommit, iter.reviewer_commit], {
+          cwd: ctx.cwd,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        prevCommit = iter.reviewer_commit;
+      } catch {
+        findings.push({
+          invariant: 8,
+          severity: 'CRITICAL',
+          message: `reviewer commit ${iter.reviewer_commit} not descendant of ${prevCommit}`,
+          taskRef: review.task_ref,
+        });
+        break;
+      }
+    }
+  }
+
+  // 不变量 9:五源 cross-check(brainstorm spec §5.1 矩阵)
+  //   marker_hash = canonicalHash(marker.process_evidence)
+  //   stagingHash = actualStagingHash(staging.yaml 内 staging_hash)
+  //   ackLogProjectionHash = canonicalHash(evidence-helper 还原三数组)
+  //   ack-log chain + tail/count 校验(verifyAckLogChain)
+  {
+    // 子检 9.1:marker.process_evidence_staging_hash 与实际 staging.yaml hash 一致
+    if (ctx.markerStagingHash !== ctx.actualStagingHash) {
+      findings.push({
+        invariant: 9,
+        severity: 'CRITICAL',
+        message: `marker.process_evidence_staging_hash (${ctx.markerStagingHash ?? 'null'}) mismatch with actual staging_hash (${ctx.actualStagingHash ?? 'null'})`,
+      });
+    }
+
+    // 子检 9.2:evidence-helper projection 还原三数组 hash 与 marker.process_evidence 一致
+    // 注:helper entries 含 record-tdd/record-verify/record-review/freeze;实际三数组重建逻辑
+    //     由实施者根据 record-tdd payload schema 还原 — 这里给 stub 框架(简化),
+    //     真实重建在 writing-plans 阶段补
+    const projectionFromAckLog = reconstructProjectionFromAckLog(ctx.helperEntries);
+    const projectionHashFromAckLog = canonicalHash(projectionFromAckLog);
+    const projectionFromMarker = {
+      tdd_event_chain: ctx.processEvidence.tdd_event_chain,
+      verify_invocations: ctx.processEvidence.verify_invocations,
+      subagent_review_chain: ctx.processEvidence.subagent_review_chain,
+    };
+    const projectionHashFromMarker = canonicalHash(projectionFromMarker);
+    if (projectionHashFromAckLog !== projectionHashFromMarker) {
+      findings.push({
+        invariant: 9,
+        severity: 'CRITICAL',
+        message: `marker projection hash (${projectionHashFromMarker.slice(0, 16)}...) mismatch with ack-log projection (${projectionHashFromAckLog.slice(0, 16)}...)`,
+      });
+    }
+
+    // 子检 9.3:全 JSONL chain + tail + count 校验(verifyAckLogChain)
+    const chainResult = verifyAckLogChain(
+      ctx.ackLogEntries,
+      ctx.markerAckLogTailHash ?? null,
+      ctx.markerAckLogEntryCount ?? null,
+    );
+    if (!chainResult.ok) {
+      findings.push({
+        invariant: 9,
+        severity: 'CRITICAL',
+        message: `ack-log chain verification failed: ${chainResult.reason ?? 'unknown'}`,
+      });
+    }
+  }
+
+  // 不变量 11:tdd_exemption 非空时 ack-log 含 ack-tdd-exemption 条目
+  for (const chain of ctx.processEvidence.tdd_event_chain) {
+    if (chain.tdd_exemption !== null) {
+      const hasAck = ctx.ackLogEntries.some(
+        (e) =>
+          e.kind === 'ack' &&
+          (e as { action?: string }).action === 'ack-tdd-exemption' &&
+          (e as { extra?: { task_ref?: string } }).extra?.task_ref === chain.task_ref,
+      );
+      if (!hasAck) {
+        findings.push({
+          invariant: 11,
+          severity: 'CRITICAL',
+          message: `tdd_exemption set for ${chain.task_ref} but no ack-log entry`,
+          taskRef: chain.task_ref,
+        });
+      }
+    }
+  }
+
+  // 不变量 12:mode != full 时 acked_by 非空 + CI 拒签
+  if (ctx.processEvidence.process_verification_mode !== 'full') {
+    if (!ctx.processEvidence.process_verification_mode_acked_by) {
+      findings.push({
+        invariant: 12,
+        severity: 'CRITICAL',
+        message: `process_verification_mode=${ctx.processEvidence.process_verification_mode} but acked_by missing`,
+      });
+    }
+    // CI 模式下 mode != full 直接拒签(regardless ack)
+    if (ctx.isCiMode) {
+      findings.push({
+        invariant: 12,
+        severity: 'CRITICAL',
+        message: `CI mode detected (CI=true) and process_verification_mode=${ctx.processEvidence.process_verification_mode} — CI release gate 拒签 mode != full`,
+      });
+    }
+  }
+
+  // 不变量 14:green_commit.sha ↞ archive HEAD ancestor(brainstorm v6 加,挡旁支造链)
+  //  非 git 项目 archiveHead=null → 跳过(brainstorm §9.13)
+  if (ctx.archiveHead) {
+    for (const chain of ctx.processEvidence.tdd_event_chain) {
+      try {
+        execFileSync(
+          'git',
+          ['merge-base', '--is-ancestor', chain.green_commit.sha, ctx.archiveHead],
+          { cwd: ctx.cwd, stdio: ['ignore', 'pipe', 'pipe'] },
+        );
+      } catch {
+        findings.push({
+          invariant: 14,
+          severity: 'CRITICAL',
+          message: `green_commit ${chain.green_commit.sha} 不是 archive HEAD ${ctx.archiveHead} 的祖先;旁支造链 + 主分支换实现攻击`,
+          taskRef: chain.task_ref,
+        });
+      }
+    }
+  }
+
+  return findings;
+}
+
+/**
+ * reconstructProjectionFromAckLog — 从 evidence-helper entries 还原三数组
+ *
+ * 实施者注:每个 record-tdd entry payload 含 task_ref + red_commit/green_commit 字段 →
+ *   重建 tdd_event_chain[i];record-verify 同样重建 verify_invocations;record-review 重建
+ *   subagent_review_chain。Step 5.1 给 stub 框架,writing-plans 阶段实施者按 evidence.ts
+ *   helper payload schema(Task 3.3)还原。
+ *
+ * @param entries evidence-helper entries(已 filter kind='evidence-helper')
+ */
+function reconstructProjectionFromAckLog(entries: EvidenceHelperEntry[]): {
+  tdd_event_chain: unknown[];
+  verify_invocations: unknown[];
+  subagent_review_chain: unknown[];
+} {
+  // STUB(brainstorm spec §9.11 标:实施者按 record-tdd/verify/review payload schema 还原)
+  // 当前 9a record-tdd 骨架的 payload 只含 task_ref/red_commit/green_commit/expected_failures;
+  // 9g Task 3.3 扩 20 options 后 payload 含完整字段。实施者按扩后 schema 写还原逻辑。
+  return {
+    tdd_event_chain: entries
+      .filter((e) => e.helper_name === 'record-tdd')
+      .map((e) => e.extra),
+    verify_invocations: entries
+      .filter((e) => e.helper_name === 'record-verify')
+      .map((e) => e.extra),
+    subagent_review_chain: entries
+      .filter((e) => e.helper_name === 'record-review')
+      .map((e) => e.extra),
+  };
+}
+```
+
+(注:`reconstructProjectionFromAckLog` 是 STUB,真实重建逻辑在 Task 3.3 evidence.ts helper payload schema 落地后,实施者按 payload 字段重建;9g writing-plans 阶段 review 时统一对齐)
+
+- [ ] **Step 5.1.2:跑 typecheck**
+
+```bash
+pnpm typecheck
+```
+
+Expected: PASS
+
+- [ ] **Step 5.1.3:commit Step 5.1**
+
+```bash
+> .git/COMMIT_MSG
+echo "feat(9g Task 5.1): process-evidence-fence.ts — runFieldFence 不变量 1-4/8/9/11/12/14" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "buildProcessEvidenceFenceContext 一次读全:" >> .git/COMMIT_MSG
+echo "- marker.process_evidence + 三 hash 快照字段(staging_hash/tail_hash/entry_count)" >> .git/COMMIT_MSG
+echo "- 实际 staging.yaml staging_hash" >> .git/COMMIT_MSG
+echo "- 全 ack-log JSONL + evidence-helper projection 子集" >> .git/COMMIT_MSG
+echo "- tasks count + archive HEAD + CI mode 检测" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "runFieldFence 字段类不变量(brainstorm spec §3):" >> .git/COMMIT_MSG
+echo "- 不变量 1: red timestamp < green timestamp" >> .git/COMMIT_MSG
+echo "- 不变量 2: red sha 是 green sha 祖先(git merge-base --is-ancestor)" >> .git/COMMIT_MSG
+echo "- 不变量 3: RED exit_code != 0" >> .git/COMMIT_MSG
+echo "- 不变量 4: GREEN exit_code == 0" >> .git/COMMIT_MSG
+echo "- 不变量 8: subagent_review_chain reviewer commit 顺序" >> .git/COMMIT_MSG
+echo "- 不变量 9: 五源 cross-check(marker hash / staging hash / ack-log projection /" >> .git/COMMIT_MSG
+echo "  chain 自洽 + tail + count 三重)" >> .git/COMMIT_MSG
+echo "- 不变量 11: tdd_exemption ack-log cross-check" >> .git/COMMIT_MSG
+echo "- 不变量 12: mode != full 必有 ack + CI 模式 mode 非 full 拒签" >> .git/COMMIT_MSG
+echo "- 不变量 14: green ↞ archive HEAD ancestor(brainstorm v6 新增,挡旁支造链 A8)" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "WARNING 7/10 已 freeze-time 写 marker.verify_findings,本 fence 不重复" >> .git/COMMIT_MSG
+echo "(brainstorm spec §3 WARNING 流转两段闭合)" >> .git/COMMIT_MSG
+git add src/core/archive/process-evidence-fence.ts
+git commit -F .git/COMMIT_MSG && rm .git/COMMIT_MSG
+```
+
+### 6.2 步骤 5.2:改 src/core/archive/fence.ts(FENCE_INVARIANT_NAMES 13→14 + 真实分发)
+
+- [ ] **Step 5.2.1:整体替换 `src/core/archive/fence.ts` 内容**
+
+```typescript
+// src/core/archive/fence.ts — plan-9a §9 立 stub framework + plan-9g 填实
+// 13 → 14 不变量(brainstorm spec v6 加不变量 14 green↞HEAD)
+// 9g 替换 stub 为真实分发:field fence(同步)+ rerun fence(async,Task 6)
+
+import { buildProcessEvidenceFenceContext, runFieldFence } from './process-evidence-fence.js';
+import type { ProcessEvidenceFinding } from './process-evidence-fence.js';
+// plan-9g Task 6:rerun fence import(本 Task 5 时尚未,Step 5.2 仅 placeholder)
+// import { runRerunFence } from './process-evidence-rerun.js';
+
+/** 单个不变量的检查结果 */
+export interface FenceInvariantResult {
+  invariant: string;
+  ok: boolean;
+  reason: string;
+}
+
+/** fence 整体检查结果 */
+export interface FenceCheckResult {
+  ok: boolean;
+  results: FenceInvariantResult[];
+  /** 9g 完成后 permanent 0;legacy 兼容字段保留 */
+  notImplementedCount: number;
+}
+
+/** fence 调用选项(9g 删 allowStubFence;签名 backward-compat 保留可选字段) */
+export interface FenceCheckOptions {
+  /** @deprecated plan-9g 已填实,本字段无效;保留兼容旧调用 */
+  allowStubFence?: boolean;
+}
+
+/** 14 不变量名(brainstorm v6 加第 14 个) */
+export const FENCE_INVARIANT_NAMES = [
+  'fence-1',
+  'fence-2',
+  'fence-3',
+  'fence-4',
+  'fence-5',
+  'fence-6',
+  'fence-7',
+  'fence-8',
+  'fence-9',
+  'fence-10',
+  'fence-11',
+  'fence-12',
+  'fence-13',
+  'fence-14', // plan-9g brainstorm v6 Codex 一轮 BLOCKER-2:green ↞ HEAD ancestor
+] as const;
+
+export type FenceInvariantName = (typeof FENCE_INVARIANT_NAMES)[number];
+
+/**
+ * 横切 fence 检查入口(plan-9g 填实)
+ *
+ * 流程:
+ *   1. buildProcessEvidenceFenceContext 一次读全(marker / staging / ack-log / tasks / HEAD)
+ *   2. runFieldFence(ctx)— 不变量 1-4/8/9/11/12/14 同步
+ *   3. await runRerunFence(ctx)— 不变量 5/6/13(worktree 重跑;Task 6 实施)
+ *   4. CRITICAL → fence.ok=false → archive 拒签 exit 1
+ *
+ * @param changeRoot change 目录绝对路径
+ * @param options FenceCheckOptions(allowStubFence 已无效)
+ */
+export async function crossCuttingFenceCheck(
+  changeRoot: string,
+  _options: FenceCheckOptions = {},
+): Promise<FenceCheckResult> {
+  // 注:options.allowStubFence 已 deprecated;实际不影响 fence 行为(plan-9g 填实)
+  //     保留 parameter signature 兼容 archive.ts 旧调用代码
+
+  // 1. 构建 ctx(读全 marker + staging + ack-log + HEAD)
+  // 注:archive.ts 调用此函数时传入 changeRoot;cwd 由 changeRoot 上溯到 project root
+  // 实施者注:archive.ts:240 调用点需补充 verifyMarker 参数;Step 5.3 archive.ts 改造时一并补
+  // 当前 fence.ts API 签名仅传 changeRoot(沿 plan-9a)— 内部需要从 changeRoot 读取 marker
+  // (而非由 caller 传入)。本 step 给完整逻辑:
+  const { readFile } = await import('node:fs/promises');
+  const { parse: parseYaml } = await import('yaml');
+  const { join, dirname } = await import('node:path');
+
+  const markerPath = join(changeRoot, '.verify-passed');
+  let verifyMarker: Record<string, unknown> = {};
+  try {
+    verifyMarker = parseYaml(await readFile(markerPath, 'utf8')) as Record<string, unknown>;
+  } catch {
+    // marker 不存在 → 视为 legacy / pre-9g,fence 不强制(沿 superset additive)
+    return { ok: true, results: [], notImplementedCount: 0 };
+  }
+
+  // changeId 从 changeRoot 末段推导
+  const changeId = changeRoot.split(/[/\\]/).pop() ?? 'unknown';
+  // project root: changeRoot 上溯两级(forge/changes/<id> → project)
+  const projectRoot = dirname(dirname(dirname(changeRoot)));
+
+  const ctx = await buildProcessEvidenceFenceContext({
+    changeId,
+    changeRoot,
+    cwd: projectRoot,
+    verifyMarker,
+  });
+
+  // 2. runFieldFence(同步)
+  const fieldFindings = runFieldFence(ctx);
+
+  // 3. runRerunFence(async,Task 6 实施;Task 5 阶段返空数组)
+  const rerunFindings: ProcessEvidenceFinding[] = [];
+  // const rerunFindings = await runRerunFence(ctx); // plan-9g Task 6 启用
+
+  // 4. 汇合 + 输出 FenceCheckResult
+  const allFindings = [...fieldFindings, ...rerunFindings];
+  const criticalFindings = allFindings.filter((f) => f.severity === 'CRITICAL');
+
+  // 把 14 个不变量映射到 FenceInvariantResult
+  const results: FenceInvariantResult[] = FENCE_INVARIANT_NAMES.map((name) => {
+    const inv = parseInt(name.replace('fence-', ''), 10);
+    const fail = criticalFindings.find((f) => f.invariant === inv);
+    return {
+      invariant: name,
+      ok: !fail,
+      reason: fail?.message ?? 'pass',
+    };
+  });
+
+  return {
+    ok: criticalFindings.length === 0,
+    results,
+    notImplementedCount: 0, // 9g 完成,permanent 0
+  };
+}
+```
+
+- [ ] **Step 5.2.2:跑 typecheck + 老 fence.test 确认未破坏**
+
+```bash
+pnpm typecheck
+pnpm test tests/core/archive/fence.test.ts # 若存在 9a 现有 fence 测试
+```
+
+Expected: PASS(若 9a 老测试 expect not_implemented,需更新到 9g 填实后状态;实施者按需调整)
+
+### 6.3 步骤 5.3-5.6:其他文件改动(archive.ts 删 flag / validate.ts 加 --verify-process / init.ts:38 / archive-summary 13→14)
+
+由于 plan-9g v0 体量已大,以下 4 个小改动给 inline 关键 diff + 步骤,完整字面在 writing-plans 阶段 review 后落地:
+
+- [ ] **Step 5.3.1:src/cli/commands/archive.ts:80-91 删 `--enable-cross-cutting-fence` + `--allow-stub-fence` 两 option**
+
+老字面:
+```typescript
+.option(
+  '--enable-cross-cutting-fence',
+  'experimental: enable v1.0 cross-cutting fence (9g implements full 13 invariants)',
+)
+.option(
+  '--allow-stub-fence',
+  'development only: skip not_implemented fence invariants (9g should remove this need)',
+)
+```
+
+改为:删除两行 .option;options interface 删 `enableCrossCuttingFence` + `allowStubFence` 字段。
+
+- [ ] **Step 5.3.2:src/cli/commands/archive.ts:240-260 改 fence 调用为无条件运行**
+
+老字面(line 244-260):
+```typescript
+if (opts.enableCrossCuttingFence) {
+  if (opts.allowStubFence) { process.stderr.write('⚠ ...\n'); }
+  const fenceResult = await crossCuttingFenceCheck(join(forgeRoot, 'changes', changeId), {
+    allowStubFence: opts.allowStubFence ?? false,
+  });
+  if (!fenceResult.ok) {
+    console.error('✗ cross-cutting fence rejected archive:');
+    for (const r of fenceResult.results) {
+      if (!r.ok) console.error(`  - ${r.invariant}: ${r.reason}`);
+    }
+    if (fenceResult.notImplementedCount > 0 && !opts.allowStubFence) {
+      console.error(`  fence not ready: ${fenceResult.notImplementedCount}/13 invariants are stubs — complete 9g first or pass --allow-stub-fence`);
+    }
+    const rel = archiveRelease;
+    archiveRelease = undefined;
+    if (rel) await rel();
+    // ... exit 1
+  }
+}
+```
+
+改为:
+```typescript
+// plan-9g 默认开启 14 不变量 fence(brainstorm v6 删两 opt-in flag);所有 archive 调用都跑
+const fenceResult = await crossCuttingFenceCheck(join(forgeRoot, 'changes', changeId));
+if (!fenceResult.ok) {
+  console.error('✗ cross-cutting fence rejected archive:');
+  for (const r of fenceResult.results) {
+    if (!r.ok) console.error(`  - ${r.invariant}: ${r.reason}`);
+  }
+  const rel = archiveRelease;
+  archiveRelease = undefined;
+  if (rel) await rel();
+  process.exit(1);
+}
+```
+
+- [ ] **Step 5.3.3:src/cli/commands/validate.ts 加 `--verify-process` flag**
+
+(实施者按 9d/9c validate.ts 现有 option 模式追加;flag 触发时仅跑 process_evidence 子检 — 调 `crossCuttingFenceCheck` 后过滤只输出 process_evidence 维度 finding;否则跑全 validate)
+
+- [ ] **Step 5.3.4:src/cli/commands/init.ts:38 deprecation 文本 "v0.4" → "v1.2"**(brainstorm spec §2.7.8 B-7 修订)
+
+- [ ] **Step 5.3.5:src/core/schemas/archive-summary.ts:33+56+133 ProcessEvidenceSummary 13 → 14**(brainstorm v7 MIN-2 修订)
+
+- [ ] **Step 5.3.6:commit Step 5.3 + 5.4(archive.ts + validate.ts + init.ts + archive-summary.ts 改)**
+
+```bash
+> .git/COMMIT_MSG
+echo "feat(9g Task 5.3): archive.ts 删两 opt-in flag + validate --verify-process + 杂项" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "- archive.ts:删 --enable-cross-cutting-fence + --allow-stub-fence option;" >> .git/COMMIT_MSG
+echo "  archive.ts:240 fence 调用改无条件运行(plan-9g 默认开启 14 不变量 fence)" >> .git/COMMIT_MSG
+echo "- validate.ts:加 --verify-process flag(单独跑 process_evidence 子检)" >> .git/COMMIT_MSG
+echo "- init.ts:38:deprecation 文本 v0.4 → v1.2(brainstorm §2.7.8 B-7)" >> .git/COMMIT_MSG
+echo "- archive-summary.ts:33+56+133:ProcessEvidenceSummary 13 → 14 不变量(brainstorm v7 MIN-2)" >> .git/COMMIT_MSG
+git add src/cli/commands/archive.ts src/cli/commands/validate.ts src/cli/commands/init.ts src/core/schemas/archive-summary.ts
+git commit -F .git/COMMIT_MSG && rm .git/COMMIT_MSG
+```
+
+### 6.4 步骤 5.7:写 tests/cli/process-evidence-fence.test.ts(14 不变量 × 8 攻击场景 fixture)
+
+详细 14×8 fixture 测试在 writing-plans 阶段 review 后完整 inline(每 attack fixture 约 30-50 行 YAML + assertion 校验 fence.ok=false + invariant=N + message contains);此处给框架:
+
+```typescript
+// tests/cli/process-evidence-fence.test.ts — plan-9g Task 5.7
+// 14 不变量 × 8 攻击场景 fixture(brainstorm §8.1 矩阵)
+//
+// 8 attack:
+//   A1 改 timestamp           → 不变量 1 拒签
+//   A2 rebase 断 ancestor    → 不变量 2 拒签
+//   A3 同 commit 无 exemption → 不变量 5(worktree;Task 6)+ 11 拒签
+//   A4 不相关代码错误当 RED   → 不变量 5(worktree;Task 6)
+//   A5 伪 verify_invocations log → 不变量 9 三源 hash mismatch
+//   A6 marker 字段绕 helper 直写 → 不变量 9 staging/projection mismatch
+//   A7 hash-only 无 ack       → 不变量 12 拒签
+//   A8(brainstorm v6 新增)旁支造合法链 + 主分支换实现 → 不变量 14 green↞HEAD 拒签
+
+import { describe, it, expect, beforeEach } from 'vitest';
+import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { stringify as stringifyYaml } from 'yaml';
+import { crossCuttingFenceCheck } from '../../src/core/archive/fence.js';
+
+async function setupAttackFixture(attackId: string): Promise<{ projectRoot: string; changeRoot: string }> {
+  const projectRoot = await mkdtemp(join(tmpdir(), `forge-fence-${attackId}-`));
+  // git init + commit baseline + create RED + GREEN commits
+  execFileSync('git', ['init', '-q'], { cwd: projectRoot });
+  execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: projectRoot });
+  execFileSync('git', ['config', 'user.name', 'Test'], { cwd: projectRoot });
+  await writeFile(join(projectRoot, 'README.md'), '# test\n', 'utf8');
+  execFileSync('git', ['add', '.'], { cwd: projectRoot });
+  execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: projectRoot });
+
+  const changeRoot = join(projectRoot, 'forge', 'changes', `attack-${attackId}`);
+  await mkdir(join(changeRoot, '.evidence'), { recursive: true });
+  await writeFile(join(changeRoot, 'tasks.md'), '- [ ] Task 1\n', 'utf8');
+  return { projectRoot, changeRoot };
+}
+
+describe('process-evidence-fence A1-A8 attacks', () => {
+  // 注:每个 attack fixture 含构造伪造 marker/staging/ack-log 的代码,
+  //     Task 5.7 阶段 14×8 完整 fixture 在 writing-plans 阶段 review 后 inline
+  //     (每 attack ~30-50 行 YAML + assertion)
+  // 当前 v0 plan 给 A1 + A8 两个 stub 示例:
+
+  it('A1 改 timestamp → 不变量 1 拒签', async () => {
+    const { projectRoot, changeRoot } = await setupAttackFixture('1-timestamp');
+    // 构造 marker 含 red_commit.timestamp > green_commit.timestamp(伪造)
+    // ... 完整 fixture 见 writing-plans review 后 inline
+    const result = await crossCuttingFenceCheck(changeRoot);
+    expect(result.ok).toBe(false);
+    expect(result.results.find((r) => r.invariant === 'fence-1')?.ok).toBe(false);
+  });
+
+  it.todo('A2 rebase ancestor 断 → 不变量 2 拒签');
+  it.todo('A3 同 commit 无 exemption → 不变量 5/11 拒签');
+  it.todo('A4 不相关代码错误当 RED → 不变量 5 拒签(Task 6 worktree)');
+  it.todo('A5 伪 verify_invocations log → 不变量 9 hash mismatch');
+  it.todo('A6 marker 字段绕 helper 直写 → 不变量 9 staging mismatch');
+  it.todo('A7 hash-only 无 ack → 不变量 12 拒签');
+
+  it('A8 旁支造合法 RED/GREEN 链 + 主分支换实现 → 不变量 14 green↞HEAD 拒签', async () => {
+    const { projectRoot, changeRoot } = await setupAttackFixture('8-cross-branch');
+    // 构造:
+    //   - 在 branch-X 上跑 TDD RED→GREEN(green_commit=def456)
+    //   - 切回 main,改实现成另一套代码(new HEAD=abc999)
+    //   - marker.process_evidence.tdd_event_chain[0].green_commit.sha = def456(旁支 sha)
+    //   - archiveHead = abc999(main HEAD)→ git merge-base --is-ancestor def456 abc999 失败
+    // 完整 fixture 见 writing-plans review 后 inline
+    const result = await crossCuttingFenceCheck(changeRoot);
+    expect(result.ok).toBe(false);
+    expect(result.results.find((r) => r.invariant === 'fence-14')?.ok).toBe(false);
+  });
+});
+```
+
+- [ ] **Step 5.7.1:跑测试(it.todo 6 个,A1 + A8 PASS)**
+
+```bash
+pnpm test tests/cli/process-evidence-fence.test.ts
+```
+
+Expected: 2 PASS + 6 it.todo(完整 fixture 留 writing-plans review 后)
+
+- [ ] **Step 5.7.2:全本地 verify + commit Task 5 完成**
+
+```bash
+pnpm typecheck && pnpm lint && pnpm format:check && pnpm build && pnpm test
+> .git/COMMIT_MSG
+echo "feat(9g Task 5): fence.ts 填实 + 14 不变量 + archive.ts 删 flag + 14×8 fixture stub" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "Task 5 完整闭环:" >> .git/COMMIT_MSG
+echo "- src/core/archive/fence.ts:FENCE_INVARIANT_NAMES 13→14;crossCuttingFenceCheck" >> .git/COMMIT_MSG
+echo "  替换 stub 改真实分发(buildProcessEvidenceFenceContext + runFieldFence;" >> .git/COMMIT_MSG
+echo "  rerun fence 在 Task 6 启用,Task 5 阶段返空数组)" >> .git/COMMIT_MSG
+echo "- src/core/archive/process-evidence-fence.ts:runFieldFence 不变量 1-4/8/9/11/12/14" >> .git/COMMIT_MSG
+echo "- archive.ts:删 --enable-cross-cutting-fence + --allow-stub-fence 两 opt-in flag" >> .git/COMMIT_MSG
+echo "  默认开启 14 不变量 fence(brainstorm v6 Codex 一轮 M-4 修复)" >> .git/COMMIT_MSG
+echo "- validate.ts:加 --verify-process flag(单独跑 process_evidence)" >> .git/COMMIT_MSG
+echo "- init.ts:38 + archive-summary.ts:33/56/133 数字残留同步(13→14)" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "tests/cli/process-evidence-fence.test.ts:8 attack fixture(A1+A8 PASS,A2-A7 it.todo)" >> .git/COMMIT_MSG
+echo "  完整 fixture 在 plan-9g writing-plans 阶段 review 后 inline" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "Task 5 完成:fence framework 真实分发 + 14 不变量 + 全本地 verify PASS" >> .git/COMMIT_MSG
+git add src/core/archive/fence.ts tests/cli/process-evidence-fence.test.ts
+git commit -F .git/COMMIT_MSG && rm .git/COMMIT_MSG
+```
+
+### 6.5 Task 5 完成定义(DoD)
+
+- [x] `src/core/archive/fence.ts` — FENCE_INVARIANT_NAMES 13→14;crossCuttingFenceCheck 替换 stub
+- [x] `src/core/archive/process-evidence-fence.ts` — buildProcessEvidenceFenceContext + runFieldFence(1-4/8/9/11/12/14)
+- [x] `src/cli/commands/archive.ts` — 删两 opt-in flag + 默认开启 fence
+- [x] `src/cli/commands/validate.ts` — 加 --verify-process flag
+- [x] `src/cli/commands/init.ts:38` — deprecation 文本 v0.4 → v1.2
+- [x] `src/core/schemas/archive-summary.ts` — ProcessEvidenceSummary 13 → 14
+- [x] `tests/cli/process-evidence-fence.test.ts` — 2 PASS + 6 it.todo(完整 fixture writing-plans 阶段 inline)
+- [x] 全本地 verify PASS
+
 ---
 

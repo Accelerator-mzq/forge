@@ -97,7 +97,7 @@ ArchiveSummary.process_evidence_summary = {
 2. **legacy_exempt 取值**:0(非 legacy)或 10(legacy 路径,沿 §3.4.4.1 #1-8/10/13);**不硬编码 10**,从 fence status='legacy-skip' 折数
 3. **`process_evidence_unavailable_legacy` flag 双源取并集(v2 codex 一轮 MAJOR 修订)**:`legacyExempt = verifyMarker.process_evidence_unavailable_legacy === true || reviewMarker?.process_evidence_unavailable_legacy === true`;沿 plan-9g fence.ts:115/157 已两源独立读约定,9e2 mapper 取并集;v1.0 精度损失 = 无法区分 verify-only / review-only legacy,留 v1.1+ 精确拆分
 4. **invariants_failed 永远 = 0**:fence.ok=false 时 archive.ts:231 已 exit 1,buildArchiveSummary 永远不执行;字段保留对称 + 防未来 fail-soft
-5. **invariants_with_warning 取值范围(v2 codex 一轮 MAJOR 修订:新增)**:0 到 (FENCE_INVARIANT_NAMES.length - exempt - passed);WARNING 来源 design §2.7.3 #7(verify_invocations 不足)/ #10(env_hash 不一致)/ #13(sample/hash-only 模式 timeout);WARNING 不阻断 fence,但需要在 summary 中可见,否则 invariants_passed 数字虚高
+5. **invariants_with_warning 取值范围(v2 codex 一轮 MAJOR 修订:新增;v4 codex 四轮 MINOR 收紧)**:0 到 (FENCE_INVARIANT_NAMES.length - exempt - passed);WARNING 来源 design §2.7.3 #7(verify_invocations 不足)/ #10(env_hash 不一致)/ #13(sample/hash-only 模式 timeout);WARNING 不阻断 fence,**经 mapper 优先级 `fail > legacy-skip > warning > pass` 筛选后**通过本字段反映;legacy 路径下被豁免的 invariant 即使产 WARNING 也被吞为 'legacy-skip',本字段计数偏低(沿 §4.3 副作用 + §7 遗留 #8 显式承认),WARNING 实际信息仍走 acked_warnings / stderr 双路径不丢
 
 ### 2.3 模块改动 surface(5 代码文件 + 2 文档,v2 codex 一轮 MAJOR 修订:补根级 archive.md)
 
@@ -324,7 +324,7 @@ const summary = await buildArchiveSummary(
 | 场景 | 触发点 | 后果 | exit code |
 |---|---|---|---|
 | fence CRITICAL finding 出现 | crossCuttingFenceCheck | results[i].status='fail' / ok=false → archive 拦截 | 1(沿 master §3.12.3 fence business-fail) |
-| fence WARNING finding 出现(v2 codex 一轮 MAJOR 修订:新增) | crossCuttingFenceCheck mapper | results[i].status='warning' / ok=true;archive 继续,summary 中 invariants_with_warning 计数+1 | 0(WARNING 不阻断;沿 design §2.7.3 + plan-9g brainstorm v9 修订) |
+| fence WARNING finding 出现(v2 codex 一轮 MAJOR 修订:新增;v4 codex 四轮 MINOR 收紧) | crossCuttingFenceCheck mapper | results[i].status='warning'(仅当未被 fail / legacy-skip 优先级覆盖时,沿 §3.2 mapper)/ ok=true;archive 继续,summary 中 invariants_with_warning 计数+1;legacy 豁免表 invariant 即使产 WARNING 也优先标 'legacy-skip',本场景计数不+1(沿 §4.3 副作用)| 0(WARNING 不阻断;沿 design §2.7.3 + plan-9g brainstorm v9 修订) |
 | legacy flag 误填(v1.0 native marker 含 legacy flag,v2 codex 一轮 MINOR 修订) | archive.ts:341/349 validateLegacyExemption 兜底 | legacy-exemption.ts:47-62 互斥校验拒签(`legacy=true ⊥ created_by_tool_version>=1.0.0 且 resigned 缺失`)| 1(沿 plan-9j 反向加固 + design §3.4.4.1) |
 | sum 不变式破(fence 内部 bug) | summarizeProcessEvidence 不主动 throw | 写入 .tmp → archive-summary-schema 严格校验拒签 | 3(corrupt) |
 | .tmp 内容 tamper | validateArchiveSummarySchema | 必填字段缺 → errors → archive 拒签 | 3(corrupt) |
@@ -413,12 +413,13 @@ fence.ts mapper 取 `verifyLegacy || reviewLegacy`(任一为 true 视为 legacy 
 ✓ placeholder=true(9e1 路径) → pass(backward-compat)
 ```
 
-**4. `archive.ts` integration test**(扩 9e1 现有 test ~4 case,v2 修订加 WARNING + dual-legacy 路径)
+**4. `archive.ts` integration test**(扩 9e1 现有 test ~5 case,v2 修订加 WARNING + dual-legacy 路径;v4 codex 四轮 MINOR 修订加副作用回归 case)
 ```
 ✓ archive non-legacy change → archive_summary.yaml 含 passed:14 / warning:0 / failed:0 / exempt:0
 ✓ archive non-legacy change + 1 WARNING fixture → archive_summary.yaml 含 passed:13 / warning:1 / failed:0 / exempt:0
 ✓ archive legacy(verify-only)change → archive_summary.yaml 含 passed:4 / warning:0 / failed:0 / exempt:10
 ✓ archive legacy(review-only)change → archive_summary.yaml 等同 verify-only legacy(取并集)
+✓ **archive review-only legacy + verify-side #10 WARNING fixture(v4 codex 四轮 MINOR 修订:钉住副作用)** → archive_summary.yaml 含 passed:4 / warning:0 / failed:0 / exempt:10;verify-side WARNING 在 stderr 输出但 summary 计数为 0(沿 §4.3 副作用 + §7 遗留 #8 接受的精度损失);本 case 守住 mapper 优先级 `legacy-skip > warning` 不被无意修改
 ```
 
 **5. `archive.md` 双文件同步守护**(v2 codex 一轮 MAJOR 修订:新增 1 case)
@@ -434,6 +435,7 @@ unit test 用 node 自身 `crypto.createHash('md5')` 计算,避免 OS 工具依�
 **v2 codex 一轮 MAJOR 修订新增 fixture**:
 - `tests/fixtures/archive-warning-process-evidence/` — non-legacy v1.0 marker,verify 阶段产 #10 env_hash WARNING(env mismatch)
 - `tests/fixtures/archive-review-only-legacy/` — verify v1.0 native + review 标 `process_evidence_unavailable_legacy: true`(测试 dual-legacy 并集路径)
+- `tests/fixtures/archive-review-only-legacy-with-verify-warning/`(v4 codex 四轮 MINOR 修订:新增)— verify v1.0 native 阶段产 #10 env_hash WARNING + review 标 `process_evidence_unavailable_legacy: true`;用于测 §4.3 副作用场景(WARNING 被 effectiveLegacyExempt=true 吞为 legacy-skip,summary 中 invariants_with_warning 计数为 0)
 
 **注**:fixture 格式与 plan-9j 的 `forge upgrade --resign-markers` 输出相同,9e2 可手写(不依赖 9j 完成);若 9j 已合,直接复用 9j fixture。
 

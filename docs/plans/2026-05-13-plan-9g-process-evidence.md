@@ -2216,7 +2216,7 @@ git commit -F .git/COMMIT_MSG && rm .git/COMMIT_MSG
 **Files:**
 
 - Modify: `src/core/ack-log.ts`(EvidenceHelperEntry 加 prev_entry_hash + appendAckLog 算链 + 加 verifyAckLogChain helper + 加 readAllAckLogEntries helper)
-- Modify: `src/cli/commands/evidence.ts`(三 helper commander options +19 + staging 写入 + 文件锁)
+- Modify: `src/cli/commands/evidence.ts`(三 helper commander options +20 + staging 写入 + 文件锁)
 - Create: `src/core/staging-lock.ts`(staging 文件锁仿 archive lock.ts 模式)
 - Create: `tests/core/ack-log-chain.test.ts`(7 case)
 - Modify: `tests/cli/evidence-helpers.test.ts`(扩 5 case — 三 helper staging append + ack-log chain + 文件锁)
@@ -2998,11 +2998,29 @@ freeze 子命令是 plan-9g 反伪造架构的关键凝固点 — 主代理在 c
             process_verification_mode_acked_at: string | null;
             env_hash: { lockfile_hash: string; node_version: string; os_platform: 'win32' | 'darwin' | 'linux' };
           };
-          // 强制校验必填(v2 修订)
-          if (!stagingTyped.process_verification_mode || !stagingTyped.env_hash) {
+          // **v3 修订(Codex 三轮 B-2)**:强制校验必填字段含 ack_by/ack_at + env_hash 子字段
+          //   (v2 仅校 mode/env_hash 顶级,acked_by/at 缺失会被悄变 null 静默通过)
+          const missingFields: string[] = [];
+          if (!stagingTyped.process_verification_mode) missingFields.push('process_verification_mode');
+          // mode != full 时 acked_by + acked_at 必填(沿不变量 12 CRITICAL)
+          if (
+            stagingTyped.process_verification_mode &&
+            stagingTyped.process_verification_mode !== 'full'
+          ) {
+            if (!stagingTyped.process_verification_mode_acked_by) missingFields.push('process_verification_mode_acked_by (mode != full required)');
+            if (!stagingTyped.process_verification_mode_acked_at) missingFields.push('process_verification_mode_acked_at (mode != full required)');
+          }
+          if (!stagingTyped.env_hash) missingFields.push('env_hash');
+          else {
+            // env_hash 子字段完整性
+            if (!stagingTyped.env_hash.lockfile_hash) missingFields.push('env_hash.lockfile_hash');
+            if (!stagingTyped.env_hash.node_version) missingFields.push('env_hash.node_version');
+            if (!stagingTyped.env_hash.os_platform) missingFields.push('env_hash.os_platform');
+          }
+          if (missingFields.length > 0) {
             process.stderr.write(
-              `forge evidence freeze: staging.yaml missing required fields (process_verification_mode / env_hash);` +
-                ` 主代理必须先调 forge evidence record-tdd 写完整 staging\n`,
+              `forge evidence freeze: staging.yaml missing required fields: ${missingFields.join(', ')};` +
+                ` 主代理必须先调 forge evidence record-tdd 写完整 staging(含 --mode + --lockfile-hash + 环境字段)\n`,
             );
             process.exit(1);
           }
@@ -3546,7 +3564,7 @@ describe('forge evidence freeze (plan-9g Task 4)', () => {
 });
 ```
 
-注:Case 8 staging 写入需 mode/acked_by 字段;实施者按 freeze 子命令读取逻辑实际 staging schema 设计调整(原 staging schema 只含三数组 + hash;mode/ack 字段是否纳入 staging 由实施者决定 — 或由 helper 写 staging 时通过 record-tdd `--mode` 选项填,9g writing-plans 阶段实际实施时定)。
+注:Case 8 staging 写入需 mode/acked_by/acked_at + env_hash 完整字段(v3 修订 Codex 三轮 B-2 锁:staging schema 强制必填,由 helper 写 staging 时通过 record-tdd `--mode <full|sample|hash-only>` + 自动检测 env_hash 子字段填;freeze 缺字段 exit 1 而非静默 fallback)。
 
 - [ ] **Step 4.2.2:跑 build + 测试**
 
@@ -3700,6 +3718,18 @@ export interface ProcessEvidenceFinding {
 }
 
 /**
+ * parseSemverMajor — 取 semver 字符串的 major 部分(v3 修订 Codex 三轮 B-1)
+ * 沿 plan-9j src/core/archive/version-retrograde-fence.ts parseSemver 模式但仅返 major
+ *
+ * @param v semver 字符串(如 "1.0.0" / "0.4.0-beta.1+build.5")
+ * @returns major 数字(无法解析返 0)
+ */
+function parseSemverMajor(v: string): number {
+  const m = v.match(/^(\d+)\./);
+  return m ? parseInt(m[1] ?? '0', 10) : 0;
+}
+
+/**
  * buildProcessEvidenceFenceContext — fence 入口,一次读全(brainstorm spec §7.2)
  *
  * v1 修订(Codex 一轮 M-4):接收 verifyMarker + reviewMarker 双参数
@@ -3828,17 +3858,7 @@ export function runFieldFence(ctx: ProcessEvidenceFenceContext): ProcessEvidence
     return findings;
   }
 
-  // helper(v2 修订 Codex 二轮 B-3:补完整 inline 函数 declare,不再注释占位):
-  // parseSemverMajor 作为 process-evidence-fence.ts 模块顶层 helper,
-  // 在 runFieldFence 函数**外**(buildProcessEvidenceFenceContext 之前)定义。
-  // 实施者注:此 helper 函数定义放在文件顶部,在 buildProcessEvidenceFenceContext export 之前:
-  //
-  // function parseSemverMajor(v: string): number {
-  //   const m = v.match(/^(\d+)\./);
-  //   return m ? parseInt(m[1] ?? '0', 10) : 0;
-  // }
-  //
-  // 沿 plan-9j src/core/archive/version-retrograde-fence.ts parseSemver 同模式但仅返 major
+  // ↑ runFieldFence 函数体结束 — parseSemverMajor 真定义在文件顶部(下面 inline)
 
   // 不变量 1:red_commit.timestamp < green_commit.timestamp
   for (const chain of ctx.processEvidence.tdd_event_chain) {
@@ -4299,23 +4319,43 @@ export async function crossCuttingFenceCheck(
   // 2. runFieldFence(同步)
   const fieldFindings = runFieldFence(ctx);
 
-  // 3. **v2 修订(Codex 二轮 M-1)**:fence 对 verify + review 各跑一遍 process_evidence 校验
-  //    沿 brainstorm spec §5.1 五源 cross-check;review marker 也含 process_evidence 字段(--kind review freeze 写)
-  //    finding source 字段区分 verify / review,方便 archive 输出定位
+  // 3. **v3 修订(Codex 三轮 M-1)**:fence 对 verify + review 各跑 process_evidence 校验
+  //    含 review 侧 bypass 检测(review marker 存在但缺 process_evidence 也 CRITICAL)
+  //    沿 brainstorm spec §5.1 五源 cross-check;finding source 字段区分 verify / review
   const reviewFindings: ProcessEvidenceFinding[] = [];
-  if (ctx.reviewProcessEvidence) {
-    // 构造 review-side ctx(processEvidence 替换为 reviewProcessEvidence;hash 字段对应替换)
-    const reviewCtx: ProcessEvidenceFenceContext = {
-      ...ctx,
-      processEvidence: ctx.reviewProcessEvidence,
-      markerStagingHash: ctx.reviewMarkerStagingHash,
-      markerAckLogTailHash: ctx.reviewMarkerAckLogTailHash,
-      markerAckLogEntryCount: ctx.reviewMarkerAckLogEntryCount,
-    };
-    const reviewSideFindings = runFieldFence(reviewCtx);
-    // 标 source='review' 区分(实施者可在 finding message prefix `[review]`)
-    for (const f of reviewSideFindings) {
-      reviewFindings.push({ ...f, message: `[review] ${f.message}` });
+  if (reviewMarker) {
+    // review 侧 bypass 检测(对称 verify 侧 B-3,v3 修订 Codex 三轮 M-1):
+    //   review marker 含 v1.0 marker version 标志(`created_by_tool_version >= 1.0.0`)
+    //   且无 legacy_exempt → 必须含 process_evidence;否则 CRITICAL
+    const reviewLegacyExempt =
+      (reviewMarker.process_evidence_unavailable_legacy as boolean | undefined) === true;
+    const reviewMarkerVersion = reviewMarker.created_by_tool_version as string | undefined;
+    const reviewIsV10Native = reviewMarkerVersion
+      ? parseSemverMajor(reviewMarkerVersion) >= 1
+      : false;
+    if (!ctx.reviewProcessEvidence) {
+      if (reviewIsV10Native && !reviewLegacyExempt) {
+        reviewFindings.push({
+          invariant: 9,
+          severity: 'CRITICAL',
+          message:
+            '[review] v1.0 marker missing process_evidence — 必须走 forge evidence freeze --kind review',
+        });
+      }
+    } else {
+      // 构造 review-side ctx(processEvidence 替换为 reviewProcessEvidence)
+      const reviewCtx: ProcessEvidenceFenceContext = {
+        ...ctx,
+        processEvidence: ctx.reviewProcessEvidence,
+        markerStagingHash: ctx.reviewMarkerStagingHash,
+        markerAckLogTailHash: ctx.reviewMarkerAckLogTailHash,
+        markerAckLogEntryCount: ctx.reviewMarkerAckLogEntryCount,
+      };
+      const reviewSideFindings = runFieldFence(reviewCtx);
+      // 标 source='review' 区分
+      for (const f of reviewSideFindings) {
+        reviewFindings.push({ ...f, message: `[review] ${f.message}` });
+      }
     }
   }
 
@@ -4955,7 +4995,7 @@ git commit -F .git/COMMIT_MSG && rm .git/COMMIT_MSG
 - [x] `tests/integration/process-evidence-end-to-end.test.ts` — 11 it.todo(8 attack + 3 GREEN)
 - [x] 全本地 verify PASS
 
-**注**:Task 6 留 14 个 it.todo 完整 fixture inline 留 writing-plans 阶段 review 后落地;主要因 e2e fixture 每个 ~200-400 行 YAML + git 构造代码,体量大;plan-9g v0 草稿先把测试**框架 + 断言意图**写明,详细 fixture inline 在用户 review plan-9g v1 后展开。
+**注**:Task 6 留 29 个 it.todo(详见 §9.3 按 4 测试文件分列)完整 fixture inline 留 writing-plans 阶段 review 后落地;主要因 e2e fixture 每个 ~200-400 行 YAML + git 构造代码,体量大;plan-9g 草稿先把测试**框架 + 断言意图**写明,详细 fixture inline 留 codex 收敛后展开。
 
 ---
 
@@ -5374,7 +5414,7 @@ Expected: process-evidence + 4 双同步 skill 通过 forge-eval RED/GREEN delta
   - `tests/cli/ack-cli-mode.test.ts`:6 个 it.todo(CI × mode × ack 矩阵)
   - `tests/integration/process-evidence-end-to-end.test.ts`:11 个 it.todo(A1-A8 attack + 3 GREEN mode sub-fixture)
   - 总 29 个 it.todo 完整 fixture 留 writing-plans 阶段 codex review 收敛后 inline(每 fixture ~200-400 行 YAML + git 构造)
-- **reconstructProjectionFromAckLog STUB**(Task 5.1 process-evidence-fence.ts):helper payload schema(Task 3.3)落地后,实施者按 record-tdd/record-verify/record-review 实际 payload 字段重建三数组;v0 plan 给 STUB 框架
+~~- reconstructProjectionFromAckLog STUB~~ — **v2 修**(Codex 二轮 M-3):函数体已给完整伪代码 + 3 projection type alias 显式声明,反伪造五源 cross-check 不变量 9 可按 inline 落地
 - **WARNING dedup 实测**:freeze-time WARNING 与 archive-time rerun WARNING 同 finding_hash dedup(brainstorm spec §9.12 M-2)— v0 plan 写算法,实测在 e2e fixture 阶段验证
 - **rerun-time WARNING 13 stderr 输出格式**:brainstorm v9 简化为 stderr 不阻断,但 archive.ts 实际输出格式留实施者按 plan-9d 现有 stderr 模式(`⚠ ...`)统一
 
@@ -5402,7 +5442,7 @@ Expected: process-evidence + 4 双同步 skill 通过 forge-eval RED/GREEN delta
 
 ---
 
-**Status**: plan-9g v1(沿 plan-9j v1→v9 模式,等 codex 二轮收敛)
+**Status**: plan-9g v3(沿 plan-9j v1→v9 模式,Codex 三轮已审,等四轮收敛到 0 BLOCKER + 0 MAJOR)
 
 实施前必跑:`pnpm install`(fast-xml-parser + tap-parser 两新 deps)
 
@@ -5444,5 +5484,22 @@ Expected: process-evidence + 4 双同步 skill 通过 forge-eval RED/GREEN delta
 **真 MINOR 修复(2 项)**:
 - **MIN-1 §9.2 it.todo 14 → 29 同步**:v1 §9.3 已改 29,但 §9.2 整体 DoD 仍写 14;v2 同步。
 - **MIN-2 Task 7 模板 19 options → 20 options**:全文 sed 统一。
+
+---
+
+## 12. v2 → v3 修订摘要(Codex 三轮 3 BLOCKER + 4 MAJOR 全采纳)
+
+**真 BLOCKER 修复(3 项)**:
+- **B-1 parseSemverMajor 真函数体**(Task 5.1):原 v2 函数体在 `//` 注释里 → TS 编译失败。**v3**:把函数体真定义在 process-evidence-fence.ts 顶部(ProcessEvidenceFinding interface 后,buildProcessEvidenceFenceContext 之前),完整 `function parseSemverMajor(v: string): number { ... }`,non-export module-internal helper。
+- **B-2 staging 必填扩 ack_by/ack_at + env_hash 子字段**(Task 4 Step 5):原 v2 只校 mode/env_hash 顶级,ack_by/at + lockfile_hash/node_version/os_platform 缺失会静默通过。**v3**:扩 `missingFields[]` 收集 — mode != full 时 ack_by/at 必填 + env_hash.{lockfile_hash, node_version, os_platform} 三子字段必填,缺任意一个 exit 1 + stderr 列具体缺哪个字段。
+- **B-3 删 reconstructProjectionFromAckLog STUB 标注**:§9.3 Known limitation 删 STUB 条(v2 已给完整伪代码 + 3 projection alias,留 STUB 字面误导实施者);改为说明 "v2 修后函数体已完整 inline,反伪造五源 cross-check 可按 inline 落地"。
+
+**真 MAJOR 修复(4 项)**:
+- **M-1 review 侧 bypass 检测对称**:原 v2 `if (ctx.reviewProcessEvidence)` 跳过缺失场景,与 verify 侧 B-3 检测不对称。**v3**:扩 review 侧 — 检 reviewMarker.created_by_tool_version >= 1.0.0 + reviewMarker.process_evidence_unavailable_legacy = undefined 时无 reviewProcessEvidence → CRITICAL "[review] v1.0 marker missing process_evidence"(对称 verify 侧 B-3)。
+- **M-2 Task 3 Files line 2219 +19 残留**:`+19` → `+20`。
+- **M-3 Task 6 line 4958 注释 14 个 it.todo 残留**:14 → 29 + 链接 §9.3 4 测试文件分列。
+- **M-4 §9.5 Status 行 v1 → v3**:文档版本号同步本轮修订级别。
+
+体量 5448 → 5550+ 行;留 v4 codex 四轮收敛
 
 

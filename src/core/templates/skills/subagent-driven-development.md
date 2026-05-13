@@ -296,3 +296,19 @@ forge v1.0 在本 skill 基础上加以下反向加固协议(与上游 superpowe
 | "用户在对话中确认过,我直接写 ack 就好"                   | `forge archive` ack-log 一致性 cross-check 会发现 marker ack ↔ ack-log 不一致(沿 plan-9d v2 B-4) |
 | "CRITICAL 太严了,我降级为 WARNING 让用户 ack"            | fence 在 `severity` 字段重算 finding_hash(沿 plan-9d Task 6),篡改任一 hash payload 字段 → 拒签   |
 | "option=3 转 out-of-scope 时 rationale 写"用户决定即可"" | rationale 必须论证"为什么 subagent 能跳过"— 不是"用户决定"是答案                                 |
+
+### plan-9g 新增:DONE_REPORT 必须含 process_evidence 字段
+
+subagent 在 task 实施完成报 DONE 时,**必须**提供以下字段给主代理(供 `forge evidence record-tdd` helper 用):
+
+- `red_commit`:RED 阶段 commit sha + ISO timestamp
+- `red_log_path` + `red_log_hash`(sha256)
+- `red_report_path` + `red_report_hash`(JUnit XML / TAP / Vitest JSON)
+- `red_exit_code`(必 != 0)
+- `green_commit`:同上(GREEN)
+- `green_exit_code`(必 == 0)
+- `expected_failures`:RED 阶段绑定具体失败的 test(test_file + test_name + failure_type)
+
+若 light mode trivial change 走 tdd_exemption:必须先调 `forge ack propose --action ack-tdd-exemption`,DONE_REPORT 含 ack_log entry 引用。
+
+详细 process_evidence 协议见 `skills/process-evidence/SKILL.md`。

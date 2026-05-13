@@ -104,9 +104,27 @@ You are about to handle `/forge:verify $ARGUMENTS`.
        # ... 其他 finding
      ```
 
-     4.4 **若产任何 WARNING + resolved=false**:提示用户 — archive 阶段必须先 `forge ack propose <finding-id>`(沿 9a 两步流程),否则 archive fence 拒签。
+     4.4 **(plan-9g 新增):调 forge evidence freeze 凝固 process_evidence**
 
-     4.5 **若产任何 automated=true CRITICAL + resolved=false**:**不能 archive**(沿 design §2.2.4 fence)— 必须先实际修复让 finding resolved=true(改 code + 重跑 verify),不允许 ack 降级。
+     主代理在写完 .verify-passed YAML 后,**必须**调:
+
+     ```bash
+     forge evidence freeze <changeId> --kind verify
+     ```
+
+     freeze 子命令做:
+     1. 读 `.evidence/process-evidence.staging.yaml` + 校验 staging_hash
+     2. 复制三数组(tdd_event_chain / verify_invocations / subagent_review_chain)到 marker.process_evidence
+     3. 写 marker.process_evidence_staging_hash + ack_log_tail_hash + ack_log_entry_count(五源 cross-check 用)
+     4. 算 freeze-time WARNING(不变量 7 + 10)→ 转 VerifyFinding 写 marker.verify_findings
+     5. 若 CRITICAL 11/12(tdd_exemption 缺 ack / mode 缺 ack)→ exit 1 + 提示先跑 forge ack
+     6. transaction(tmp + rename atomic)落 marker
+
+     详细 process_evidence 协议见 `skills/process-evidence/SKILL.md`。
+
+     4.5 **若产任何 WARNING + resolved=false**:提示用户 — archive 阶段必须先 `forge ack propose <finding-id>`(沿 9a 两步流程),否则 archive fence 拒签。
+
+     4.6 **若产任何 automated=true CRITICAL + resolved=false**:**不能 archive**(沿 design §2.2.4 fence)— 必须先实际修复让 finding resolved=true(改 code + 重跑 verify),不允许 ack 降级。
 
 ## 禁止行为
 

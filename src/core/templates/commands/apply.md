@@ -131,3 +131,20 @@ pause_decisions:
 - 不允许主代理直接写代码 — 所有 task 实施必须通过 subagent
 - 不允许 subagent 改 tasks.md(写入是主代理单点串行职责)
 - 不允许跳过 TDD 的 red 步骤(verify 阶段会发现并 append 修复 task)
+
+## 禁止行为(plan-9g §2.7 process_evidence 协议)
+
+✗ **不允许绕过 forge evidence helper 直接写 process_evidence 字段**:
+
+- 不允许 `fs.writeFile .verify-passed` 或 `.review-passed` 含 process_evidence 字段
+- 不允许拼接 YAML 字面塞 process_evidence 到 marker
+- 不允许直接编辑 `.evidence/process-evidence.staging.yaml`
+
+✓ **必须**通过 helper 写入:
+
+- `forge evidence record-tdd <changeId> --task ... --red-commit ... --green-commit ... ...`(20 options)
+- `forge evidence record-verify <changeId> --task-refs ... --scope ... --report ...`
+- `forge evidence record-review <changeId> --task ... --implementer-commit ...`
+- `forge evidence freeze <changeId> --kind verify|review`(在 marker YAML 写完后调,统一凝固)
+
+详细 process_evidence 协议见 `skills/process-evidence/SKILL.md`。

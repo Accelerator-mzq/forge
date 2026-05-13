@@ -7,7 +7,7 @@ metadata:
   author: forgeue project (extracted to generic)
   version: "1.0-generic"
   scenario_subtype_count: 28
-  case_study_count: 5
+  case_study_count: 6
   retrospect_protocol: trigger-type-matrix(5 types × per-type intensity)
 ---
 
@@ -941,6 +941,88 @@ git update-ref refs/heads/<wrong-branch> <prior-base-sha>
 - 全 Opus 假设:7 implementer × 2 + 14 reviewer + 5 round 2 + 1 final + 2 direct + 1 retrospect ≈ **$22-28**
 - 节省 ratio:~80%
 - **质量**:28 commits + 1 CI fix + 1 final fix = 30 commits 全 commit + push origin/feature/v1.0-fusion-completion-design + PR #29 合入 dev + 0 regression + 14 不变量 fence 全 GREEN + e2e 用户工作流真闭环 + Final reviewer 实测 verify I-1/A8 升级 + 7 new patterns 沉淀
+
+---
+
+### Case 06: forge-repo / Plan 9e2 / ProcessEvidenceSummary 真实统计接入 5 Task
+
+**Date**:2026-05-13
+**Trigger Type**:Type 1(3-stage full retrospect mandatory + final reviewer cross-task synthesis)
+**Project context**:TS/Node monorepo(opsp/forge-repo),plan-9e2 落 archive_summary.process_evidence_summary 从 plan-9e1 placeholder 接 plan-9g 14 不变量真实统计 — 5 Task 跨 fence.ts FenceInvariantResult.status 4 态 enum + LEGACY_EXEMPT_INVARIANTS 模块级常量 + mapFindingsToResults 导出纯函数 / summary-builder.ts buildProcessEvidenceSummary 私有 fn + buildArchiveSummary 签名扩 fenceResult / archive-summary-schema.ts placeholder=false 严格校验(EXPECTED_INVARIANT_COUNT + REQUIRED_FIELDS 模块级 + 4 字段必填 + 值域 + sum 不变式)/ archive.ts:534-540 透传(Task 2 同步)/ commands/archive.md 双改 + md5 sync invariant guard;**13 commits**(5 Task GREEN + 3 Task round 2 quality fix + 1 tail fix + Task 4 docs-only empty + Task 5 invariant guard)直接 commit 到 dev(非 feature branch);spec v6 6 轮 codex 收敛 + plan v4 4 轮 codex 收敛 + 跨 OS CI(Linux+Windows)全绿 push origin/dev
+
+**Subagent dispatch**:
+| Subagent | Scenario subtype(§1.X.Y)| Model | $cost | Verdict |
+|---|---|---|---|---|
+| Task 1 implementer(fence 4 态 + LEGACY_EXEMPT_INVARIANTS + mapper + schema 扩字段)| §1.1.3 Multi-file integration | sonnet | ~$0.25 | DONE |
+| Task 1 spec_reviewer | §1.2.4 acceptance criteria | sonnet | ~$0.15 | ✅ |
+| Task 1 code_quality_reviewer | §1.3.3 maintainability | sonnet | ~$0.20 | ⚠️ I-1 reviewLegacyExempt 重复声明 + I-2 测试 case 4 冗余 |
+| Task 1 round 2 + re-review | §1.1.3 + §1.3.3 | sonnet | ~$0.20 | ✅ |
+| Task 2 implementer(summarize fn + 签名扩 + 既有 17 test 加 STUB)| §1.1.3 Multi-file integration | sonnet | ~$0.40 | DONE — 自加 4 处偏离 plan(import 顶部 / 既有 test 加 STUB / PLACEHOLDER import 移除 / baseline placeholder true→false)全 spec reviewer 接受 |
+| Task 2 spec_reviewer | §1.2.4 acceptance criteria | sonnet | ~$0.25 | ✅ — 4 处偏离独立 verify 全合理 + Task 3 regression 风险独立分析无风险 |
+| Task 2 code_quality_reviewer | §1.3.4 runtime correctness | sonnet | ~$0.30 | ⚠️ I-1 STUB_FENCE_RESULT 结构性假阴性 + I-2 命名 vs 仓库 build 前缀约定 + I-3 case 4 描述失配 |
+| Task 2 round 2 + re-review | §1.1.3 + §1.3.4 | sonnet | ~$0.30 | ⚠️ I-2 rename 注释残留 2 处(tail fix) |
+| Task 2 round 3(tail fix)| §1.1.1 Mechanical | sonnet | ~$0.10 | ✅ — grep summarizeProcessEvidence 0 匹配 |
+| Task 3 implementer(schema validator 4 字段 + 值域 + sum 不变式)| §1.1.1 Mechanical(plan inline 字面 transcribe)| haiku | ~$0.10 | DONE — 自报 4 处 `void var` 抑制(ESLint no-unused-vars destructuring 丢弃) |
+| Task 3 spec_reviewer | §1.2.1 string matching | sonnet | ~$0.20 | ✅ — `void` 抑制独立评估为合理 ESLint 修复 |
+| Task 3 code_quality_reviewer | §1.3.3 maintainability | sonnet | ~$0.25 | ⚠️ I-1 REQUIRED_FIELDS 应模块级(SCREAMING_SNAKE_CASE 仓库约定 = 模块级)+ I-2 case 5/6 数据数学矛盾 |
+| Task 3 round 2 + re-review | §1.1.1 + §1.3.3 | haiku | ~$0.10 | ✅ |
+| Task 4 implementer(docs-only empty commit + 跑现有测试)| §1.7.2 cross-check verification | haiku | ~$0.10 | DONE — empty commit + 全 1003 test 无回归 |
+| Task 4 spec_reviewer | §1.2.4 acceptance criteria | sonnet | ~$0.10 | ✅ |
+| Task 4 code_quality_reviewer | minimal(0 code change)| sonnet | ~$0.10 | ✅ Approved(commit message 准确 + pattern healthy)|
+| Task 5 implementer(archive.md 双改 + md5 sync test)| §1.1.1 Mechanical + §1.5.1 doc sync | haiku | ~$0.15 | DONE — 1 invariant guard commit + 1 GREEN commit + md5 同步 9ace21b6... |
+| Task 5 spec_reviewer | §1.2.1 string matching | sonnet | ~$0.15 | ✅ — 4 处文案 + 短段字面与 plan 一致 |
+| Task 5 code_quality_reviewer | §1.3.3 maintainability + build pipeline 影响 | sonnet | ~$0.20 | ✅ Approved — Important(cwd 依赖)为仓库全局惯例;Minor build pipeline auto-sync 注记 |
+| **Final reviewer** | cross-task synthesis(Type 1 mandate)| sonnet | ~$0.30 | ✅ Approved — ready to merge,0 Critical / 0 Important,Minor 留 plan-9z polish |
+| Retrospect(本次)| Type 1 mandatory(§3.4.1)| controller(opus 4.7)| ~$0.30 | Q3 Yes(3 round 2 fix)→ add Case 06 reinforce |
+
+**Real issues caught / failed**:
+| Issue | Severity | Caught by | Scenario subtype 验证 |
+|---|---|---|---|
+| Task 1 I-1 reviewLegacyExempt 重复声明(if block 内 + 函数级两处)| Important | Task 1 sonnet code_quality round 1 + controller cross-verify line 167-172 vs 212-214 实测 | §1.3.3 — sonnet maintainability 抓双声明 |
+| Task 1 I-2 测试 case 4 冗余(与 case 3 完全相同入参 + 子集断言)| Important | Task 1 sonnet code_quality round 1 + controller 实测两 case 数据等价 | §1.3.3 — 测试设计冗余 |
+| Task 2 I-1 STUB_FENCE_RESULT 结构性假阴性(空 results sum=0 ≠ 14;Task 3 严格校验上线后既有 17 test 失败风险) | Important+ | Task 2 sonnet code_quality round 1 + controller 提前预警 Task 3 regression 风险 | §1.3.4 + cross-Task forward-compat — 类似 Case 05 Pattern K(cross-Task test interaction)但 reverse(N+1 Task 严格化 / N Task 既有 test 漏失败)|
+| Task 2 I-2 命名 summarizeProcessEvidence vs 仓库 build/collect 前缀约定 | Important | Task 2 sonnet code_quality round 1 | §1.3.3 — 命名约定 + 类比 Case 01 Pattern B 反向(plan inline 字面 vs 仓库约定不符)|
+| Task 2 I-3 case 4 描述 "WARNING 落保留 invariant" vs 实际 buildStubFenceResult 顺序生成的 WARNING 落在 idx 4 非保留 invariant | Important(测试可读性)| Task 2 sonnet code_quality round 1 | §1.3.3 — test name/data 失配 |
+| Task 3 I-1 REQUIRED_FIELDS 函数内 vs 模块级(SCREAMING_SNAKE_CASE 仓库约定 = 模块级,marker-schema.ts:11-51 全模块级)| Important | Task 3 sonnet code_quality round 1 + controller 对照 marker-schema.ts 仓库约定 | §1.3.3 — 命名约定(reinforce Case 01 Pattern B stack-specific 模式;本次是 TS/Node 仓库内部约定)|
+| Task 3 I-2 case 5/6 数据数学矛盾(sum=14 + 单字段越界不可能;双字段同越界 test name 只提一个)| Important(测试可读性)| Task 3 sonnet code_quality round 1 + controller 数学推导确认 | §1.3.3 — test design 数学约束识别 |
+| Task 3 4 处 `void var` 抑制 ESLint no-unused-vars(destructuring 丢弃)| Minor(implementer 自补 lint 修复)| Task 3 haiku self-report + spec reviewer 独立评估为合理 | §1.1.1 — implementer 严格按 plan transcribe + 自补 stack-specific lint 抑制(plan inline 未考虑 ESLint config)|
+| Task 5 cwd 依赖 process.cwd()(md5 sync test)| Important(非 blocker;仓库全局惯例)| Task 5 sonnet code_quality | §1.3.3 — 仓库全局约定 accept |
+| Task 5 build pipeline auto-sync 注记(copy-templates.mjs build 时覆盖 templates/)| Minor(plan 知晓但未文档)| Task 5 sonnet code_quality 实测 | §1.3.4 — build pipeline 行为对 md5 guard 时机的影响 |
+
+**Lesson**(reinforce / new pattern / 边界 refinement):
+
+1. **REINFORCE Pattern G/I(Case 05)— Plan inline 字面 vs 仓库约定/schema 不符**(Task 2 I-2 命名 + Task 3 I-1 SCREAMING_SNAKE_CASE 模块级实证)
+   - 实证:plan-9e2 v4 inline 代码 `summarizeProcessEvidence` 与仓库 `buildVerifiedInvariants` / `collectAckedWarnings` 命名约定不符;`REQUIRED_FIELDS` 函数内 vs 仓库 marker-schema.ts:11-51 全模块级 SCREAMING_SNAKE_CASE 约定不符。
+   - **类比 Case 05 Pattern I**:那是 plan inline placeholder 字面与现有 schema regex 不符(`'sha256:placeholder'` 不符 SHA256_RE);Case 06 reinforce 是 **plan inline 命名 / 常量位置约定与仓库内部约定不符**。
+   - **fix 模式**:plan inline 实施时 cross-check 仓库约定(grep 同 directory 现有 fn/const 命名 + module-level vs function-level 分布)→ implementer 按仓库约定调整,reviewer 抓 polish。
+   - **dispatch prompt 加(reinforce §1.1.3 multi-file integration playbook)**:Pre-verified Data 段 controller 给 implementer 列**同 directory 现有 fn/const 命名约定 + module-level vs function-level 分布 sample**(grep `^export const|^export function` 同 directory)→ implementer transcribe plan 时自动对齐仓库约定。
+
+2. **NEW Pattern N — Cross-Task forward-compat test stub 不变式覆盖**(Task 2 I-1 STUB_FENCE_RESULT 实证)
+   - 实证:Task 2 implementer 给既有 ~17 test 加 STUB_FENCE_RESULT={results:[]} (typecheck fix);**当 Task 3 引入 schema sum 不变式严格校验后,sum=0 ≠ 14 → 既有 17 test 失败**。Task 2 quality reviewer 抓住此 forward-compat 风险,在 Task 3 实施前修订 STUB 为 14 全 pass(sum=14 不变式成立)。
+   - **与 Case 05 Pattern K 区别**:Pattern K 是 N+1 Task enable real logic 后 N Task test 触发 long-running operation timeout;Pattern N 是 **N Task 加的 STUB 在 N+1 Task 严格化 schema 不变式后违反 → 既有 test 失败**(reverse 方向:不是 long-running 而是 schema 不变式破)。
+   - **fix 模式**:STUB constant 改用 helper 构造 14 全 pass 满足下游 schema 不变式(代价:helper 提前到 STUB 之前 declaration order),既有 test 仍不断言 process_evidence_summary 字段 + 不被 stub 真实数据影响。
+   - **dispatch prompt 加 §1.1.3 multi-file integration playbook**:涉及"既有 N test 加 stub 适配 N+1 Task 签名变更"时,**显式列 N+1 Task 后续 schema 不变式 / 严格校验需求** → implementer 选 stub 默认值时主动满足下游不变式(forward-compat by design)。
+
+3. **REINFORCE Case 01 Pattern B(stack-specific self-review)+ §2.1 implementer playbook**(Task 3 `void var` 抑制实证)
+   - 实证:plan-9e2 Task 3 inline test 代码 `const { invariants_passed, ...rest } = realSummaryBaseline;` destructuring 丢弃 `invariants_passed`,触发 ESLint `@typescript-eslint/no-unused-vars: error`(tests/ 生效)。haiku implementer 严格按 plan transcribe 后自补 4 处 `void invariants_passed;` 抑制 → 跑 lint PASS。spec reviewer 独立评估为合理 ESLint 修复。
+   - **与 Case 01 Pattern B 区别**:那是 Python pytest checklist vs TS pnpm format:check 套错;Pattern C-extension 是 **stack-specific lint config 与 plan inline 代码 mismatch**(plan inline 未考虑 ESLint `no-unused-vars` 对 destructuring 丢弃的报错)。
+   - **§2.1 stack-specific lint checklist 加**:plan inline test 代码含 `const { foo, ...rest }` destructuring 丢弃 `foo` 时,implementer 自补 `void foo;` 抑制(标准 TS 社区做法;ESLint `varsIgnorePattern` 默认不存在时,`_` 前缀 unused 抑制不生效)+ self-review 项"plan inline destructuring 丢弃变量是否触发 no-unused-vars"。
+
+4. **REINFORCE Case 05 Pattern L — implementer self-report "acceptable risk" / spec/plan inline 字面无 polish issue 自评 → reviewer 实测验证抓 polish**(plan-9e2 5 Task 3 round 2 fix 实证)
+   - 实证:plan-9e2 5 Task 中 Task 1/2/3 的 implementer 严格按 plan 字面 transcribe(quality reviewer round 1 找出每 Task 2-3 Important polish issues:重复声明 / 冗余 case / 命名约定 / 数据数学矛盾)。implementer 没自报 "acceptable risk",但 plan v4 4 轮 codex review 收敛过程中已经 review 多次,inline 代码仍有 polish 间隙;quality reviewer 是 polish 抓手。
+   - **Implementer plan-strict 实施 ≠ 仓库约定完整覆盖** — review 阶段 quality reviewer 是 polish 防线,不能 skip。
+   - **§2.1 implementer playbook 加**:plan inline code 严格 transcribe 后,**self-review 加项 "我加的代码与同 directory 现有约定(命名 / 常量位置 / lint mode)对齐了吗?"** — 不依赖 reviewer 唯一防线。
+
+5. **REINFORCE Case 05 Pattern J — reviewer Important 但 system-wide 关键词 → controller 实测升级**(plan-9e2 Task 2 I-1 STUB 假阴性实证)
+   - 实证:Task 2 quality reviewer 标 I-1 Important;但描述含 "Task 3 schema 不变式上线后既有 17 test 失败" 关键词("17 test 失败" 接近 "all-fail" 系统级影响)。controller cross-verify 确认 forward-compat 风险真实,虽然立即不破(Task 2 阶段 schema validator 未严格化)但 Task 3 必触发 → implementer 修订 STUB 为 14 全 pass 主动避免 Task 3 regression。
+   - **类比 Case 05 Pattern J**:那是 reviewer 标 Important 但 "system-wide broken" 关键词 → controller 实测升级 Critical;本次 reverse — reviewer 标 Important 含 "17 test 失败" forward-compat 关键词 → controller 不升级 Critical(因为立即不破)但 schedule fix in current task(Task 2 round 2 不等 Task 3 暴露)。
+   - **§3.2 cross-verify 强化**:reviewer 标 Important 含 "system-wide" / "all-fail" / "N test 失败" / "forward-compat" / "下游 Task X 后破" 等关键词 → controller 实测 verify(grep 涉及 file:line + 推演下游 Task 行为)→ 决定 round 2 fix 立即修 / 升级 Critical / 接受推迟 Task X 暴露。
+
+**Cost vs all-Opus alternative**:
+- 实际:5 Task implementer(haiku ×3 / sonnet ×2 — 各 1-2 round)~$1.20 + 10 per-task reviewer(sonnet,各 1-2 round)~$1.80 + 1 round 3 tail fix(sonnet)~$0.10 + 1 final reviewer(sonnet)~$0.30 + 1 retrospect(opus)~$0.30 ≈ **$3.70**
+- 全 Opus 假设:5 implementer × 2 + 10 reviewer + 5 round 2 + 1 final + 1 retrospect ≈ **$18-22**
+- 节省 ratio:~80%(与 Case 05 同模式)
+- **质量**:13 commits 全 commit + push origin/dev + 跨 OS CI(Linux+Windows)全绿 + 0 regression + spec v6(6 轮 codex 0 BLOCKER/MAJOR 收敛)+ plan v4(4 轮 codex 0 BLOCKER/MAJOR 收敛)+ 5 Task 全 final review Approved + 2 reinforce patterns(G/I + L + Case 01 Pattern B + Case 05 Pattern J)+ 1 new Pattern N(cross-Task forward-compat test stub 不变式覆盖)
 
 ---
 

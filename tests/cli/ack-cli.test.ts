@@ -29,6 +29,7 @@ describe('forge ack propose', () => {
       const result = runCli(
         ['ack', 'propose', 'test-change', '--finding', '7', '--action', 'ack-warning'],
         root,
+        { CI: '' }, // CI 环境(GitHub runner CI=true)会让 ack propose exit 2;显式清空模拟本地开发
       );
 
       // exit code 1:AI 已写 pending,需要 user 确认
@@ -74,7 +75,11 @@ describe('forge ack propose', () => {
   it('pending 文件名匹配 <findingId>-<isoTimestamp>.yaml 格式', () => {
     const root = setupChange();
     try {
-      runCli(['ack', 'propose', 'test-change', '--finding', '7', '--action', 'ack-warning'], root);
+      runCli(
+        ['ack', 'propose', 'test-change', '--finding', '7', '--action', 'ack-warning'],
+        root,
+        { CI: '' }, // CI 环境覆盖,沿 test 1 模式
+      );
 
       const pendingDir = join(root, 'forge', 'changes', 'test-change', '.evidence', 'pending-acks');
       const files = readdirSync(pendingDir);
@@ -94,7 +99,11 @@ describe('forge ack confirm', () => {
     const root = setupChange();
     try {
       // 先 propose
-      runCli(['ack', 'propose', 'test-change', '--finding', '7', '--action', 'ack-warning'], root);
+      runCli(
+        ['ack', 'propose', 'test-change', '--finding', '7', '--action', 'ack-warning'],
+        root,
+        { CI: '' }, // CI 环境覆盖
+      );
 
       // 再 confirm
       const result = runCli(['ack', 'confirm', 'test-change', '7'], root);
@@ -135,7 +144,11 @@ describe('forge ack reject', () => {
     const root = setupChange();
     try {
       // 先 propose
-      runCli(['ack', 'propose', 'test-change', '--finding', '7', '--action', 'ack-warning'], root);
+      runCli(
+        ['ack', 'propose', 'test-change', '--finding', '7', '--action', 'ack-warning'],
+        root,
+        { CI: '' }, // CI 环境覆盖
+      );
 
       // 再 reject
       const result = runCli(

@@ -22,7 +22,7 @@ import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { stringify, parse } from 'yaml';
-import { appendAckLog } from '../../core/ack-log.js';
+import { appendAckLog, readAllAckLogEntries } from '../../core/ack-log.js';
 import type { EvidenceHelperEntry } from '../../core/ack-log.js';
 import { canonicalHash } from '../../core/canonical-json.js';
 import { acquireStagingLock } from '../../core/staging-lock.js';
@@ -36,6 +36,8 @@ import type {
   ExpectedFailure,
   ReviewIteration,
 } from '../../core/schemas/process-evidence.js';
+import type { VerifyFinding } from '../../core/markers/types.js';
+import { computeFreezeWarnings } from '../../core/process-evidence-freeze-warnings.js';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // staging.yaml 路径
@@ -600,6 +602,231 @@ export function buildEvidenceCommand(): Command {
         process.exit(0);
       },
     );
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // 子命令 4: forge evidence freeze <changeId> --kind <verify|review>
+  // plan-9g Task 4 — staging → marker 凝固 + transaction + WARNING 转 VerifyFinding
+  // brainstorm spec §5 数据流 + §9.6 锁定 B(transaction)+ §9.11(ack-log tail+count 固化)
+  // ────────────────────────────────────────────────────────────────────────────
+
+  evidence
+    .command('freeze')
+    .description('staging → marker 凝固;主代理在 verify/review marker 写完后显式调用')
+    .argument('<changeId>', 'change 目录 ID')
+    .requiredOption(
+      '--kind <verify|review>',
+      'freeze 目标 marker:verify 或 review(commander.requiredOption,omit 自动 exit 1)',
+    )
+    .option('--marker <path>', 'marker 路径(可选,默认按 --kind 派生)')
+    .action(async (changeId: string, opts: { kind: string; marker?: string }) => {
+      // 校验 --kind 取值(commander.requiredOption 已保证非空,但仍校 enum)
+      if (opts.kind !== 'verify' && opts.kind !== 'review') {
+        process.stderr.write(
+          `forge evidence freeze: invalid --kind "${opts.kind}". Must be 'verify' or 'review'\n`,
+        );
+        process.exit(2);
+      }
+      const kind = opts.kind as 'verify' | 'review';
+
+      const changeRoot = resolve(process.cwd(), 'forge', 'changes', changeId);
+      const markerFilename = kind === 'verify' ? '.verify-passed' : '.review-passed';
+      const markerPath = opts.marker ?? join(changeRoot, markerFilename);
+
+      // 路径冲突检测(--marker 与 --kind 派生不一致 → stderr WARNING)
+      const derivedPath = join(changeRoot, markerFilename);
+      if (opts.marker && opts.marker !== derivedPath) {
+        process.stderr.write(
+          `⚠ forge evidence freeze: --marker (${opts.marker}) 与 --kind=${kind} 派生路径 (${derivedPath}) 不一致;以 --marker 为准\n`,
+        );
+      }
+
+      // 1. acquireStagingLock(防 freeze 期间 helper 再 append)
+      const releaseLock = await acquireStagingLock(changeRoot);
+      try {
+        // 2. 读 staging.yaml
+        const stagingPath = join(changeRoot, '.evidence', 'process-evidence.staging.yaml');
+        if (!existsSync(stagingPath)) {
+          process.stderr.write(
+            `forge evidence freeze: staging file not found at ${stagingPath};` +
+              ` 主代理必须先调 forge evidence record-tdd/verify/review 写 staging\n`,
+          );
+          process.exit(1);
+        }
+        const stagingContent = await readFile(stagingPath, 'utf8');
+        const staging = parse(stagingContent) as ProcessEvidence & {
+          staging_hash: string;
+        };
+
+        // 3. 重算 staging_hash 校验未被中间篡改
+        // Observation(latent bug 1):plan §5.1.1 字面 projection 三数组与 Task 3 实际公式不一致。
+        // Task 3 writeStagingYaml:stagingHash = canonicalHash(data) 其中 data 是完整 ProcessEvidence struct
+        //   (不含 staging_hash),再写 { ...data, staging_hash }。
+        // 所以读取后 staging 含 staging_hash 信封字段;重算需剥离该字段对剩余做 canonicalHash。
+        // 沿 Task 3 落地公式(backward-compatible)。
+        const { staging_hash: storedHash, ...stagingForHash } = staging;
+        const recomputedHash = canonicalHash(stagingForHash);
+        if (recomputedHash !== storedHash) {
+          process.stderr.write(
+            `✗ forge evidence freeze: staging_hash mismatch — staging tampered\n`,
+          );
+          process.exit(1);
+        }
+
+        // 4. 读 marker(主代理刚写的 .verify-passed/.review-passed)
+        if (!existsSync(markerPath)) {
+          process.stderr.write(
+            `forge evidence freeze: marker not found at ${markerPath};` +
+              ` 主代理必须先写 .${kind}-passed yaml(沿 commands/verify.md 步骤 4.3)\n`,
+          );
+          process.exit(1);
+        }
+        const markerContent = await readFile(markerPath, 'utf8');
+        const marker = parse(markerContent) as Record<string, unknown>;
+
+        // 5. staging schema 强制必填 mode/ack/env_hash;freeze 时缺字段 → exit 1
+        //    (v3 修订:mode != full 时 acked_by/acked_at 必填;env_hash 子字段完整性)
+        const stagingTyped = staging as typeof staging & {
+          process_verification_mode?: 'full' | 'sample' | 'hash-only';
+          process_verification_mode_acked_by?: string | null;
+          process_verification_mode_acked_at?: string | null;
+          env_hash?: {
+            lockfile_hash: string;
+            node_version: string;
+            os_platform: 'win32' | 'darwin' | 'linux';
+          };
+        };
+
+        const missingFields: string[] = [];
+        if (!stagingTyped.process_verification_mode)
+          missingFields.push('process_verification_mode');
+        // mode != full 时 acked_by + acked_at 必填(沿不变量 12 CRITICAL)
+        if (
+          stagingTyped.process_verification_mode &&
+          stagingTyped.process_verification_mode !== 'full'
+        ) {
+          if (!stagingTyped.process_verification_mode_acked_by)
+            missingFields.push('process_verification_mode_acked_by (mode != full required)');
+          if (!stagingTyped.process_verification_mode_acked_at)
+            missingFields.push('process_verification_mode_acked_at (mode != full required)');
+        }
+        if (!stagingTyped.env_hash) {
+          missingFields.push('env_hash');
+        } else {
+          // env_hash 子字段完整性
+          if (!stagingTyped.env_hash.lockfile_hash) missingFields.push('env_hash.lockfile_hash');
+          if (!stagingTyped.env_hash.node_version) missingFields.push('env_hash.node_version');
+          if (!stagingTyped.env_hash.os_platform) missingFields.push('env_hash.os_platform');
+        }
+        if (missingFields.length > 0) {
+          process.stderr.write(
+            `forge evidence freeze: staging.yaml missing required fields: ${missingFields.join(', ')};` +
+              ` 主代理必须先调 forge evidence record-tdd 写完整 staging(含 --mode + --lockfile-hash + 环境字段)\n`,
+          );
+          process.exit(1);
+        }
+
+        // 构造 processEvidence(不含 staging_hash 信封字段)
+        const processEvidence: ProcessEvidence = {
+          schema: 'forge-process-evidence/v1',
+          process_verification_mode: stagingTyped.process_verification_mode!,
+          process_verification_mode_acked_by:
+            stagingTyped.process_verification_mode_acked_by ?? null,
+          process_verification_mode_acked_at:
+            stagingTyped.process_verification_mode_acked_at ?? null,
+          env_hash: stagingTyped.env_hash!,
+          tdd_event_chain: staging.tdd_event_chain,
+          verify_invocations: staging.verify_invocations,
+          subagent_review_chain: staging.subagent_review_chain,
+        };
+        marker.process_evidence = processEvidence;
+
+        // 6. 写 process_evidence_staging_hash 快照(archive fence cross-check 用)
+        marker.process_evidence_staging_hash = storedHash;
+
+        // 7. 三段式 entry 处理:
+        //    a) entriesBeforeFreeze:用于 11/12 ack 检测(freeze entry 还未在)
+        //    b) appendAckLog(freezeEntry):写 freeze 行(参与全 JSONL 链)
+        //    c) entriesAfterFreeze:用于 tail/count 固化(含 freeze entry)
+        //    避免 happy path 自拒签(原 v0/v1:用同名 allEntries 跨两阶段导致顺序错乱)
+        const entriesBeforeFreeze = await readAllAckLogEntries(changeRoot);
+
+        // 8. 算 freeze-time WARNING(仅不变量 7 + 10)→ 转 VerifyFinding 写 marker.verify_findings
+        //    + CRITICAL 11/12(tdd_exemption ack / mode ack)freeze 时直接 exit 1
+        //    (brainstorm spec §3 WARNING 流转两段闭合)
+        //    用 entriesBeforeFreeze(freeze entry 还未在);避免循环依赖
+        const warningFindings = computeFreezeWarnings(
+          processEvidence,
+          changeRoot,
+          entriesBeforeFreeze,
+        );
+        // 若 fence-ctx 检测到不变量 11/12 失败 → CRITICAL,exit 1
+        if (warningFindings.criticals.length > 0) {
+          for (const c of warningFindings.criticals) {
+            process.stderr.write(`✗ ${c.evidence}\n`);
+          }
+          process.stderr.write(
+            `forge evidence freeze: CRITICAL invariant failed;` +
+              ` 必须先跑 forge ack propose 处理后 retry freeze\n`,
+          );
+          process.exit(1);
+        }
+        // WARNING 7/10 转 VerifyFinding 追加 marker.verify_findings
+        if (warningFindings.warnings.length > 0) {
+          const existingFindings = (marker.verify_findings as VerifyFinding[] | undefined) ?? [];
+          marker.verify_findings = [...existingFindings, ...warningFindings.warnings];
+        }
+
+        // 9. 先 append freeze entry 到 ack-log,再读全文件算 tail/count 固化
+        //    freeze entry payload_hash 不含 ack_log_tail_hash(循环依赖避免)
+        //    markerPath 跨平台归一化正斜杠(plan-9g 注:Windows 反斜杠路径 hash 不一致)
+        const normalizedMarkerPath = markerPath.replace(/\\/g, '/');
+        const freezeEntry: EvidenceHelperEntry = {
+          schema: 'forge-ack-log/v1',
+          kind: 'evidence-helper',
+          timestamp: new Date().toISOString(),
+          helper_name: 'freeze',
+          change_id: changeId,
+          task_ref: `freeze-${kind}`, // 标志 freeze 而非 record-*
+          payload_hash: canonicalHash({
+            helper: 'freeze',
+            change_id: changeId,
+            kind,
+            marker_path: normalizedMarkerPath,
+            staging_hash: storedHash,
+            warning_count: warningFindings.warnings.length,
+          }),
+          status: 'success',
+          git_head: getGitHead(changeRoot),
+          extra: { kind, warning_count: warningFindings.warnings.length },
+        };
+        await appendAckLog(changeRoot, freezeEntry);
+
+        // 10. 读 entriesAfterFreeze(此时已含 freeze entry)→ 算 tail/count 固化到 marker
+        const entriesAfterFreeze = await readAllAckLogEntries(changeRoot);
+        marker.ack_log_entry_count = entriesAfterFreeze.length;
+        marker.ack_log_tail_hash =
+          entriesAfterFreeze.length > 0
+            ? canonicalHash(entriesAfterFreeze[entriesAfterFreeze.length - 1]!)
+            : null;
+
+        // 11. transaction 落 marker(沿 brainstorm spec §9.6 锁定 B + plan-9e1 transaction.ts 模式)
+        //    tmp 文件写 + rename atomic(POSIX + Windows NTFS 同卷)
+        const tmpPath = `${markerPath}.tmp.${process.pid}`;
+        const updatedYaml = stringify(marker);
+        await writeFile(tmpPath, updatedYaml, 'utf8');
+        // rename atomic(POSIX + Windows NTFS 同卷)
+        await rename(tmpPath, markerPath);
+
+        process.stdout.write(
+          `✓ forge evidence freeze: ${kind} marker frozen` +
+            ` (staging_hash=${storedHash.slice(0, 16)}..., ` +
+            `${warningFindings.warnings.length} WARNING(s) → marker.verify_findings)\n`,
+        );
+        process.exit(0);
+      } finally {
+        await releaseLock();
+      }
+    });
 
   return evidence;
 }

@@ -65,11 +65,10 @@ describe('runInWorktree', () => {
 
   it('Case 2: timeout 触发 WorktreeError stage=timeout', async () => {
     await expect(
-      runInWorktree(
-        sha,
-        () => new Promise((resolve) => setTimeout(resolve, 200)),
-        { cwd: repoPath, timeout: 50 },
-      ),
+      runInWorktree(sha, () => new Promise((resolve) => setTimeout(resolve, 200)), {
+        cwd: repoPath,
+        timeout: 50,
+      }),
     ).rejects.toMatchObject({
       name: 'WorktreeError',
       stage: 'timeout',

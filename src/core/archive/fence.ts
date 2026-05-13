@@ -14,7 +14,10 @@ import {
   runFieldFence,
   parseSemverMajor,
 } from './process-evidence-fence.js';
-import type { ProcessEvidenceFenceContext, ProcessEvidenceFinding } from './process-evidence-fence.js';
+import type {
+  ProcessEvidenceFenceContext,
+  ProcessEvidenceFinding,
+} from './process-evidence-fence.js';
 // plan-9g Task 6:rerun fence import(本 Task 5 时尚未,Step 5.2 仅 placeholder)
 // import { runRerunFence } from './process-evidence-rerun.js';
 

@@ -26,7 +26,9 @@ export function buildValidateCommand(): Command {
         try {
           fenceResult = await crossCuttingFenceCheck(changeDir);
         } catch (err) {
-          console.error(`✗ process_evidence fence error: ${err instanceof Error ? err.message : String(err)}`);
+          console.error(
+            `✗ process_evidence fence error: ${err instanceof Error ? err.message : String(err)}`,
+          );
           process.exit(2);
         }
         if (fenceResult.ok) {

@@ -14,10 +14,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
-import type {
-  ProcessEvidence,
-  TddEventChain,
-} from '../schemas/process-evidence.js';
+import type { ProcessEvidence, TddEventChain } from '../schemas/process-evidence.js';
 import type { AckLogEntry, EvidenceHelperEntry } from '../ack-log.js';
 import { readAllAckLogEntries, verifyAckLogChain } from '../ack-log.js';
 import { canonicalHash } from '../canonical-json.js';
@@ -333,7 +330,10 @@ export function runFieldFence(ctx: ProcessEvidenceFenceContext): ProcessEvidence
   // 简化版:reviewer_commit 必须是 implementer_commit 的后代;后续 reviewer 必须是前一个后代
   for (const review of ctx.processEvidence.subagent_review_chain) {
     let prevCommit = review.implementer_commit;
-    const allIterations = [...review.spec_reviewer_iterations, ...review.quality_reviewer_iterations];
+    const allIterations = [
+      ...review.spec_reviewer_iterations,
+      ...review.quality_reviewer_iterations,
+    ];
     for (const iter of allIterations) {
       try {
         execFileSync('git', ['merge-base', '--is-ancestor', prevCommit, iter.reviewer_commit], {
@@ -410,9 +410,7 @@ export function runFieldFence(ctx: ProcessEvidenceFenceContext): ProcessEvidence
     if (chain.tdd_exemption !== null) {
       // Option C 简化:同 freeze-warnings.ts 模式(去掉 extra.task_ref 比较)
       const hasAck = ctx.ackLogEntries.some(
-        (e) =>
-          e.kind === 'ack' &&
-          (e as { action?: string }).action === 'ack-tdd-exemption',
+        (e) => e.kind === 'ack' && (e as { action?: string }).action === 'ack-tdd-exemption',
       );
       if (!hasAck) {
         findings.push({
@@ -521,7 +519,8 @@ function reconstructProjectionFromAckLog(entries: EvidenceHelperEntry[]): {
         task_ref: (extra.task_ref as string) ?? entry.task_ref,
         implementer_commit: extra.implementer_commit as string,
         spec_reviewer_iterations: (extra.spec_iterations as ReviewIterationProjection[]) ?? [],
-        quality_reviewer_iterations: (extra.quality_iterations as ReviewIterationProjection[]) ?? [],
+        quality_reviewer_iterations:
+          (extra.quality_iterations as ReviewIterationProjection[]) ?? [],
         main_agent_check_off_at: (extra.main_check_off_at as string) ?? entry.timestamp,
       });
     }

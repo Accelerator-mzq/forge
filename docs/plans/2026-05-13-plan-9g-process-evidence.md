@@ -2877,6 +2877,8 @@ git commit -F .git/COMMIT_MSG && rm .git/COMMIT_MSG
 | record-tdd | `--green-exit <int>` | `tdd_event_chain[i].green_commit.exit_code` | `green_commit.exit_code` | `TddEventChainProjection.green_commit.exit_code` |
 | record-tdd | `--mode <full\|sample\|hash-only>` | `process_verification_mode`(顶级) | `mode` | (顶级,非数组) |
 | record-tdd | `--tdd-exemption <json>` | `tdd_event_chain[i].tdd_exemption` | `tdd_exemption` | `TddEventChainProjection.tdd_exemption` |
+| record-tdd | `--tdd-exemption-acked-by <user>`(v6 修订,Codex 七轮 MAJOR) | `tdd_event_chain[i].tdd_exemption_acked_by` | `tdd_exemption_acked_by` | `TddEventChainProjection.tdd_exemption_acked_by` |
+| record-verify | `--result <pass\|fail\|skip>`(v6 修订,Codex 七轮 MAJOR) | `verify_invocations[i].result` | `result` | `VerifyInvocationProjection.result` |
 | record-verify | `--task-refs <list>` | `verify_invocations[i].task_refs` | `task_refs` | `VerifyInvocationProjection.task_refs` |
 | record-verify | `--scope <type>` | `verify_invocations[i].verify_scope` | `verify_scope` | `VerifyInvocationProjection.verify_scope` |
 | record-verify | `--report <path>` | `verify_invocations[i].runner_report_path` | `runner_report_path` | `VerifyInvocationProjection.runner_report_path` |
@@ -3759,6 +3761,13 @@ export interface ProcessEvidenceFenceContext {
   archiveHead: string | null;
   /** process.env.CI === 'true' */
   isCiMode: boolean;
+  /** ForgeConfig.process_verification sanitize 后的完整配置(v7 修订 Codex 七轮 BLOCKER 1) */
+  config: {
+    mode: 'full' | 'sample' | 'hash-only';
+    sample_ratio: number;
+    test_timeout_per_task: number; // 秒(runRerunFence 转毫秒用)
+    max_parallel_reruns: number;
+  };
   /**
    * v1 修订 Codex 一轮 M-4:加 reviewMarker 字段
    *  review marker 也含 process_evidence + 三 hash 字段(--kind review freeze 写);
@@ -3806,6 +3815,7 @@ export async function buildProcessEvidenceFenceContext(args: {
   verifyMarker: Record<string, unknown>; // 已 parseYaml 的 .verify-passed
   reviewMarker?: Record<string, unknown>; // 已 parseYaml 的 .review-passed(可选;legacy marker / verify-only 流程可能缺)
   legacyExempt?: boolean; // plan-9j legacy-exemption 调用方传入(v1 修订 Codex 一轮 B-3)
+  config: ProcessEvidenceFenceContext['config']; // v7 Codex 七轮 BLOCKER 1:caller 必须传入 sanitize 配置
 }): Promise<ProcessEvidenceFenceContext> {
   const { changeId, changeRoot, cwd, verifyMarker, reviewMarker, legacyExempt } = args;
 
@@ -3873,6 +3883,7 @@ export async function buildProcessEvidenceFenceContext(args: {
     tasksCount,
     archiveHead,
     isCiMode: process.env.CI === 'true',
+    config: args.config, // v7 Codex 七轮 BLOCKER 1
     // v1 Codex M-4:review marker 字段
     reviewMarker,
     reviewProcessEvidence,
@@ -4371,6 +4382,17 @@ export async function crossCuttingFenceCheck(
   const legacyExempt =
     (verifyMarker.process_evidence_unavailable_legacy as boolean | undefined) === true;
 
+  // v7 Codex 七轮 BLOCKER 1:读 forge/config.yaml + sanitize ProcessVerification 配置
+  const { parseConfig } = await import('../parse/index.js');
+  const { validateProcessVerificationConfig } = await import('../schema/process-verification-config.js');
+  let forgeConfig: import('../schema/types.js').ForgeConfig | undefined;
+  try {
+    forgeConfig = parseConfig(await readFile(join(projectRoot, 'forge', 'config.yaml'), 'utf8'));
+  } catch {
+    forgeConfig = undefined; // 缺 config 走默认
+  }
+  const sanitizedConfig = validateProcessVerificationConfig(forgeConfig);
+
   const ctx = await buildProcessEvidenceFenceContext({
     changeId,
     changeRoot,
@@ -4378,6 +4400,7 @@ export async function crossCuttingFenceCheck(
     verifyMarker,
     reviewMarker, // v1 M-4
     legacyExempt, // v1 B-3
+    config: sanitizedConfig, // v7 Codex 七轮 BLOCKER 1
   });
 
   // 2. runFieldFence(同步)
@@ -4728,13 +4751,16 @@ export async function runRerunFence(
     return findings;
   }
 
-  // 读 ForgeConfig.process_verification 配置(已在 buildProcessEvidenceFenceContext sanitize)
-  // 实施者注:ctx 缺该字段时需要从 changeRoot/.../forge/config.yaml 加载;Step 6.1 略,
-  //   writing-plans 阶段补 ctx.config 字段(沿 buildProcessEvidenceFenceContext 扩)
+  // 读 ForgeConfig.process_verification 配置(v7 修订 Codex 七轮 BLOCKER 1:完整 inline)
+  // ctx.config 是 buildProcessEvidenceFenceContext 已 sanitize 字段(沿 Task 5.1 Step 5.1.1);
+  // ProcessEvidenceFenceContext interface 已含 `config` 字段(Task 1.2 +
+  // validateProcessVerificationConfig 返 SanitizedProcessVerificationConfig);
+  // 调 buildProcessEvidenceFenceContext 时 caller(archive.ts crossCuttingFenceCheck)读
+  // forge/config.yaml + 调 validateProcessVerificationConfig 后 fill ctx.config
   const config = {
-    sample_ratio: 0.3, // 默认;实际从 ctx.config 读
-    test_timeout_per_task: 300_000, // 毫秒
-    max_parallel_reruns: 2,
+    sample_ratio: ctx.config.sample_ratio,
+    test_timeout_per_task: ctx.config.test_timeout_per_task * 1000, // 秒 → 毫秒(worktree timeout 用)
+    max_parallel_reruns: ctx.config.max_parallel_reruns,
   };
 
   // 选择要重跑的 task 列表(full → 全;sample → 抽样)
@@ -5531,12 +5557,13 @@ it('RED rerun exit_code=0 → 不变量 5 CRITICAL(brainstorm A3 同 commit 无 
   // 构造 ProcessEvidenceFenceContext(简化:full mode)
   const ctx: ProcessEvidenceFenceContext = {
     changeId: 'test', changeRoot: repoPath, cwd: repoPath,
+    changeId: 'test', changeRoot: repoPath, cwd: repoPath,
     processEvidence: {
       schema: 'forge-process-evidence/v1',
       process_verification_mode: 'full',
       process_verification_mode_acked_by: null,
       process_verification_mode_acked_at: null,
-      env_hash: { lockfile_hash: 'sha256:x', node_version: '20', os_platform: 'linux' },
+      env_hash: { lockfile_hash: 'sha256:x', node_version: '20.10.0', os_platform: 'linux' },
       tdd_event_chain: [{
         task_ref: 'tasks.md#task-1',
         red_commit: {
@@ -5546,13 +5573,28 @@ it('RED rerun exit_code=0 → 不变量 5 CRITICAL(brainstorm A3 同 commit 无 
           runner_report_path: '.evidence/r.xml', runner_report_hash: 'sha256:rh',
           expected_failures: [{ test_file: 't.ts', test_name: 'x', failure_type: 'assertion' }],
         },
-        green_commit: { sha: greenSha, /* ... */ } as any,
+        green_commit: {
+          sha: greenSha, timestamp: '2026-05-13T00:10:00Z',
+          green_log_path: '.evidence/g.log', green_log_hash: 'sha256:g',
+          exit_code: 0,
+          runner_report_path: '.evidence/g.xml', runner_report_hash: 'sha256:gh',
+        },
         tdd_exemption: null, tdd_exemption_acked_by: null,
       }],
       verify_invocations: [], subagent_review_chain: [],
     },
-    /* ... 其他 ctx 字段填默认 */
-  } as any;
+    // ctx 其他字段填合理默认(沿 ProcessEvidenceFenceContext interface)
+    markerStagingHash: undefined,
+    markerAckLogTailHash: undefined,
+    markerAckLogEntryCount: undefined,
+    markerCreatedByToolVersion: '1.0.0',
+    legacyExempt: false,
+    actualStagingHash: undefined,
+    ackLogEntries: [], helperEntries: [],
+    tasksCount: 1, archiveHead: greenSha,
+    isCiMode: false,
+    config: { mode: 'full', sample_ratio: 0.3, test_timeout_per_task: 300, max_parallel_reruns: 2 },
+  };
   const findings = await runRerunFence(ctx);
   const inv5 = findings.find((f) => f.invariant === 5);
   expect(inv5).toBeDefined();
@@ -5634,8 +5676,19 @@ it('A8 旁支造合法 RED/GREEN 链 + 主分支换实现 → 不变量 14 green
         env_hash: { lockfile_hash: 'sha256:x', node_version: '20', os_platform: 'linux' },
         tdd_event_chain: [{
           task_ref: 'tasks.md#task-1',
-          red_commit: { sha: redSha, /* ... */ } as any,
-          green_commit: { sha: greenSha, /* ... */ } as any,
+          red_commit: {
+            sha: redSha, timestamp: '2026-05-13T00:00:00Z',
+            red_log_path: '.evidence/r.log', red_log_hash: 'sha256:r',
+            exit_code: 1,
+            runner_report_path: '.evidence/r.xml', runner_report_hash: 'sha256:rh',
+            expected_failures: [{ test_file: 't.ts', test_name: 'x', failure_type: 'assertion' }],
+          },
+          green_commit: {
+            sha: greenSha, timestamp: '2026-05-13T00:10:00Z',
+            green_log_path: '.evidence/g.log', green_log_hash: 'sha256:g',
+            exit_code: 0,
+            runner_report_path: '.evidence/g.xml', runner_report_hash: 'sha256:gh',
+          },
           tdd_exemption: null,
           tdd_exemption_acked_by: null,
         }],
@@ -5681,7 +5734,7 @@ it('A8 旁支造合法 RED/GREEN 链 + 主分支换实现 → 不变量 14 green
 
 ---
 
-**Status**: plan-9g v6(沿 plan-9j v1→v9 模式;Codex 六轮已审 — B-3/M-5/M-6 PASS,M-7 按"最小修法"采纳:§0.0 留白契约 + §9.2 措辞修正 + §4.3.0 payload 字段映射表 + §9.3.1 4 哨兵 fixture 完整 inline;预期 v7 验证 M-7 闭合)
+**Status**: plan-9g v7(沿 plan-9j v1→v9 模式;Codex 七轮已审 3 BLOCKER + 2 MAJOR 全修;§14/§15 双修订摘要 inline)
 
 实施前必跑:`pnpm install`(fast-xml-parser + tap-parser 两新 deps)
 
@@ -5773,5 +5826,20 @@ Codex 六轮报告确认:B-3 / M-5 / M-6 全 PASS,M-7 给"最小修法 4 步骤"
 **4. §9.3.1 4 哨兵 fixture 完整 inline(新增)**:沿 Codex 建议选 4 个最高风险 fixture(A6 marker 绕 helper / RED rerun exit 0 / CI sample 拒签 / A8 旁支造链)完整 inline 字面,其余 25 个保留 it.todo 框架。每 fixture ~30-50 行 inline。
 
 体量 5521 → ~6000 行;预期 v7 验证 0 BLOCKER + 0 MAJOR 进入 writing-plans
+
+---
+
+## 15. v6 → v7 修订摘要(Codex 七轮 3 BLOCKER + 2 MAJOR 全修)
+
+**真 BLOCKER 修复(3 项)**:
+- **B-1 ctx.config 越界留白闭合**(line 4731-4738):原 v6 runRerunFence 含"Step 6.1 略,writing-plans 阶段补 ctx.config 字段"违反 §0.0 留白契约。**v7**:ProcessEvidenceFenceContext interface 加 `config: { mode, sample_ratio, test_timeout_per_task, max_parallel_reruns }` 字段;buildProcessEvidenceFenceContext 接收 `config` 参数;crossCuttingFenceCheck 调用点读 forge/config.yaml + 调 validateProcessVerificationConfig sanitize 后传入;runRerunFence 真读 ctx.config(test_timeout_per_task * 1000 转毫秒)。
+- **B-2 哨兵 B `/* ... */` 展开**(§9.3.1):原 v6 green_commit 字段含 `as any` + 注释占位;ctx 其他字段含"填默认"占位。**v7**:green_commit 6 字段全 inline(sha/timestamp/green_log_path/green_log_hash/exit_code/runner_report_path/runner_report_hash);ctx 12 个字段全显式 inline(markerStagingHash 等 null/undefined 显式声明 + config 完整对象);删 `as any`。
+- **B-3 哨兵 D `/* ... */` 展开**:原 v6 red_commit / green_commit 各仅 sha 字段 + 注释占位。**v7**:两 commit 字段全 inline 同上模式(8 字段 red + 7 字段 green),无注释占位。
+
+**真 MAJOR 修复(2 项)**:
+- **M-1 §4.3.0 表加 record-verify `--result <pass|fail|skip>` option 映射**:reconstructProjectionFromAckLog 读 extra.result(line 4165),projection type 必填 result(line 4203);v6 表未映射 → 实施者无法对齐。**v7**:表加一行 record-verify `--result` → `verify_invocations[i].result` → `result` → `VerifyInvocationProjection.result`。
+- **M-2 §4.3.0 表加 record-tdd `--tdd-exemption-acked-by <user>` option 映射**:reconstructProjectionFromAckLog 读 extra.tdd_exemption_acked_by(line 4157),projection type 强制要求(line 4203 等价);v6 表未映射。**v7**:表加一行同模式。
+
+体量 5777 → ~5900 行(+ ctx.config interface + 哨兵 B/D 展开 + 2 表行);预期 v8 验证 0 BLOCKER + 0 MAJOR 进入 writing-plans
 
 

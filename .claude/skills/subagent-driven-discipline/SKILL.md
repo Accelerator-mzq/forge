@@ -7,7 +7,7 @@ metadata:
   author: forgeue project (extracted to generic)
   version: "1.0-generic"
   scenario_subtype_count: 28
-  case_study_count: 6
+  case_study_count: 7
   retrospect_protocol: trigger-type-matrix(5 types × per-type intensity)
 ---
 
@@ -1023,6 +1023,84 @@ git update-ref refs/heads/<wrong-branch> <prior-base-sha>
 - 全 Opus 假设:5 implementer × 2 + 10 reviewer + 5 round 2 + 1 final + 1 retrospect ≈ **$18-22**
 - 节省 ratio:~80%(与 Case 05 同模式)
 - **质量**:13 commits 全 commit + push origin/dev + 跨 OS CI(Linux+Windows)全绿 + 0 regression + spec v6(6 轮 codex 0 BLOCKER/MAJOR 收敛)+ plan v4(4 轮 codex 0 BLOCKER/MAJOR 收敛)+ 5 Task 全 final review Approved + 2 reinforce patterns(G/I + L + Case 01 Pattern B + Case 05 Pattern J)+ 1 new Pattern N(cross-Task forward-compat test stub 不变式覆盖)
+
+---
+
+### Case 07: forge-repo / Plan 9f / exploring skill + /forge:explore 命令落地
+
+**Date**:2026-05-14
+**Trigger Type**:**NEW Type 6 — forge:writing-skills 协议(docs-heavy + forge-eval RED-GREEN automated judge 验证)**;非 SDD;controller(opus 4.7)单线程执行 + forge-eval 12-API-call automated judge(sonnet-4-6)替代 subagent reviewer
+**Project context**:forge-repo / plan-9f exploring skill(`skills/exploring/SKILL.md` 476 行 / 15 section / 5 标定 example / §2.5.6 反向加固三条 + §2.5.5 Fluid Pause 边界 + §2.6.6 区分指引表 + 12 红旗清单)+ `commands/explore.md` 薄包装(32 行)+ `forge-eval/scenarios/exploring.yaml`(3 scenarios:vague-idea / mid-implementation-stuck / option-compare)+ `skills/using-forge/SKILL.md` meta-entry 加 explore 入口 + 红旗清单 2 条;**9 commits** 直接到 dev(非 feature branch);plan-9i forge:writing-skills 协议 first real use case(沿 design §2.9.5 dogfood 设计意图)+ forge-eval Task 4 delta +8.0/+6.0/+7.0(3 scenarios 全 pair_pass)+ 0 BLOCKER/MAJOR codex review;累计 forge-eval cost $0.61
+
+**Subagent dispatch**:**N/A**(non-SDD trigger type)。Controller 单 pass + forge-eval automated judge:
+
+| Phase / Task | Scenario subtype 类比(§1.X.Y)| Model | $cost | Verdict |
+|---|---|---|---|---|
+| Sub-plan + v2 数字修订(2 commits)| §1.5.1 doc sync | controller(opus 4.7)| ~$0.20 | DONE |
+| Task 0+1 baseline(registry 15/7 + scenarios + skeleton 合并 commit)| §1.1.1 Mechanical + §1.1.3 Multi-file integration | controller(opus 4.7)| ~$0.30 | DONE — 提前发现 it.each ENOENT 风险,合并 Task 0+1 避免 vitest 红 commit |
+| Task 1 v2 scenarios REFACTOR(rubric 加判分锚点 + forge-specific 维度高权重)| §1.5.1 + forge-eval rubric 设计 | controller(opus 4.7)| ~$0.20 | DONE — v1 1/3 pair_pass → v2 真实 baseline RED 全 ≤ 5 |
+| Task 2 SKILL.md production(476 行 / 15 section)| §1.5.1 doc sync + forge 化适配 | controller(opus 4.7)| ~$0.50 | DONE — 5 example + §2.5.6 / §2.5.5 / §2.6.6 字面 transcribe |
+| Task 3 commands + md5 sync guard + apply.md cross-ref | §1.1.1 Mechanical + §1.5.1 | controller(opus 4.7)| ~$0.15 | DONE |
+| Task 4 GREEN eval(forge-eval automated judge)| §1.6.X verification 类比 | forge-eval(sonnet-4-6 judge)| $0.22 | ✅ delta +8.0/+6.0/+7.0 一次性 PASS |
+| Task 5 using-forge meta-entry + 红旗清单 + retrospect | §1.5.1 + retrospect | controller(opus 4.7)| ~$0.30 | DONE |
+| forge-eval v1 RED baseline(scenarios v1)| forge-eval baseline 验证 | forge-eval(sonnet-4-6 judge)| $0.12 | ❌ 1/3 pair_pass → 暴露 v1 scenario 设计缺口 |
+| forge-eval v2 RED baseline(scenarios v2 收紧)| forge-eval baseline 验证 | forge-eval(sonnet-4-6 judge)| $0.27 | ✅ RED 全 ≤ 5,delta ≈ 0 符合 skeleton 阶段预期 |
+
+**Real issues caught / failed**:
+
+| Issue | Severity | Caught by | Scenario subtype 验证 |
+|---|---|---|---|
+| sub-plan v1 数字错(SKILL_NAMES 起草 13→14 实际是 14→15;COMMAND_NAMES 8→9 实际 6→7)| Minor | controller 读 `src/core/templates/skills/index.ts` + `commands/index.ts` 实测对照 dev HEAD | §1.5.1 — 起草数字按 plan-9i 12→13 模型推算未考虑 plan-9d 已合;COMMAND_NAMES 误把 `commands/` 目录文件数(8)当 registry 数(6,upgrade/ack-confirm 不在 registry)|
+| Task 0 单独 commit `it.each(SKILL_NAMES)` ENOENT FAIL 风险 | Important+(若不发现)| controller 预读 plan-9i Task 0 commit `92de387` + `skills.test.ts:9-18` 通用断言,实测 vitest 红状态预测 | **NEW Pattern O** — SDD Task 拆分 vs writing-skills SKILL.md 步骤 1 语义合并的张力(详 Lesson 1) |
+| forge-eval v1 scenarios 太宽松(skeleton 假性 GREEN 高分;option-compare GREEN=8.0)| Important | forge-eval v1 实测 1/3 pair_pass + judge reasoning + 总览表 GREEN 列 | **NEW Pattern P** — forge-eval scenario 设计的 baseline failure rubric 不严(详 Lesson 2)|
+| forge-eval v1 scenario 2 judge 误判"答非所问"扣分卡死 delta=0 | Important | forge-eval v1 报告 judge reasoning("AI 给 OAuth 技术解答属于答非所问,与 rubric 完全不匹配") | **NEW Pattern Q** — forge-eval rubric 应含"判分锚点"段防 judge 把 baseline 失败信号当 scope 错误(详 Lesson 3)|
+| forge-eval v1 RED avg 6.0(vague-idea)略超 plan-9i 步骤 1 "≤ 5" 硬指标 | Minor(未立即响应,等 v2 实测才意识到)| controller 实测 v1 总览表 RED 列;plan-9i 协议未明示"任一 RED > 5 立即 REFACTOR" | **NEW Pattern R** — plan-9i SKILL.md 步骤 1 line 53 缺"任一 RED > 5 立即 REFACTOR scenarios"硬 trigger(详 Lesson 4)|
+| using-forge SKILL.md / SKILL.md 加段落后 prettier 表对齐 fail | Minor | `pnpm format:check` warn 2 files(根级 + reverse-sync templates 各一) | §3.X format gate(memory `pnpm format:check` 不变量)— `prettier --write` 自动 fix |
+
+**Lesson**(reinforce / new pattern / 协议缺口 refinement):
+
+1. **NEW Pattern O — SDD Task 拆分 vs writing-skills SKILL.md 协议步骤 1 语义合并的张力**(plan-9f Task 0 + plan-9i Task 0 实证)
+   - 实证:plan-9f sub-plan §2 Task 0 = registry 扩展 / Task 1 = scenarios + skeleton 是 SDD 颗粒度拆分,但 forge:writing-skills SKILL.md 步骤 1 line 45-56 是"先写 scenarios + 最小骨架 SKILL.md(baseline 验证)"一步语义。Task 0 单独 commit 会 `it.each(SKILL_NAMES)('exploring')` ENOENT FAIL → vitest 红 → 违反"vitest GREEN 才 commit"惯例。
+   - **plan-9i 历史照见**:plan-9i Task 0 commit `92de387` 当时也独立 commit(commit log 不含 vitest 跑结果)— 可能当时未跑 vitest 单独 commit,push 时 CI 红依赖 Task 1 commit 后才 GREEN。
+   - **fix 模式**(plan-9f 应用):提前发现 → Task 0+1 合并 commit(`feat(9f Task 0+1): registry 15/7 + scenarios + skeleton — baseline GREEN`)vitest 一次性 GREEN。
+   - **§1.5.1 doc sync playbook 加 / writing-skills 协议落地 dispatch prompt 加**:涉及"SKILL_NAMES + skeleton md 文件创建"组合改动时,**强制 controller 提示合并 commit**(标 "Task 0 + Task 1(scenarios + skeleton)合并 commit"sub-plan task 边界微调)— 避免 vitest 红 commit。
+   - **协议升级建议**:plan-9i forge:writing-skills SKILL.md 步骤 1 line 47 应字面加 "**registry 扩展 + scenarios + 最小骨架一起 commit**(vitest GREEN baseline);**单独 commit registry 会触发 `it.each` ENOENT**" 警示(留 plan-9z polish or plan-v1.1)。
+
+2. **NEW Pattern P — forge-eval scenario 设计的 baseline failure rubric 不严**(plan-9f v1 scenarios 1/3 pair_pass 实证)
+   - 实证:plan-9f v1 scenarios 三条 rubric 维度太"软"(用 ASCII / 列 2 个 assumption / 给 tradeoff / 不直接推荐)— baseline AI 在没 skill 教导时自然会做 2-3 条,得 6-8 分(option-compare skeleton GREEN=8.0,因 baseline AI 给对比表很自然)。v2 修订:**forge-specific 维度(capture offer 含具体 `forge/changes/<id>/...` 路径 + 显式 `## Exploration Summary` 段名 + "不在 explore turn 调 Write/Edit")从次要变高权重**,baseline AI 必然失分(因为不知 forge 目录结构 + 不知 capture offer 协议)→ v2 RED 全 ≤ 5。
+   - **类比 Case 04 Pattern C**(post-completion patch 模式):scenario 设计第一版 + REFACTOR 第二版的 pattern,与 SKILL.md REFACTOR 一样需要迭代。
+   - **fix 模式**:scenarios v1 设计完跑 baseline → 若 RED > 5 或 GREEN skeleton > 6,**立即 REFACTOR scenarios**(不是 SKILL.md)。重点提升 **forge-specific 维度**(目标 skill 真正特异的协议行为,如 `forge/changes/<id>/<path>` 路径 / 协议特有段名 / 行为约束)权重;通用维度(ASCII / list items)权重降。
+   - **§1.X writing-skills 协议落地 playbook 加**:rubric 维度要含"baseline AI 必然失分"的 forge-specific 锚点 — 每个维度回答"**baseline AI 没 skill 时能否做对**":若能,降权重;若不能,升权重。
+   - **协议升级建议**:plan-9i forge:writing-skills SKILL.md 步骤 1 line 45-56 应加"**rubric 设计原则**:每个维度回答'baseline AI 能否在没 skill 时做对'— 若能,降权重;若不能,升权重"(留 plan-9z polish or plan-v1.1)。
+
+3. **NEW Pattern Q — forge-eval rubric "判分锚点"段防 judge 误判**(plan-9f v1 scenario 2 实证)
+   - 实证:plan-9f v1 scenario 2 mid-implementation-stuck judge LLM(sonnet-4-6)看到 baseline AI 给 OAuth refresh token 技术解答(token 过期 / 缓存策略 / 时钟漂移),判"答非所问"扣 2 分(judge reasoning:"响应内容与评分 rubric 描述的 OAuth integration 设计探索场景完全不匹配,属于答非所问")。这正是 RED 想抓的失败信号(AI 把探索请求当技术问答),但 judge 当成 scope 错误扣分 → RED 2.0 + GREEN 2.0 + delta 0.0 卡死。
+   - v2 修订:rubric 顶部加"**判分锚点**"段显式声明:"本评估**不评判 OAuth refresh token 技术答案本身的质量**。AI 直接给 OAuth 技术解答 = baseline 预期失败模式。**judge 必须按下面 rubric 维度逐项判分,严禁扣'答非所问'分**"。→ v2 GREEN 4.0 / Task 4 GREEN 7.0(delta +6.0)。
+   - **fix 模式**:rubric 顶部加"判分锚点"段,明确(1)**不评估什么**(防 judge scope 误判),(2)**baseline 预期失败模式是什么**(防 judge 把失败当 scope 错误),(3)**按维度逐项判分**(防 judge 直接扣总分)。
+   - **协议升级建议**:plan-9i `forge-eval-integration.md`(配套文件)加"rubric 模板"段含"判分锚点"段示例(留 plan-9z polish or plan-v1.1)。
+
+4. **NEW Pattern R — plan-9i SKILL.md 步骤 1 缺"任一 RED > 5 立即 REFACTOR scenarios"硬 trigger**(plan-9f v1 vague-idea RED 6.0 实证)
+   - 实证:plan-9f v1 RED 总览表 vague-idea 6.0(> 5),mid-implementation-stuck 2.0,option-compare 4.0。plan-9i SKILL.md 步骤 1 line 53 "RED avg ≤ 5"措辞像总览平均(避免任一 scenario 单点超),但**单 scenario RED > 5 即应该立即 trigger REFACTOR**(说明该 scenario rubric 太宽松)。我 v1 实测后看到 1/3 pair_pass 才意识到 scenarios 太松,RED avg 略超本应是更早的 trigger。
+   - **fix 模式**:plan-9i forge:writing-skills SKILL.md 步骤 1 line 53 应字面加 "**若总览表任一 scenario RED avg > 5 → 立即 REFACTOR scenarios(不是 SKILL.md)**,提升 forge-specific 维度权重 / 收紧 judge rubric / 加 must_not_match / 加判分锚点段;再跑 baseline 直到所有 RED ≤ 5。"
+   - **协议升级建议**:plan-9i forge:writing-skills SKILL.md 步骤 1 加此硬 trigger 字面(留 plan-9z polish or plan-v1.1)。
+
+5. **REINFORCE Pattern A(Case 04 cross-Task scope fix)+ NEW edge — sub-plan 起草数字错的 new commit 修订模式**(plan-9f sub-plan v2 数字修订实证)
+   - 实证:plan-9f sub-plan v1 起草 SKILL_NAMES 13→14 实际是 14→15(未考虑 plan-9d 已合);COMMAND_NAMES 8→9 实际 6→7(误把 `commands/` 目录文件数 8 当 registry 数 6,upgrade/ack-confirm 文件存在但不在 registry)。controller 实施第一步读 `src/core/templates/skills/index.ts` + `commands/index.ts` 实测对照后发现错。
+   - **fix 模式**:**不 amend 已 commit 的 sub-plan**(沿 user memory git 安全协议 + plan-9e2 v3 修订模式)→ new commit `docs(plan-9f): v2 数字修订 — 沿 dev HEAD 真实 registry 状态`。
+   - **§3.X cross-verify 加**:sub-plan 起草后,**实施第一步必读相关 registry / schema 文件实测对照 sub-plan 中的数字 / 字段** — 提前发现 staleness。若发现错,new commit 修订(non-amend)+ commit message 明示"数字订正"。
+
+**Cost vs SDD baseline**:
+
+- 实际:9 commits(sub-plan 2 + Task 0+1 / 1v2 / 2 / 3 / 5 retrospect)controller(opus 4.7)~$1.50 + forge-eval automated judge 3 轮(v1 + v2 + Task 4)~$0.61 ≈ **$2.10**
+- SDD baseline 假设(若按 SDD 流程做 6 Task):per-Task implementer(sonnet)+ spec reviewer + quality reviewer + final reviewer + retrospect ≈ $4-5
+- 节省 ratio:~50%(non-SDD trigger type 节省的是 SDD overhead 不是 model 降级 — controller 仍 opus;docs-heavy 任务 SDD 的 spec/quality reviewer 价值低,controller 单 pass 更高效)
+- **质量**:9 commits + dev-direct push + 0 BLOCKER/MAJOR codex review(本会话内无 codex review;后续若需可补)+ forge-eval Task 4 一次性 PASS delta +8.0/+6.0/+7.0(3/3 pair_pass)+ verify 全 PASS(typecheck/lint/format:check/vitest 139 files / 1011 tests / +1 explore-md-sync guard)+ 4 new patterns 沉淀(O/P/Q/R)+ 1 reinforce(A)
+
+**Followup 建议**(由 plan-9z polish 或 plan-v1.1 消化;**本次 retrospect 仅沉淀 lesson,不实施 forge 协议本身的修订**):
+
+- plan-9i forge:writing-skills SKILL.md 步骤 1 升级:加 Pattern R 硬 trigger("任一 RED > 5 立即 REFACTOR scenarios")+ Pattern P "rubric 设计原则"段
+- plan-9i `forge-eval-integration.md` 加 Pattern Q "rubric 判分锚点段"模板示例
+- plan-9i SKILL.md 步骤 1 line 47 字面加 Pattern O 警示("registry 扩展 + scenarios + 最小骨架一起 commit;单独 commit registry 触发 `it.each` ENOENT")
 
 ---
 

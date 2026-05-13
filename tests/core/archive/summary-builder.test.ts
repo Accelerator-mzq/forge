@@ -549,3 +549,158 @@ describe('buildArchiveSummary - collector3 handoff_to_backlog 三类聚合', () 
     expect(summary.handoff_to_backlog).toHaveLength(3);
   });
 });
+
+// ============================================================
+// plan-9e2 Task 2:summarizeProcessEvidence + buildArchiveSummary 签名扩 5 case
+// ============================================================
+// 注:buildArchiveSummary 已在文件顶部 line 14 import,本块不重复 import(v2 codex 一轮 plan review MAJOR 3 修订)
+import type { FenceCheckResult } from '../../../src/core/archive/fence.js';
+
+// helper:构造 stub FenceCheckResult
+function buildStubFenceResult(opts: {
+  passed: number;
+  warning: number;
+  failed: number;
+  exempt: number;
+}): FenceCheckResult {
+  const results = [];
+  let idx = 1;
+  for (let i = 0; i < opts.passed; i++) {
+    results.push({ invariant: `fence-${idx++}`, ok: true, status: 'pass' as const, reason: 'pass' });
+  }
+  for (let i = 0; i < opts.warning; i++) {
+    results.push({
+      invariant: `fence-${idx++}`,
+      ok: true,
+      status: 'warning' as const,
+      reason: 'env_hash mismatch',
+    });
+  }
+  for (let i = 0; i < opts.failed; i++) {
+    results.push({
+      invariant: `fence-${idx++}`,
+      ok: false,
+      status: 'fail' as const,
+      reason: 'CRITICAL bug',
+    });
+  }
+  for (let i = 0; i < opts.exempt; i++) {
+    results.push({
+      invariant: `fence-${idx++}`,
+      ok: true,
+      status: 'legacy-skip' as const,
+      reason: 'legacy-exempt per master §3.4.4.1',
+    });
+  }
+  return {
+    ok: opts.failed === 0,
+    results,
+    notImplementedCount: 0,
+  };
+}
+
+describe('summarizeProcessEvidence 通过 buildArchiveSummary 接入 — plan-9e2 Task 2', () => {
+  const baselineVerifyMarker = {
+    schema: 'forge-verify/v1',
+    verify_findings: [],
+  };
+  const baselineReviewMarker = {
+    schema: 'forge-review/v1',
+    reviewed_by: 'ai-agent',
+    review_outcomes: [],
+  };
+
+  it('14 全 pass → process_evidence_summary 实际统计 {placeholder:false, passed:14, warning:0, failed:0, exempt:0}', async () => {
+    const fenceResult = buildStubFenceResult({ passed: 14, warning: 0, failed: 0, exempt: 0 });
+    const summary = await buildArchiveSummary(
+      baselineVerifyMarker,
+      baselineReviewMarker,
+      '/tmp/nonexistent-change-dir',
+      'test-change-1',
+      fenceResult,
+      { archivedAt: '2026-05-13T12:00:00Z' },
+    );
+    expect(summary.process_evidence_summary).toEqual({
+      placeholder: false,
+      invariants_passed: 14,
+      invariants_with_warning: 0,
+      invariants_failed: 0,
+      legacy_exempt: 0,
+    });
+  });
+
+  it('legacy + 4 真过 + 10 legacy-skip → {placeholder:false, passed:4, warning:0, failed:0, exempt:10}', async () => {
+    const fenceResult = buildStubFenceResult({ passed: 4, warning: 0, failed: 0, exempt: 10 });
+    const summary = await buildArchiveSummary(
+      baselineVerifyMarker,
+      baselineReviewMarker,
+      '/tmp/nonexistent-change-dir',
+      'test-change-2',
+      fenceResult,
+      { archivedAt: '2026-05-13T12:01:00Z' },
+    );
+    expect(summary.process_evidence_summary).toEqual({
+      placeholder: false,
+      invariants_passed: 4,
+      invariants_with_warning: 0,
+      invariants_failed: 0,
+      legacy_exempt: 10,
+    });
+  });
+
+  it('non-legacy + 1 WARNING → {placeholder:false, passed:13, warning:1, failed:0, exempt:0}', async () => {
+    const fenceResult = buildStubFenceResult({ passed: 13, warning: 1, failed: 0, exempt: 0 });
+    const summary = await buildArchiveSummary(
+      baselineVerifyMarker,
+      baselineReviewMarker,
+      '/tmp/nonexistent-change-dir',
+      'test-change-3',
+      fenceResult,
+      { archivedAt: '2026-05-13T12:02:00Z' },
+    );
+    expect(summary.process_evidence_summary).toEqual({
+      placeholder: false,
+      invariants_passed: 13,
+      invariants_with_warning: 1,
+      invariants_failed: 0,
+      legacy_exempt: 0,
+    });
+  });
+
+  it('legacy + 1 WARNING 落保留 invariant + 3 真过 + 10 skip → {placeholder:false, passed:3, warning:1, failed:0, exempt:10}', async () => {
+    const fenceResult = buildStubFenceResult({ passed: 3, warning: 1, failed: 0, exempt: 10 });
+    const summary = await buildArchiveSummary(
+      baselineVerifyMarker,
+      baselineReviewMarker,
+      '/tmp/nonexistent-change-dir',
+      'test-change-4',
+      fenceResult,
+      { archivedAt: '2026-05-13T12:03:00Z' },
+    );
+    expect(summary.process_evidence_summary).toEqual({
+      placeholder: false,
+      invariants_passed: 3,
+      invariants_with_warning: 1,
+      invariants_failed: 0,
+      legacy_exempt: 10,
+    });
+  });
+
+  it('summary 字段顺序稳定 — process_evidence_summary 出现在 review_passed 之后 handoff_to_backlog 之前(沿 plan-9e1 design §2.4.3 yaml 字面顺序)', async () => {
+    const fenceResult = buildStubFenceResult({ passed: 14, warning: 0, failed: 0, exempt: 0 });
+    const summary = await buildArchiveSummary(
+      baselineVerifyMarker,
+      baselineReviewMarker,
+      '/tmp/nonexistent-change-dir',
+      'test-change-5',
+      fenceResult,
+      { archivedAt: '2026-05-13T12:04:00Z' },
+    );
+    const keys = Object.keys(summary);
+    const peIdx = keys.indexOf('process_evidence_summary');
+    const reviewIdx = keys.indexOf('review_passed');
+    const handoffIdx = keys.indexOf('handoff_to_backlog');
+    expect(peIdx).toBeGreaterThan(reviewIdx);
+    expect(peIdx).toBeLessThan(handoffIdx);
+  });
+});

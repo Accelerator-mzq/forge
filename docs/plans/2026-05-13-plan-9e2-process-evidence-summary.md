@@ -4,7 +4,7 @@
 
 **Goal**:把 plan-9e1 留下的 `archive_summary.process_evidence_summary` placeholder 字面接到 plan-9g 实施的 14 不变量真实 pass/warning/fail/legacy_exempt 统计;同步双改根级 `commands/archive.md` + 模板 `src/core/templates/commands/archive.md`(md5 sync 守护)+ 5 case integration 覆盖含 review-only legacy + verify-side WARNING 副作用回归。
 
-**Architecture**:四层 — (1) **Schema 层**:`src/core/schemas/archive-summary.ts` `ProcessEvidenceSummary` interface 加 `invariants_with_warning?: number` 字段(v2 codex 一轮 MAJOR 修订),从 3 计数字段扩 4 计数字段;`PLACEHOLDER_PROCESS_EVIDENCE_SUMMARY` 常量保留(测试 fixture 用),生产路径不再使用,JSDoc 注释更新。 (2) **Fence 层**:`src/core/archive/fence.ts` `FenceInvariantResult` 加 `status: 'pass' | 'warning' | 'fail' | 'legacy-skip'` 4 态 enum 字段(沿 plan-9g 现有 `ok: boolean` + `reason: string` 保留 backwards-compat,但新 mapper 维持 `status === 'fail' ⟺ ok === false` 不变式);加 `LEGACY_EXEMPT_INVARIANTS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 10, 13])` 模块级常量(沿 master §3.4.4.1 表);`crossCuttingFenceCheck()` mapper 重写 — `effectiveLegacyExempt = verifyLegacy || reviewLegacy`(v2 codex 一轮 MAJOR 修订并集);从 allFindings 同时筛 CRITICAL + WARNING;mapper 优先级 `fail > legacy-skip > warning > pass`(legacy 路径下被豁免的 invariant 即使产 WARNING 也优先 'legacy-skip',这是 v1.0 接受的精度损失,v1.1+ side-aware 拆分修复)。 (3) **Builder + Validator 层**:`src/core/archive/summary-builder.ts` 加私有 `summarizeProcessEvidence(fenceResult): ProcessEvidenceSummary`(4 字段),`buildArchiveSummary()` 签名扩 `fenceResult: FenceCheckResult` 入参,line 118 placeholder 替换;`src/core/validate/archive-summary-schema.ts` 加 placeholder=false 路径严格校验 — 4 字段必填 + number + 值域 [0, EXPECTED_INVARIANT_COUNT] + sum 不变式;`EXPECTED_INVARIANT_COUNT = FENCE_INVARIANT_NAMES.length` 派生常量(自动跟随 invariant 数演化)。 (4) **CLI + 文档 + 测试层**:`src/cli/commands/archive.ts:231` fence 调用后透传 fenceResult 到 `buildArchiveSummary()`;**双改** `commands/archive.md` + `src/core/templates/commands/archive.md`(实施前 md5 完全一致,实施时逐行同步双改;CI + unit md5 比对断言守 sync);3 新 fixture(`archive-warning-process-evidence/` / `archive-review-only-legacy/` / `archive-review-only-legacy-with-verify-warning/`)+ 5 case integration 覆盖含副作用回归。
+**Architecture**:四层 — (1) **Schema 层**:`src/core/schemas/archive-summary.ts` `ProcessEvidenceSummary` interface 加 `invariants_with_warning?: number` 字段(v2 codex 一轮 MAJOR 修订),从 3 计数字段扩 4 计数字段;`PLACEHOLDER_PROCESS_EVIDENCE_SUMMARY` 常量保留(测试 fixture 用),生产路径不再使用,JSDoc 注释更新。 (2) **Fence 层**:`src/core/archive/fence.ts` `FenceInvariantResult` 加 `status: 'pass' | 'warning' | 'fail' | 'legacy-skip'` 4 态 enum 字段(沿 plan-9g 现有 `ok: boolean` + `reason: string` 保留 backwards-compat,但新 mapper 维持 `status === 'fail' ⟺ ok === false` 不变式);加 `LEGACY_EXEMPT_INVARIANTS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 10, 13])` 模块级常量(沿 master §3.4.4.1 表);`crossCuttingFenceCheck()` mapper 重写 — `effectiveLegacyExempt = verifyLegacy || reviewLegacy`(v2 codex 一轮 MAJOR 修订并集);从 allFindings 同时筛 CRITICAL + WARNING;mapper 优先级 `fail > legacy-skip > warning > pass`(legacy 路径下被豁免的 invariant 即使产 WARNING 也优先 'legacy-skip',这是 v1.0 接受的精度损失,v1.1+ side-aware 拆分修复)。 (3) **Builder + Validator 层**:`src/core/archive/summary-builder.ts` 加私有 `summarizeProcessEvidence(fenceResult): ProcessEvidenceSummary`(4 字段),`buildArchiveSummary()` 签名扩 `fenceResult: FenceCheckResult` 入参,line 118 placeholder 替换;`src/core/validate/archive-summary-schema.ts` 加 placeholder=false 路径严格校验 — 4 字段必填 + number + 值域 [0, EXPECTED_INVARIANT_COUNT] + sum 不变式;`EXPECTED_INVARIANT_COUNT = FENCE_INVARIANT_NAMES.length` 派生常量(自动跟随 invariant 数演化)。 (4) **CLI + 文档 + 测试层**:`src/cli/commands/archive.ts:231` fence 调用后透传 fenceResult 到 `buildArchiveSummary()`;**双改** `commands/archive.md` + `src/core/templates/commands/archive.md`(实施前 md5 完全一致,实施时逐行同步双改;CI + unit md5 比对断言守 sync);**4 case integration 通过 test-runtime builder helper 构造 fixture**(v2 codex 一轮 plan review BLOCKER 1 修订:仓库无 plan-9g `tests/fixtures/process-evidence-*` baseline,改为代码构造 marker — sha256 hash 链由 helper 实时计算避免手写 hash 失效),覆盖含副作用回归。
 
 **Tech Stack**:Node 20+ / TypeScript ESM strict + noUncheckedIndexedAccess / commander 12 / `yaml` v2 / vitest 1.x / pnpm 9+ / `crypto` 内置(md5 sync 守护用);现有 `src/core/schemas/archive-summary.ts`(plan-9e1 已立 ProcessEvidenceSummary 3 字段,本 plan 扩第 4 字段)+ `src/core/archive/fence.ts`(plan-9g 已填实 crossCuttingFenceCheck + 14 不变量 mapper,本 plan 加 status enum + LEGACY_EXEMPT_INVARIANTS + 改 mapper)+ `src/core/archive/summary-builder.ts`(plan-9e1 已立 buildArchiveSummary,本 plan 扩签名 + 加 summarizeProcessEvidence)+ `src/core/validate/archive-summary-schema.ts`(plan-9e1 已立,本 plan 扩 placeholder=false 路径严格校验)+ `src/cli/commands/archive.ts`(plan-9e1/9g/9j 已合,本 plan 改 line 231 区段透传)+ `commands/archive.md` × 2(plan-9e1/9g 已合,本 plan 同步双改)。
 
@@ -40,13 +40,10 @@
   - `tests/core/archive/fence-mapper.test.ts`(新)— 9 case 覆盖 4 态 mapper + dual-legacy 并集 + 优先级
   - `tests/core/archive/summary-builder.test.ts` 扩 — 5 case 覆盖 summarize + 签名扩
   - `tests/core/validate/archive-summary-schema.test.ts` 扩 — 8 case 覆盖 4 字段严格校验 + sum 不变式
-  - `tests/cli/archive-process-evidence-summary.test.ts`(新)— 5 case integration(含副作用回归)
+  - `tests/cli/archive-process-evidence-summary.test.ts`(新)— 5 case integration(含副作用回归;v2 codex 一轮 plan review BLOCKER 1 修订:用 test-runtime builder helper 构造 marker,不依赖物理 fixture 目录)
   - `tests/integration/archive-md-sync.test.ts`(新)— 1 case md5 sync 守护
-- Fixtures:
-  - `tests/fixtures/archive-warning-process-evidence/` — non-legacy v1.0 marker + verify 阶段产 #10 env_hash WARNING
-  - `tests/fixtures/archive-verify-only-legacy/` — verify 标 legacy + review v1.0 native(spec §5.1 case 4 验证)
-  - `tests/fixtures/archive-review-only-legacy/` — verify v1.0 native + review 标 legacy
-  - `tests/fixtures/archive-review-only-legacy-with-verify-warning/` — verify v1.0 native + verify 产 #10 WARNING + review legacy(钉副作用)
+  - `tests/utils/build-archive-fixture.ts`(新,v2 codex 一轮 plan review BLOCKER 1 修订)— `buildProcessEvidenceFixture(opts)` helper 函数,programmatically 构造完整 verify/review marker(含 process_evidence 字段 + sha256 hash 链 + JCS canonical 序列化),返回 marker objects + helper 写入 mkdtemp 目录;4 种 scenario:`warning` / `verify-legacy` / `review-legacy` / `review-legacy-with-verify-warning`
+- 物理 fixture:**仅 tasks.md / proposal.md / design.md stub 文件**(不含 marker yaml,marker 由 builder helper 注入)— 实施时如发现 plan-9g 已合后 base dev 补全了 `tests/fixtures/process-evidence-*`,Task 6 可改回复用物理 fixture(但 builder helper 仍保留为 backstop)
 - 全本地 verify 通过(`pnpm typecheck && pnpm lint && pnpm format:check && pnpm build && pnpm vitest run`)
 - 跨 OS CI(Linux/Windows × Node 20/22)全绿
 
@@ -57,6 +54,8 @@
 | Bash / Git-Bash / WSL | `git commit -m "$(cat <<'EOF' ... EOF)"` | heredoc 直接用 |
 | PowerShell 5.1 / 7+(默认) | `git commit -F message-tmp.txt` | 先 Write message 到 tmp 文件,commit 后 rm;避免 `@` 字符泄漏 subject 行(memory)|
 | Claude Code Bash tool (Windows) | 同 PowerShell | 默认走 PowerShell |
+
+**v2 codex 一轮 plan review MAJOR 6 修订**:本 plan 主体 commit block 给 PowerShell 形式(沿 Windows + PowerShell 用户偏好);**Bash heredoc 等价见 Task 1 GREEN commit 下方注脚** — implementer 在 Bash 环境按相同消息内容用 `git commit -m "$(cat <<'EOF'...EOF)"` 改写即可,无需重复列出每 Task 的 Bash 版本。
 
 ---
 
@@ -91,10 +90,8 @@
 | `tests/core/validate/archive-summary-schema.test.ts` | 扩 ~150 行 | 8 case schema 严格校验 | T3 |
 | `tests/cli/archive-process-evidence-summary.test.ts` | 新文件 ~300 行 | 5 case integration(含副作用)| T4 |
 | `tests/integration/archive-md-sync.test.ts` | 新文件 ~30 行 | md5 sync 守护单测 | T5 |
-| `tests/fixtures/archive-warning-process-evidence/` | 新 fixture | non-legacy + #10 WARNING | T6 |
-| `tests/fixtures/archive-verify-only-legacy/` | 新 fixture | verify legacy + review v1.0 native(spec §5.1 case 4 验证;spec §5.2 隐含未独立列,plan 加 fixture)| T6 |
-| `tests/fixtures/archive-review-only-legacy/` | 新 fixture | verify native + review legacy | T6 |
-| `tests/fixtures/archive-review-only-legacy-with-verify-warning/` | 新 fixture | review legacy + verify WARNING 副作用回归 | T6 |
+| `tests/utils/build-archive-fixture.ts` | 新文件 ~200 行 | `buildProcessEvidenceFixture(opts)` helper 程序化构造 verify/review marker + sha256 hash 链(v2 codex 一轮 plan review BLOCKER 1 修订:仓库无 plan-9g baseline fixture,改为代码构造)| T6 |
+| `tests/fixtures/archive-9e2-stub/` | 新 fixture stub 目录 | 4 scenario 共享的 tasks.md / proposal.md / design.md(不含 marker yaml,marker 由 builder helper 注入到 mkdtemp)| T6 |
 
 ---
 
@@ -117,50 +114,17 @@
 // fence-mapper.test.ts — plan-9e2 Task 1 单测
 // 9 case 覆盖 4 态 status enum mapper + dual-legacy 并集 + 优先级
 // fail > legacy-skip > warning > pass
+// v2 codex 一轮 plan review MINOR 3 修订:简化 imports,纯 mapper 单测无需 IO
 
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { stringify as stringifyYaml } from 'yaml';
 import {
-  crossCuttingFenceCheck,
   FENCE_INVARIANT_NAMES,
   LEGACY_EXEMPT_INVARIANTS,
+  mapFindingsToResults,
 } from '../../../src/core/archive/fence.js';
+import type { ProcessEvidenceFinding } from '../../../src/core/archive/process-evidence-fence.js';
 
-// 工具:在临时目录构造 change 目录 + 写 verify/review marker
-function buildChangeRoot(opts: {
-  verifyMarker: Record<string, unknown>;
-  reviewMarker?: Record<string, unknown>;
-}): string {
-  const root = mkdtempSync(join(tmpdir(), 'forge-fence-mapper-'));
-  // 模拟 forge/changes/<id> 路径(crossCuttingFenceCheck 内部 dirname 三次上溯到 project root)
-  const projectRoot = root;
-  const changeRoot = join(projectRoot, 'forge', 'changes', 'test-change-1');
-  mkdirSync(changeRoot, { recursive: true });
-  writeFileSync(
-    join(changeRoot, '.verify-passed'),
-    stringifyYaml(opts.verifyMarker),
-    'utf8',
-  );
-  if (opts.reviewMarker) {
-    writeFileSync(
-      join(changeRoot, '.review-passed'),
-      stringifyYaml(opts.reviewMarker),
-      'utf8',
-    );
-  }
-  return changeRoot;
-}
-
-function cleanup(changeRoot: string): void {
-  // 上溯到 mkdtemp 创建的根
-  const projectRoot = join(changeRoot, '..', '..', '..');
-  rmSync(projectRoot, { recursive: true, force: true });
-}
-
-describe('crossCuttingFenceCheck mapper — 4 态 status enum + dual-legacy 并集', () => {
+describe('crossCuttingFenceCheck module-level constants', () => {
   it('LEGACY_EXEMPT_INVARIANTS 常量导出 size === 10 + 内容匹配 §3.4.4.1', () => {
     expect(LEGACY_EXEMPT_INVARIANTS.size).toBe(10);
     expect([...LEGACY_EXEMPT_INVARIANTS].sort((a, b) => a - b)).toEqual([
@@ -172,35 +136,16 @@ describe('crossCuttingFenceCheck mapper — 4 态 status enum + dual-legacy 并�
     expect(FENCE_INVARIANT_NAMES.length).toBe(14);
   });
 
-  it('non-legacy + 无 process_evidence marker → fence 不强制(legacy / pre-9g 路径,返 ok:true + 空 results)', () => {
-    // 构造缺 process_evidence 字段的 verify marker — fence.ts:94 早 return 路径
-    const changeRoot = buildChangeRoot({
-      verifyMarker: {
-        schema: 'forge-verify/v1',
-        // 缺 process_evidence — 走 legacy / pre-9g superset additive 路径
-      },
-    });
-    try {
-      // 注:此 case 走的是 fence.ts 内部 readFile 失败或 marker 缺字段早 return 路径
-      //     具体 mapper 4 态测试用下方更精确的 case
-      // 此 case 作为 sanity check,确保 fence 不会硬崩
-    } finally {
-      cleanup(changeRoot);
-    }
-  });
-
-  // 注:更精确的 4 态 mapper 单元测试需 mock `runFieldFence` / `runRerunFence` 返指定 findings
-  // 沿 plan-9g tests/cli/process-evidence-fence.test.ts 模式,直接 stub 内部 findings
-  // 本 plan Task 1 不引入 fence.ts 内部 IO mock 框架(沿 plan-9g 现有测试已覆盖 fence IO);
-  // 本测试文件只测 mapper 折数 → status 优先级,通过 export 一个 `mapFindingsToResults`
-  // 纯函数包装供测试调用(沿 plan-9d / 9j 同纯函数提取模式)
+  // 注:更精确的 4 态 mapper 单元测试通过 export 的 `mapFindingsToResults` 纯函数测试(下方 describe 块)
+  //     沿 plan-9d / 9j 同纯函数提取模式;crossCuttingFenceCheck 的 IO 路径由 plan-9g 现有 process-evidence-fence.test.ts 覆盖
+  //     本 describe 块仅守 LEGACY_EXEMPT_INVARIANTS 常量 + FENCE_INVARIANT_NAMES 长度两个 module-level invariant
+  //     (v2 codex 一轮 plan review MINOR 3 修订:删空体 sanity case,不留 placeholder)
 });
 
 // ============================================================
 // mapFindingsToResults 纯函数版 mapper 单元测试(沿 plan-9d 同模式)
+// v2 codex 一轮 plan review MAJOR 3 修订:import 已在文件顶部,本块不重复
 // ============================================================
-import type { ProcessEvidenceFinding } from '../../../src/core/archive/process-evidence-fence.js';
-import { mapFindingsToResults } from '../../../src/core/archive/fence.js';
 
 describe('mapFindingsToResults — 4 态 mapper 纯函数', () => {
   it('non-legacy + 无 finding → 14 个 status="pass"', () => {
@@ -549,6 +494,30 @@ Remove-Item .git/COMMIT_MSG_T1_GREEN
 Run: `git log -2 --format="%h %s"`
 Expected: 看到 GREEN commit + RED commit 各一条
 
+**Bash 等价 commit sample(v2 codex 一轮 plan review MAJOR 6 修订;其他 Task 同模式 implementer 转换)**:
+
+PowerShell 上方 GREEN commit block 的 Bash heredoc 等价:
+```bash
+git add src/core/schemas/archive-summary.ts src/core/archive/fence.ts tests/core/archive/fence-mapper.test.ts
+git commit -m "$(cat <<'EOF'
+feat(9e2 Task 1 GREEN): fence 4 态 status enum + LEGACY_EXEMPT_INVARIANTS + mapper 重写
+
+实施 plan-9e2 brainstorm spec §3.1-3.2:
+- archive-summary.ts ProcessEvidenceSummary 加 invariants_with_warning?: number 字段(v2 codex 一轮 MAJOR);JSDoc 注释含 sum 不变式 + legacy 精度损失说明
+- fence.ts FenceInvariantResult 加 status: 'pass'|'warning'|'fail'|'legacy-skip' 4 态 enum(保留 ok 字段 backwards-compat,plan-9z 阶段考虑 deprecation)
+- fence.ts 加 LEGACY_EXEMPT_INVARIANTS = new Set([1-8, 10, 13]) 模块级常量(沿 master §3.4.4.1)
+- fence.ts mapper 重写:effectiveLegacyExempt = verifyLegacy || reviewLegacy 并集;从 allFindings 同时筛 CRITICAL + WARNING;优先级 fail > legacy-skip > warning > pass
+- mapFindingsToResults 提取为导出纯函数(沿 plan-9d/9j 同模式)便于单测
+
+9 case unit test 全 PASS,现有 fence test 无回归。
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+EOF
+)"
+```
+
+Task 2-6 implementer 按相同 message 内容 + 相同 git add file 列表自行用 Bash heredoc 改写,无需重复列出。
+
 ---
 
 ## 3. Task 2 — summary-builder.ts summarizeProcessEvidence + buildArchiveSummary 签名扩
@@ -570,7 +539,7 @@ Expected: 看到 GREEN commit + RED commit 各一条
 // ============================================================
 // plan-9e2 Task 2:summarizeProcessEvidence + buildArchiveSummary 签名扩 5 case
 // ============================================================
-import { buildArchiveSummary } from '../../../src/core/archive/summary-builder.js';
+// 注:buildArchiveSummary 已在文件顶部 line 14 import,本块不重复 import(v2 codex 一轮 plan review MAJOR 3 修订)
 import type { FenceCheckResult } from '../../../src/core/archive/fence.js';
 
 // helper:构造 stub FenceCheckResult
@@ -1096,14 +1065,15 @@ Expected: FAIL — 多数 case fail(validator 现仅校验 process_evidence_summ
 
 ```powershell
 @'
-test(9e2 Task 3 RED): archive-summary-schema placeholder=false 严格校验 8 case
+test(9e2 Task 3 RED): archive-summary-schema placeholder=false 严格校验 10 case
 
-沿 brainstorm spec §5.1 测试矩阵:
-- 缺 invariants_passed / invariants_with_warning / invariants_failed / legacy_exempt 各拒签
-- invariants_with_warning = -1 / invariants_passed = 15 越界拒签 "must be in [0, 14]"
-- sum 不变式破 2 case(passed+failed+exempt=15 / passed+warning+exempt=15)拒签 "sum invariant"
-- placeholder=true 路径(plan-9e1 容忍)通过
-- 4 字段值域内 + sum=14 通过
+沿 brainstorm spec §5.1 测试矩阵(v2 codex 一轮 plan review MINOR 2 修订:8 → 10 计数):
+- 缺 invariants_passed / invariants_with_warning / invariants_failed / legacy_exempt 各拒签(4)
+- invariants_with_warning = -1 / invariants_passed = 15 越界拒签 "must be in [0, 14]"(2)
+- sum 不变式破 2 case(passed+failed+exempt=15 / passed+warning+exempt=15)拒签 "sum invariant"(2)
+- placeholder=true 路径(plan-9e1 容忍)通过(1)
+- 4 字段值域内 + sum=14 通过(1)
+合计 10 case
 
 红:validator 现仅校 object,不校内部字段 → FAIL
 
@@ -1116,12 +1086,19 @@ Remove-Item .git/COMMIT_MSG_T3_RED
 
 ### Step 2: 实现 — archive-summary-schema.ts 扩严格校验(GREEN)
 
-- [ ] **Step 2.1: 修改 `src/core/validate/archive-summary-schema.ts` 顶部 import 区加 FENCE_INVARIANT_NAMES**
+- [ ] **Step 2.1: 修改 `src/core/validate/archive-summary-schema.ts` 顶部 import + 模块级常量(v2 codex 一轮 plan review MAJOR 5 修订:EXPECTED_INVARIANT_COUNT 提升模块级)**
 
 在现有 import 之后追加:
 ```typescript
 // plan-9e2 Task 3:派生 EXPECTED_INVARIANT_COUNT 从 FENCE_INVARIANT_NAMES.length(自动跟随 invariant 数演化)
 import { FENCE_INVARIANT_NAMES } from '../archive/fence.js';
+
+/**
+ * plan-9e2 v2 codex 一轮 plan review MAJOR 5 修订:模块级派生常量
+ * 沿 brainstorm spec §3.5 + DoD 显式要求"派生常量"语义 — 不放函数内 const,模块级单源
+ * 后续若 invariant 数演化(plan-v1.1+),本常量自动跟随 FENCE_INVARIANT_NAMES.length
+ */
+const EXPECTED_INVARIANT_COUNT = FENCE_INVARIANT_NAMES.length;
 ```
 
 - [ ] **Step 2.2: 在 `src/core/validate/archive-summary-schema.ts:651-665` process_evidence_summary 校验区段后插入 placeholder=false 严格校验**
@@ -1153,7 +1130,7 @@ import { FENCE_INVARIANT_NAMES } from '../archive/fence.js';
   ) {
     const peSummary = obj.process_evidence_summary as Record<string, unknown>;
     if (peSummary.placeholder === false) {
-      const EXPECTED_INVARIANT_COUNT = FENCE_INVARIANT_NAMES.length;
+      // EXPECTED_INVARIANT_COUNT 从模块顶层 import(v2 codex 一轮 plan review MAJOR 5 修订)
       const REQUIRED_FIELDS = [
         'invariants_passed',
         'invariants_with_warning',
@@ -1264,7 +1241,7 @@ Remove-Item .git/COMMIT_MSG_T3_GREEN
 // 沿 plan-9e1 tests/cli/archive*.test.ts 同 e2e 模式;fixture 在 Task 6 创建,本 Task 用临时 mkdtemp + 手写 marker
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { stringify as stringifyYaml, parse as parseYaml } from 'yaml';
@@ -1351,9 +1328,10 @@ describe('archive 真实 process_evidence_summary 写入 — plan-9e2 Task 4 int
 
   function readSummary(): Record<string, unknown> {
     // 读 archive 目录下的 archive_summary.yaml(沿 plan-9e1 yaml 路径)
-    const archiveSubDirs = require('node:fs')
-      .readdirSync(join(projectRoot, 'forge', 'changes', 'archive'))
-      .filter((d: string) => d.includes('test-change'));
+    // v2 codex 一轮 plan review MAJOR 4 修订:用 readdirSync ESM import(避免 require ESM 不支持)
+    const archiveSubDirs = readdirSync(join(projectRoot, 'forge', 'changes', 'archive')).filter(
+      (d) => d.includes('test-change'),
+    );
     expect(archiveSubDirs.length).toBe(1);
     const summaryPath = join(
       projectRoot,
@@ -1366,43 +1344,54 @@ describe('archive 真实 process_evidence_summary 写入 — plan-9e2 Task 4 int
     return parseYaml(readFileSync(summaryPath, 'utf8'));
   }
 
-  it('non-legacy + 无 process_evidence → fence 早 return(superset additive 路径),summary placeholder=false + passed=14 / 0 / 0 / 0', () => {
-    // 注:fence.ts:94 当 verifyMarker 缺 process_evidence 时早 return 空 results
-    //     此 case 走 Task 1 mapper 不再 reach 的路径(fence 自身返 ok:true + 空 results)
-    //     summary 写入时 buildArchiveSummary 收到的 fenceResult.results = []
-    //     summarizeProcessEvidence 折数 = {passed:0, warning:0, failed:0, exempt:0}
-    //     archive-summary-schema 严格校验 sum 不变式 0 !== 14 → 拒签
+  it('plan-9e1 mixed-all-three fixture(legacy / pre-9g marker)→ archive exit 0 + summary {placeholder:false, passed:14, warning:0, failed:0, exempt:0}', () => {
+    // v2 codex 一轮 plan review MAJOR 2 + BLOCKER 2 修订:用 plan-9e1 现有 fixture 作为强 RED 路径
     //
-    // 但此 case 是 archive 主路径 e2e — 实际 plan-9g 现有 fence 行为对缺 process_evidence
-    //     的 non-legacy marker 是返 ok:true + 空 results(legacy/pre-9g 兼容)
+    // RED 因果:Task 4 GREEN 前 archive.ts:444-446 buildArchiveSummary 调用未带 fenceResult 入参
+    //          (Task 2 Step 3.1b 已临时改,本 Task 4 走完整路径) → 调用栈断 → typecheck fail
+    //          或运行时 buildArchiveSummary 收到 undefined fenceResult → summarize crash / placeholder 写入
+    // GREEN:Task 4 Step 2.1 确认 fenceResult 透传后,fence 跑 mixed-all-three(无 created_by_tool_version
+    //        的 legacy / pre-9g marker)→ runFieldFence 早 return 空 findings(沿 process-evidence-fence.ts:243
+    //        isV10Native=false 路径)→ mapper 折数 14 全 'pass' → summary {placeholder:false, 14/0/0/0}
     //
-    // 故此 case 的预期是:archive 失败 exit 1(因 schema validator 拒签 sum 不变式)
-    //     **这是 plan-9e2 引入的边界 case**:non-legacy + 缺 process_evidence 在 v1.0 路径下
-    //     **会被严格校验拒签**(沿 plan-9g 反向加固:created_by_tool_version >= 1.0.0 必须含 process_evidence)
-    //
-    // 实际此 case 由 plan-9g process-evidence-fence.ts:243 v1 修订 B-3 路径拦截(产 CRITICAL finding 9)
-    //     而非走到 summary 写入。Task 4 该 case 预期 archive exit 1(fence 拦截,而非 schema 拦截)
-    writeBaselineMarkers();
+    // 注:plan-9e1 mixed-all-three fixture 已存在(tests/fixtures/archive-warnings/mixed-all-three/)
+    //     沿 plan-9e1 同 e2e 模式;sum 不变式 14+0+0+0=14 PASS
+    copyFixtureToProject('archive-warnings/mixed-all-three');
     const r = runArchive();
-    expect(r.exitCode).toBe(1);
-    expect(r.stderr).toMatch(/v1\.0 marker missing process_evidence|fence rejected/);
+    expect(r.exitCode).toBe(0);
+    const summary = readSummary();
+    expect(summary.process_evidence_summary).toEqual({
+      placeholder: false,
+      invariants_passed: 14,
+      invariants_with_warning: 0,
+      invariants_failed: 0,
+      legacy_exempt: 0,
+    });
   });
 
-  it('non-legacy + 完整 process_evidence(14 全 pass)→ archive_summary.yaml passed:14 / 0 / 0 / 0', () => {
-    // 注:此 case 需要构造完整 process_evidence 14 不变量全 PASS 的 marker
-    //     fixture 完整内容由 Task 6 提供(`tests/fixtures/archive-warning-process-evidence/` 基础)
-    //     Task 4 用占位 it.todo,实施时 stub 一个最小 happy-path marker;Task 6 完整 fixture 接
-    //     **本 step 用 it.todo 占位**(沿 plan-9g Task 6 同 fixture 占位模式)
-  });
+  it.todo('non-legacy v1.0 marker + 完整 process_evidence + 1 #10 env_hash WARNING(Task 6 builder helper 接)→ passed:13 / warning:1 / failed:0 / exempt:0');
 
-  it.todo('non-legacy + 完整 process_evidence + 1 #10 env_hash WARNING fixture → passed:13 / warning:1 / failed:0 / exempt:0(Task 6 fixture 完成后接)');
+  it.todo('verify-only legacy(verify marker process_evidence_unavailable_legacy: true)(Task 6 builder helper 接)→ passed:4 / warning:0 / failed:0 / exempt:10');
 
-  it.todo('verify-only legacy(verify marker process_evidence_unavailable_legacy: true)→ passed:4 / warning:0 / failed:0 / exempt:10(Task 6 fixture 完成后接)');
+  it.todo('review-only legacy(verify v1 native + review process_evidence_unavailable_legacy: true)(Task 6 builder helper 接)→ 等同 verify-only legacy(并集)');
 
-  it.todo('review-only legacy(verify v1 native + review process_evidence_unavailable_legacy: true)→ 等同 verify-only legacy(并集,Task 6 fixture 完成后接)');
+  it.todo('review-only legacy + verify-side #10 WARNING(Task 6 builder helper 接)→ passed:4 / warning:0 / failed:0 / exempt:10(v2 codex 一轮 MAJOR 副作用回归;verify WARNING 被吞,summary 计数为 0 但 stderr 有输出)');
 
-  it.todo('review-only legacy + verify-side #10 WARNING fixture → passed:4 / warning:0 / failed:0 / exempt:10(v2 codex 一轮 MAJOR 副作用回归;verify WARNING 被吞 stderr 有输出但 summary 计数为 0;Task 6 fixture 完成后接)');
+  // 注:copyFixtureToProject helper 见文件底部辅助函数;沿 plan-9e1 archive*.test.ts 同模式
 });
+
+// ============================================================
+// Test helper(沿 plan-9e1 同模式)
+// ============================================================
+import { cpSync } from 'node:fs';
+
+declare let projectRoot: string;
+
+function copyFixtureToProject(fixturePath: string): void {
+  const fixtureSrc = join(process.cwd(), 'tests', 'fixtures', fixturePath);
+  const fixtureDst = join(projectRoot, 'forge', 'changes', 'test-change');
+  cpSync(fixtureSrc, fixtureDst, { recursive: true, force: true });
+}
 ```
 
 注:Task 4 的 integration 测试有 4 个 it.todo,Task 6 完成 fixture 后 enable;Task 4 仅保留 2 个可立即跑的 case(non-legacy 缺 process_evidence 拒签 + happy-path placeholder)。沿 plan-9g Task 5/6 同 it.todo 占位模式。
@@ -1416,17 +1405,18 @@ Expected: 1 case FAIL(non-legacy 缺 process_evidence)— 实际可能 PASS 取�
 
 ```powershell
 @'
-test(9e2 Task 4 RED): archive integration 5 case 占位(2 active + 4 it.todo Task 6 接)
+test(9e2 Task 4 RED): archive integration 5 case(1 active + 4 it.todo Task 6 builder 接)
 
-沿 brainstorm spec §5.1 测试矩阵 + plan-9g Task 5/6 it.todo 占位模式:
-- non-legacy + 缺 process_evidence → exit 1(fence 反向加固拦截,v1.0 native marker 必须含 process_evidence)
-- non-legacy + 完整 process_evidence → 14 全 PASS(it.todo,Task 6 fixture 接)
-- non-legacy + WARNING → passed:13 / warning:1(it.todo,Task 6 fixture 接)
-- verify-legacy → passed:4 / exempt:10(it.todo,Task 6 fixture 接)
-- review-only legacy → 等同 verify-legacy 并集(it.todo,Task 6 fixture 接)
-- review-only legacy + verify WARNING → passed:4 / warning:0 / exempt:10 副作用回归(it.todo,Task 6 fixture 接)
+沿 brainstorm spec §5.1 测试矩阵 + v2 codex 一轮 plan review BLOCKER 2 + MAJOR 2 修订:
+- plan-9e1 mixed-all-three fixture(legacy / pre-9g marker)→ summary {placeholder:false, 14/0/0/0}(active 强 RED → GREEN)
+- non-legacy v1.0 + 完整 process_evidence + 1 #10 WARNING → passed:13 / warning:1(it.todo,Task 6 builder helper 接)
+- verify-only legacy → passed:4 / exempt:10(it.todo,Task 6 builder helper 接)
+- review-only legacy → 等同 verify-only legacy 并集(it.todo,Task 6 builder helper 接)
+- review-only legacy + verify WARNING → 副作用回归(it.todo,Task 6 builder helper 接)
 
-红:5 case 中 1 active(此 case 已被 plan-9g 反向加固覆盖,作为 regression guard 落地)
+红:Task 4 GREEN 前 archive.ts:444-446 buildArchiveSummary 未带 fenceResult 入参 → TS 编译失败或运行时 placeholder 写入,active case fail
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 '@ | Out-File -Encoding utf8 .git/COMMIT_MSG_T4_RED
@@ -1509,9 +1499,11 @@ Remove-Item .git/COMMIT_MSG_T4_GREEN
 - Modify: `src/core/templates/commands/archive.md`(模板,完全同步根级)
 - Create: `tests/integration/archive-md-sync.test.ts`
 
-### Step 1: 先写 RED md5 sync 守护测试(TDD red)
+### Step 1: 建立 md5 sync invariant guard test(非 TDD red,守护 invariant)
 
-- [ ] **Step 1.1: 创建 `tests/integration/archive-md-sync.test.ts`**
+**注(v2 codex 一轮 plan review MAJOR 1 修订)**:本 Task 不是标准 TDD red→green — md5 sync 是 invariant guard,实施前两份 archive.md 已经 md5 一致(实施前基线),Step 1 落地的 test 初始 PASS。Step 2 双改两份文件后 test 仍 PASS(守住一致性)。**Step 1.3 的"临时破坏"是教练性 sanity verify,不是 TDD red 流程**。
+
+- [ ] **Step 1.1: 创建 `tests/integration/archive-md-sync.test.ts`(invariant guard)**
 
 ```typescript
 // archive-md-sync.test.ts — plan-9e2 Task 5 md5 sync 守护
@@ -1541,7 +1533,16 @@ Expected: PASS(实施前两份 md5 一致)
 
 注:本 test 不是 TDD red — 它是守护 invariant 不被破坏。Task 5 后续步骤改一份未同步会让此 test FAIL;同步双改后恢复 PASS。
 
-- [ ] **Step 1.3: 改一份(根级)制造临时不一致,确认守护生效(临时 RED 验证)**
+- [ ] **Step 1.3: 教练性 sanity verify — 改一份制造临时不一致,确认守护生效**
+
+v2 codex 一轮 plan review MINOR 4 修订:**先确认工作区干净**避免覆盖用户改动:
+```powershell
+git diff --quiet commands/archive.md src/core/templates/commands/archive.md
+if ($LASTEXITCODE -ne 0) {
+  Write-Host "Error: archive.md 工作区不干净,先 stash 或 commit 用户改动再跑 sanity verify"
+  exit 1
+}
+```
 
 人工编辑 `commands/archive.md` 末尾加一行空行(临时破坏 md5),跑测试:
 ```
@@ -1549,7 +1550,7 @@ Run: pnpm vitest run tests/integration/archive-md-sync.test.ts
 Expected: FAIL — md5 mismatch
 ```
 
-回滚临时改动:
+回滚临时改动(此时工作区干净,git checkout 不会覆盖意外改动):
 ```powershell
 git checkout commands/archive.md
 ```
@@ -1560,11 +1561,11 @@ Run: pnpm vitest run tests/integration/archive-md-sync.test.ts
 Expected: PASS
 ```
 
-- [ ] **Step 1.4: RED commit(守护测试落地)**
+- [ ] **Step 1.4: invariant guard commit(守护测试落地;v2 codex 一轮 plan review MAJOR 1 修订:非 TDD red)**
 
 ```powershell
 @'
-test(9e2 Task 5 RED guard): commands/archive.md 双文件 md5 sync 守护
+test(9e2 Task 5 guard): commands/archive.md 双文件 md5 sync invariant 守护
 
 沿 brainstorm spec §5.1 case 5 + plan-9j Task 6.2 双同步模式:
 - 根级 commands/archive.md 与模板 src/core/templates/commands/archive.md md5 必须完全一致
@@ -1670,7 +1671,7 @@ feat(9e2 Task 5 GREEN): archive.md 双改 + 字段语义短段 + md5 sync 守护
 
 实施 plan-9e2 brainstorm spec §3.7:
 - 根级 commands/archive.md + 模板 src/core/templates/commands/archive.md 双改 4 处文案
-  - line 53:process_evidence_summary 字段说明扩 5 子字段 + sum 不变式
+  - line 53:process_evidence_summary 字段说明扩 placeholder + 4 计数字段(passed/with_warning/failed/exempt)+ sum 不变式(v2 codex 一轮 plan review NIT 2 修订:placeholder 不是统计字段)
   - line 66:stdout sample 改为 [process_evidence:passed=3/warning=1/failed=0/legacy=10]
   - line 141:9e2 已完成状态说明
   - line 144:merge 顺序加 "9e2(已完成全链)" 注脚
@@ -1686,129 +1687,265 @@ Remove-Item .git/COMMIT_MSG_T5_GREEN
 
 ---
 
-## 7. Task 6 — 3 fixture + 4 it.todo integration case enable
+## 7. Task 6 — build-archive-fixture.ts builder helper + 4 it.todo integration case enable
 
-**Implementer**:sonnet(fixture + e2e — 3 个 fixture 涉及 process_evidence 14 不变量完整 marker)
+**v2 codex 一轮 plan review BLOCKER 1 修订**:plan-9g `tests/fixtures/process-evidence-*` baseline 在仓库不存在(实际 ls tests/fixtures 仅 archive-warnings/ + legacy-bridge/);改为 **test-runtime builder helper 程序化构造完整 marker**(含 process_evidence + sha256 hash 链 + JCS canonical),不依赖物理 fixture 目录。
+
+**Implementer**:sonnet(test infra — builder helper 设计 + 4 case enable + 副作用回归)
 **Spec reviewer**:sonnet
 **Quality reviewer**:sonnet
 
 **Files**:
-- Create: `tests/fixtures/archive-warning-process-evidence/`(non-legacy v1.0 + verify 阶段产 #10 env_hash WARNING)
-- Create: `tests/fixtures/archive-verify-only-legacy/`(verify legacy + review v1.0 native;沿 brainstorm spec §5.2 隐含 — spec 仅列 3 个新 fixture 但 §5.1 case 4 verify-only legacy 需要独立 fixture;plan-9g 已有 legacy fixture 时可复用,此处 Task 6 Step 1.3 给出复用 / 手写两条路径)
-- Create: `tests/fixtures/archive-review-only-legacy/`(verify v1.0 native + review legacy)
-- Create: `tests/fixtures/archive-review-only-legacy-with-verify-warning/`(verify v1.0 + #10 WARNING + review legacy 副作用回归)
-- Modify: `tests/cli/archive-process-evidence-summary.test.ts`(enable 4 it.todo case)
+- Create: `tests/utils/build-archive-fixture.ts`(builder helper)
+- Modify: `tests/cli/archive-process-evidence-summary.test.ts`(enable 4 it.todo 用 builder helper 注入 marker)
 
-### Step 1: 创建 3 fixture 目录 + 完整 marker yaml
+### Step 1: 创建 build-archive-fixture.ts builder helper
 
-**注**:每个 fixture 是完整的 `forge/changes/<id>/` 目录骨架,含:
-- `.verify-passed`(完整 v1.0 marker 含 process_evidence schema)
-- `.review-passed`(完整 v1.0 marker)
-- `tasks.md` + `proposal.md` + `design.md`(最小 stub)
-- `.evidence/process-evidence.staging.yaml`(plan-9g freeze 写入的 staging 文件)
-- `.evidence/ack-log.jsonl`(plan-9a / plan-9g helper 写入的 JSONL chain)
+- [ ] **Step 1.1: 创建 `tests/utils/build-archive-fixture.ts`**
 
-完整 fixture 需要构造合法的 process_evidence 数据(JCS hash 链 / red_commit / green_commit / verify_invocations)。**沿 plan-9g.3 现有 fixture 模板**:
-
-- [ ] **Step 1.1: 复制 plan-9g fixture 作为 baseline**
-
-查 plan-9g.3 已立的 fixture 路径(`tests/fixtures/process-evidence-*/` 类似命名),复制作为 fixture 1 baseline:
-```powershell
-$baseFixture = Get-ChildItem tests/fixtures -Directory | Where-Object Name -like "*process-evidence*" | Select-Object -First 1
-Copy-Item $baseFixture.FullName -Destination tests/fixtures/archive-warning-process-evidence -Recurse
-```
-
-- [ ] **Step 1.2: 修改 fixture 1 `archive-warning-process-evidence/` 让 #10 env_hash 不一致**
-
-修改 `.verify-passed` marker 中 `process_evidence.env_hash` 字段为一个真实 sha256(占位:`"deadbeef".repeat(8)`),然后在 process_evidence_summary 内置环境哈希校对时不匹配 → plan-9g process-evidence-fence.ts 产 invariant 10 WARNING finding。
-
-(实操:plan-9g.3 fixture 中如有 `env_hash: <hash>` 字段,改其值 → fence 时 recomputeEnvHash 不匹配 → push WARNING)
-
-- [ ] **Step 1.3a: 复制 baseline 创建 fixture 2 `archive-verify-only-legacy/`**
-
-```powershell
-Copy-Item $baseFixture.FullName -Destination tests/fixtures/archive-verify-only-legacy -Recurse
-```
-
-- [ ] **Step 1.3b: 修改 fixture 2 让 verify marker 为 legacy(review 保持 v1.0 native)**
-
-修改 `.verify-passed` marker:
-- 删除 `process_evidence` 整字段
-- 加 `process_evidence_unavailable_legacy: true`
-- 加 `resigned_by_tool_version: '1.0.0'`(沿 plan-9j legacy-exemption resigned-aware,避免 legacy-exemption fence 拒签;sample 来源:`forge upgrade --resign-markers` 写入)
-
-review marker 保持 v1.0 native(完整 process_evidence)。
-
-- [ ] **Step 1.3c: 复制 baseline 创建 fixture 3 `archive-review-only-legacy/`**
-
-```powershell
-Copy-Item $baseFixture.FullName -Destination tests/fixtures/archive-review-only-legacy -Recurse
-```
-
-- [ ] **Step 1.4: 修改 fixture 3 `archive-review-only-legacy/` 让 review marker 为 legacy(verify 仍 v1.0 native)**
-
-修改 `.review-passed` marker:
-- 删除 `process_evidence` 整字段
-- 加 `process_evidence_unavailable_legacy: true`
-- 加 `resigned_by_tool_version: '1.0.0'`(避免 plan-9j legacy-exemption fence 拒签;沿 design §3.4.4.1 修订 resigned-aware)
-
-verify marker 保持 v1.0 native(完整 process_evidence)。
-
-- [ ] **Step 1.5: 复制 fixture 3 创建 fixture 4 `archive-review-only-legacy-with-verify-warning/`**
-
-```powershell
-Copy-Item tests/fixtures/archive-review-only-legacy -Destination tests/fixtures/archive-review-only-legacy-with-verify-warning -Recurse
-```
-
-- [ ] **Step 1.6: 修改 fixture 4 让 verify 侧 #10 env_hash 不一致**
-
-同 Step 1.2 — 修改 `.verify-passed` 中 `process_evidence.env_hash` 字段值,让 fence 产 invariant 10 WARNING。
-此时 review 是 legacy(豁免),effectiveLegacyExempt = true,verify 侧 #10 WARNING 被 mapper 标 legacy-skip 静默丢失(沿 brainstorm spec §4.3 副作用)。
-
-### Step 2: enable 4 it.todo case + 实测预期值
-
-- [ ] **Step 2.1: 修改 `tests/cli/archive-process-evidence-summary.test.ts`,把 4 个 it.todo 改为 it + 实现 case**
-
-替换:
 ```typescript
-it.todo('non-legacy + 完整 process_evidence + 1 #10 env_hash WARNING fixture → passed:13 / warning:1 / failed:0 / exempt:0(Task 6 fixture 完成后接)');
-```
+// build-archive-fixture.ts — plan-9e2 Task 6 builder helper(v2 codex 一轮 plan review BLOCKER 1 修订)
+// 程序化构造完整 verify/review marker(含 process_evidence + sha256 hash 链 + JCS canonical 序列化)
+// 沿 plan-9g brainstorm spec §2.7.2 process_evidence schema 字段名严格(red_commit/green_commit/...)
+// 4 scenario:warning / verify-legacy / review-legacy / review-legacy-with-verify-warning
 
-为:
-```typescript
-it('non-legacy + 完整 process_evidence + 1 #10 env_hash WARNING fixture → passed:13 / warning:1 / failed:0 / exempt:0', () => {
-  // 复制 fixture 到临时项目根
-  copyFixtureToProject('archive-warning-process-evidence');
-  const r = runArchive();
-  expect(r.exitCode).toBe(0);
-  const summary = readSummary();
-  expect(summary.process_evidence_summary).toEqual({
-    placeholder: false,
-    invariants_passed: 13,
-    invariants_with_warning: 1,
-    invariants_failed: 0,
-    legacy_exempt: 0,
-  });
-});
-```
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { stringify as stringifyYaml } from 'yaml';
+import { createHash } from 'node:crypto';
+import { canonicalize } from 'canonicalize'; // plan-9a 已 dep,JCS RFC 8785
 
-(其他 3 个 it.todo 同模式 enable,fixture 名 + 预期 summary fields 按上方 spec §4.3 边界场景表填)
+/** 4 种 scenario 类别 — 决定 verify/review marker 内 process_evidence 字段构造 */
+export type FixtureScenario =
+  | 'warning' // non-legacy v1.0 + verify 阶段 env_hash WARNING(invariant 10)
+  | 'verify-legacy' // verify marker 标 legacy + review v1.0 native
+  | 'review-legacy' // verify v1.0 native + review 标 legacy
+  | 'review-legacy-with-verify-warning'; // verify v1.0 + WARNING + review legacy(副作用回归)
 
-补全 `copyFixtureToProject` helper 在文件顶部:
-```typescript
-import { cpSync } from 'node:fs';
-function copyFixtureToProject(fixtureName: string): void {
-  const fixtureSrc = join(process.cwd(), 'tests', 'fixtures', fixtureName);
-  const fixtureDst = join(projectRoot, 'forge', 'changes', 'test-change');
-  cpSync(fixtureSrc, fixtureDst, { recursive: true, force: true });
+export interface FixtureBuildOptions {
+  scenario: FixtureScenario;
+  /** change 目录绝对路径(必须已 mkdir);本 fn 写入 .verify-passed / .review-passed 到此目录 */
+  changeDir: string;
+  /** change-id 字符串,默认 'test-change' */
+  changeId?: string;
+}
+
+/**
+ * 程序化构造完整 v1.0 process_evidence(passable + matching env_hash 等)
+ *
+ * 注:本 helper 构造的 marker **不实际跑 fence rerun**(因为 mkdtemp 临时项目内无真实 git history /
+ *     real test command);依赖 fence 内部 mode=hash-only 路径 ack-mode 隐含覆盖(沿 plan-9g brainstorm v9)
+ *     fence 实际行为:hash-only mode → invariant 5/6/13 走 stderr 不阻断(WARNING 已被 ack-mode 隐含覆盖)
+ *     不变量 1-4/7-9/11-12/14 走字段类校验,marker 内字段构造合法即 PASS
+ */
+function buildBaselineProcessEvidence(): Record<string, unknown> {
+  // 最小合法 process_evidence — 14 不变量全 PASS(hash-only mode 跳 rerun;字段类不变量靠构造合法字段满足)
+  const baselinePe = {
+    version: '1.0.0',
+    tdd_event_chain: [
+      {
+        task_ref: 'T1',
+        red_commit: {
+          sha: 'a'.repeat(40),
+          timestamp: '2026-05-13T09:00:00Z',
+          log_path: 'logs/red-T1.log',
+          log_hash: 'b'.repeat(64),
+          report_path: 'logs/red-T1.junit.xml',
+          report_hash: 'c'.repeat(64),
+          exit_code: 1,
+          expected_failures: [{ test_id: 'T1.case1' }],
+        },
+        green_commit: {
+          sha: 'd'.repeat(40),
+          timestamp: '2026-05-13T09:05:00Z',
+          log_path: 'logs/green-T1.log',
+          log_hash: 'e'.repeat(64),
+          report_path: 'logs/green-T1.junit.xml',
+          report_hash: 'f'.repeat(64),
+          exit_code: 0,
+        },
+      },
+    ],
+    verify_invocations: [
+      {
+        invoked_at: '2026-05-13T09:10:00Z',
+        log_path: 'logs/verify.log',
+        log_hash: '1'.repeat(64),
+        report_hash: '2'.repeat(64),
+        exit_code: 0,
+      },
+    ],
+    subagent_review_chain: [
+      {
+        spec_iterations: 1,
+        quality_iterations: 1,
+        main_check_off_at: '2026-05-13T09:15:00Z',
+      },
+    ],
+    env_hash: '3'.repeat(64),
+    process_verification_mode: 'hash-only',
+    process_verification_mode_acked_by: 'msc',
+    worktree_paths: [],
+  };
+  return baselinePe;
+}
+
+/** 计算 process_evidence 的 JCS hash(plan-9g 不变量 9) */
+function computeProcessEvidenceHash(pe: Record<string, unknown>): string {
+  const jcs = canonicalize(pe);
+  if (jcs === undefined) throw new Error('canonicalize failed');
+  return createHash('sha256').update(jcs).digest('hex');
+}
+
+/**
+ * Build marker objects + 写入 changeDir(.verify-passed + .review-passed)
+ *
+ * 注:本 helper 假设 hash-only mode + ack-mode 已覆盖 invariant 5/6/13;
+ *     文件类不变量 1-4/7-9/11-12/14 通过构造合法 hash + timestamp 字段满足
+ *     scenario 决定 verify/review 各自 marker 的 legacy / WARNING 字段
+ */
+export function buildProcessEvidenceFixture(opts: FixtureBuildOptions): void {
+  const { scenario, changeDir, changeId = 'test-change' } = opts;
+  mkdirSync(changeDir, { recursive: true });
+
+  // 共享基础 marker 字段
+  const sharedHash = 'a'.repeat(64); // tasks_hash / content_hash
+
+  // 构造 verify marker
+  let verifyMarker: Record<string, unknown>;
+  if (scenario === 'verify-legacy') {
+    // verify marker 走 legacy 路径:删 process_evidence,加 legacy flag + resigned_by_tool_version
+    verifyMarker = {
+      schema: 'forge-verify/v1',
+      created_by_tool_version: '0.4.0',
+      resigned_by_tool_version: '1.0.0', // 沿 plan-9j legacy-exemption resigned-aware
+      process_evidence_unavailable_legacy: true,
+      tasks_hash: sharedHash,
+      content_hash: sharedHash,
+      verified_at: '2026-05-13T10:00:00Z',
+      verified_by: 'ai-agent',
+      evidence: [],
+      verify_findings: [],
+      pause_decisions: [],
+    };
+  } else {
+    // non-legacy 路径:含完整 process_evidence
+    const pe = buildBaselineProcessEvidence();
+    // scenario='warning' 或 'review-legacy-with-verify-warning' → verify 侧 env_hash 不一致触发 WARNING #10
+    if (scenario === 'warning' || scenario === 'review-legacy-with-verify-warning') {
+      pe.env_hash = 'deadbeef'.repeat(8); // 64 字符 sha256 字面,与 ctx.recomputed env_hash 不匹配 → WARNING
+    }
+    const peHash = computeProcessEvidenceHash(pe);
+    verifyMarker = {
+      schema: 'forge-verify/v1',
+      created_by_tool_version: '1.0.0',
+      tasks_hash: sharedHash,
+      content_hash: sharedHash,
+      verified_at: '2026-05-13T10:00:00Z',
+      verified_by: 'ai-agent',
+      evidence: [],
+      verify_findings: [],
+      pause_decisions: [],
+      process_evidence: pe,
+      process_evidence_staging_hash: peHash,
+      ack_log_tail_hash: '0'.repeat(64),
+      ack_log_entry_count: 0,
+    };
+  }
+
+  // 构造 review marker
+  let reviewMarker: Record<string, unknown>;
+  if (scenario === 'review-legacy' || scenario === 'review-legacy-with-verify-warning') {
+    // review marker 走 legacy 路径
+    reviewMarker = {
+      schema: 'forge-review/v1',
+      created_by_tool_version: '0.4.0',
+      resigned_by_tool_version: '1.0.0',
+      process_evidence_unavailable_legacy: true,
+      tasks_hash: sharedHash,
+      content_hash: sharedHash,
+      reviewed_at: '2026-05-13T10:05:00Z',
+      reviewed_by: 'ai-agent',
+      review_outcomes: [],
+      pause_decisions: [],
+    };
+  } else {
+    // non-legacy 路径(含 verify-legacy 场景 — review 是 v1.0 native)
+    const pe = buildBaselineProcessEvidence();
+    const peHash = computeProcessEvidenceHash(pe);
+    reviewMarker = {
+      schema: 'forge-review/v1',
+      created_by_tool_version: '1.0.0',
+      tasks_hash: sharedHash,
+      content_hash: sharedHash,
+      reviewed_at: '2026-05-13T10:05:00Z',
+      reviewed_by: 'ai-agent',
+      review_outcomes: [],
+      pause_decisions: [],
+      process_evidence: pe,
+      process_evidence_staging_hash: peHash,
+      ack_log_tail_hash: '0'.repeat(64),
+      ack_log_entry_count: 0,
+    };
+  }
+
+  writeFileSync(join(changeDir, '.verify-passed'), stringifyYaml(verifyMarker), 'utf8');
+  writeFileSync(join(changeDir, '.review-passed'), stringifyYaml(reviewMarker), 'utf8');
+
+  // 共享 stub:tasks.md / proposal.md / design.md(最小 stub,不含 scope-entries 块)
+  writeFileSync(
+    join(changeDir, 'tasks.md'),
+    '# Tasks\n\n## Task 1\n\nMinimal stub.\n',
+    'utf8',
+  );
+  writeFileSync(
+    join(changeDir, 'proposal.md'),
+    '# Proposal\n\nMinimal stub for plan-9e2 Task 6 fixture.\n',
+    'utf8',
+  );
+  writeFileSync(
+    join(changeDir, 'design.md'),
+    '# Design\n\nMinimal stub.\n',
+    'utf8',
+  );
+
+  // .evidence/staging 文件(plan-9g freeze 写入)— 用 fix 0 entry_count + 0-hash 简化
+  mkdirSync(join(changeDir, '.evidence'), { recursive: true });
+  writeFileSync(
+    join(changeDir, '.evidence', 'process-evidence.staging.yaml'),
+    stringifyYaml({ schema: 'forge-process-evidence/v1', tdd_event_chain: [], verify_invocations: [], subagent_review_chain: [] }),
+    'utf8',
+  );
+  writeFileSync(join(changeDir, '.evidence', 'ack-log.jsonl'), '', 'utf8');
 }
 ```
 
-enable 后的完整 4 case:
+注:本 helper **在 hash-only mode + ack-mode 假设下构造**;若 fence rerun 不变量 5/6 真跑(full / sample mode)需扩 helper 注入 git history。Task 6 实施时如 fence 实际行为不符,需调整(可能简化为 fixture mode='hash-only' + ack-mode='acked' 标记内置)。
+
+### Step 2: enable 4 it.todo case 用 builder helper
+
+- [ ] **Step 2.1: 修改 `tests/cli/archive-process-evidence-summary.test.ts` 顶部加 builder import + 改 copyFixtureToProject 助手**
+
+文件顶部 import 区追加:
+```typescript
+import { buildProcessEvidenceFixture, type FixtureScenario } from '../utils/build-archive-fixture.js';
+```
+
+删 `copyFixtureToProject` helper(改用 builder),改加:
+```typescript
+function buildFixtureInProject(scenario: FixtureScenario): void {
+  const changeDir = join(projectRoot, 'forge', 'changes', 'test-change');
+  buildProcessEvidenceFixture({ scenario, changeDir });
+}
+```
+
+(`projectRoot` 是 describe 块顶层定义的 mkdtempSync 路径)
+
+- [ ] **Step 2.2: 替换 4 个 `it.todo(...)` 为完整实现**
 
 ```typescript
-it('non-legacy + 完整 process_evidence + 1 #10 env_hash WARNING fixture → passed:13 / warning:1 / failed:0 / exempt:0', () => {
-  copyFixtureToProject('archive-warning-process-evidence');
+it('non-legacy v1.0 marker + 完整 process_evidence + 1 #10 env_hash WARNING → passed:13 / warning:1 / failed:0 / exempt:0', () => {
+  buildFixtureInProject('warning');
   const r = runArchive();
   expect(r.exitCode).toBe(0);
   const summary = readSummary();
@@ -1822,9 +1959,7 @@ it('non-legacy + 完整 process_evidence + 1 #10 env_hash WARNING fixture → pa
 });
 
 it('verify-only legacy → passed:4 / warning:0 / failed:0 / exempt:10', () => {
-  // 需独立 fixture `archive-verify-only-legacy/`(Task 6 Step 1 加,若 plan-9g 已有 verify-legacy fixture 可复用)
-  // 此处 Task 6 可能需要再加一个 fixture;若复用 plan-9g 已有 legacy fixture 则 ok
-  copyFixtureToProject('archive-verify-only-legacy');
+  buildFixtureInProject('verify-legacy');
   const r = runArchive();
   expect(r.exitCode).toBe(0);
   const summary = readSummary();
@@ -1838,7 +1973,7 @@ it('verify-only legacy → passed:4 / warning:0 / failed:0 / exempt:10', () => {
 });
 
 it('review-only legacy → passed:4 / warning:0 / failed:0 / exempt:10(等同 verify-only legacy 并集)', () => {
-  copyFixtureToProject('archive-review-only-legacy');
+  buildFixtureInProject('review-legacy');
   const r = runArchive();
   expect(r.exitCode).toBe(0);
   const summary = readSummary();
@@ -1852,9 +1987,9 @@ it('review-only legacy → passed:4 / warning:0 / failed:0 / exempt:10(等同 ve
 });
 
 it('review-only legacy + verify-side #10 WARNING(v2 codex 一轮 MAJOR 副作用回归)→ passed:4 / warning:0 / failed:0 / exempt:10', () => {
-  // 副作用:verify 侧 #10 WARNING 被 effectiveLegacyExempt=true 吞为 legacy-skip,summary 计数为 0
-  // 但 stderr 有 WARNING 输出(沿 plan-9g rerun-time WARNING stderr 路径)
-  copyFixtureToProject('archive-review-only-legacy-with-verify-warning');
+  // 副作用:verify 侧 #10 WARNING 被 effectiveLegacyExempt=true 吞为 legacy-skip
+  //   summary invariants_with_warning 计数为 0(不是 1)— 这是核心副作用回归点
+  buildFixtureInProject('review-legacy-with-verify-warning');
   const r = runArchive();
   expect(r.exitCode).toBe(0);
   const summary = readSummary();
@@ -1865,18 +2000,15 @@ it('review-only legacy + verify-side #10 WARNING(v2 codex 一轮 MAJOR 副作用
     invariants_failed: 0,
     legacy_exempt: 10,
   });
-  // stderr WARNING 仍可见(沿 brainstorm spec §4.3 副作用 "WARNING 实际信息走 stderr/acked_warnings 双路径不丢")
-  // 注:若 #10 是 freeze-time WARNING 走 marker.verify_findings,stderr 不输出本条;
-  //     此 assertion 由 fixture 内部 WARNING 源决定 — Task 6 fixture 实现时选 freeze-time 路径
-  //     则 summary.acked_warnings 数组应含此 WARNING(用户已 ack)或 verify_findings 含此 WARNING
-  // 此处 assertion 弱化为"summary process_evidence_summary 计数为 0",这是核心副作用回归点
+  // 副作用守护:WARNING 实际信息走 stderr 或 verify_findings(本 fixture WARNING 是 freeze-time #10 env_hash,
+  //   走 marker.verify_findings → acked_warnings 路径),summary 主体不受影响
 });
 ```
 
-- [ ] **Step 2.2: 跑测试确认 4 case PASS**
+- [ ] **Step 2.3: 跑测试确认 5 case PASS**
 
 Run: `pnpm vitest run tests/cli/archive-process-evidence-summary.test.ts`
-Expected: PASS — 5 case 全 PASS(1 active + 4 enable)
+Expected: PASS — 5 case 全 PASS(1 active Task 4 留 + 4 enable Task 6 新)
 
 ### Step 3: 全本地 verify + commit Task 6
 
@@ -1889,13 +2021,12 @@ Expected: 全 PASS
 
 ```powershell
 @'
-feat(9e2 Task 6 GREEN): 4 fixture + 4 integration case enable + 副作用回归钉住
+feat(9e2 Task 6 GREEN): build-archive-fixture builder helper + 4 integration case enable + 副作用回归钉住
 
-实施 plan-9e2 brainstorm spec §5.2:
-- tests/fixtures/archive-warning-process-evidence/ — non-legacy v1.0 + #10 env_hash WARNING
-- tests/fixtures/archive-verify-only-legacy/ — verify legacy + review v1.0 native(plan §5.1 case 4 验证)
-- tests/fixtures/archive-review-only-legacy/ — verify v1.0 + review legacy(沿 plan-9j resigned-aware;验证并集等同 verify-only legacy)
-- tests/fixtures/archive-review-only-legacy-with-verify-warning/ — verify v1.0 + #10 WARNING + review legacy(v2 codex 一轮 MAJOR 副作用回归)
+实施 plan-9e2 brainstorm spec §5.2 + v2 codex 一轮 plan review BLOCKER 1 修订:
+- tests/utils/build-archive-fixture.ts builder helper(程序化构造 v1.0 marker + sha256 hash 链 + JCS canonical)
+- 4 scenario:warning(non-legacy + #10 env_hash WARNING)/ verify-legacy / review-legacy / review-legacy-with-verify-warning(副作用回归)
+- 不依赖 plan-9g `tests/fixtures/process-evidence-*` baseline(仓库不存在)
 
 Task 4 的 4 it.todo enable 为 active:
 - non-legacy + WARNING → passed:13 / warning:1
@@ -1907,7 +2038,7 @@ Task 4 的 4 it.todo enable 为 active:
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 '@ | Out-File -Encoding utf8 .git/COMMIT_MSG_T6_GREEN
-git add tests/fixtures/archive-warning-process-evidence tests/fixtures/archive-verify-only-legacy tests/fixtures/archive-review-only-legacy tests/fixtures/archive-review-only-legacy-with-verify-warning tests/cli/archive-process-evidence-summary.test.ts
+git add tests/utils/build-archive-fixture.ts tests/cli/archive-process-evidence-summary.test.ts
 git commit -F .git/COMMIT_MSG_T6_GREEN
 Remove-Item .git/COMMIT_MSG_T6_GREEN
 ```
@@ -1925,6 +2056,20 @@ Expected: 全 PASS
 
 Push 到 PR 分支,等待 GitHub Actions Linux/Windows × Node 20/22 全绿。
 Expected: 4 job 全 PASS
+
+- [ ] **DoD 2b: 每 Task DONE_REPORT 完整(v2 codex 一轮 plan review MAJOR 7 修订)**
+
+沿 plan-9g process_evidence 协议 + brainstorm spec §6.2 DoD 字面要求,**每 Task 完成的 subagent / SDD session 必须 DONE_REPORT 含**:
+- **RED commit sha**(本 plan Task 1-4/6 走 RED → GREEN;Task 5 是 invariant guard,单 commit)
+- **GREEN commit sha**(本 plan Task 1-4/6;Task 5 是 invariant guard commit 即唯一 commit)
+- **本地 verify 全 PASS 的 log paths**:
+  - `pnpm typecheck` 输出(若无 error,记录 `verify-typecheck.log` 空文件或 stdout 摘要)
+  - `pnpm lint` 输出
+  - `pnpm format:check` 输出(memory `本地 verification 必须含 format:check`)
+  - `pnpm vitest run` 输出含 Task 涉及 test 文件的 PASS 摘要
+- **新增 / 修改文件的 git diff stat**(沿 plan-9g `git diff --stat HEAD~2..HEAD` 模式)
+
+DONE_REPORT 缺失任一字段 → 主代理 reject 该 Task 不进入下一 Task review;沿 subagent-driven-discipline §3.4 + plan-9g 同协议。
 
 - [ ] **DoD 3: 综合 retrospect Q1-Q6**
 
@@ -1947,7 +2092,7 @@ gh pr create --base dev --head <feature-branch> --title "feat: plan-9e2 ProcessE
 - FenceInvariantResult 扩 status 4 态 enum + mapper 重写(WARNING + dual-legacy 并集)
 - schema validator 严格化 + sum 不变式守护
 - 双改根级 + 模板 archive.md + md5 sync 守护
-- 5 fixture + 5 integration case 含副作用回归
+- build-archive-fixture builder helper(v2 codex 一轮 plan review BLOCKER 1 修订:不依赖 plan-9g 物理 fixture)+ 5 integration case 含副作用回归
 
 ## Test plan
 - [x] pnpm typecheck && pnpm lint && pnpm format:check && pnpm build && pnpm vitest run 全 PASS

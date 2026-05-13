@@ -1126,7 +1126,7 @@ function checkInvariant14(ctx: ProcessEvidenceFenceContext): ProcessEvidenceFind
 
 - master spec §2.7 全节(行 1076-1342)— 14 不变量字面(v10 修订)+ 三 helper 接口签名(v10 修订接收字段)+ 三档 mode + worktree 重跑
 - master spec §2.9 全节(writing-skills 协议 — §9.8 P2 路径 process-evidence skill 创建依此协议)
-- master plan §0 总览表 line 30(v6 待 9g writing-plans 前修订)
+- master plan §0 总览表 line 30(v6 已修订:P50 8 / P90 11 / 加 9i 依赖 / 14 不变量;§0 总计 P50 39.5→40.5 / P90 52.5→54.5)
 - **plan-9a Task 5**(evidence CLI 骨架 + ack-log + canonical hash)— 9g 扩三 helper options + 加 freeze 子命令 + ack-log prev_entry_hash chain
 - **plan-9a Task 8**(`src/core/archive/fence.ts` 13 stub framework + `crossCuttingFenceCheck()` API + archive.ts:240 wire)— 9g 填实 stub + 移除 opt-in flag(Codex MAJOR #4)
 - plan-9d Task 3(VerifyFinding schema)— 9g WARNING 转换目标 schema

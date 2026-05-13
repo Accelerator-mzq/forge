@@ -3768,6 +3768,11 @@ export interface ProcessEvidenceFenceContext {
     test_timeout_per_task: number; // 秒(runRerunFence 转毫秒用)
     max_parallel_reruns: number;
   };
+  /** ForgeConfig.test sanitize 后(v8 修订 Codex 八轮 BLOCKER:runRerunFence 真读) */
+  testConfig: {
+    reporter: 'junit' | 'tap' | 'vitest-json';
+    test_command: string;
+  };
   /**
    * v1 修订 Codex 一轮 M-4:加 reviewMarker 字段
    *  review marker 也含 process_evidence + 三 hash 字段(--kind review freeze 写);
@@ -3803,6 +3808,42 @@ function parseSemverMajor(v: string): number {
 }
 
 /**
+ * seededSample — deterministic 抽样 N 个元素(v8 修订 Codex 八轮 BLOCKER)
+ * 用 seed(changeId)生成可重现 PRNG → Fisher-Yates 部分洗牌 → 取前 N
+ * 沿 mulberry32 简洁 PRNG(无外部依赖)
+ *
+ * @param items 全集数组
+ * @param n 抽样数量(若 > items.length 返全集)
+ * @param seed 字符串 seed(用 changeId 保 fence 可重现)
+ * @returns 抽样后的子集(保留原顺序由 seed 决定,跨平台 deterministic)
+ */
+function seededSample<T>(items: T[], n: number, seed: string): T[] {
+  if (n >= items.length) return [...items];
+  // 字符串 seed → 32-bit hash
+  let hash = 2166136261;
+  for (let i = 0; i < seed.length; i++) {
+    hash ^= seed.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  // mulberry32 PRNG state
+  let state = hash >>> 0;
+  const rand = (): number => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  // Fisher-Yates 洗牌 + 取前 n
+  const arr = [...items];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr.slice(0, n);
+}
+
+/**
  * buildProcessEvidenceFenceContext — fence 入口,一次读全(brainstorm spec §7.2)
  *
  * v1 修订(Codex 一轮 M-4):接收 verifyMarker + reviewMarker 双参数
@@ -3816,6 +3857,7 @@ export async function buildProcessEvidenceFenceContext(args: {
   reviewMarker?: Record<string, unknown>; // 已 parseYaml 的 .review-passed(可选;legacy marker / verify-only 流程可能缺)
   legacyExempt?: boolean; // plan-9j legacy-exemption 调用方传入(v1 修订 Codex 一轮 B-3)
   config: ProcessEvidenceFenceContext['config']; // v7 Codex 七轮 BLOCKER 1:caller 必须传入 sanitize 配置
+  testConfig: ProcessEvidenceFenceContext['testConfig']; // v8 Codex 八轮 BLOCKER
 }): Promise<ProcessEvidenceFenceContext> {
   const { changeId, changeRoot, cwd, verifyMarker, reviewMarker, legacyExempt } = args;
 
@@ -3884,6 +3926,7 @@ export async function buildProcessEvidenceFenceContext(args: {
     archiveHead,
     isCiMode: process.env.CI === 'true',
     config: args.config, // v7 Codex 七轮 BLOCKER 1
+    testConfig: args.testConfig, // v8 Codex 八轮 BLOCKER
     // v1 Codex M-4:review marker 字段
     reviewMarker,
     reviewProcessEvidence,
@@ -4392,6 +4435,11 @@ export async function crossCuttingFenceCheck(
     forgeConfig = undefined; // 缺 config 走默认
   }
   const sanitizedConfig = validateProcessVerificationConfig(forgeConfig);
+  // v8 Codex 八轮 BLOCKER:test config 从 forgeConfig.test 取(沿 §6 brainstorm spec)
+  const testConfig = {
+    reporter: (forgeConfig?.test?.reporter ?? 'junit') as 'junit' | 'tap' | 'vitest-json',
+    test_command: forgeConfig?.test?.test_command ?? 'pnpm test',
+  };
 
   const ctx = await buildProcessEvidenceFenceContext({
     changeId,
@@ -4401,6 +4449,7 @@ export async function crossCuttingFenceCheck(
     reviewMarker, // v1 M-4
     legacyExempt, // v1 B-3
     config: sanitizedConfig, // v7 Codex 七轮 BLOCKER 1
+    testConfig, // v8 Codex 八轮 BLOCKER
   });
 
   // 2. runFieldFence(同步)
@@ -4769,16 +4818,15 @@ export async function runRerunFence(
   if (mode === 'full') {
     targetChains = chains;
   } else {
-    // sample 抽样:按 sample_ratio,确定性抽样(seed=changeId 保 fence reproducible)
+    // sample 抽样:按 sample_ratio,**deterministic seed=changeId** 保 fence reproducible
+    // v8 修订 Codex 八轮 BLOCKER:真实现 seeded shuffle(沿 mulberry32 简洁 PRNG)
     const sampleCount = Math.max(1, Math.ceil(chains.length * config.sample_ratio));
-    targetChains = chains.slice(0, sampleCount); // 简化:取前 N 个;实施者按 seed 实现
+    targetChains = seededSample(chains, sampleCount, ctx.changeId);
   }
 
-  // 取 reporter 类型(从 ForgeConfig.test.reporter,默认 junit)
-  const reporterType: ReporterType = 'junit'; // 实施者从 ctx.testConfig.reporter 读
-
-  // 取测试命令(从 ForgeConfig.test.test_command;默认 'pnpm test')
-  const testCommand = 'pnpm test';
+  // 取 reporter 类型(v8 修订 Codex 八轮 BLOCKER:ctx 加 testConfig 字段,fence 真读)
+  const reporterType: ReporterType = ctx.testConfig.reporter;
+  const testCommand = ctx.testConfig.test_command;
 
   // 创建并发 gate
   const gate = new ParallelGate(config.max_parallel_reruns);
@@ -5557,7 +5605,6 @@ it('RED rerun exit_code=0 → 不变量 5 CRITICAL(brainstorm A3 同 commit 无 
   // 构造 ProcessEvidenceFenceContext(简化:full mode)
   const ctx: ProcessEvidenceFenceContext = {
     changeId: 'test', changeRoot: repoPath, cwd: repoPath,
-    changeId: 'test', changeRoot: repoPath, cwd: repoPath,
     processEvidence: {
       schema: 'forge-process-evidence/v1',
       process_verification_mode: 'full',
@@ -5594,6 +5641,7 @@ it('RED rerun exit_code=0 → 不变量 5 CRITICAL(brainstorm A3 同 commit 无 
     tasksCount: 1, archiveHead: greenSha,
     isCiMode: false,
     config: { mode: 'full', sample_ratio: 0.3, test_timeout_per_task: 300, max_parallel_reruns: 2 },
+    testConfig: { reporter: 'junit', test_command: 'pnpm test' },
   };
   const findings = await runRerunFence(ctx);
   const inv5 = findings.find((f) => f.invariant === 5);
@@ -5734,7 +5782,7 @@ it('A8 旁支造合法 RED/GREEN 链 + 主分支换实现 → 不变量 14 green
 
 ---
 
-**Status**: plan-9g v7(沿 plan-9j v1→v9 模式;Codex 七轮已审 3 BLOCKER + 2 MAJOR 全修;§14/§15 双修订摘要 inline)
+**Status**: plan-9g v8(沿 plan-9j v1→v9 模式;Codex 八轮已审 2 BLOCKER 全修;接 v9 终审)
 
 实施前必跑:`pnpm install`(fast-xml-parser + tap-parser 两新 deps)
 
@@ -5841,5 +5889,20 @@ Codex 六轮报告确认:B-3 / M-5 / M-6 全 PASS,M-7 给"最小修法 4 步骤"
 - **M-2 §4.3.0 表加 record-tdd `--tdd-exemption-acked-by <user>` option 映射**:reconstructProjectionFromAckLog 读 extra.tdd_exemption_acked_by(line 4157),projection type 强制要求(line 4203 等价);v6 表未映射。**v7**:表加一行同模式。
 
 体量 5777 → ~5900 行(+ ctx.config interface + 哨兵 B/D 展开 + 2 表行);预期 v8 验证 0 BLOCKER + 0 MAJOR 进入 writing-plans
+
+---
+
+## 16. v7 → v8 修订摘要(Codex 八轮 2 BLOCKER 全修)
+
+Codex 八轮报告 B-1/B-3/M-1/M-2 全 CLOSED,B-2 哨兵 B 字段重复 + §0.0 留白违规 runRerunFence 实现空洞两新 BLOCKER。v8 全修:
+
+- **BLOCKER 1 哨兵 B 重复属性**:`changeId/changeRoot/cwd` 写两次 → 删重复行
+- **BLOCKER 2 runRerunFence 范围外占位**:
+  - sample 抽样:`chains.slice(0, sampleCount) // 实施者按 seed 实现` → 真实现 `seededSample(chains, sampleCount, ctx.changeId)`,加 inline `seededSample<T>(items, n, seed): T[]`(mulberry32 PRNG + Fisher-Yates;无外部依赖)
+  - reporterType:`'junit'; // 实施者从 ctx.testConfig.reporter 读` → ProcessEvidenceFenceContext interface 加 `testConfig: { reporter, test_command }` 字段;buildProcessEvidenceFenceContext 接收 testConfig 参数;crossCuttingFenceCheck 从 forgeConfig.test 取(默认 junit / 'pnpm test');runRerunFence 真读 ctx.testConfig
+
+加 seededSample helper inline 完整函数体(33 行 + JSDoc);哨兵 B ctx 补 testConfig 字段。
+
+体量 5845 → ~5900 行;预期 v9 验证 0 BLOCKER + 0 MAJOR 终态
 
 

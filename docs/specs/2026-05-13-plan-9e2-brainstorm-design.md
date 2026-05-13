@@ -469,9 +469,9 @@ pnpm typecheck && pnpm lint && pnpm format:check && pnpm build && pnpm vitest ru
 | 1 | `archive-summary.ts` ProcessEvidenceSummary 加 invariants_with_warning 字段(v2 codex 一轮 MAJOR 修订);`fence.ts` FenceInvariantResult 扩 status 4 态 enum + LEGACY_EXEMPT_INVARIANTS 常量 + crossCuttingFenceCheck mapper 重写(WARNING + dual-legacy 并集)+ unit ~9 case | multi-file 设计面 | sonnet |
 | 2 | `summary-builder.ts` summarizeProcessEvidence 新私有 fn(4 字段)+ buildArchiveSummary 签名扩 fenceResult 参 + 接线 + unit ~5 case | multi-file | sonnet |
 | 3 | `archive-summary-schema.ts` placeholder=false 严格校验扩(4 字段必填 / 值域 / sum 不变式 用 `FENCE_INVARIANT_NAMES.length` 派生)+ unit ~8 case | mechanical | haiku |
-| 4 | `archive.ts:231` fenceResult 透传 + integration ~4 case(non-legacy / non-legacy+WARNING / verify-legacy / review-legacy) | mechanical | haiku |
+| 4 | `archive.ts:231` fenceResult 透传 + integration ~5 case(non-legacy / non-legacy+WARNING / verify-legacy / review-legacy / **review-only legacy + verify-side WARNING 副作用回归**,v5 codex 五轮 MINOR 修订同步) | mechanical | haiku |
 | 5 | **双改** `commands/archive.md` + `src/core/templates/commands/archive.md`(v2 codex 一轮 MAJOR 修订)4 处文案 + 短段解释 invariants_passed/with_warning/failed/legacy_exempt 语义 + CI/unit md5 同步守护 | docs + ci | haiku |
-| 6 | legacy marker fixture(若 9j 未合则手写,9j 已合则复用)+ WARNING fixture + review-only legacy fixture(v2 codex 一轮 MAJOR 修订)+ end-to-end integration ~4 case | fixture | sonnet |
+| 6 | legacy marker fixture(若 9j 未合则手写,9j 已合则复用)+ WARNING fixture + review-only legacy fixture(v2 codex 一轮 MAJOR 修订)+ **review-only legacy + verify-side WARNING fixture**(v5 codex 五轮 MINOR 修订同步,沿 §5.2)+ end-to-end integration ~5 case | fixture | sonnet |
 
 **review**:每 Task 二段 review(spec ✅ 后 quality ✅,沿 plan-9g 协议)→ sonnet。
 
@@ -484,9 +484,9 @@ pnpm typecheck && pnpm lint && pnpm format:check && pnpm build && pnpm vitest ru
 - `archive-summary-schema.ts` placeholder=false 路径 4 字段严格校验,sum 不变式由派生常量 `FENCE_INVARIANT_NAMES.length` 守住
 - `commands/archive.md` 根级 + 模板**双改**(md5 一致守护),4 处文案校正 + 1 段解释 4 个字段语义
 
-**测试层(v2 codex 一轮 MAJOR 修订)**:
+**测试层(v2 codex 一轮 MAJOR 修订;v5 codex 五轮 MINOR 同步)**:
 - Unit:fence mapper(9 case)+ summarize(5 case)+ schema validator(8 case)+ md5 sync(1 case)= ~23 新 case
-- Integration:non-legacy + non-legacy+WARNING + verify-legacy + review-legacy 四种 archive 输出 yaml 真实统计 fields 正确
+- Integration(5 种):non-legacy + non-legacy+WARNING + verify-legacy + review-legacy + **review-only legacy + verify-side WARNING 副作用回归**(v5 codex 五轮修订加;沿 §5.1 case 5 + §5.2 fixture archive-review-only-legacy-with-verify-warning/)
 
 **纪律层**:
 - 全本地 verify(`pnpm typecheck && pnpm lint && pnpm format:check && pnpm build && pnpm vitest run`)PASS

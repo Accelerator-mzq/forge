@@ -1,4 +1,4 @@
-// 6 个 slash 命令模板的 registry — Plan 4
+// 7 个 slash 命令模板的 registry — Plan 4 + plan-9f
 // 文件实体 .md 由 Task C 逐个填实
 
 import { readFile } from 'node:fs/promises';
@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-/** 6 个 slash 命令名(spec §2.2 6 命令表;实际 slash 名为 /forge:<name>) */
+/** 7 个 slash 命令名(spec §2.2 6 命令表 + plan-9f explore;实际 slash 名为 /forge:<name>) */
 export const COMMAND_NAMES = [
   'brainstorm',
   'propose',
@@ -16,6 +16,7 @@ export const COMMAND_NAMES = [
   'review',
   'verify',
   'archive',
+  'explore', // 9f 新增(沿 design §2.5 + plan-9f;非线性思考空间,非产物驱动)
 ] as const;
 
 export type CommandName = (typeof COMMAND_NAMES)[number];
@@ -30,7 +31,7 @@ export interface LoadedCommand {
   content: string;
 }
 
-/** 全量加载 6 个 slash 命令,失败抛错(说明某个 .md 漏建) */
+/** 全量加载 7 个 slash 命令,失败抛错(说明某个 .md 漏建) */
 export async function loadAllCommands(): Promise<LoadedCommand[]> {
   return Promise.all(
     COMMAND_NAMES.map(async (name) => ({ name, content: await loadCommand(name) })),

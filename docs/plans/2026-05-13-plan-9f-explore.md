@@ -31,9 +31,9 @@
 **DoD**(完成定义):
 
 - **registry**:
-  - `src/core/templates/skills/index.ts` 的 `SKILL_NAMES` 加 `'exploring'`(13 → 14)
-  - `src/core/templates/commands/index.ts` 的 `COMMAND_NAMES` 加 `'explore'`(8 → 9)
-  - hardcoded 断言同步:`tests/core/templates/registry.test.ts` + `tests/smoke.test.ts`(skill 13→14 / command 8→9 + 完整数组加入)
+  - `src/core/templates/skills/index.ts` 的 `SKILL_NAMES` 加 `'exploring'`(14 → 15)
+  - `src/core/templates/commands/index.ts` 的 `COMMAND_NAMES` 加 `'explore'`(6 → 7)
+  - hardcoded 断言同步:`tests/core/templates/registry.test.ts` + `tests/smoke.test.ts`(skill 14→15 / command 6→7 + 完整数组加入)
 - **skill**:
   - `skills/exploring/SKILL.md` 存在,~300-500 LOC
   - 含 4 必备 section(Methodology / When to Use & When NOT to Use / forge-specific 反向加固 / 红旗清单)
@@ -75,8 +75,8 @@
 ## 0. Scope freeze + 不做项声明
 
 **本 plan freeze 时,以下代码状态为 plan-9i / 9j HEAD(fbbf1f9)现状**:
-- `src/core/templates/skills/index.ts` SKILL_NAMES 含 13 项(plan-9i 加 'writing-skills' 后)
-- `src/core/templates/commands/index.ts` COMMAND_NAMES 含 8 项
+- `src/core/templates/skills/index.ts` SKILL_NAMES 含 **14 项**(plan-9i 加 `'writing-skills'` + plan-9d 加 `'verifying-three-dimensions'` 都已合 dev)
+- `src/core/templates/commands/index.ts` COMMAND_NAMES 含 **6 项**(slash command registry;`commands/upgrade.md` + `commands/ack-confirm.md` 文件存在但**不在 registry** — 沿 dev HEAD 现状)
 - `skills/writing-skills/SKILL.md` 五步骤协议已就绪;runner 双轨设计已实测可用(plan-9i §8.4 验证)
 - `commands/apply.md` 含 `## Fluid Pause Decision Point` 段(plan-9c 已落地)— 9f 改此段加 cross-ref,不重新设计 Fluid Pause 协议
 
@@ -103,10 +103,10 @@ tests/integration/explore-md-sync.test.ts          ← Task 3:1 case md5 sync �
 ### 修改文件
 
 ```
-src/core/templates/skills/index.ts                 ← Task 0:SKILL_NAMES 加 'exploring'(13 → 14)
-src/core/templates/commands/index.ts               ← Task 0:COMMAND_NAMES 加 'explore'(8 → 9)
-tests/core/templates/registry.test.ts              ← Task 0:hardcoded 13/8 → 14/9 + 完整数组加入
-tests/smoke.test.ts                                ← Task 0:hardcoded 13/8 → 14/9 同步
+src/core/templates/skills/index.ts                 ← Task 0:SKILL_NAMES 加 'exploring'(14 → 15)
+src/core/templates/commands/index.ts               ← Task 0:COMMAND_NAMES 加 'explore'(6 → 7)
+tests/core/templates/registry.test.ts              ← Task 0:hardcoded 14/6 → 15/7 + 完整数组加入
+tests/smoke.test.ts                                ← Task 0:hardcoded 14/6 → 15/7 同步
 commands/apply.md                                  ← Task 3:`## Fluid Pause Decision Point` 段加 cross-ref
 src/core/templates/commands/apply.md               ← Task 3:同步双改
 skills/using-forge/SKILL.md                        ← Task 5:slash commands 表加 explore 行 + 红旗清单加条目

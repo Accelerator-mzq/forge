@@ -6,11 +6,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { mkdtemp, writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import {
-  appendAckLog,
-  readAllAckLogEntries,
-  verifyAckLogChain,
-} from '../../src/core/ack-log.js';
+import { appendAckLog, readAllAckLogEntries, verifyAckLogChain } from '../../src/core/ack-log.js';
 import type { EvidenceHelperEntry } from '../../src/core/ack-log.js';
 import { canonicalHash } from '../../src/core/canonical-json.js';
 
@@ -104,10 +100,7 @@ describe('ack-log chain (plan-9g Task 3.1)', () => {
     // 固化原 tail hash
     const origTailHash = canonicalHash(entries[1]!);
     // 篡改最后一行(实际尾 hash 变)但 marker 固化的是原 tail
-    const tamperedEntries = [
-      entries[0]!,
-      { ...entries[1]!, extra: { tampered: true } },
-    ];
+    const tamperedEntries = [entries[0]!, { ...entries[1]!, extra: { tampered: true } }];
     const result = verifyAckLogChain(tamperedEntries, origTailHash, 2);
     expect(result.ok).toBe(false);
     // 此 case 测 tail hash 检测:中间篡改也触发链断(两种都可)

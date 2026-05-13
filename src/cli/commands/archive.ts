@@ -530,11 +530,13 @@ export function buildArchiveCommand(): Command {
           const archiveDate = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
           let archiveSummary;
           try {
+            // plan-9e2 Task 2 同步改:加 fenceResult 入参(沿 archive.ts:231 现有 crossCuttingFenceCheck 输出)— Task 4 进一步整理调用顺序
             archiveSummary = await buildArchiveSummary(
               verifyRec,
               reviewRec,
               changeDir, // 沿用 line 213 已定义的 changeDir
               changeId,
+              fenceResult,
             );
           } catch (err) {
             if (err instanceof ScopeEntriesIntegrityError) {

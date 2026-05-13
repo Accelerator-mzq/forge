@@ -15,11 +15,11 @@ import type {
   HandoffEntry,
   AckedWarningRef,
   SuggestionRef,
+  ProcessEvidenceSummary,
 } from '../schemas/archive-summary.js';
-import {
-  ARCHIVE_SUMMARY_VERSION,
-  PLACEHOLDER_PROCESS_EVIDENCE_SUMMARY,
-} from '../schemas/archive-summary.js';
+import { ARCHIVE_SUMMARY_VERSION } from '../schemas/archive-summary.js';
+// plan-9e2 Task 2:接 plan-9g fence 真实统计;PLACEHOLDER_PROCESS_EVIDENCE_SUMMARY 常量已移至 schema 文件供测试 fixture 使用
+import type { FenceCheckResult } from './fence.js';
 import { parseMarkdown } from '../parse/markdown.js';
 import { parseFencedYamlBlocks } from '../parse/fenced-yaml.js';
 import { SCOPE_ANCHOR_IDS, type ScopeAnchorId, type ScopeEntry } from '../schemas/scope-entries.js';
@@ -46,6 +46,7 @@ export interface BuildArchiveSummaryOptions {
  * @param reviewMarker .review-passed 解析后对象(Record 形)
  * @param changeDir change 目录绝对路径(读 proposal.md / design.md 抽 scope-entries)
  * @param changeId change id 字符串
+ * @param fenceResult plan-9g crossCuttingFenceCheck() 输出;9e2 接真实统计(替换 plan-9e1 placeholder)
  * @param opts 可选项
  */
 export async function buildArchiveSummary(
@@ -53,6 +54,7 @@ export async function buildArchiveSummary(
   reviewMarker: Record<string, unknown>,
   changeDir: string,
   changeId: string,
+  fenceResult: FenceCheckResult,
   opts: BuildArchiveSummaryOptions = {},
 ): Promise<ArchiveSummary> {
   const archivedAt = opts.archivedAt ?? toIso8601(new Date());
@@ -115,7 +117,7 @@ export async function buildArchiveSummary(
     review_passed: {
       reviewers: [String(reviewMarker.reviewed_by ?? 'unknown')],
     },
-    process_evidence_summary: PLACEHOLDER_PROCESS_EVIDENCE_SUMMARY,
+    process_evidence_summary: summarizeProcessEvidence(fenceResult),
     handoff_to_backlog,
     acked_warnings,
     pending_suggestions,
@@ -315,4 +317,35 @@ function buildVerifiedInvariants(verifyMarker: Record<string, unknown>): string[
 /** Date → 'YYYY-MM-DDTHH:MM:SSZ'(沿 marker-schema.ts:20 ISO 8601 UTC 格式) */
 function toIso8601(d: Date): string {
   return d.toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+
+/**
+ * summarizeProcessEvidence — fence 14 不变量统计折数为 ProcessEvidenceSummary
+ *
+ * plan-9e2 v2 codex 一轮 MAJOR 修订:4 字段计数
+ *
+ * 输出 4 计数:
+ *   - invariants_passed: status='pass' 的数(真过校验)
+ *   - invariants_with_warning: status='warning' 的数(WARNING 经 fail/legacy-skip 优先级筛选后保留)
+ *   - invariants_failed: status='fail' 的数(v1.0 永远 = 0;fence.ok=false 时 archive 已 exit 1 不进本路径)
+ *   - legacy_exempt: status='legacy-skip' 的数(沿 §3.4.4.1)
+ *
+ * 不变式:passed + warning + failed + exempt === FENCE_INVARIANT_NAMES.length
+ *
+ * 注:不在 builder 内 throw — 让 archive-summary-schema validator 单点把守不变式
+ *     (避免双源校验路径分歧;沿 brainstorm spec §4.2 决策 #1)
+ */
+function summarizeProcessEvidence(fenceResult: FenceCheckResult): ProcessEvidenceSummary {
+  // 按 status 4 态分类统计
+  const passed = fenceResult.results.filter((r) => r.status === 'pass').length;
+  const warning = fenceResult.results.filter((r) => r.status === 'warning').length;
+  const failed = fenceResult.results.filter((r) => r.status === 'fail').length;
+  const exempt = fenceResult.results.filter((r) => r.status === 'legacy-skip').length;
+  return {
+    placeholder: false,
+    invariants_passed: passed,
+    invariants_with_warning: warning,
+    invariants_failed: failed,
+    legacy_exempt: exempt,
+  };
 }

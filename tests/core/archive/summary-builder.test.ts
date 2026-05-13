@@ -12,6 +12,14 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { buildArchiveSummary } from '../../../src/core/archive/summary-builder.js';
+import type { FenceCheckResult } from '../../../src/core/archive/fence.js';
+
+// plan-9e2 Task 2:既有测试用 stub fenceResult(全 pass,不影响 collector 逻辑测试)
+const STUB_FENCE_RESULT: FenceCheckResult = {
+  ok: true,
+  results: [],
+  notImplementedCount: 0,
+};
 
 // helper:在 tmpdir 建一个最小 change 目录(proposal + design + tasks + specs)
 function setupChangeDir(): { changeDir: string; cleanup: () => void } {
@@ -65,13 +73,15 @@ describe('buildArchiveSummary - basic baseline', () => {
       baseReviewMarker(),
       ctx.changeDir,
       'add-x',
+      STUB_FENCE_RESULT,
     );
     expect(summary.handoff_to_backlog).toEqual([]);
     expect(summary.acked_warnings).toEqual([]);
     expect(summary.pending_suggestions).toEqual([]);
     expect(summary.schema).toBe('forge-archive-summary/v1');
     expect(summary.change_id).toBe('add-x');
-    expect(summary.process_evidence_summary.placeholder).toBe(true);
+    // plan-9e2 Task 2:生产路径 summarizeProcessEvidence 不再写 placeholder=true
+    expect(summary.process_evidence_summary.placeholder).toBe(false);
   });
 
   it('verify_passed.verified_invariants 至少含 hash-match + evidence-complete', async () => {
@@ -80,6 +90,7 @@ describe('buildArchiveSummary - basic baseline', () => {
       baseReviewMarker(),
       ctx.changeDir,
       'add-x',
+      STUB_FENCE_RESULT,
     );
     expect(summary.verify_passed.verified_invariants).toContain('hash-match');
     expect(summary.verify_passed.verified_invariants).toContain('evidence-complete');
@@ -89,7 +100,13 @@ describe('buildArchiveSummary - basic baseline', () => {
     const verify = baseVerifyMarker();
     const review = baseReviewMarker();
     review.reviewed_by = 'msc';
-    const summary = await buildArchiveSummary(verify, review, ctx.changeDir, 'add-x');
+    const summary = await buildArchiveSummary(
+      verify,
+      review,
+      ctx.changeDir,
+      'add-x',
+      STUB_FENCE_RESULT,
+    );
     expect(summary.review_passed.reviewers).toContain('msc');
   });
 });
@@ -120,7 +137,13 @@ describe('buildArchiveSummary - collector1 acked_warnings', () => {
         git_head: 'e'.repeat(40),
       },
     ];
-    const summary = await buildArchiveSummary(verify, baseReviewMarker(), ctx.changeDir, 'add-x');
+    const summary = await buildArchiveSummary(
+      verify,
+      baseReviewMarker(),
+      ctx.changeDir,
+      'add-x',
+      STUB_FENCE_RESULT,
+    );
     expect(summary.acked_warnings).toHaveLength(1);
     expect(summary.acked_warnings[0]?.source).toBe('verify_findings');
     expect(summary.acked_warnings[0]?.id).toBe(2);
@@ -144,7 +167,13 @@ describe('buildArchiveSummary - collector1 acked_warnings', () => {
         git_head: 'e'.repeat(40),
       },
     ];
-    const summary = await buildArchiveSummary(verify, baseReviewMarker(), ctx.changeDir, 'add-x');
+    const summary = await buildArchiveSummary(
+      verify,
+      baseReviewMarker(),
+      ctx.changeDir,
+      'add-x',
+      STUB_FENCE_RESULT,
+    );
     expect(summary.acked_warnings).toHaveLength(0);
   });
 });
@@ -173,7 +202,13 @@ describe('buildArchiveSummary - collector2 pending_suggestions', () => {
         git_head: 'c'.repeat(40),
       },
     ];
-    const summary = await buildArchiveSummary(verify, baseReviewMarker(), ctx.changeDir, 'add-x');
+    const summary = await buildArchiveSummary(
+      verify,
+      baseReviewMarker(),
+      ctx.changeDir,
+      'add-x',
+      STUB_FENCE_RESULT,
+    );
     expect(summary.pending_suggestions).toHaveLength(1);
     expect(summary.pending_suggestions[0]?.id).toBe(3);
     expect(summary.pending_suggestions[0]?.dimension).toBe('coherence');
@@ -196,7 +231,13 @@ describe('buildArchiveSummary - collector2 pending_suggestions', () => {
         git_head: 'c'.repeat(40),
       },
     ];
-    const summary = await buildArchiveSummary(verify, baseReviewMarker(), ctx.changeDir, 'add-x');
+    const summary = await buildArchiveSummary(
+      verify,
+      baseReviewMarker(),
+      ctx.changeDir,
+      'add-x',
+      STUB_FENCE_RESULT,
+    );
     expect(summary.pending_suggestions).toHaveLength(0);
   });
 
@@ -206,7 +247,13 @@ describe('buildArchiveSummary - collector2 pending_suggestions', () => {
     review.review_outcomes = [
       { severity: 'L', accepted: false, resolved: false, rationale: 'nice-to-have rename' },
     ];
-    const summary = await buildArchiveSummary(baseVerifyMarker(), review, ctx.changeDir, 'add-x');
+    const summary = await buildArchiveSummary(
+      baseVerifyMarker(),
+      review,
+      ctx.changeDir,
+      'add-x',
+      STUB_FENCE_RESULT,
+    );
     expect(summary.pending_suggestions).toHaveLength(1);
     expect(summary.pending_suggestions[0]?.source).toBe('review_outcomes');
     expect(summary.pending_suggestions[0]?.recommendation).toBe('nice-to-have rename');
@@ -218,7 +265,13 @@ describe('buildArchiveSummary - collector2 pending_suggestions', () => {
     review.review_outcomes = [
       { severity: 'C', accepted: true, resolved: false, rationale: 'should be rejected by fence' },
     ];
-    const summary = await buildArchiveSummary(baseVerifyMarker(), review, ctx.changeDir, 'add-x');
+    const summary = await buildArchiveSummary(
+      baseVerifyMarker(),
+      review,
+      ctx.changeDir,
+      'add-x',
+      STUB_FENCE_RESULT,
+    );
     // builder 仅 sanity:C 不进 acked_warnings / pending_suggestions
     expect(summary.acked_warnings).toHaveLength(0);
     expect(summary.pending_suggestions).toHaveLength(0);
@@ -249,7 +302,13 @@ describe('buildArchiveSummary - ScopeEntriesIntegrityError 抛错路径(v3 MAJOR
       'utf8',
     );
     await expect(
-      buildArchiveSummary(baseVerifyMarker(), baseReviewMarker(), ctx.changeDir, 'add-x'),
+      buildArchiveSummary(
+        baseVerifyMarker(),
+        baseReviewMarker(),
+        ctx.changeDir,
+        'add-x',
+        STUB_FENCE_RESULT,
+      ),
     ).rejects.toThrow(/scope-entries YAML parse failed/);
   });
 
@@ -270,7 +329,13 @@ describe('buildArchiveSummary - ScopeEntriesIntegrityError 抛错路径(v3 MAJOR
       'utf8',
     );
     await expect(
-      buildArchiveSummary(baseVerifyMarker(), baseReviewMarker(), ctx.changeDir, 'add-x'),
+      buildArchiveSummary(
+        baseVerifyMarker(),
+        baseReviewMarker(),
+        ctx.changeDir,
+        'add-x',
+        STUB_FENCE_RESULT,
+      ),
     ).rejects.toThrow(/scope-entries schema 非 'forge-scope-entries\/v1'/);
   });
 
@@ -291,7 +356,13 @@ describe('buildArchiveSummary - ScopeEntriesIntegrityError 抛错路径(v3 MAJOR
       'utf8',
     );
     await expect(
-      buildArchiveSummary(baseVerifyMarker(), baseReviewMarker(), ctx.changeDir, 'add-x'),
+      buildArchiveSummary(
+        baseVerifyMarker(),
+        baseReviewMarker(),
+        ctx.changeDir,
+        'add-x',
+        STUB_FENCE_RESULT,
+      ),
     ).rejects.toThrow(/scope-entries anchor_id 不匹配/);
   });
 
@@ -312,7 +383,13 @@ describe('buildArchiveSummary - ScopeEntriesIntegrityError 抛错路径(v3 MAJOR
       'utf8',
     );
     await expect(
-      buildArchiveSummary(baseVerifyMarker(), baseReviewMarker(), ctx.changeDir, 'add-x'),
+      buildArchiveSummary(
+        baseVerifyMarker(),
+        baseReviewMarker(),
+        ctx.changeDir,
+        'add-x',
+        STUB_FENCE_RESULT,
+      ),
     ).rejects.toThrow(/scope-entries entries 非数组/);
   });
 });
@@ -341,7 +418,13 @@ describe('buildArchiveSummary - collector3 handoff_to_backlog 三类聚合', () 
         git_head: 'c'.repeat(40),
       },
     ];
-    const summary = await buildArchiveSummary(verify, baseReviewMarker(), ctx.changeDir, 'add-x');
+    const summary = await buildArchiveSummary(
+      verify,
+      baseReviewMarker(),
+      ctx.changeDir,
+      'add-x',
+      STUB_FENCE_RESULT,
+    );
     expect(summary.handoff_to_backlog).toHaveLength(1);
     expect(summary.handoff_to_backlog[0]?.source).toBe('verify_findings');
     expect(summary.handoff_to_backlog[0]?.severity).toBe('SUGGESTION');
@@ -366,7 +449,13 @@ describe('buildArchiveSummary - collector3 handoff_to_backlog 三类聚合', () 
         other_acked_by: null,
       },
     ];
-    const summary = await buildArchiveSummary(verify, baseReviewMarker(), ctx.changeDir, 'add-x');
+    const summary = await buildArchiveSummary(
+      verify,
+      baseReviewMarker(),
+      ctx.changeDir,
+      'add-x',
+      STUB_FENCE_RESULT,
+    );
     const pauseEntries = summary.handoff_to_backlog.filter((e) => e.source === 'pause_decisions');
     expect(pauseEntries).toHaveLength(1);
     expect(pauseEntries[0]?.id).toBe(1);
@@ -393,7 +482,13 @@ describe('buildArchiveSummary - collector3 handoff_to_backlog 三类聚合', () 
         other_acked_by: null,
       },
     ];
-    const summary = await buildArchiveSummary(verify, baseReviewMarker(), ctx.changeDir, 'add-x');
+    const summary = await buildArchiveSummary(
+      verify,
+      baseReviewMarker(),
+      ctx.changeDir,
+      'add-x',
+      STUB_FENCE_RESULT,
+    );
     const pauseEntries = summary.handoff_to_backlog.filter((e) => e.source === 'pause_decisions');
     expect(pauseEntries).toHaveLength(0);
   });
@@ -432,6 +527,7 @@ describe('buildArchiveSummary - collector3 handoff_to_backlog 三类聚合', () 
       baseReviewMarker(),
       ctx.changeDir,
       'add-x',
+      STUB_FENCE_RESULT,
     );
     const scopeEntries = summary.handoff_to_backlog.filter((e) => e.source === 'scope_entries');
     expect(scopeEntries).toHaveLength(1);
@@ -481,6 +577,7 @@ describe('buildArchiveSummary - collector3 handoff_to_backlog 三类聚合', () 
       baseReviewMarker(),
       ctx.changeDir,
       'add-x',
+      STUB_FENCE_RESULT,
     );
     const scopeEntries = summary.handoff_to_backlog.filter((e) => e.source === 'scope_entries');
     expect(scopeEntries).toHaveLength(0);
@@ -543,7 +640,13 @@ describe('buildArchiveSummary - collector3 handoff_to_backlog 三类聚合', () 
       ].join('\n'),
       'utf8',
     );
-    const summary = await buildArchiveSummary(verify, baseReviewMarker(), ctx.changeDir, 'add-x');
+    const summary = await buildArchiveSummary(
+      verify,
+      baseReviewMarker(),
+      ctx.changeDir,
+      'add-x',
+      STUB_FENCE_RESULT,
+    );
     const bySource = new Set(summary.handoff_to_backlog.map((e) => e.source));
     expect(bySource).toEqual(new Set(['verify_findings', 'pause_decisions', 'scope_entries']));
     expect(summary.handoff_to_backlog).toHaveLength(3);
@@ -553,8 +656,7 @@ describe('buildArchiveSummary - collector3 handoff_to_backlog 三类聚合', () 
 // ============================================================
 // plan-9e2 Task 2:summarizeProcessEvidence + buildArchiveSummary 签名扩 5 case
 // ============================================================
-// 注:buildArchiveSummary 已在文件顶部 line 14 import,本块不重复 import(v2 codex 一轮 plan review MAJOR 3 修订)
-import type { FenceCheckResult } from '../../../src/core/archive/fence.js';
+// 注:buildArchiveSummary + FenceCheckResult 已在文件顶部 import,本块不重复 import(v2 codex 一轮 plan review MAJOR 3 修订)
 
 // helper:构造 stub FenceCheckResult
 function buildStubFenceResult(opts: {
@@ -566,7 +668,12 @@ function buildStubFenceResult(opts: {
   const results = [];
   let idx = 1;
   for (let i = 0; i < opts.passed; i++) {
-    results.push({ invariant: `fence-${idx++}`, ok: true, status: 'pass' as const, reason: 'pass' });
+    results.push({
+      invariant: `fence-${idx++}`,
+      ok: true,
+      status: 'pass' as const,
+      reason: 'pass',
+    });
   }
   for (let i = 0; i < opts.warning; i++) {
     results.push({

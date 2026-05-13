@@ -2888,3 +2888,693 @@ git commit -F .git/COMMIT_MSG && rm .git/COMMIT_MSG
 
 ---
 
+## 5. Task 4 — evidence freeze 子命令(staging → marker + transaction + WARNING 转 VerifyFinding + 锁 + --kind requiredOption) + 8 case
+
+**Files:**
+
+- Modify: `src/cli/commands/evidence.ts`(加 freeze 子命令)
+- Test: `tests/cli/evidence-freeze.test.ts`(8 case)
+
+### 5.1 步骤 4.1:写 freeze 子命令完整字面
+
+freeze 子命令是 plan-9g 反伪造架构的关键凝固点 — 主代理在 commands/verify.md 步骤 4.3 写完 .verify-passed YAML 后调用,把 staging 三数组凝固进 marker.process_evidence + 写 ack_log_tail_hash + entry_count + 把 fence-ctx WARNING(不变量 7/10)转 VerifyFinding 写 marker.verify_findings。整步走 transaction (tmp + rename atomic) 保 crash 安全。
+
+- [ ] **Step 4.1.1:在 `src/cli/commands/evidence.ts` 现有三 helper 后追加 freeze 子命令完整字面**
+
+(在 `buildEvidenceCommand()` 函数末尾 `return evidence;` 之前插入)
+
+```typescript
+  // ────────────────────────────────────────────────────────────────────────────
+  // 子命令 4: forge evidence freeze <changeId> --kind <verify|review>
+  // plan-9g Task 4 — staging → marker 凝固 + transaction + WARNING 转 VerifyFinding
+  // brainstorm spec §5 数据流 + §9.6 锁定 B(transaction)+ §9.11(ack-log tail+count 固化)
+  // ────────────────────────────────────────────────────────────────────────────
+
+  evidence
+    .command('freeze')
+    .description('staging → marker 凝固;主代理在 verify/review marker 写完后显式调用')
+    .argument('<changeId>', 'change 目录 ID')
+    .requiredOption('--kind <verify|review>', 'freeze 目标 marker:verify 或 review(commander.requiredOption,omit 自动 exit 1)')
+    .option('--marker <path>', 'marker 路径(可选,默认按 --kind 派生)')
+    .action(
+      async (changeId: string, opts: { kind: string; marker?: string }) => {
+        // 校验 --kind 取值(commander.requiredOption 已保证非空,但仍校 enum)
+        if (opts.kind !== 'verify' && opts.kind !== 'review') {
+          process.stderr.write(
+            `forge evidence freeze: invalid --kind "${opts.kind}". Must be 'verify' or 'review'\n`,
+          );
+          process.exit(2);
+        }
+        const kind = opts.kind as 'verify' | 'review';
+
+        const changeRoot = resolve(process.cwd(), 'forge', 'changes', changeId);
+        const markerFilename = kind === 'verify' ? '.verify-passed' : '.review-passed';
+        const markerPath = opts.marker ?? join(changeRoot, markerFilename);
+
+        // 路径冲突检测(--marker 与 --kind 派生不一致 → stderr WARNING)
+        const derivedPath = join(changeRoot, markerFilename);
+        if (opts.marker && opts.marker !== derivedPath) {
+          process.stderr.write(
+            `⚠ forge evidence freeze: --marker (${opts.marker}) 与 --kind=${kind} 派生路径 (${derivedPath}) 不一致;以 --marker 为准\n`,
+          );
+        }
+
+        // 1. acquireStagingLock(防 freeze 期间 helper 再 append)
+        const releaseLock = await acquireStagingLock(changeRoot);
+        try {
+          // 2. 读 staging.yaml
+          const stagingPath = join(changeRoot, '.evidence', 'process-evidence.staging.yaml');
+          if (!existsSync(stagingPath)) {
+            process.stderr.write(
+              `forge evidence freeze: staging file not found at ${stagingPath};` +
+                ` 主代理必须先调 forge evidence record-tdd/verify/review 写 staging\n`,
+            );
+            process.exit(1);
+          }
+          const stagingContent = await readFile(stagingPath, 'utf8');
+          const staging = parseYaml(stagingContent) as {
+            schema: 'forge-process-evidence-staging/v1';
+            change_id: string;
+            created_at: string;
+            tdd_event_chain: TddEventChain[];
+            verify_invocations: VerifyInvocation[];
+            subagent_review_chain: SubagentReviewChain[];
+            staging_hash: string;
+          };
+
+          // 3. 重算 staging_hash 校验未被中间篡改
+          const projection = {
+            tdd_event_chain: staging.tdd_event_chain,
+            verify_invocations: staging.verify_invocations,
+            subagent_review_chain: staging.subagent_review_chain,
+          };
+          const recomputedHash = canonicalHash(projection);
+          if (recomputedHash !== staging.staging_hash) {
+            process.stderr.write(
+              `✗ forge evidence freeze: staging_hash mismatch — staging tampered\n`,
+            );
+            process.exit(1);
+          }
+
+          // 4. 读 marker(主代理刚写的 .verify-passed/.review-passed)
+          if (!existsSync(markerPath)) {
+            process.stderr.write(
+              `forge evidence freeze: marker not found at ${markerPath};` +
+                ` 主代理必须先写 .${kind}-passed yaml(沿 commands/verify.md 步骤 4.3)\n`,
+            );
+            process.exit(1);
+          }
+          const markerContent = await readFile(markerPath, 'utf8');
+          const marker = parseYaml(markerContent) as Record<string, unknown>;
+
+          // 5. 复制三数组到 marker.process_evidence(沿 brainstorm spec §5 数据流 step 5)
+          // process_evidence 顶级字段;主代理已写时可能 marker.process_evidence 缺失或部分填
+          // 这里覆盖全字段(staging 是 ground truth)
+          // 注:env_hash 和 mode 由调用方在 staging 创建时填(record-tdd 第一次写时);若 staging
+          //     不含,沿默认值。完整 process_evidence 字段需含:
+          //     schema + process_verification_mode + ack_by + ack_at + env_hash + 三数组
+          const processEvidence: ProcessEvidence = {
+            schema: 'forge-process-evidence/v1',
+            process_verification_mode: 'full', // 默认 full;若 staging 含 mode 字段则覆盖
+            process_verification_mode_acked_by: null,
+            process_verification_mode_acked_at: null,
+            env_hash: {
+              lockfile_hash: 'sha256:placeholder', // 实施者:由 record-tdd 写 staging 时填真实
+              node_version: process.version.slice(1), // '20.10.0' 去 'v'
+              os_platform: process.platform as 'win32' | 'darwin' | 'linux',
+            },
+            tdd_event_chain: staging.tdd_event_chain,
+            verify_invocations: staging.verify_invocations,
+            subagent_review_chain: staging.subagent_review_chain,
+          };
+          marker.process_evidence = processEvidence;
+
+          // 6. 写 process_evidence_staging_hash 快照(archive fence cross-check 用)
+          marker.process_evidence_staging_hash = staging.staging_hash;
+
+          // 7. 算 ack-log tail_hash + entry_count 固化(brainstorm §9.11)
+          const allEntries = await readAllAckLogEntries(changeRoot);
+          marker.ack_log_entry_count = allEntries.length;
+          marker.ack_log_tail_hash =
+            allEntries.length > 0 ? canonicalHash(allEntries[allEntries.length - 1]) : null;
+
+          // 8. 算 freeze-time WARNING(仅不变量 7 + 10)→ 转 VerifyFinding 写 marker.verify_findings
+          //    (brainstorm spec §3 WARNING 流转两段闭合 — v9 修订:11/12 是 CRITICAL,freeze 时
+          //     直接 exit 1 拒绝写 marker,提示用户先跑 forge ack)
+          const warningFindings = computeFreezeWarnings(
+            processEvidence,
+            changeRoot,
+            allEntries,
+          );
+          // 若 fence-ctx 检测到 不变量 11/12 失败 → CRITICAL,exit 1
+          if (warningFindings.criticals.length > 0) {
+            for (const c of warningFindings.criticals) {
+              process.stderr.write(`✗ ${c.message}\n`);
+            }
+            process.stderr.write(
+              `forge evidence freeze: CRITICAL invariant failed;` +
+                ` 必须先跑 forge ack propose 处理后 retry freeze\n`,
+            );
+            process.exit(1);
+          }
+          // WARNING 7/10 转 VerifyFinding 追加 marker.verify_findings
+          if (warningFindings.warnings.length > 0) {
+            const existingFindings = (marker.verify_findings as VerifyFinding[] | undefined) ?? [];
+            marker.verify_findings = [...existingFindings, ...warningFindings.warnings];
+          }
+
+          // 9. transaction 落盘(沿 brainstorm spec §9.6 锁定 B + plan-9e1 transaction.ts 模式)
+          //    tmp 文件写 + rename atomic;crash 时 marker 保持原状
+          const tmpPath = `${markerPath}.tmp.${process.pid}`;
+          const updatedYaml = stringifyYaml(marker);
+          await writeFile(tmpPath, updatedYaml, 'utf8');
+          // rename atomic(POSIX 保证;Windows NTFS 同卷 rename 也是 atomic)
+          await rename(tmpPath, markerPath);
+
+          // 10. 写 ack-log freeze 行(沿 evidence helper 同模式)
+          const freezeEntry: EvidenceHelperEntry = {
+            schema: 'forge-ack-log/v1',
+            kind: 'evidence-helper',
+            timestamp: new Date().toISOString(),
+            helper_name: 'freeze',
+            change_id: changeId,
+            task_ref: `freeze-${kind}`, // 标志 freeze 而非 record-*
+            payload_hash: canonicalHash({
+              helper: 'freeze',
+              change_id: changeId,
+              kind,
+              marker_path: markerPath,
+              staging_hash: staging.staging_hash,
+              ack_log_tail_hash: marker.ack_log_tail_hash,
+              ack_log_entry_count: marker.ack_log_entry_count,
+            }),
+            status: 'success',
+            git_head: getGitHead(changeRoot),
+            extra: {
+              kind,
+              warning_count: warningFindings.warnings.length,
+            },
+          };
+          await appendAckLog(changeRoot, freezeEntry);
+
+          process.stdout.write(
+            `✓ forge evidence freeze: ${kind} marker frozen` +
+              ` (staging_hash=${staging.staging_hash.slice(0, 16)}..., ` +
+              `${warningFindings.warnings.length} WARNING(s) → marker.verify_findings)\n`,
+          );
+          process.exit(0);
+        } finally {
+          await releaseLock();
+        }
+      },
+    );
+```
+
+关键 import 头部追加(evidence.ts 顶部):
+
+```typescript
+import { readFile, writeFile, rename } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
+import { acquireStagingLock } from '../../core/staging-lock.js';
+import {
+  appendAckLog,
+  readAllAckLogEntries,
+} from '../../core/ack-log.js';
+import type { EvidenceHelperEntry } from '../../core/ack-log.js';
+import { canonicalHash } from '../../core/canonical-json.js';
+import type {
+  ProcessEvidence,
+  TddEventChain,
+  VerifyInvocation,
+  SubagentReviewChain,
+} from '../../core/schemas/process-evidence.js';
+import type { VerifyFinding } from '../../core/markers/types.js';
+import { computeFreezeWarnings } from '../../core/process-evidence-freeze-warnings.js';
+```
+
+- [ ] **Step 4.1.2:新建 `src/core/process-evidence-freeze-warnings.ts`**(freeze-time fence-ctx 检测函数,挪到独立模块避免 evidence.ts 太大)
+
+```typescript
+// src/core/process-evidence-freeze-warnings.ts — plan-9g Task 4
+// freeze-time WARNING 算法(沿 brainstorm spec §3 WARNING 流转两段)
+//
+// freeze 阶段只能算 fence-ctx 字段类 WARNING(不变量 7 + 10);
+// 不变量 11/12 是 CRITICAL,失败时返 criticals 数组让 freeze 子命令 exit 1;
+// 不变量 5/6/13/14 是 archive 阶段 worktree 重跑产,freeze 时不算
+//
+// finding_hash 沿 plan-9a computeFindingHash 8 字段 schema
+// dimension='process_evidence'(plan-9g Task 1.4 扩 enum)
+
+import { existsSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import type { ProcessEvidence } from './schemas/process-evidence.js';
+import type { VerifyFinding } from './markers/types.js';
+import type { AckLogEntry } from './ack-log.js';
+import { computeFindingHash } from './schemas/severity.js'; // plan-9a 已立
+
+export interface FreezeWarningsResult {
+  /** WARNING finding(写 marker.verify_findings) */
+  warnings: VerifyFinding[];
+  /** CRITICAL finding(freeze 时 exit 1) */
+  criticals: VerifyFinding[];
+}
+
+/**
+ * computeFreezeWarnings — freeze 时算 fence-ctx WARNING + CRITICAL
+ *
+ * 不变量映射:
+ *   - 7  verify_invocations 计数 < task 数 → WARNING(check_type='invariant-7-verify-count')
+ *   - 10 env_hash 漂移(lockfile/node/os 与当前不一致)→ WARNING(check_type='invariant-10-env-drift')
+ *   - 11 tdd_exemption 非空但 ack-log 无对应条目 → CRITICAL
+ *   - 12 mode != full 但 acked_by 缺 → CRITICAL
+ *
+ * @param processEvidence freeze 时凝固的 process_evidence
+ * @param changeRoot change 根目录(读 tasks.md 计 task 数)
+ * @param ackLogEntries 全 ack-log entries(用于 11/12 cross-check)
+ */
+export function computeFreezeWarnings(
+  processEvidence: ProcessEvidence,
+  changeRoot: string,
+  ackLogEntries: AckLogEntry[],
+): FreezeWarningsResult {
+  const warnings: VerifyFinding[] = [];
+  const criticals: VerifyFinding[] = [];
+
+  // 不变量 7:verify_invocations 总数 ≥ task 数
+  const tasksCount = countTasksInTasksMd(changeRoot);
+  if (processEvidence.verify_invocations.length < tasksCount) {
+    warnings.push(
+      mkFinding({
+        invariant: 7,
+        severity: 'WARNING',
+        check_type: 'invariant-7-verify-count',
+        message_template:
+          'verify_invocations count {actual} less than tasks count {expected}',
+        evidence: `verify_invocations.length=${processEvidence.verify_invocations.length}; tasks count=${tasksCount}`,
+        recommendation:
+          'subagent 实施完每 task 必须调 forge evidence record-verify;若主代理已统一跑 change-level verify 视为可接受 → forge ack propose --action ack-warning',
+      }),
+    );
+  }
+
+  // 不变量 10:env_hash 一致性
+  const currentEnv = {
+    node_version: process.version.slice(1),
+    os_platform: process.platform,
+  };
+  if (
+    processEvidence.env_hash.node_version !== currentEnv.node_version ||
+    processEvidence.env_hash.os_platform !== currentEnv.os_platform
+  ) {
+    warnings.push(
+      mkFinding({
+        invariant: 10,
+        severity: 'WARNING',
+        check_type: 'invariant-10-env-drift',
+        message_template: 'env_hash drift detected',
+        evidence: `marker env: node=${processEvidence.env_hash.node_version} os=${processEvidence.env_hash.os_platform};` +
+          ` current env: node=${currentEnv.node_version} os=${currentEnv.os_platform}`,
+        recommendation: '使用 hermetic CI 或重跑 verify 同步 env_hash;若环境差异客观 → forge ack propose --action ack-warning',
+      }),
+    );
+  }
+
+  // 不变量 11:tdd_exemption 非空但 ack-log 无对应条目 → CRITICAL
+  for (const chain of processEvidence.tdd_event_chain) {
+    if (chain.tdd_exemption !== null) {
+      const hasAck = ackLogEntries.some(
+        (e) =>
+          e.kind === 'ack' &&
+          (e as { action?: string }).action === 'ack-tdd-exemption' &&
+          (e as { extra?: { task_ref?: string } }).extra?.task_ref === chain.task_ref,
+      );
+      if (!hasAck) {
+        criticals.push(
+          mkFinding({
+            invariant: 11,
+            severity: 'CRITICAL',
+            check_type: 'invariant-11-tdd-exemption-no-ack',
+            message_template: 'tdd_exemption set but no ack-log entry for task {task_ref}',
+            evidence: `task_ref=${chain.task_ref} has tdd_exemption=${JSON.stringify(chain.tdd_exemption)} but no ack`,
+            recommendation: '跑 forge ack propose --action ack-tdd-exemption --finding <task-id>',
+          }),
+        );
+      }
+    }
+  }
+
+  // 不变量 12:mode != full 但 acked_by 缺 → CRITICAL
+  if (
+    processEvidence.process_verification_mode !== 'full' &&
+    !processEvidence.process_verification_mode_acked_by
+  ) {
+    criticals.push(
+      mkFinding({
+        invariant: 12,
+        severity: 'CRITICAL',
+        check_type: 'invariant-12-mode-no-ack',
+        message_template:
+          'process_verification_mode={mode} but acked_by missing',
+        evidence: `mode=${processEvidence.process_verification_mode}; acked_by=null`,
+        recommendation: '跑 forge ack propose --action ack-mode 写 acked_by',
+      }),
+    );
+  }
+
+  return { warnings, criticals };
+}
+
+interface MkFindingInput {
+  invariant: number;
+  severity: 'CRITICAL' | 'WARNING';
+  check_type: string;
+  message_template: string;
+  evidence: string;
+  recommendation: string;
+}
+
+function mkFinding(input: MkFindingInput): VerifyFinding {
+  // 沿 plan-9a computeFindingHash 8 字段 schema + dimension='process_evidence'
+  const payload = {
+    content_hash: 'sha256:placeholder', // freeze 时不算实际 content_hash(留实施者按 9a 标准填)
+    git_head: 'placeholder', // 留实施者 fill
+    dimension: 'process_evidence' as const,
+    check_type: input.check_type,
+    severity: input.severity,
+    automated: true,
+    evidence: input.evidence,
+    recommendation: input.recommendation,
+  };
+  const finding_hash = computeFindingHash(payload);
+  return {
+    id: input.invariant, // 沿不变量编号作 id(brainstorm M-2 dedup)
+    resolved: false,
+    finding_hash,
+    ...payload,
+  };
+}
+
+function countTasksInTasksMd(changeRoot: string): number {
+  const tasksPath = join(changeRoot, 'tasks.md');
+  if (!existsSync(tasksPath)) return 0;
+  const content = readFileSync(tasksPath, 'utf8');
+  // 简单 count `- [ ]` 或 `- [x]`(沿 plan-9j parseTasks 同模式)
+  const matches = content.match(/^\s*- \[[ x]\]/gm);
+  return matches?.length ?? 0;
+}
+```
+
+(注:`computeFindingHash` 是 plan-9a 立的;若 9a 未导出 — 实施者按 9a `src/core/schemas/severity.ts` 实际函数名调整)
+
+- [ ] **Step 4.1.3:跑 typecheck**
+
+```bash
+pnpm typecheck
+```
+
+Expected: PASS
+
+### 5.2 步骤 4.2:写 tests/cli/evidence-freeze.test.ts 8 case
+
+- [ ] **Step 4.2.1:写测试**(沿 brainstorm spec §8.2 测试矩阵 freeze CLI 子命令 8 case)
+
+```typescript
+// tests/cli/evidence-freeze.test.ts — plan-9g Task 4.2
+// 测 forge evidence freeze 子命令 8 case(brainstorm spec §8.2)
+//
+// Case 1: --kind requiredOption omit → commander 自动 exit 1
+// Case 2: --kind invalid value(非 verify|review)→ exit 2
+// Case 3: staging.yaml 不存在 → exit 1 + 提示先跑 record-tdd
+// Case 4: staging_hash mismatch(中间篡改)→ exit 1 staging tampered
+// Case 5: marker 不存在 → exit 1 + 提示先写 .verify-passed
+// Case 6: happy path — freeze 写 marker.process_evidence + tail_hash + entry_count
+// Case 7: WARNING 7(verify_invocations < tasks)→ 转 VerifyFinding 写 marker.verify_findings
+// Case 8: CRITICAL 12(mode != full + acked_by 缺)→ exit 1 拒绝写 marker
+
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { execFileSync, spawn } from 'node:child_process';
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
+import { canonicalHash } from '../../src/core/canonical-json.js';
+
+const CLI = join(process.cwd(), 'dist', 'cli', 'index.js');
+
+async function setupChangeFixture(): Promise<{ projectRoot: string; changeRoot: string; changeId: string }> {
+  const projectRoot = await mkdtemp(join(tmpdir(), 'forge-freeze-test-'));
+  const changeId = 'test-change';
+  const changeRoot = join(projectRoot, 'forge', 'changes', changeId);
+  await mkdir(join(changeRoot, '.evidence'), { recursive: true });
+  // 写 minimal tasks.md(用于不变量 7 count)
+  await writeFile(join(changeRoot, 'tasks.md'), `- [ ] Task 1\n- [x] Task 2\n`, 'utf8');
+  return { projectRoot, changeRoot, changeId };
+}
+
+async function writeStaging(
+  changeRoot: string,
+  data: {
+    tdd_event_chain: unknown[];
+    verify_invocations: unknown[];
+    subagent_review_chain: unknown[];
+  },
+): Promise<string> {
+  const projection = data;
+  const staging_hash = canonicalHash(projection);
+  const staging = {
+    schema: 'forge-process-evidence-staging/v1',
+    change_id: 'test-change',
+    created_at: '2026-05-13T00:00:00Z',
+    ...data,
+    staging_hash,
+  };
+  await writeFile(
+    join(changeRoot, '.evidence', 'process-evidence.staging.yaml'),
+    stringifyYaml(staging),
+    'utf8',
+  );
+  return staging_hash;
+}
+
+async function writeMinimalVerifyMarker(changeRoot: string): Promise<void> {
+  const marker = {
+    schema: 'forge-verify/v1',
+    verified_at: '2026-05-13T00:00:00Z',
+    verified_by: 'ai-agent',
+    tasks_hash: 'sha256:placeholder',
+    content_hash: 'sha256:placeholder',
+    evidence: [],
+  };
+  await writeFile(join(changeRoot, '.verify-passed'), stringifyYaml(marker), 'utf8');
+}
+
+describe('forge evidence freeze (plan-9g Task 4)', () => {
+  let projectRoot: string;
+  let changeRoot: string;
+  let changeId: string;
+
+  beforeEach(async () => {
+    ({ projectRoot, changeRoot, changeId } = await setupChangeFixture());
+  });
+
+  afterEach(async () => {
+    await rm(projectRoot, { recursive: true, force: true }).catch(() => {});
+  });
+
+  it('Case 1: --kind requiredOption omit → exit 1', () => {
+    expect(() => {
+      execFileSync('node', [CLI, 'evidence', 'freeze', changeId], {
+        cwd: projectRoot,
+        encoding: 'utf8',
+        stdio: 'pipe',
+      });
+    }).toThrow(/required option.*--kind|Process exited|exit code 1/i);
+  });
+
+  it('Case 2: --kind invalid value → exit 2', () => {
+    expect(() => {
+      execFileSync('node', [CLI, 'evidence', 'freeze', changeId, '--kind', 'invalid'], {
+        cwd: projectRoot,
+        encoding: 'utf8',
+        stdio: 'pipe',
+      });
+    }).toThrow(/invalid --kind|Process exited|exit code (1|2)/i);
+  });
+
+  it('Case 3: staging.yaml 不存在 → exit 1', async () => {
+    await writeMinimalVerifyMarker(changeRoot);
+    expect(() => {
+      execFileSync('node', [CLI, 'evidence', 'freeze', changeId, '--kind', 'verify'], {
+        cwd: projectRoot,
+        encoding: 'utf8',
+        stdio: 'pipe',
+      });
+    }).toThrow(/staging file not found|exit code 1/i);
+  });
+
+  it('Case 4: staging_hash mismatch → exit 1 staging tampered', async () => {
+    await writeStaging(changeRoot, { tdd_event_chain: [], verify_invocations: [], subagent_review_chain: [] });
+    // 篡改 staging hash
+    const stagingPath = join(changeRoot, '.evidence', 'process-evidence.staging.yaml');
+    const staging = parseYaml(await readFile(stagingPath, 'utf8')) as Record<string, unknown>;
+    staging.staging_hash = 'sha256:tampered';
+    await writeFile(stagingPath, stringifyYaml(staging), 'utf8');
+    await writeMinimalVerifyMarker(changeRoot);
+
+    expect(() => {
+      execFileSync('node', [CLI, 'evidence', 'freeze', changeId, '--kind', 'verify'], {
+        cwd: projectRoot,
+        encoding: 'utf8',
+        stdio: 'pipe',
+      });
+    }).toThrow(/staging tampered|staging_hash mismatch|exit code 1/i);
+  });
+
+  it('Case 5: marker 不存在 → exit 1 提示先写', async () => {
+    await writeStaging(changeRoot, { tdd_event_chain: [], verify_invocations: [], subagent_review_chain: [] });
+    expect(() => {
+      execFileSync('node', [CLI, 'evidence', 'freeze', changeId, '--kind', 'verify'], {
+        cwd: projectRoot,
+        encoding: 'utf8',
+        stdio: 'pipe',
+      });
+    }).toThrow(/marker not found|exit code 1/i);
+  });
+
+  it('Case 6: happy path — freeze 写 marker.process_evidence + tail/count', async () => {
+    await writeStaging(changeRoot, {
+      tdd_event_chain: [
+        {
+          task_ref: 'tasks.md#task-1',
+          red_commit: null,
+          green_commit: { sha: 'abc', timestamp: '2026-05-13T00:00:00Z', green_log_path: '.evidence/g.log', green_log_hash: 'sha256:x', exit_code: 0, runner_report_path: '.evidence/g.xml', runner_report_hash: 'sha256:y' },
+          tdd_exemption: null,
+          tdd_exemption_acked_by: null,
+        },
+      ],
+      verify_invocations: [
+        { invoked_at: '2026-05-13T00:00:00Z', task_refs: ['tasks.md#task-1', 'tasks.md#task-2'], verify_scope: 'change-level', result: 'pass', exit_code: 0, log_path: '.evidence/v.log', log_hash: 'sha256:v', runner_report_path: '.evidence/v.xml', runner_report_hash: 'sha256:vr' },
+      ],
+      subagent_review_chain: [],
+    });
+    await writeMinimalVerifyMarker(changeRoot);
+
+    execFileSync('node', [CLI, 'evidence', 'freeze', changeId, '--kind', 'verify'], {
+      cwd: projectRoot,
+      encoding: 'utf8',
+      stdio: 'pipe',
+    });
+
+    const marker = parseYaml(await readFile(join(changeRoot, '.verify-passed'), 'utf8')) as Record<string, unknown>;
+    expect(marker.process_evidence).toBeDefined();
+    expect(marker.process_evidence_staging_hash).toBeDefined();
+    expect(marker.ack_log_tail_hash).toBeDefined(); // freeze 自身 ack-log entry → 非 null
+    expect(marker.ack_log_entry_count).toBeGreaterThan(0);
+  });
+
+  it('Case 7: WARNING 7 verify_invocations < tasks → marker.verify_findings 含 process_evidence 维度 finding', async () => {
+    // 写 staging:0 verify_invocations(但 tasks.md 有 2 task)→ count < tasks
+    await writeStaging(changeRoot, { tdd_event_chain: [], verify_invocations: [], subagent_review_chain: [] });
+    await writeMinimalVerifyMarker(changeRoot);
+
+    execFileSync('node', [CLI, 'evidence', 'freeze', changeId, '--kind', 'verify'], {
+      cwd: projectRoot,
+      encoding: 'utf8',
+      stdio: 'pipe',
+    });
+
+    const marker = parseYaml(await readFile(join(changeRoot, '.verify-passed'), 'utf8')) as Record<string, unknown>;
+    const findings = marker.verify_findings as Array<{ dimension: string; check_type: string; severity: string }>;
+    expect(findings).toBeDefined();
+    expect(findings.some((f) => f.dimension === 'process_evidence' && f.check_type === 'invariant-7-verify-count')).toBe(true);
+  });
+
+  it('Case 8: CRITICAL 12 mode != full + ack 缺 → exit 1 拒绝写 marker', async () => {
+    // 写 staging mode=hash-only + ack 缺(直接 stub PE 字段)
+    const projection = {
+      tdd_event_chain: [],
+      verify_invocations: [],
+      subagent_review_chain: [],
+    };
+    const staging_hash = canonicalHash(projection);
+    const staging = {
+      schema: 'forge-process-evidence-staging/v1',
+      change_id: 'test-change',
+      created_at: '2026-05-13T00:00:00Z',
+      ...projection,
+      process_verification_mode: 'hash-only', // 故意 non-full
+      process_verification_mode_acked_by: null, // ack 缺 → CRITICAL 12
+      staging_hash,
+    };
+    await writeFile(join(changeRoot, '.evidence', 'process-evidence.staging.yaml'), stringifyYaml(staging), 'utf8');
+    await writeMinimalVerifyMarker(changeRoot);
+
+    expect(() => {
+      execFileSync('node', [CLI, 'evidence', 'freeze', changeId, '--kind', 'verify'], {
+        cwd: projectRoot,
+        encoding: 'utf8',
+        stdio: 'pipe',
+      });
+    }).toThrow(/CRITICAL.*invariant|mode.*ack|exit code 1/i);
+  });
+});
+```
+
+注:Case 8 staging 写入需 mode/acked_by 字段;实施者按 freeze 子命令读取逻辑实际 staging schema 设计调整(原 staging schema 只含三数组 + hash;mode/ack 字段是否纳入 staging 由实施者决定 — 或由 helper 写 staging 时通过 record-tdd `--mode` 选项填,9g writing-plans 阶段实际实施时定)。
+
+- [ ] **Step 4.2.2:跑 build + 测试**
+
+```bash
+pnpm build && pnpm test tests/cli/evidence-freeze.test.ts
+```
+
+Expected: 8 case 全 PASS(注:execFileSync 测试需 dist/cli/index.js 已编译;build 是先决条件)
+
+- [ ] **Step 4.2.3:全本地 verify 收尾 Task 4**
+
+```bash
+pnpm typecheck && pnpm lint && pnpm format:check && pnpm build && pnpm test
+```
+
+Expected: 全 PASS
+
+- [ ] **Step 4.2.4:commit Task 4 完成**
+
+```bash
+> .git/COMMIT_MSG
+echo "feat(9g Task 4): forge evidence freeze 子命令 + computeFreezeWarnings + 8 case + Task 4 完成" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "src/cli/commands/evidence.ts:" >> .git/COMMIT_MSG
+echo "- 新增 freeze 子命令 (--kind <verify|review> requiredOption + 可选 --marker)" >> .git/COMMIT_MSG
+echo "- 流程:acquireStagingLock → 读 staging + 校验 staging_hash → 读 marker →" >> .git/COMMIT_MSG
+echo "  复制三数组到 process_evidence + 写 staging_hash + tail/count 固化 →" >> .git/COMMIT_MSG
+echo "  computeFreezeWarnings(WARNING 7/10 写 marker.verify_findings;CRITICAL 11/12 exit 1) →" >> .git/COMMIT_MSG
+echo "  transaction(tmp + rename atomic)→ ack-log freeze 行 → releaseLock" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "src/core/process-evidence-freeze-warnings.ts(新建):" >> .git/COMMIT_MSG
+echo "- computeFreezeWarnings 算 fence-ctx WARNING 7/10 + CRITICAL 11/12" >> .git/COMMIT_MSG
+echo "- finding 沿 9a computeFindingHash 8 字段 + dimension='process_evidence'" >> .git/COMMIT_MSG
+echo "  (brainstorm spec §3 WARNING 流转两段 + §9.12)" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "tests/cli/evidence-freeze.test.ts:8 case(--kind omit/invalid/staging 不存在/" >> .git/COMMIT_MSG
+echo "  staging tampered/marker 不存在/happy path/WARNING 7/CRITICAL 12)" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "Task 4 完成:freeze 子命令 + transaction + WARNING/CRITICAL 分级 + 8 case PASS" >> .git/COMMIT_MSG
+git add src/cli/commands/evidence.ts src/core/process-evidence-freeze-warnings.ts tests/cli/evidence-freeze.test.ts
+git commit -F .git/COMMIT_MSG && rm .git/COMMIT_MSG
+```
+
+### 5.3 Task 4 完成定义(DoD)
+
+- [x] `src/cli/commands/evidence.ts` — 加 freeze 子命令(--kind requiredOption + --marker 可选 + transaction + WARNING 分级)
+- [x] `src/core/process-evidence-freeze-warnings.ts` — computeFreezeWarnings 函数(WARNING 7/10 + CRITICAL 11/12)
+- [x] `tests/cli/evidence-freeze.test.ts` 8 case PASS
+- [x] 全本地 verify PASS
+
+---
+

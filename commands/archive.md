@@ -50,7 +50,13 @@ archive 成功后,**新增产物**:`forge/changes/archive/YYYY-MM-DD-<id>/archiv
 - `archived_at` ISO 8601 UTC
 - `change_id` 字符串
 - `verify_passed` / `review_passed` 摘要
-- `process_evidence_summary`(9e1 placeholder,9e2 接 9g 真实统计)
+- `process_evidence_summary`(9e1 placeholder → 9e2 真实统计,沿 plan-9g 14 不变量):
+  - `placeholder: false`
+  - `invariants_passed: number`(经 mapper 优先级筛选后仍为 status='pass' 的 invariant 数)
+  - `invariants_with_warning: number`(WARNING 经 fail/legacy-skip 优先级筛选后仍保留为 status='warning' 的数;legacy 路径下被豁免 invariant 的 WARNING 不计入,沿 master §3.4.4.1 精度损失)
+  - `invariants_failed: number`(v1.0 永远 = 0;fence.ok=false 时 archive 直接 exit 1,summary 不写入)
+  - `legacy_exempt: number`(`process_evidence_unavailable_legacy: true` 路径下被豁免的 invariant 数;legacy 路径恒 = 10,非 legacy 恒 = 0;flag 取自 verify || review 任一为 true)
+  - 不变式:`invariants_passed + invariants_with_warning + invariants_failed + legacy_exempt === 14`(沿 plan-9g FENCE_INVARIANT_NAMES.length)
 - `handoff_to_backlog` 三类聚合(SUGGESTION 持挂 + pause_decisions chosen_option=3 + scope-entries active)
 - `acked_warnings`(WARNING + ack 的引用,给用户回顾)
 - `pending_suggestions`(SUGGESTION + resolved=false 引用,handoff 子集)
@@ -63,7 +69,7 @@ archive 成功后 stdout 渲染段(沿 design §2.4.4 模板):
 **Change:** <change-id>
 **Archived to:** forge/changes/archive/<archive-id>/
 **Specs:** ✓ Synced
-**Security:** [process_evidence:placeholder] ... (9e2 完成后改为真实统计)
+**Security:** [process_evidence:passed=3/warning=1/failed=0/legacy=10]
 
 ### Acknowledged Warnings (N)
 - [WARNING] verify_findings#<id> (<dimension>/<check_type>)
@@ -138,10 +144,10 @@ archive 成功后,**调用 `forge:finishing-a-development-branch` skill** 提示
 本文件由多个 sub-plan 共同维护:
 
 - **9e1**(本文件落地):三级分级行为表 + archive_summary 输出格式 + --resume-summary 用法
-- **9e2**(待 9g 完成后):把 `process_evidence_summary` 字段从 placeholder 接 9g 实施的 13 不变量真实统计
+- **9e2(已完成,plan-9e2)**:`process_evidence_summary` 字段从 placeholder 接 plan-9g 实施的 14 不变量真实统计(4 字段计数:passed / with_warning / failed / legacy_exempt;sum 不变式 = 14)
 - **9g**(process_evidence):在"archive 顺序原子化"步骤中加入 worktree 重跑 + 结构化 reporter parsing(注:9g 实施时 **不动** 9e1 的 .tmp / rename / 三级 fence 步骤,只在 verify markers 阶段之前插入 worktree 阶段)
 
-merge 顺序推荐:**9e1 → 9g → 9e2**(本顺序保证 archive_summary placeholder 在 9g 真实 13 不变量统计完成后才接,避免 placeholder 与真实统计在中间状态混淆)
+merge 顺序推荐:**9e1 → 9g → 9e2(已完成全链)** — 14 不变量真实统计已接入,placeholder 路径仅 plan-9e1 backward-compat 兼容保留
 
 ## C 简码迁移协议(plan-9e1 v4 BLOCKER 1 落地 + plan-9j v2 解锁)
 

@@ -1,18 +1,45 @@
 // forge validate 子命令 — 验证 change 目录
 // v2 B2 修订:exit 0/1/2 三档(沿 master §3.12.3 freeze)
 // exit 0 = 全 PASS;exit 1 = CRITICAL findings 存在;exit 2 = fs/config 错
+// plan-9g Task 5.4:加 --verify-process flag(单独跑 process_evidence 子检)
 
 import { Command } from 'commander';
 import { join } from 'node:path';
 import { validateChange } from '../../core/validate/index.js';
+import { crossCuttingFenceCheck } from '../../core/archive/fence.js';
 
 export function buildValidateCommand(): Command {
   return new Command('validate')
     .argument('<changeId>', 'change directory id (e.g., add-login)')
     .description('Validate a change directory')
-    .action(async (changeId: string) => {
+    .option(
+      '--verify-process',
+      'plan-9g:单独跑 process_evidence 子检(14 不变量 fence;不跑其他 validate 步骤)',
+    )
+    .action(async (changeId: string, opts: { verifyProcess?: boolean }) => {
       // 构建 change 目录路径: <cwd>/forge/changes/<changeId>
       const changeDir = join(process.cwd(), 'forge', 'changes', changeId);
+
+      // --verify-process:仅跑 crossCuttingFenceCheck process_evidence 子检
+      if (opts.verifyProcess) {
+        let fenceResult;
+        try {
+          fenceResult = await crossCuttingFenceCheck(changeDir);
+        } catch (err) {
+          console.error(`✗ process_evidence fence error: ${err instanceof Error ? err.message : String(err)}`);
+          process.exit(2);
+        }
+        if (fenceResult.ok) {
+          console.log(`✓ ${changeId}: process_evidence fence PASS (14 invariants)`);
+          process.exit(0);
+        }
+        console.error(`✗ ${changeId}: process_evidence fence FAIL`);
+        for (const r of fenceResult.results) {
+          if (!r.ok) console.error(`  - ${r.invariant}: ${r.reason}`);
+        }
+        process.exit(1);
+      }
+
       const result = await validateChange(changeDir);
 
       if (result.valid) {

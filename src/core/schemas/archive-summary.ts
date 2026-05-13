@@ -30,7 +30,7 @@ export interface ArchiveSummary {
   verify_passed: VerifyPassedRef;
   /** review-passed 摘要(含 reviewers 列表) */
   review_passed: ReviewPassedRef;
-  /** process_evidence 13 不变量 pass/fail/legacy 分布;9e1 仅 placeholder,9e2 接 9g 真实统计 */
+  /** process_evidence 14 不变量 pass/fail/legacy 分布;9e1 仅 placeholder,9e2 接 9g 真实统计 */
   process_evidence_summary: ProcessEvidenceSummary;
   /** 给 v1.1 forge backlog index 用 — 三类聚合(沿 design §2.4.3) */
   handoff_to_backlog: HandoffEntry[];
@@ -53,11 +53,11 @@ export interface ReviewPassedRef {
 }
 
 /**
- * process_evidence_summary — 13 不变量分布(9g/9e2 真实填,9e1 仅 placeholder)
+ * process_evidence_summary — 14 不变量分布(9g/9e2 真实填,9e1 仅 placeholder)
  *
  * placeholder=true 表示本字段是 9e1 占位,9e2 实施时改为真实统计:
  *   - placeholder: false
- *   - invariants_passed: number(0-13)
+ *   - invariants_passed: number(0-14)
  *   - invariants_failed: number
  *   - legacy_exempt: number(legacy marker 豁免数)
  */
@@ -130,7 +130,7 @@ export const ARCHIVE_SUMMARY_VERSION = '1.0.0';
 /** 9e1 placeholder process_evidence_summary(9e2 接 9g 替换) */
 export const PLACEHOLDER_PROCESS_EVIDENCE_SUMMARY: ProcessEvidenceSummary = {
   placeholder: true,
-  note: 'process_evidence 13 不变量统计待 9g + 9e2 实施',
+  note: 'process_evidence 14 不变量统计待 9g + 9e2 实施',
 };
 
 /** ISO 8601 UTC 校验正则(沿 marker-schema.ts:20 同形式) */

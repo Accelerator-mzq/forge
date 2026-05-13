@@ -78,14 +78,6 @@ export function buildArchiveCommand(): Command {
   return new Command('archive')
     .argument('[changeId]', 'change directory id (e.g., add-login)')
     .description('Archive a verified+reviewed change')
-    .option(
-      '--enable-cross-cutting-fence',
-      'experimental: enable v1.0 cross-cutting fence (9g implements full 13 invariants)',
-    )
-    .option(
-      '--allow-stub-fence',
-      'development only: skip not_implemented fence invariants (9g should remove this need)',
-    )
     .option('--force', 'accept human-override or non-git review markers')
     .option('--recover', 'recover from a half-completed archive transaction')
     .option(
@@ -99,8 +91,6 @@ export function buildArchiveCommand(): Command {
           force?: boolean;
           recover?: boolean;
           resumeSummary?: string; // plan-9e1 Task 5
-          enableCrossCuttingFence?: boolean;
-          allowStubFence?: boolean;
         },
       ) => {
         const forgeRoot = join(process.cwd(), 'forge');
@@ -237,34 +227,17 @@ export function buildArchiveCommand(): Command {
             process.exit(2);
           }
 
-          // Task 8 (plan-9a §9): cross-cutting fence framework — opt-in via --enable-cross-cutting-fence
-          // 13 invariants 当前均为 stub (9g 实施完整逻辑);未启用时跳过(向后兼容)
-          // 注:plan §11.5 明确"9b/9c/9d 阶段 archive 命令需要加 --allow-stub-fence 或等 9g 完成"
-          //     当前默认关闭,避免破坏现有 archive.test.ts;9g 完成后将改为默认开启
-          if (opts.enableCrossCuttingFence) {
-            if (opts.allowStubFence) {
-              process.stderr.write(
-                '⚠ --allow-stub-fence is for development only — release CLI should not use this\n',
-              );
+          // plan-9g 默认开启 14 不变量 fence(brainstorm v6 删两 opt-in flag);所有 archive 调用都跑
+          const fenceResult = await crossCuttingFenceCheck(join(forgeRoot, 'changes', changeId));
+          if (!fenceResult.ok) {
+            console.error('✗ cross-cutting fence rejected archive:');
+            for (const r of fenceResult.results) {
+              if (!r.ok) console.error(`  - ${r.invariant}: ${r.reason}`);
             }
-            const fenceResult = await crossCuttingFenceCheck(join(forgeRoot, 'changes', changeId), {
-              allowStubFence: opts.allowStubFence ?? false,
-            });
-            if (!fenceResult.ok) {
-              console.error('✗ cross-cutting fence rejected archive:');
-              for (const r of fenceResult.results) {
-                if (!r.ok) console.error(`  - ${r.invariant}: ${r.reason}`);
-              }
-              if (fenceResult.notImplementedCount > 0 && !opts.allowStubFence) {
-                console.error(
-                  `  fence not ready: ${fenceResult.notImplementedCount}/13 invariants are stubs — complete 9g first or pass --allow-stub-fence`,
-                );
-              }
-              const rel = archiveRelease;
-              archiveRelease = undefined;
-              if (rel) await rel();
-              process.exit(2);
-            }
+            const rel = archiveRelease;
+            archiveRelease = undefined;
+            if (rel) await rel();
+            process.exit(1);
           }
 
           const changeDir = join(forgeRoot, 'changes', changeId);

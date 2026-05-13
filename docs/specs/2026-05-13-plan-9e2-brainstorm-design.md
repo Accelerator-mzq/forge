@@ -41,7 +41,7 @@
 | Q1 | FenceInvariantResult 多态信息流归属 | **扩 `status: 'pass' \| 'warning' \| 'fail' \| 'legacy-skip'` 4 态 enum 字段,语义住 fence 层**(v2 codex 一轮 MAJOR 修订:从 3 态扩 4 态加 WARNING 处理) | legacy 豁免表(哪些 invariant 跳)只在 fence.ts 内单源维护(LEGACY_EXEMPT_INVARIANTS 常量);类型安全;superset additive 不破 plan-9g 已写 ok/reason 代码;WARNING(env_hash 不一致 / sample 模式 timeout / verify_invocations 不足等沿 design §2.7.3 #7/#10/#13)必须可识别,否则 invariants_passed 数字虚高把"有软告警放行"误报"全过" |
 | Q2 | `invariants_failed` 字段语义 | **保留字段,值永远 = 0**(对称性 + 防未来 fail-soft 模式) | 字段已在 9e1 schema 立(archive-summary.ts:64-73),不破 backwards-compat;archive_summary.yaml 是用户 review 产物,字段对称直观;未来若 fence 改 fail-soft(部分 invariant fail 但仍写 summary)字段已就位 |
 | Q3 | placeholder=false 路径 schema 校验严格度 | **严格:四字段必填 + number + 值域 [0, EXPECTED_INVARIANT_COUNT] + sum = EXPECTED_INVARIANT_COUNT 不变式;常量派生自 `FENCE_INVARIANT_NAMES.length` 自动跟随 invariant 数演化**(v2 codex 一轮 MAJOR 修订:三字段 → 四字段含 invariants_with_warning) | 9g 14 不变量是产物完整性核心,sum 不变式破 = bug 或 tamper 直接拒签;archive_summary.yaml 是 v1.1 backlog index 上游,后续消费者期望字段完整;与 plan-9d / 9j schema validator 严格化路径一致 |
-| Q4 | archive.md 文档更新边界 | **4 处文案校正 + 短段解释字段语义,且双改根级 `commands/archive.md` + 模板 `src/core/templates/commands/archive.md` 两份**(v2 codex 一轮 MAJOR 修订:漏列根级)(legacy_exempt 引 master §3.4.4.1 表 / invariants_failed 永远 = 0 设计理由 / invariants_with_warning 解释) | archive.md 是 slash command 模板被 `forge init` 写入用户项目,基本字段语义必须可读;两份 archive.md(根级 + template)`md5sum` 完全一致(05a3713...),必须同步双改否则用户调根级 `/forge:archive` 会读到过期协议;但"具体哪 10 个被跳"展开是 master spec 工作,文档引到表即可不内嵌(YAGNI) |
+| Q4 | archive.md 文档更新边界 | **4 处文案校正 + 短段解释字段语义,且双改根级 `commands/archive.md` + 模板 `src/core/templates/commands/archive.md` 两份**(v2 codex 一轮 MAJOR 修订:漏列根级)(legacy_exempt 引 master §3.4.4.1 表 / invariants_failed 永远 = 0 设计理由 / invariants_with_warning 解释) | archive.md 是 slash command 模板被 `forge init` 写入用户项目,基本字段语义必须可读;两份 archive.md(根级 + template)实施前 `md5sum` 完全一致(v2 codex 二轮 NIT 修订:删字面量 hash 避免实施后过时),必须同步双改否则用户调根级 `/forge:archive` 会读到过期协议;但"具体哪 10 个被跳"展开是 master spec 工作,文档引到表即可不内嵌(YAGNI) |
 | Q5 | legacy flag 取值源(v2 codex 一轮 MAJOR 修订:新增) | **`legacyExempt = verifyMarker.process_evidence_unavailable_legacy === true \|\| reviewMarker?.process_evidence_unavailable_legacy === true`(任一为 true 即视为 legacy 路径)** | 当前 fence.ts:153-186 已对 review marker 独立读 reviewLegacyExempt 跑独立 process_evidence 校验;若只读 verify side flag,verify 非 legacy + review legacy 路径下 review 侧被豁免的 #1-8/10/13 会落成 status='pass',legacy_exempt 统计失真;v1.0 取并集简化(精度损失 = 无法区分 verify-only / review-only legacy,留 v1.1+ 精确拆分) |
 
 ---
@@ -110,7 +110,7 @@ ArchiveSummary.process_evidence_summary = {
 | `src/core/validate/archive-summary-schema.ts` | +30 行 | placeholder=false 严格校验(4 字段必填 / 值域 / sum 不变式) |
 | `src/cli/commands/archive.ts` | ~3 行 | fenceResult 透传到 buildArchiveSummary |
 | `commands/archive.md` | ~10 行 | **根级 slash command;v2 codex 一轮 MAJOR 修订:漏列已补**;4 处文案校正 + 短段解释字段语义(含 invariants_with_warning) |
-| `src/core/templates/commands/archive.md` | ~10 行 | **模板,被 `forge init` 复制到用户项目**;内容与根级 md5 完全一致(05a3713...),9e2 实施时同步双改 |
+| `src/core/templates/commands/archive.md` | ~10 行 | **模板,被 `forge init` 复制到用户项目**;内容与根级 md5 完全一致(实施前基线;v2 codex 二轮 NIT 修订:删字面量 hash 避免实施后过时),9e2 实施时同步双改 |
 
 ---
 
@@ -356,10 +356,11 @@ fence.ts mapper 取 `verifyLegacy || reviewLegacy`(任一为 true 视为 legacy 
 | non-legacy + 1 个 WARNING(如 #10 env_hash 不一致) | `passed=13, warning=1, failed=0, exempt=0`;archive 继续,WARNING reason 进 result.reason |
 | legacy(verify only)+ 14 个全无 CRITICAL/WARNING | `passed=4, warning=0, failed=0, exempt=10`(#9/11/12/14 真过,#1-8/10/13 跳) |
 | legacy(review only,verify 非 legacy)+ 14 个全无 CRITICAL/WARNING | `passed=4, warning=0, failed=0, exempt=10`(取并集后等同 verify legacy 路径) |
+| **review-only legacy + verify 侧 #10 env_hash WARNING(v2 codex 二轮 MAJOR 修订:精度损失新增场景)** | `passed=4, warning=0, failed=0, exempt=10`;**verify 侧 #10 WARNING 因 effectiveLegacyExempt=true 被 mapper 标 'legacy-skip' 静默丢失**;v1.0 接受此精度损失(Q5 并集决策副作用),实际 WARNING 仍走 stderr / acked_warnings 路径 — 但 summary 中 invariants_with_warning 数字偏低;v1.1+ 引入 side-aware mapper 修复(沿 §7 遗留 #8) |
 | legacy + 1 个保留不变量 WARNING(如 #9 JCS hash WARNING)+ 0 CRITICAL | `passed=3, warning=1, failed=0, exempt=10`(legacy-skip 优先级高于 warning,但 #9/11/12/14 不在 exempt 表,WARNING 落在保留 invariant 上) |
-| legacy + 1 个豁免不变量 WARNING(如 #10 env_hash,#10 在 exempt 表)| `passed=4, warning=0, failed=0, exempt=10`(legacy-skip 优先级高于 warning,#10 仍标 legacy-skip 不计 warning) |
+| legacy + 1 个豁免不变量 WARNING(如 #10 env_hash,#10 在 exempt 表)| `passed=4, warning=0, failed=0, exempt=10`(legacy-skip 优先级高于 warning,#10 仍标 legacy-skip 不计 warning;同 review-only legacy 副作用) |
 | legacy + 1 个保留不变量 CRITICAL(如 fence-9 JCS hash)| fence.ok=false → exit 1,summary 不写 |
-| v1.0 native marker 误带 legacy flag(v2 codex 一轮 MINOR 修订)| archive.ts:341/349 validateLegacyExemption 兜底拒签 → exit 1,不进 fence mapper |
+| v1.0 native marker 误带 legacy flag(v2 codex 一轮 MINOR + 二轮 MINOR 修订)| **先进 crossCuttingFenceCheck mapper:effectiveLegacyExempt=true → 豁免表 invariant 标 'legacy-skip',fence.ok=true 不拦截**;后被 archive.ts:341/349 validateLegacyExemption 兜底拒签(legacy-exemption.ts:47-62 互斥:`legacy=true ⊥ created>=1.0.0 且 resigned 缺失`)→ exit 1,summary 不写 |
 | `FENCE_INVARIANT_NAMES.length` 演化到 15(未来加新 invariant) | 派生常量自动跟随,sum=15 校验生效,9e2 schema 不破 |
 
 ### 4.4 不引入的复杂度(YAGNI)
@@ -522,7 +523,7 @@ pnpm typecheck && pnpm lint && pnpm format:check && pnpm build && pnpm vitest ru
 | 5 | Task 4 Case 8 dead-code path(plan 字面 design 矛盾) | plan-9z polish(9g 已知遗留) |
 | 6 | Task 6 shell:true 注入面(forge/config.yaml test_command 无校验) | plan-9z polish(9g 已知遗留) |
 | 7 | 29 个 it.todo(Task 5/6 e2e fixture 完整 inline) | plan-9z polish(9g 已知遗留) |
-| 8 | legacy_exempt 精确拆分 verify-only / review-only(v2 codex 一轮 MAJOR 修订:并集后精度损失) | plan-v1.1(扩 `verify_legacy_exempt` / `review_legacy_exempt` 字段) |
+| 8 | legacy_exempt 精确拆分 verify-only / review-only + side-aware WARNING(v2 codex 二轮 MAJOR 修订扩) | plan-v1.1 — 扩 `verify_legacy_exempt` / `review_legacy_exempt` 字段;mapper 改 side-aware 不取并集,可解决"review-only legacy + verify-side WARNING 被静默吞"副作用(沿 §4.3 边界场景);v1.0 接受并集精度损失,因 archive_summary 是粗粒度审计输入,WARNING 实际仍走 stderr / acked_warnings 双路径不丢实际信息,仅 summary 计数偏低 |
 | 9 | freeze-time WARNING 走 marker.verify_findings → acked_warnings vs rerun-time WARNING 走 stderr,两条路径在 summary 中合并为 invariants_with_warning 单字段,精度损失 | plan-9z polish 或 v1.1(若有需求拆 freeze/rerun WARNING) |
 
 ---

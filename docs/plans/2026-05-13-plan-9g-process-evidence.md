@@ -1137,3 +1137,1077 @@ Expected: 全本地 verify PASS;commit 输出
 
 ---
 
+## 3. Task 2 — worktree.ts 高阶 API + test-reporters 三档 parser + 9 case worktree + 9 case reporters
+
+**Files:**
+
+- Create: `src/core/worktree.ts`
+- Create: `src/core/test-reporters/index.ts`
+- Create: `src/core/test-reporters/junit.ts`
+- Create: `src/core/test-reporters/tap.ts`
+- Create: `src/core/test-reporters/vitest-json.ts`
+- Modify: `package.json`(加 `fast-xml-parser` + `tap-parser` 两 deps)
+- Test: `tests/core/worktree.test.ts`(9 case)
+- Test: `tests/core/test-reporters/{junit,tap,vitest-json}.test.ts`(各 3 case)
+
+### 3.1 步骤 2.1:加 npm deps
+
+- [ ] **Step 2.1.1:加 fast-xml-parser + tap-parser 两 deps**
+
+```bash
+pnpm add fast-xml-parser@^4
+pnpm add tap-parser@^15
+```
+
+Expected: pnpm-lock.yaml 更新;两 dep 加到 package.json dependencies
+
+- [ ] **Step 2.1.2:跑 typecheck 确认新 deps types**
+
+```bash
+pnpm typecheck
+```
+
+Expected: PASS(tap-parser 有 @types,fast-xml-parser 自带 d.ts)
+
+- [ ] **Step 2.1.3:commit Step 2.1**
+
+```bash
+> .git/COMMIT_MSG
+echo "feat(9g Task 2.1): pnpm add fast-xml-parser + tap-parser deps" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "新增两 deps for plan-9g test-reporters:" >> .git/COMMIT_MSG
+echo "- fast-xml-parser ^4(JUnit XML 解析,vitest/jest/mocha 通用)" >> .git/COMMIT_MSG
+echo "- tap-parser ^15(TAP stream 解析,node:test 用)" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "(Vitest --reporter=json 走原生 JSON.parse,不需 dep)" >> .git/COMMIT_MSG
+git add package.json pnpm-lock.yaml
+git commit -F .git/COMMIT_MSG && rm .git/COMMIT_MSG
+```
+
+### 3.2 步骤 2.2:写 src/core/worktree.ts 高阶 API
+
+- [ ] **Step 2.2.1:写 `src/core/worktree.ts` 完整字面**
+
+```typescript
+// src/core/worktree.ts — plan-9g Task 2.2
+// 高阶 git worktree helper:runInWorktree(sha, fn, opts)
+// 沿 brainstorm spec §2.1 锁定的"高阶 runInWorktree"路径(brainstorm 决策点 3)
+//
+// 关键设计:
+//   - try/finally 强 cleanup(git worktree remove --force 必跑)
+//   - timeout AbortSignal 控制单 task 重跑超时(沿 §2.7.4 D)
+//   - max_parallel 并发 gate(brainstorm §9.10 — Windows 磁盘空间约束更紧)
+//   - 跨平台 tmp 目录:Windows 用 os.tmpdir() 即 %TEMP%,Unix 用 /tmp
+
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+
+const execFileAsync = promisify(execFile);
+
+/** runInWorktree 调用选项 */
+export interface RunInWorktreeOptions {
+  /** 重跑 timeout 毫秒(沿 §2.7.4 D;ProcessVerificationConfig.test_timeout_per_task × 1000) */
+  timeout?: number;
+  /** 工作目录(默认 cwd) */
+  cwd?: string;
+  /** 失败 cleanup 时 stderr 输出回调(测试可注入 mock) */
+  onCleanupWarning?: (msg: string) => void;
+}
+
+/** runInWorktree 失败错误类型 */
+export class WorktreeError extends Error {
+  constructor(
+    message: string,
+    public readonly stage: 'add' | 'run' | 'remove' | 'timeout',
+    public readonly cause?: unknown,
+  ) {
+    super(message);
+    this.name = 'WorktreeError';
+  }
+}
+
+/**
+ * runInWorktree — 在 git worktree 隔离执行 fn(workPath)
+ *
+ * 流程:
+ *   1. mkdtemp 临时目录(跨平台 tmpdir)
+ *   2. git worktree add <tmpDir> <sha> 创建 detached worktree
+ *   3. try: fn(workPath) — 业务逻辑(测试重跑)
+ *   4. finally: git worktree remove --force <tmpDir>(失败 log WARNING 不阻断)
+ *
+ * @param sha — 要 checkout 的 git commit sha
+ * @param fn — 业务函数,接收 workPath(absolute)返回 T
+ * @param opts — { timeout, cwd, onCleanupWarning }
+ * @returns fn 的返回值 T
+ * @throws WorktreeError stage='add'|'run'|'remove'|'timeout'
+ */
+export async function runInWorktree<T>(
+  sha: string,
+  fn: (workPath: string) => Promise<T>,
+  opts: RunInWorktreeOptions = {},
+): Promise<T> {
+  const cwd = opts.cwd ?? process.cwd();
+  const timeoutMs = opts.timeout ?? 300_000; // 默认 300 秒(沿 DEFAULT_PROCESS_VERIFICATION.test_timeout_per_task)
+  const onCleanupWarning = opts.onCleanupWarning ?? ((msg) => process.stderr.write(`⚠ ${msg}\n`));
+
+  // 1. 创建 tmpdir(跨平台)
+  const workPath = await mkdtemp(join(tmpdir(), 'forge-rerun-'));
+
+  let addedWorktree = false;
+  try {
+    // 2. git worktree add
+    try {
+      await execFileAsync('git', ['worktree', 'add', '--detach', workPath, sha], {
+        cwd,
+        encoding: 'utf8',
+      });
+      addedWorktree = true;
+    } catch (e) {
+      throw new WorktreeError(
+        `git worktree add failed for sha=${sha} at ${workPath}: ${e instanceof Error ? e.message : String(e)}`,
+        'add',
+        e,
+      );
+    }
+
+    // 3. 跑 fn 含 timeout
+    const result = await Promise.race([
+      fn(workPath),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new WorktreeError(`worktree fn timeout after ${timeoutMs}ms`, 'timeout')),
+          timeoutMs,
+        ),
+      ),
+    ]);
+
+    return result;
+  } catch (e) {
+    if (e instanceof WorktreeError) throw e;
+    // fn 内部抛错
+    throw new WorktreeError(
+      `runInWorktree fn failed: ${e instanceof Error ? e.message : String(e)}`,
+      'run',
+      e,
+    );
+  } finally {
+    // 4. cleanup(失败仅 WARNING 不阻断)
+    if (addedWorktree) {
+      try {
+        await execFileAsync('git', ['worktree', 'remove', '--force', workPath], {
+          cwd,
+          encoding: 'utf8',
+        });
+      } catch (cleanupErr) {
+        onCleanupWarning(
+          `git worktree remove --force ${workPath} failed: ${cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)}`,
+        );
+      }
+    }
+    // tmpdir 物理目录最后清理(git worktree remove 应该已删,这里兜底)
+    try {
+      await rm(workPath, { recursive: true, force: true });
+    } catch {
+      // 已被 git worktree remove 删了,正常
+    }
+  }
+}
+
+/**
+ * Parallel gate — 限制 max_parallel_reruns 并发(brainstorm §9.10)
+ * 实施者根据 ProcessVerificationConfig.max_parallel_reruns 创建 gate 实例
+ * 用法:
+ *   const gate = new ParallelGate(2);
+ *   await gate.acquire();
+ *   try {
+ *     await runInWorktree(sha, fn);
+ *   } finally {
+ *     gate.release();
+ *   }
+ */
+export class ParallelGate {
+  private inFlight = 0;
+  private queue: Array<() => void> = [];
+
+  constructor(private readonly max: number) {
+    if (max < 1) throw new Error(`ParallelGate max must be >= 1, got ${max}`);
+  }
+
+  async acquire(): Promise<void> {
+    if (this.inFlight < this.max) {
+      this.inFlight++;
+      return;
+    }
+    return new Promise((resolve) => {
+      this.queue.push(() => {
+        this.inFlight++;
+        resolve();
+      });
+    });
+  }
+
+  release(): void {
+    this.inFlight--;
+    if (this.queue.length > 0 && this.inFlight < this.max) {
+      const next = this.queue.shift()!;
+      next();
+    }
+  }
+}
+```
+
+- [ ] **Step 2.2.2:跑 typecheck**
+
+```bash
+pnpm typecheck
+```
+
+Expected: PASS
+
+- [ ] **Step 2.2.3:写 `tests/core/worktree.test.ts` 9 case**
+
+```typescript
+// tests/core/worktree.test.ts — plan-9g Task 2.2
+// 测 runInWorktree 9 case(brainstorm spec §8.2):
+//   - happy path(成功跑 + cleanup)
+//   - timeout 触发
+//   - fn 抛错 + cleanup 跑
+//   - git worktree add 失败(非 git repo / sha 不存在)
+//   - cleanup 失败仅 WARNING 不阻断
+//   - ParallelGate max=2 并发 gate
+//   - ParallelGate FIFO 顺序
+//   - ParallelGate release 释放下一个
+//   - WorktreeError stage 字段
+
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { runInWorktree, ParallelGate, WorktreeError } from '../../src/core/worktree.js';
+
+const execFileAsync = promisify(execFile);
+
+async function setupGitRepo(): Promise<{ repoPath: string; sha: string }> {
+  const repoPath = await mkdtemp(join(tmpdir(), 'forge-worktree-test-'));
+  await execFileAsync('git', ['init', '-q'], { cwd: repoPath });
+  await execFileAsync('git', ['config', 'user.email', 'test@example.com'], { cwd: repoPath });
+  await execFileAsync('git', ['config', 'user.name', 'Test'], { cwd: repoPath });
+  await writeFile(join(repoPath, 'README.md'), '# test\n', 'utf8');
+  await execFileAsync('git', ['add', '.'], { cwd: repoPath });
+  await execFileAsync('git', ['commit', '-q', '-m', 'init'], { cwd: repoPath });
+  const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: repoPath });
+  return { repoPath, sha: stdout.trim() };
+}
+
+describe('runInWorktree', () => {
+  let repoPath: string;
+  let sha: string;
+
+  beforeEach(async () => {
+    const setup = await setupGitRepo();
+    repoPath = setup.repoPath;
+    sha = setup.sha;
+  });
+
+  afterEach(async () => {
+    await execFileAsync('rm', ['-rf', repoPath]).catch(() => {});
+  });
+
+  it('Case 1: happy path 返 fn 结果 + cleanup', async () => {
+    let receivedPath = '';
+    const result = await runInWorktree(
+      sha,
+      async (workPath) => {
+        receivedPath = workPath;
+        return 'ok';
+      },
+      { cwd: repoPath },
+    );
+    expect(result).toBe('ok');
+    expect(receivedPath).toContain('forge-rerun-');
+    // worktree 已被 cleanup;list 应不含
+    const { stdout } = await execFileAsync('git', ['worktree', 'list'], { cwd: repoPath });
+    expect(stdout).not.toContain(receivedPath);
+  });
+
+  it('Case 2: timeout 触发 WorktreeError stage=timeout', async () => {
+    await expect(
+      runInWorktree(
+        sha,
+        () => new Promise((resolve) => setTimeout(resolve, 200)),
+        { cwd: repoPath, timeout: 50 },
+      ),
+    ).rejects.toMatchObject({
+      name: 'WorktreeError',
+      stage: 'timeout',
+    });
+  });
+
+  it('Case 3: fn 抛错触发 WorktreeError stage=run + cleanup 跑', async () => {
+    await expect(
+      runInWorktree(
+        sha,
+        async () => {
+          throw new Error('fn failed');
+        },
+        { cwd: repoPath },
+      ),
+    ).rejects.toMatchObject({
+      name: 'WorktreeError',
+      stage: 'run',
+    });
+  });
+
+  it('Case 4: sha 不存在 → WorktreeError stage=add', async () => {
+    await expect(
+      runInWorktree('0000000000000000000000000000000000000000', async () => 'x', { cwd: repoPath }),
+    ).rejects.toMatchObject({
+      name: 'WorktreeError',
+      stage: 'add',
+    });
+  });
+
+  it('Case 5: cleanup 失败仅 WARNING 不阻断(mock cleanup error)', async () => {
+    const warnings: string[] = [];
+    // 模拟 cleanup 失败:fn 内手动 git worktree remove(占用),导致 finally 时 remove 失败
+    const result = await runInWorktree(
+      sha,
+      async (workPath) => {
+        // 提前 remove(让 finally 时再 remove 失败)
+        await execFileAsync('git', ['worktree', 'remove', '--force', workPath], {
+          cwd: repoPath,
+        });
+        return 'cleanup-tested';
+      },
+      {
+        cwd: repoPath,
+        onCleanupWarning: (msg) => warnings.push(msg),
+      },
+    );
+    expect(result).toBe('cleanup-tested');
+    expect(warnings.length).toBeGreaterThan(0);
+    expect(warnings[0]).toContain('git worktree remove');
+  });
+
+  it('Case 6: ParallelGate max=2 并发 gate(第 3 个等待)', async () => {
+    const gate = new ParallelGate(2);
+    const order: number[] = [];
+    const tasks = [1, 2, 3].map(async (i) => {
+      await gate.acquire();
+      order.push(i);
+      try {
+        await new Promise((r) => setTimeout(r, 50));
+      } finally {
+        gate.release();
+      }
+    });
+    await Promise.all(tasks);
+    expect(order).toHaveLength(3);
+    // 前两个并发(顺序 1,2),第 3 个等到 1 释放后进
+    expect(order.slice(0, 2).sort()).toEqual([1, 2]);
+    expect(order[2]).toBe(3);
+  });
+
+  it('Case 7: ParallelGate FIFO 顺序(连续 acquire)', async () => {
+    const gate = new ParallelGate(1);
+    const order: number[] = [];
+    const tasks = [1, 2, 3].map(async (i) => {
+      await gate.acquire();
+      order.push(i);
+      gate.release();
+    });
+    await Promise.all(tasks);
+    expect(order).toEqual([1, 2, 3]);
+  });
+
+  it('Case 8: ParallelGate release 触发下一个 acquire', async () => {
+    const gate = new ParallelGate(1);
+    await gate.acquire();
+    let resolved = false;
+    const next = gate.acquire().then(() => {
+      resolved = true;
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(resolved).toBe(false);
+    gate.release();
+    await next;
+    expect(resolved).toBe(true);
+    gate.release();
+  });
+
+  it('Case 9: WorktreeError stage 字段 union type', () => {
+    const err = new WorktreeError('test', 'add');
+    expect(err.stage).toBe('add');
+    expect(err.name).toBe('WorktreeError');
+    // type level: 'add'|'run'|'remove'|'timeout'
+  });
+});
+```
+
+- [ ] **Step 2.2.4:跑 worktree 测试**
+
+```bash
+pnpm test tests/core/worktree.test.ts
+```
+
+Expected: 9 case 全 PASS
+
+- [ ] **Step 2.2.5:commit Step 2.2**
+
+```bash
+> .git/COMMIT_MSG
+echo "feat(9g Task 2.2): worktree.ts 高阶 API + ParallelGate + 9 case 单测" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "src/core/worktree.ts:" >> .git/COMMIT_MSG
+echo "- runInWorktree(sha, fn, opts):try/finally 强 cleanup + timeout AbortSignal" >> .git/COMMIT_MSG
+echo "  + 跨平台 tmpdir(Windows %TEMP% / Unix /tmp)" >> .git/COMMIT_MSG
+echo "- ParallelGate(max):FIFO 并发 gate(brainstorm §9.10 Windows 磁盘空间约束)" >> .git/COMMIT_MSG
+echo "- WorktreeError stage='add'|'run'|'remove'|'timeout' 区分错误阶段" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "tests/core/worktree.test.ts:9 case 全 PASS" >> .git/COMMIT_MSG
+echo "- happy path / timeout / fn 抛错 / sha 不存在 / cleanup 失败 WARNING /" >> .git/COMMIT_MSG
+echo "- ParallelGate max=2 / FIFO / release 触发 / WorktreeError stage" >> .git/COMMIT_MSG
+git add src/core/worktree.ts tests/core/worktree.test.ts
+git commit -F .git/COMMIT_MSG && rm .git/COMMIT_MSG
+```
+
+### 3.3 步骤 2.3:写 test-reporters 三档 parser
+
+- [ ] **Step 2.3.1:写 `src/core/test-reporters/index.ts` factory**
+
+```typescript
+// src/core/test-reporters/index.ts — plan-9g Task 2.3
+// parseReporter(path, type) factory + ReporterResult 统一类型
+// 沿 brainstorm spec 决策点 1:三档各引独立 npm 包
+//
+// 三档:
+//   - junit  → fast-xml-parser wrap(vitest/jest/mocha 通用)
+//   - tap    → tap-parser wrap(node:test)
+//   - vitest-json → 原生 JSON.parse + Vitest schema
+
+import { readFile } from 'node:fs/promises';
+import { parseJUnit } from './junit.js';
+import { parseTAP } from './tap.js';
+import { parseVitestJSON } from './vitest-json.js';
+
+/** Reporter 类型 union(沿 ForgeConfig['test'].reporter) */
+export type ReporterType = 'junit' | 'tap' | 'vitest-json';
+
+/** 单 test case 解析结果 */
+export interface TestCaseResult {
+  /** 相对 repo 根的测试文件路径(可能为空字符串若 reporter 不提供) */
+  test_file: string;
+  /** 测试名(对应 describe/it 嵌套全名) */
+  test_name: string;
+  /** 'pass' | 'fail' | 'skip' */
+  status: 'pass' | 'fail' | 'skip';
+  /** 若 fail,失败类型(对应 ExpectedFailure.failure_type) */
+  failure_type?: 'assertion' | 'timeout' | 'error' | 'not-implemented';
+  /** 错误消息(若 fail) */
+  message?: string;
+}
+
+/** 完整 reporter 解析结果 */
+export interface ReporterResult {
+  /** 所有 test case */
+  tests: TestCaseResult[];
+  /** 总数 */
+  totalCount: number;
+  /** pass 计数 */
+  passCount: number;
+  /** fail 计数 */
+  failCount: number;
+  /** skip 计数 */
+  skipCount: number;
+}
+
+/**
+ * parseReporter — 根据 reporter 类型 dispatch 解析
+ *
+ * @param reportPath — reporter 文件绝对路径
+ * @param type — reporter 类型('junit' | 'tap' | 'vitest-json')
+ * @returns ReporterResult 统一格式
+ * @throws Error 若文件不存在 / 解析失败
+ */
+export async function parseReporter(
+  reportPath: string,
+  type: ReporterType,
+): Promise<ReporterResult> {
+  const content = await readFile(reportPath, 'utf8');
+  switch (type) {
+    case 'junit':
+      return parseJUnit(content);
+    case 'tap':
+      return parseTAP(content);
+    case 'vitest-json':
+      return parseVitestJSON(content);
+    default: {
+      const _exhaustive: never = type;
+      throw new Error(`Unknown reporter type: ${String(_exhaustive)}`);
+    }
+  }
+}
+
+export { parseJUnit } from './junit.js';
+export { parseTAP } from './tap.js';
+export { parseVitestJSON } from './vitest-json.js';
+```
+
+- [ ] **Step 2.3.2:写 `src/core/test-reporters/junit.ts`(fast-xml-parser wrap)**
+
+```typescript
+// src/core/test-reporters/junit.ts — plan-9g Task 2.3
+// JUnit XML reporter 解析(沿 vitest/jest/mocha 通用 schema)
+// fast-xml-parser ^4 wrap
+
+import { XMLParser } from 'fast-xml-parser';
+import type { ReporterResult, TestCaseResult } from './index.js';
+
+/**
+ * JUnit XML schema(简化版,沿 vitest/jest/mocha 通用部分)
+ *
+ * <testsuites>
+ *   <testsuite name="..." tests="N" failures="M">
+ *     <testcase name="..." classname="..." file="..." time="...">
+ *       <failure message="..." type="...">...</failure>
+ *       <skipped/>
+ *     </testcase>
+ *   </testsuite>
+ * </testsuites>
+ *
+ * 注:某些 framework 直接顶层 <testsuite>(无 <testsuites> 包裹);
+ *     parser 需兼容两种形态
+ */
+
+interface JUnitFailureNode {
+  '@_message'?: string;
+  '@_type'?: string;
+  '#text'?: string;
+}
+
+interface JUnitTestCaseNode {
+  '@_name': string;
+  '@_classname'?: string;
+  '@_file'?: string;
+  '@_time'?: string;
+  failure?: JUnitFailureNode | JUnitFailureNode[];
+  error?: JUnitFailureNode | JUnitFailureNode[];
+  skipped?: object;
+}
+
+interface JUnitTestSuiteNode {
+  '@_name'?: string;
+  '@_tests'?: string;
+  '@_failures'?: string;
+  testcase?: JUnitTestCaseNode | JUnitTestCaseNode[];
+}
+
+interface JUnitDoc {
+  testsuites?: { testsuite?: JUnitTestSuiteNode | JUnitTestSuiteNode[] };
+  testsuite?: JUnitTestSuiteNode | JUnitTestSuiteNode[];
+}
+
+const parser = new XMLParser({
+  ignoreAttributes: false,
+  attributeNamePrefix: '@_',
+  parseAttributeValue: false,
+  isArray: (name) => name === 'testsuite' || name === 'testcase',
+});
+
+/**
+ * parseJUnit — 解析 JUnit XML 字符串
+ * @param xmlContent JUnit XML 字符串
+ * @returns ReporterResult
+ */
+export function parseJUnit(xmlContent: string): ReporterResult {
+  let doc: JUnitDoc;
+  try {
+    doc = parser.parse(xmlContent) as JUnitDoc;
+  } catch (e) {
+    throw new Error(`JUnit XML parse failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  // 兼容 <testsuites> 包裹 vs 直接 <testsuite>
+  const suites: JUnitTestSuiteNode[] = doc.testsuites?.testsuite
+    ? Array.isArray(doc.testsuites.testsuite)
+      ? doc.testsuites.testsuite
+      : [doc.testsuites.testsuite]
+    : doc.testsuite
+      ? Array.isArray(doc.testsuite)
+        ? doc.testsuite
+        : [doc.testsuite]
+      : [];
+
+  const tests: TestCaseResult[] = [];
+  for (const suite of suites) {
+    if (!suite.testcase) continue;
+    const cases = Array.isArray(suite.testcase) ? suite.testcase : [suite.testcase];
+    for (const tc of cases) {
+      const test: TestCaseResult = {
+        test_file: tc['@_file'] ?? tc['@_classname'] ?? '',
+        test_name: tc['@_name'],
+        status: 'pass',
+      };
+      if (tc.skipped !== undefined) {
+        test.status = 'skip';
+      } else if (tc.failure !== undefined || tc.error !== undefined) {
+        const failNode = tc.failure
+          ? Array.isArray(tc.failure)
+            ? tc.failure[0]
+            : tc.failure
+          : Array.isArray(tc.error!)
+            ? (tc.error as JUnitFailureNode[])[0]
+            : (tc.error as JUnitFailureNode);
+        test.status = 'fail';
+        test.message = failNode['@_message'] ?? failNode['#text'] ?? '';
+        // failure type 映射(JUnit 标准 type 字段 → ExpectedFailure.failure_type)
+        const rawType = (failNode['@_type'] ?? '').toLowerCase();
+        if (rawType.includes('assertion') || rawType.includes('expect')) {
+          test.failure_type = 'assertion';
+        } else if (rawType.includes('timeout')) {
+          test.failure_type = 'timeout';
+        } else if (rawType.includes('notimplemented') || rawType.includes('skip')) {
+          test.failure_type = 'not-implemented';
+        } else {
+          test.failure_type = 'error';
+        }
+      }
+      tests.push(test);
+    }
+  }
+
+  const passCount = tests.filter((t) => t.status === 'pass').length;
+  const failCount = tests.filter((t) => t.status === 'fail').length;
+  const skipCount = tests.filter((t) => t.status === 'skip').length;
+
+  return {
+    tests,
+    totalCount: tests.length,
+    passCount,
+    failCount,
+    skipCount,
+  };
+}
+```
+
+- [ ] **Step 2.3.3:写 `src/core/test-reporters/tap.ts`(tap-parser wrap)**
+
+```typescript
+// src/core/test-reporters/tap.ts — plan-9g Task 2.3
+// TAP stream reporter 解析(node:test --reporter=tap 用)
+// tap-parser ^15 wrap
+
+import Parser from 'tap-parser';
+import type { ReporterResult, TestCaseResult } from './index.js';
+
+/**
+ * parseTAP — 解析 TAP stream 字符串
+ *
+ * TAP 格式:
+ *   TAP version 13
+ *   1..N
+ *   ok 1 - testname
+ *   not ok 2 - testname2
+ *     ---
+ *     message: 'assertion failed'
+ *     ...
+ *
+ * @param tapContent TAP stream 字符串
+ * @returns ReporterResult
+ */
+export function parseTAP(tapContent: string): ReporterResult {
+  return new Promise<ReporterResult>((resolve, reject) => {
+    const tests: TestCaseResult[] = [];
+    const parser = new Parser();
+
+    parser.on('assert', (assert: { id: number; name: string; ok: boolean; skip?: string | boolean; todo?: string | boolean; diag?: { message?: string; type?: string; expected?: unknown; actual?: unknown } }) => {
+      const test: TestCaseResult = {
+        test_file: '', // TAP 不含 test_file 信息
+        test_name: assert.name,
+        status: 'pass',
+      };
+      if (assert.skip || assert.todo) {
+        test.status = 'skip';
+      } else if (!assert.ok) {
+        test.status = 'fail';
+        const diag = assert.diag ?? {};
+        test.message = diag.message ?? '';
+        const rawType = (diag.type ?? '').toLowerCase();
+        if (rawType.includes('assertion')) {
+          test.failure_type = 'assertion';
+        } else if (rawType.includes('timeout')) {
+          test.failure_type = 'timeout';
+        } else if (diag.expected !== undefined || diag.actual !== undefined) {
+          test.failure_type = 'assertion';
+        } else {
+          test.failure_type = 'error';
+        }
+      }
+      tests.push(test);
+    });
+
+    parser.on('complete', () => {
+      const passCount = tests.filter((t) => t.status === 'pass').length;
+      const failCount = tests.filter((t) => t.status === 'fail').length;
+      const skipCount = tests.filter((t) => t.status === 'skip').length;
+      resolve({
+        tests,
+        totalCount: tests.length,
+        passCount,
+        failCount,
+        skipCount,
+      });
+    });
+
+    parser.on('error', (e: Error) => reject(new Error(`TAP parse failed: ${e.message}`)));
+
+    parser.write(tapContent);
+    parser.end();
+  });
+}
+```
+
+注:`parseTAP` 是 async(tap-parser 是 stream-based);`index.ts` 的 `parseReporter` 应改为 await `parseTAP(...)` — 已在签名上声明 Promise<ReporterResult>。但 `parseJUnit` 和 `parseVitestJSON` 当前是 sync,parseReporter 包装时需统一 — 让 parseJUnit / parseVitestJSON 也返 Promise(`return Promise.resolve(...)` 或改 async)。修订 index.ts:
+
+```typescript
+// index.ts 修订(Step 2.3.1 已写但需明示 parseJUnit/parseVitestJSON 也是 async):
+export async function parseReporter(
+  reportPath: string,
+  type: ReporterType,
+): Promise<ReporterResult> {
+  const content = await readFile(reportPath, 'utf8');
+  switch (type) {
+    case 'junit':
+      return parseJUnit(content); // 注:parseJUnit 返 ReporterResult 同步,await 不影响
+    case 'tap':
+      return await parseTAP(content); // async Promise
+    case 'vitest-json':
+      return parseVitestJSON(content);
+    default: {
+      const _exhaustive: never = type;
+      throw new Error(`Unknown reporter type: ${String(_exhaustive)}`);
+    }
+  }
+}
+```
+
+- [ ] **Step 2.3.4:写 `src/core/test-reporters/vitest-json.ts`(原生 JSON.parse)**
+
+```typescript
+// src/core/test-reporters/vitest-json.ts — plan-9g Task 2.3
+// Vitest --reporter=json 原生 JSON.parse + schema
+// 沿 Vitest 4.x 的 json reporter schema(2026 锁定 — brainstorm spec §9.5 留)
+
+import type { ReporterResult, TestCaseResult } from './index.js';
+
+/**
+ * Vitest JSON reporter schema(精简版 — 仅本 plan 用到的字段)
+ *
+ * { numTotalTests, numPassedTests, numFailedTests, numPendingTests,
+ *   testResults: [{
+ *     name: filepath,
+ *     assertionResults: [{
+ *       fullName, status: 'passed'|'failed'|'pending'|'skipped',
+ *       failureMessages?: string[]
+ *     }]
+ *   }]
+ * }
+ */
+interface VitestJsonAssertionResult {
+  fullName: string;
+  status: 'passed' | 'failed' | 'pending' | 'skipped';
+  failureMessages?: string[];
+}
+
+interface VitestJsonTestResult {
+  name: string; // file path
+  assertionResults: VitestJsonAssertionResult[];
+}
+
+interface VitestJsonDoc {
+  numTotalTests?: number;
+  numPassedTests?: number;
+  numFailedTests?: number;
+  numPendingTests?: number;
+  testResults?: VitestJsonTestResult[];
+}
+
+/**
+ * parseVitestJSON — 解析 Vitest JSON reporter 字符串
+ * @param jsonContent Vitest --reporter=json 输出
+ * @returns ReporterResult
+ */
+export function parseVitestJSON(jsonContent: string): ReporterResult {
+  let doc: VitestJsonDoc;
+  try {
+    doc = JSON.parse(jsonContent) as VitestJsonDoc;
+  } catch (e) {
+    throw new Error(`Vitest JSON parse failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  const tests: TestCaseResult[] = [];
+  for (const file of doc.testResults ?? []) {
+    for (const assertion of file.assertionResults ?? []) {
+      const test: TestCaseResult = {
+        test_file: file.name,
+        test_name: assertion.fullName,
+        status:
+          assertion.status === 'passed'
+            ? 'pass'
+            : assertion.status === 'failed'
+              ? 'fail'
+              : 'skip',
+      };
+      if (test.status === 'fail') {
+        const msgs = assertion.failureMessages ?? [];
+        test.message = msgs.join('\n');
+        const msgLower = test.message.toLowerCase();
+        if (msgLower.includes('assertionerror') || msgLower.includes('expect')) {
+          test.failure_type = 'assertion';
+        } else if (msgLower.includes('timeout')) {
+          test.failure_type = 'timeout';
+        } else if (msgLower.includes('not implemented')) {
+          test.failure_type = 'not-implemented';
+        } else {
+          test.failure_type = 'error';
+        }
+      }
+      tests.push(test);
+    }
+  }
+
+  const passCount = tests.filter((t) => t.status === 'pass').length;
+  const failCount = tests.filter((t) => t.status === 'fail').length;
+  const skipCount = tests.filter((t) => t.status === 'skip').length;
+
+  return {
+    tests,
+    totalCount: tests.length,
+    passCount,
+    failCount,
+    skipCount,
+  };
+}
+```
+
+- [ ] **Step 2.3.5:写 3 个 reporter 测试 fixture(各 3 case)**
+
+```typescript
+// tests/core/test-reporters/junit.test.ts
+import { describe, it, expect } from 'vitest';
+import { parseJUnit } from '../../../src/core/test-reporters/junit.js';
+
+describe('parseJUnit', () => {
+  it('Case 1: vitest JUnit XML(testsuites 包裹)', () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="vitest" tests="3" failures="1">
+  <testsuite name="auth.test.ts" tests="3" failures="1">
+    <testcase name="login pass" classname="auth" file="src/auth.test.ts" time="0.1"/>
+    <testcase name="login fail" classname="auth" file="src/auth.test.ts" time="0.2">
+      <failure message="expected true to be false" type="AssertionError">stack...</failure>
+    </testcase>
+    <testcase name="logout" classname="auth" file="src/auth.test.ts" time="0.05">
+      <skipped/>
+    </testcase>
+  </testsuite>
+</testsuites>`;
+    const result = parseJUnit(xml);
+    expect(result.totalCount).toBe(3);
+    expect(result.passCount).toBe(1);
+    expect(result.failCount).toBe(1);
+    expect(result.skipCount).toBe(1);
+    expect(result.tests[1].failure_type).toBe('assertion');
+    expect(result.tests[1].message).toContain('expected true to be false');
+  });
+
+  it('Case 2: jest JUnit XML(直接 testsuite)', () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="jest" tests="2" failures="1">
+  <testcase name="t1" classname="src/a.test.js" time="0.1"/>
+  <testcase name="t2" classname="src/a.test.js" time="0.2">
+    <error message="ReferenceError" type="ReferenceError">stack</error>
+  </testcase>
+</testsuite>`;
+    const result = parseJUnit(xml);
+    expect(result.totalCount).toBe(2);
+    expect(result.passCount).toBe(1);
+    expect(result.failCount).toBe(1);
+    expect(result.tests[1].failure_type).toBe('error');
+  });
+
+  it('Case 3: mocha JUnit XML(空 testsuite + 边界)', () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="empty"/>
+</testsuites>`;
+    const result = parseJUnit(xml);
+    expect(result.totalCount).toBe(0);
+    expect(result.tests).toEqual([]);
+  });
+});
+```
+
+```typescript
+// tests/core/test-reporters/tap.test.ts
+import { describe, it, expect } from 'vitest';
+import { parseTAP } from '../../../src/core/test-reporters/tap.js';
+
+describe('parseTAP', () => {
+  it('Case 1: node:test TAP basic(2 pass 1 fail)', async () => {
+    const tap = `TAP version 13
+1..3
+ok 1 - login pass
+not ok 2 - login fail
+  ---
+  message: 'expected true to be false'
+  type: assertion
+  ...
+ok 3 - logout
+`;
+    const result = await parseTAP(tap);
+    expect(result.totalCount).toBe(3);
+    expect(result.passCount).toBe(2);
+    expect(result.failCount).toBe(1);
+    expect(result.tests[1].failure_type).toBe('assertion');
+  });
+
+  it('Case 2: TAP with skip + todo', async () => {
+    const tap = `TAP version 13
+1..3
+ok 1 - t1
+ok 2 - t2 # SKIP not yet
+ok 3 - t3 # TODO impl later
+`;
+    const result = await parseTAP(tap);
+    expect(result.totalCount).toBe(3);
+    expect(result.skipCount).toBe(2);
+  });
+
+  it('Case 3: TAP with diag expected/actual → failure_type=assertion', async () => {
+    const tap = `TAP version 13
+1..1
+not ok 1 - check
+  ---
+  expected: 5
+  actual: 3
+  ...
+`;
+    const result = await parseTAP(tap);
+    expect(result.failCount).toBe(1);
+    expect(result.tests[0].failure_type).toBe('assertion');
+  });
+});
+```
+
+```typescript
+// tests/core/test-reporters/vitest-json.test.ts
+import { describe, it, expect } from 'vitest';
+import { parseVitestJSON } from '../../../src/core/test-reporters/vitest-json.js';
+
+describe('parseVitestJSON', () => {
+  it('Case 1: Vitest JSON basic(1 pass 1 fail 1 skip)', () => {
+    const json = JSON.stringify({
+      numTotalTests: 3,
+      numPassedTests: 1,
+      numFailedTests: 1,
+      numPendingTests: 1,
+      testResults: [
+        {
+          name: '/abs/path/src/auth.test.ts',
+          assertionResults: [
+            { fullName: 'login pass', status: 'passed' },
+            {
+              fullName: 'login fail',
+              status: 'failed',
+              failureMessages: ['AssertionError: expected true to be false\n at ...'],
+            },
+            { fullName: 'logout', status: 'pending' },
+          ],
+        },
+      ],
+    });
+    const result = parseVitestJSON(json);
+    expect(result.totalCount).toBe(3);
+    expect(result.passCount).toBe(1);
+    expect(result.failCount).toBe(1);
+    expect(result.skipCount).toBe(1);
+    expect(result.tests[1].failure_type).toBe('assertion');
+  });
+
+  it('Case 2: Vitest JSON 多文件多 assertion', () => {
+    const json = JSON.stringify({
+      testResults: [
+        { name: 'a.test.ts', assertionResults: [{ fullName: 'a1', status: 'passed' }] },
+        { name: 'b.test.ts', assertionResults: [{ fullName: 'b1', status: 'failed', failureMessages: ['timeout 5s'] }] },
+      ],
+    });
+    const result = parseVitestJSON(json);
+    expect(result.totalCount).toBe(2);
+    expect(result.tests[1].failure_type).toBe('timeout');
+  });
+
+  it('Case 3: Vitest JSON 空 testResults', () => {
+    const json = JSON.stringify({ testResults: [] });
+    const result = parseVitestJSON(json);
+    expect(result.totalCount).toBe(0);
+  });
+});
+```
+
+- [ ] **Step 2.3.6:跑 reporter 全部测试**
+
+```bash
+pnpm test tests/core/test-reporters/
+```
+
+Expected: 9 case 全 PASS
+
+- [ ] **Step 2.3.7:全本地 verify 收尾 Task 2**
+
+```bash
+pnpm typecheck && pnpm lint && pnpm format:check && pnpm build && pnpm test
+```
+
+Expected: 全 PASS
+
+- [ ] **Step 2.3.8:commit Step 2.3 + Task 2 完成**
+
+```bash
+> .git/COMMIT_MSG
+echo "feat(9g Task 2.3): test-reporters 三档 parser + 9 case 单测 + Task 2 完成" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "三档 parser(沿 brainstorm spec 决策点 1):" >> .git/COMMIT_MSG
+echo "- src/core/test-reporters/index.ts:parseReporter(path, type) factory + ReporterResult 统一类型" >> .git/COMMIT_MSG
+echo "- junit.ts:fast-xml-parser wrap;兼容 vitest/jest/mocha 三种 XML 形态(testsuites 包裹 / 直接 testsuite)" >> .git/COMMIT_MSG
+echo "- tap.ts:tap-parser wrap;支持 skip/todo/diag" >> .git/COMMIT_MSG
+echo "- vitest-json.ts:原生 JSON.parse + Vitest 4.x schema" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "failure_type 映射(对应 ExpectedFailure.failure_type 四档):" >> .git/COMMIT_MSG
+echo "  assertion / timeout / error / not-implemented" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "tests:每档 3 case = 9 case 全 PASS" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "Task 2 完成:worktree + reporter parser 模块 + 18 case 单测 + 全本地 verify PASS" >> .git/COMMIT_MSG
+git add src/core/test-reporters/ tests/core/test-reporters/
+git commit -F .git/COMMIT_MSG && rm .git/COMMIT_MSG
+```
+
+### 3.4 Task 2 完成定义(DoD)
+
+- [x] `src/core/worktree.ts` — runInWorktree + ParallelGate + WorktreeError
+- [x] `src/core/test-reporters/index.ts` — parseReporter factory + ReporterResult/TestCaseResult 类型
+- [x] `src/core/test-reporters/junit.ts` — fast-xml-parser wrap + 兼容三框架
+- [x] `src/core/test-reporters/tap.ts` — tap-parser wrap
+- [x] `src/core/test-reporters/vitest-json.ts` — 原生 JSON.parse + Vitest schema
+- [x] `package.json` — 加 fast-xml-parser ^4 + tap-parser ^15
+- [x] `tests/core/worktree.test.ts` 9 case PASS
+- [x] `tests/core/test-reporters/{junit,tap,vitest-json}.test.ts` 各 3 case = 9 case PASS
+- [x] 全本地 verify PASS
+
+---
+

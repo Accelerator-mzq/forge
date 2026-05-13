@@ -584,7 +584,7 @@ archive 流程:
   │        │   不变量 9 四源 + 链 cross-check:
   │        │     marker_hash = canonicalHash(marker.process_evidence)
   │        │     stagingHash = ctx.stagingHash(从 marker.process_evidence_staging_hash 快照对比)
-  │        │     ackLogChainHash = canonicalHash(ack-log evidence-helper entries 还原的三数组)
+  │        │     ackLogProjectionHash = canonicalHash(ack-log evidence-helper entries 还原的三数组)  # v9 改名(Codex 四轮 MINOR-1),区分于全 JSONL 链 hash
   │        │     ack-log 链完整性 = 逐行重算 prev_entry_hash 必匹配上一条 hash
   │        │     ack-log 尾 + 行数固化 = ack-log 实际尾 hash + entry count 必 == marker.ack_log_tail_hash + marker.ack_log_entry_count
   │        │       (v7 新增,Codex 二轮 MAJOR-3:挡"改最后一行" + "整链重写")
@@ -592,16 +592,13 @@ archive 流程:
   │        │   不变量 14:git merge-base --is-ancestor green_commit.sha HEAD ≠ 0 → CRITICAL
   │        └── runRerunFence(ctx) → 不变量 5-6 / 13 finding[](mode 分支 / 抽样 / timeout)
   │      CRITICAL finding → fence.ok=false → archive.ts process.exit(1)
-  │      v8 修订(Codex 三轮 BLOCKER-1 修复):rerun-time WARNING(不变量 13 timeout 在 sample/hash-only 模式 +
-  │        不变量 5/6 关联的 env 漂移 WARNING)走 plan-9d ack-log consistency 模式 — fence 内为每条
-  │        rerun WARNING 算 finding_hash(沿 plan-9d Task 6 schema:canonicalHash({invariant, severity,
-  │        message_template, task_ref})),检 ack-log 是否含对应 ack-log entry(action='ack-rerun-warning'):
-  │          无 ack → archive 拒签 + stderr 提示 "forge ack propose --action ack-rerun-warning --finding <hash>"
-  │          有 ack → 通过(沿 9a 两步协议:propose 写 pending + confirm 写 ack-log)
-  │        finding 不写回 marker(避免 freeze 后 marker 不可变约束被破坏);finding_hash 决定 ack-log lookup
-  │        即"finding 在内存,ack 状态在 ack-log";retry archive 时 fence 重算 hash 复查 ack-log,实现 ack 闭环
-  │      WARNING dedup(Codex 三轮 MAJOR-2 修复):finding_hash 算法在 freeze-time 和 rerun-time 同一不变量
-  │        产相同 hash → 同 finding 不会在 marker.verify_findings 和 archive 内存 finding 池中重复
+  │      v9 修订(Codex 四轮 BLOCKER-1 + BLOCKER-2 简化修复):**rerun-time WARNING 隐含被 ack-mode 覆盖,无独立 ack 协议**。
+  │        核心观察:rerun-time WARNING **仅**不变量 13(timeout)在 sample/hash-only 模式产生;
+  │        而 sample/hash-only 模式本身**必须**已经走过 `forge ack propose --action ack-mode`(不变量 12 强制 + CI 拒签);
+  │        该 mode ack 已表明用户接受降级安全等级,**隐含覆盖该模式下所有 rerun-time WARNING**。
+  │        archive fence 检测到 rerun-time WARNING(仅不变量 13)时:**stderr 输出告警 + 不阻断**;
+  │        不算 finding_hash,不写 marker,不走 9a/9d ack-log 协议(简化整套设计)。
+  │        full 模式:所有 rerun-time 失败都是 CRITICAL(沿 master §2.7.3 表),无 WARNING 路径,无需此分支。
   ├── 步骤 3.6 plan-9d verify_findings fence(接 freeze-time 写入 marker.verify_findings 的 fence-ctx WARNING)
   ├── 步骤 3.7 plan-9c pause(不动)
   ├── 步骤 3.8 plan-9d ack-log consistency(扩 9g 三 helper entries cross-check + ack-log 尾 hash 校验)
@@ -613,11 +610,11 @@ archive 流程:
 | 攻击 | marker | staging | ack-log content | ack-log chain | ack-log tail+count | 检测点 |
 |---|---|---|---|---|---|---|
 | 直接改 marker.process_evidence | ✗ | ✓ | ✓ | ✓ | ✓ | 不变量 9 marker hash != staging hash |
-| 删/改 staging.yaml 后改 marker | ✗ | ✗ | ✓ | ✓ | ✓ | marker hash != ackLogChainHash(evidence-helper projection) |
+| 删/改 staging.yaml 后改 marker | ✗ | ✗ | ✓ | ✓ | ✓ | marker hash != ackLogProjectionHash(evidence-helper projection) |
 | 改 ack-log.jsonl 中间一行内容 | ✓ | ✓ | ✗ | ✗ | ✓ | prev_entry_hash 链断(下一行 hash mismatch) |
 | 删 ack-log.jsonl 中间一行 | ✓ | ✓ | ✗ | ✗ | ✗ | chain 断 + count mismatch + tail mismatch |
 | **改 ack-log.jsonl 最后一行(无下一行引用)** | ✓ | ✓ | ✗ | ✓(链内自洽) | ✗ | **tail_hash != marker.ack_log_tail_hash**(v7 新增,Codex 二轮 M-3) |
-| **重写整个 ack-log.jsonl 且每行 hash 自洽** | ✓ | ✓ | ✗ | ✓(伪造链) | ✗ | **行数 / tail 大概率不匹配**(攻击者必须精准凑齐 marker 固化的 count + tail,极难) |
+| **重写整个 ack-log.jsonl 且每行 hash 自洽** | ✓ | ✓ | ✗ | ✓(伪造链) | ✗ | **行数 / tail 确定性 mismatch**(v9 修订,Codex 四轮 SUG-1:攻击者必须精准凑齐 marker 固化的 count + tail,tail 是 256-bit hash preimage 不可暴力;若伪造链的 evidence-helper 子集与原 staging 不同则 process_evidence 三数组 hash 一并失败)|
 | 旁支造 RED/GREEN + 主分支换实现 | ✓ | ✓ | ✓ | ✓ | ✓ | **不变量 14**:green ↞ HEAD ancestor check 失败 |
 | 五源全改 + 改 git 主分支 + 重凑 tail+count | ✗ | ✗ | ✗ | ✗ | ✗ | **不变量 5/6 worktree 重跑** — AI 改不动测试运行结果 |
 
@@ -1041,25 +1038,18 @@ forge evidence freeze <changeId>     (v6 新增子命令)
                                     路径不一致,以 --marker 为准但 stderr WARNING)
 ```
 
-**finding_hash 算法**(v8 新增,Codex 三轮 M-2 修复 — WARNING dedup 用):
+**finding_hash 算法**(v9 修订,Codex 四轮 BLOCKER-2 简化):
 
-```typescript
-// 沿 plan-9d Task 6 schema,freeze-time 和 rerun-time 同一不变量产相同 hash
-function computeFindingHash(finding: ProcessEvidenceFinding): string {
-  return canonicalHash({
-    invariant: finding.invariant,         // 1..14
-    severity: finding.severity,            // CRITICAL | WARNING | SUGGESTION
-    message_template: finding.message_template,  // 沿 9d 协议字面,不含动态字段
-    task_ref: finding.taskRef ?? null,
-  });
-}
-```
+freeze-time WARNING(仅不变量 7/10)写 marker.verify_findings 时**沿 plan-9a `computeFindingHash` 现有 schema**(8 字段:`validate_run_id / content_hash / git_head / dimension / check_type / severity / automated / evidence / recommendation`,沿 master spec §2.3.6 / plan-9d Task 6),不另起独立算法。process_evidence 不变量映射到 9d schema 字段:
 
-dedup 协议:
-- freeze-time 写 marker.verify_findings 时,每个 finding 含 `finding_hash` 字段
-- rerun-time 在 archive crossCuttingFenceCheck 内产 finding 时,也算 finding_hash
-- 步骤 3.6 verify_findings fence + 步骤 3.9 three-level fence 处理时,以 finding_hash 为唯一 key dedup
-- ack-log 中 ack entry 引用 finding_hash(沿 9a 两步协议 + 9d ack-log consistency 模式),retry archive 时按 hash lookup ack 状态
+- `dimension`: `'process_evidence'`(沿 9d 三维度扩 1)
+- `check_type`: `'invariant-7-verify-count' | 'invariant-10-env-drift'`(每不变量一档)
+- `automated`: `true`
+- 其余字段沿 9d 协议(`validate_run_id` / `content_hash` / `git_head` / `severity='WARNING'` / `evidence` / `recommendation`)
+
+rerun-time WARNING(仅不变量 13 在 sample/hash-only 模式)**不算 finding_hash**(隐含被 ack-mode 覆盖,见 §5 数据流 v9 修订),不写 marker。
+
+WARNING dedup(v9 简化):freeze-time WARNING 由 freeze 单次写入 marker,不存在重入;rerun-time WARNING 不持久化,无 dedup 需求 — 整套 dedup 协议**删除**。
 
 **helper 语义协议**(v7 新增,Codex 二轮 MAJOR-2 修复 — master spec §2.7.6 行 1280 字面与 v6 设计冲突):
 
@@ -1155,7 +1145,32 @@ function checkInvariant14(ctx: ProcessEvidenceFenceContext): ProcessEvidenceFind
 
 ---
 
-**Status: ready for fourth-round Codex review**
+**Status: ready for fifth-round Codex review**
+
+---
+
+## 15. Codex 四轮审查修复摘要(v9 修订,本节供五轮审查 cross-check 用)
+
+**真 BLOCKER 修复(2 项,Codex 四轮 B-1 + B-2)**:
+
+- **B1 / B2 大幅简化**:Codex 四轮指出 v8 的"rerun-time WARNING 走 9d ack-log consistency 模式"复杂设计与现有 9a action enum + 9d finding_hash schema 冲突。**v9 关键观察**:rerun-time WARNING **仅**不变量 13(timeout)在 sample/hash-only 模式产生;sample/hash-only 模式**本身**必须已经走过 `forge ack propose --action ack-mode`(不变量 12 强制 + CI 拒签);该 mode ack **已表明用户接受降级安全等级**,**隐含覆盖该模式下所有 rerun-time WARNING**。
+  - **v9 协议**:archive fence 检测到 rerun-time WARNING(仅不变量 13)时,**stderr 输出告警 + 不阻断**;不算独立 finding_hash,不写 marker,不走 9a/9d ack-log 协议。
+  - **freeze-time WARNING**(仅不变量 7/10)写 marker.verify_findings 时**沿 plan-9a `computeFindingHash` 现有 8 字段 schema**(`dimension='process_evidence'` / `check_type='invariant-7-verify-count'|'invariant-10-env-drift'` / `automated=true` 等),不另起独立 hash 算法。
+  - 整套设计简化:删 4 字段独立 hash + 删 rerun-time ack 协议 + 删 ack-rerun-warning action
+
+**真 MAJOR 修复(3 项,Codex 四轮 M-1/-2/-3)**:
+
+- **M1 §13 残留已修**:v8 一次性更新 §5 + §14 时同步改了 §13 line 1156/1183,Codex 四轮指责的 line 1193 实际已是 v8 字面,本次只补 §13 注脚"v8 → v9 简化"标识
+- **M2 master plan 13/7 残留同步**:`docs/plans/2026-05-10-plan-9-v1.0-fusion-completion-master.md` 多处 `13 不变量` → `14 不变量`(全局 Edit);`7 攻击` → `8 攻击(含 v6 新增 A8 旁支造链)`
+- **M3 master spec §2.7.6 行 1280 helper 自跑语义本次直接修订**:不再推迟到 writing-plans 阶段。`docs/specs/2026-05-10-v1.0-fusion-completion-design.md` 行 1280-1282 helper 描述更新为"v1.0 修订:接收完整字段不自跑测试;worktree 重跑统一放 archive `crossCuttingFenceCheck()` 内 `runRerunFence`;marker 写入由 freeze CLI 子命令统一完成";加完整 commander options 列表
+
+**真 MINOR 修复(1 项)**:
+
+- **MIN-1 ackLogChainHash 改名**:§5 数据流 + §5.1 五源矩阵中 evidence-helper projection 层 hash 改名 `ackLogChainHash` → `ackLogProjectionHash`,区分于全 JSONL 链层 hash
+
+**SUGGESTION 修复(1 项)**:
+
+- **SUG-1 反伪造矩阵确定性表述**:"行数 / tail 大概率不匹配" → "行数 / tail 确定性 mismatch",加 tail 256-bit hash preimage 不可暴力 + evidence-helper projection 一并失败的论证
 
 ---
 
@@ -1190,7 +1205,7 @@ function checkInvariant14(ctx: ProcessEvidenceFenceContext): ProcessEvidenceFind
 ## 13. Codex 二轮审查修复摘要(v7 修订,本节供三轮审查 cross-check 用)
 
 **真 BLOCKER 修复(2 项,Codex 二轮 BLOCKER-3 + BLOCKER-4)**:
-- **B3 WARNING 时序闭合**:freeze-time 只写 fence-ctx-only WARNING(不变量 7/10/11/12)到 marker.verify_findings;rerun-time WARNING(不变量 5/6/13)由 archive `crossCuttingFenceCheck()` 直接合并到 archive 会话内 finding 池 → 步骤 3.9 three-level fence 即场处理(WARNING+resolved=false+无 ack 拒签 / +ack 通过)。两条路径互补无丢
+- **B3 WARNING 时序闭合**(v8 一版 → v9 简化):freeze-time **只**写不变量 7/10 到 marker.verify_findings(11/12 是 CRITICAL freeze 时直接 exit 1);rerun-time WARNING(仅不变量 13 在 sample/hash-only 模式)**隐含被 ack-mode 覆盖**(沿 §5 数据流 v9 修订),stderr 输出不阻断 — 无独立 ack 协议
 - **B4 freeze --kind 必填**:命令签名改为 `forge evidence freeze <changeId> --kind <verify|review>`,无默认值避免歧义;marker 路径由 --kind 派生(.verify-passed / .review-passed)
 
 **真 MAJOR 修复(3 项,Codex 二轮 MAJOR-1/-2/-3)**:

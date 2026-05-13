@@ -18,6 +18,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { stringify as stringifyYaml } from 'yaml';
 import { crossCuttingFenceCheck } from '../../src/core/archive/fence.js';
+import { runCli } from './helpers.js';
 
 /**
  * setupAttackFixture — 搭建最小 git repo + change 目录骨架
@@ -248,5 +249,105 @@ describe('process-evidence-fence A1-A8 attacks', () => {
     const fence14 = result.results.find((r) => r.invariant === 'fence-14');
     expect(fence14?.ok).toBe(false);
     expect(fence14?.reason).toMatch(/祖先|ancestor/);
+  });
+});
+
+/**
+ * Regression test (plan-9g Task 5 round 2 Critical fix):
+ *  fence-9.2 happy path no false positive
+ *
+ * 历史 bug:evidence.ts record-tdd 中 payload 用 `?? null` fallback,
+ *  staging 用 `?? ''` / `?? -1` / `?? new Date()` fallback。
+ *  任何省略 optional arg 的 record-tdd 调用都会导致 projection hash 不一致 → fence-9.2 永误报。
+ *
+ * Fix:payload = staging-built object(single source of truth),
+ *     reconstructProjectionFromAckLog 改为 identity cast。
+ *
+ * 本 regression test:走完整 record-tdd → freeze → crossCuttingFenceCheck 流程,
+ * 仅传 minimal required args(省略 optional)— 验证 fence-9.2 不误报。
+ */
+describe('process-evidence-fence regression: fence-9.2 happy path no false positive', () => {
+  it('minimal record-tdd(仅 required args)+ freeze → fence-9.2 PASS(不误报)', async () => {
+    const { projectRoot, changeRoot } = await setupAttackFixture('regression-9-2');
+    const changeId = 'attack-regression-9-2';
+
+    // Step 1:创建 RED commit + GREEN commit(满足不变量 2 ancestor + 不变量 14 green↞HEAD)
+    // baseline 后再加两个 commit:red 含 RED 标识 + green 含 GREEN 修复
+    await writeFile(join(projectRoot, 'red.txt'), 'red commit\n', 'utf8');
+    execFileSync('git', ['add', '.'], { cwd: projectRoot });
+    execFileSync('git', ['commit', '-q', '-m', 'RED commit'], { cwd: projectRoot });
+    const redSha = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: projectRoot,
+      encoding: 'utf8',
+    }).trim();
+
+    await writeFile(join(projectRoot, 'green.txt'), 'green commit\n', 'utf8');
+    execFileSync('git', ['add', '.'], { cwd: projectRoot });
+    execFileSync('git', ['commit', '-q', '-m', 'GREEN commit'], { cwd: projectRoot });
+    const greenSha = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: projectRoot,
+      encoding: 'utf8',
+    }).trim();
+
+    // Step 2:minimal record-tdd(仅 required args + red-exit/green-exit + 显式 timestamp)
+    // 故意不传 --red-log / --red-log-hash / --red-report / --red-report-hash 等
+    //   optional args → 触发原 bug 场景(payload fallback `?? null` vs staging fallback `?? ''`)
+    // 必须传 --red-exit/--green-exit 满足不变量 3/4
+    // 必须传 --red-timestamp/--green-timestamp 避免 staging `?? new Date()` 双调用产生
+    //   相同/反序 timestamp 误触不变量 1(本 regression 测的是 fence-9.2,不应被 fence-1 干扰)
+    // 关键:验证 payload 与 staging 字段一致 → 无 fence-9.2 误报
+    const recordResult = runCli(
+      [
+        'evidence',
+        'record-tdd',
+        changeId,
+        '--task',
+        'tasks.md#task-1',
+        '--red-commit',
+        redSha,
+        '--green-commit',
+        greenSha,
+        '--red-exit',
+        '1',
+        '--green-exit',
+        '0',
+        '--red-timestamp',
+        '2026-05-13T10:00:00Z',
+        '--green-timestamp',
+        '2026-05-13T11:00:00Z',
+      ],
+      projectRoot,
+    );
+    expect(recordResult.exitCode).toBe(0);
+
+    // Step 3:写 minimal .verify-passed marker(主代理写,等待 freeze 注入 process_evidence)
+    const verifyMarker = {
+      schema: 'forge-verify/v1',
+      verified_at: '2026-05-13T12:00:00Z',
+      verified_by: 'ai-agent',
+      tasks_hash: 'placeholder',
+      content_hash: 'placeholder',
+    };
+    await writeFile(join(changeRoot, '.verify-passed'), stringifyYaml(verifyMarker), 'utf8');
+
+    // Step 4:freeze verify marker(staging → marker.process_evidence + 三 hash 快照)
+    const freezeResult = runCli(['evidence', 'freeze', changeId, '--kind', 'verify'], projectRoot);
+    expect(freezeResult.exitCode).toBe(0);
+
+    // Step 5:crossCuttingFenceCheck — 验证 fence-9 不误报
+    //   特别是 fence-9.2(projection hash match):round 2 Critical fix 后必须 PASS
+    const result = await crossCuttingFenceCheck(changeRoot);
+
+    // fence-9 必须 ok(若 9.2 仍误报,这里会 false)
+    const fence9 = result.results.find((r) => r.invariant === 'fence-9');
+    expect(fence9?.ok).toBe(true);
+    expect(fence9?.reason).toBe('pass');
+
+    // fence-1/2/3/4 也应 PASS(合法 RED → GREEN 链)
+    expect(result.results.find((r) => r.invariant === 'fence-1')?.ok).toBe(true);
+    expect(result.results.find((r) => r.invariant === 'fence-2')?.ok).toBe(true);
+    expect(result.results.find((r) => r.invariant === 'fence-3')?.ok).toBe(true);
+    expect(result.results.find((r) => r.invariant === 'fence-4')?.ok).toBe(true);
+    expect(result.results.find((r) => r.invariant === 'fence-14')?.ok).toBe(true);
   });
 });

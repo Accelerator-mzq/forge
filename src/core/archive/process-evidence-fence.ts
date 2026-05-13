@@ -266,11 +266,20 @@ export function runFieldFence(ctx: ProcessEvidenceFenceContext): ProcessEvidence
   }
 
   // 不变量 1:red_commit.timestamp < green_commit.timestamp
+  // round 2 (M-1):区分 "timestamp invalid format" vs "timestamp reverse order"
+  //   NaN < NaN === false 会落入原 `!(redTs < greenTs)` 分支但 message 不清晰
   for (const chain of ctx.processEvidence.tdd_event_chain) {
     if (chain.red_commit && chain.green_commit) {
       const redTs = Date.parse(chain.red_commit.timestamp);
       const greenTs = Date.parse(chain.green_commit.timestamp);
-      if (!(redTs < greenTs)) {
+      if (Number.isNaN(redTs) || Number.isNaN(greenTs)) {
+        findings.push({
+          invariant: 1,
+          severity: 'CRITICAL',
+          message: `invalid timestamp format: red="${chain.red_commit.timestamp}" green="${chain.green_commit.timestamp}"`,
+          taskRef: chain.task_ref,
+        });
+      } else if (!(redTs < greenTs)) {
         findings.push({
           invariant: 1,
           severity: 'CRITICAL',
@@ -406,6 +415,15 @@ export function runFieldFence(ctx: ProcessEvidenceFenceContext): ProcessEvidence
   // 不变量 11:tdd_exemption 非空时 ack-log 含 ack-tdd-exemption 条目
   // Observation:沿 Task 4 round 2 Option C 简化 — 仅检 action 存在性,不做 per-task task_ref 精度匹配
   //   per-task 精度损失是已知 trade-off,plan-9z polish 阶段可加回 extra.task_ref 对比
+  //
+  // round 2 (M-2) 安全防护边界说明:
+  //   Option C 不查 extra.task_ref 看似可被"手写一条伪造 ack entry 蒙混过关",但实际安全防线在
+  //   不变量 9.3(verifyAckLogChain)— 全 JSONL 链 prev_entry_hash + tail/count 三重校验。
+  //   伪造 ack 必须:
+  //     (a) 重写完整 ack-log 链(包含 prev_entry_hash 递推)→ 但 marker.ack_log_tail_hash + entry_count
+  //         freeze-time 已固化,与重写后链尾 hash 不匹配 → fence-9.3 拒签
+  //     (b) 仅 append → 但 marker 在 freeze 时已固化 entry_count,append 后 count mismatch → fence-9.3 拒签
+  //   所以 Option C 在 fence-9.3 防护下仍能保证"至少存在一个合法 ack confirm 写入"语义
   for (const chain of ctx.processEvidence.tdd_event_chain) {
     if (chain.tdd_exemption !== null) {
       // Option C 简化:同 freeze-warnings.ts 模式(去掉 extra.task_ref 比较)
@@ -468,12 +486,20 @@ export function runFieldFence(ctx: ProcessEvidenceFenceContext): ProcessEvidence
 
 /**
  * reconstructProjectionFromAckLog — 从 evidence-helper entries 还原三数组
- * (v2 修订 Codex 二轮 M-3:完整伪代码,反伪造五源 cross-check 不变量 9 用)
+ * (v2 修订 Codex 二轮 M-3 + round 2 Critical fix:identity cast 模式)
  *
- * 工作原理:Task 3.3 evidence helper 写 ack-log 时,把完整 payload(record-tdd/verify/review
- *   的所有 commander options 数据)放在 entry.extra 字段;
- *   reconstruct 时按 helper_name 过滤 + 重组成三数组(与 staging.yaml 三数组同形态);
- *   archive fence 不变量 9 拿此结果与 marker.process_evidence 三数组算 hash 比对(应等)
+ * 工作原理:
+ *   - Task 5 round 2 起,evidence.ts 三 helper 改为 "payload = staging-built object" 模式
+ *     (single source of truth):helper 先构造 staging entry(TddEventChain / VerifyInvocation /
+ *     SubagentReviewChain),然后用 entry 字段直接构造 payload。
+ *   - 因此 entry.extra(=payload)字段名 + fallback default 与 staging 三数组**完全一致**,
+ *     reconstruct 改为 identity cast(无独立 fallback default)。
+ *   - 不变量 9.2 用此结果与 marker.process_evidence 三数组算 hash 比对(应严格等)。
+ *
+ * round 2 fix 历史:
+ *   原实现 reconstruct 用 `??` fallback(如 `?? null`)与 payload 的 `?? null` 一致,但
+ *   staging 用了不同 fallback(`?? ''` / `?? -1` / `?? new Date()`)→ fence-9.2 永误报。
+ *   Critical fix 把 payload 与 staging 对齐为同一对象 → reconstruct 退化为 identity cast。
  *
  * @param entries evidence-helper entries(已 filter kind='evidence-helper';不含 freeze entry)
  * @returns 三数组(与 ProcessEvidence.tdd_event_chain / verify_invocations / subagent_review_chain 同形态)
@@ -492,36 +518,39 @@ function reconstructProjectionFromAckLog(entries: EvidenceHelperEntry[]): {
 
     const extra = entry.extra as Record<string, unknown>;
     if (entry.helper_name === 'record-tdd') {
-      // Task 3.3 record-tdd extra payload 含完整 RedCommitRecord + GreenCommitRecord 字段
+      // Identity cast — payload 字段与 TddEventChain staging entry 完全一致
+      // (round 2 Critical fix:evidence.ts payload = staging-built tddEntry 字段)
       tdd.push({
-        task_ref: (extra.task_ref as string) ?? entry.task_ref,
-        red_commit: (extra.red_commit as TddCommitProjection) ?? null,
+        task_ref: extra.task_ref as string,
+        red_commit: extra.red_commit as TddCommitProjection | null,
         green_commit: extra.green_commit as TddCommitProjection,
-        tdd_exemption: (extra.tdd_exemption as TddExemptionProjection | null) ?? null,
-        tdd_exemption_acked_by: (extra.tdd_exemption_acked_by as string | null) ?? null,
+        tdd_exemption: extra.tdd_exemption as TddExemptionProjection | null,
+        tdd_exemption_acked_by: extra.tdd_exemption_acked_by as string | null,
       });
     } else if (entry.helper_name === 'record-verify') {
-      // Task 3.3 record-verify extra payload 含完整 VerifyInvocation 字段
+      // Identity cast — payload 字段与 VerifyInvocation staging entry 完全一致
       verify.push({
-        invoked_at: (extra.invoked_at as string) ?? entry.timestamp,
-        task_refs: (extra.task_refs as string[]) ?? [],
+        invoked_at: extra.invoked_at as string,
+        task_refs: extra.task_refs as string[],
         verify_scope: extra.verify_scope as 'per-task' | 'change-level',
         result: extra.result as 'pass' | 'fail' | 'skip',
-        exit_code: (extra.exit_code as number) ?? 0,
+        exit_code: extra.exit_code as number,
         log_path: extra.log_path as string,
         log_hash: extra.log_hash as string,
         runner_report_path: extra.runner_report_path as string,
         runner_report_hash: extra.runner_report_hash as string,
       });
     } else if (entry.helper_name === 'record-review') {
-      // Task 3.3 record-review extra payload 含完整 SubagentReviewChain 字段
+      // Identity cast — payload 字段(spec_iterations / quality_iterations / main_check_off_at)
+      // 映射到 SubagentReviewChain(spec_reviewer_iterations / quality_reviewer_iterations /
+      // main_agent_check_off_at)。payload key 名沿用历史 record-review 字面;
+      // 由于 staging 也通过 reviewEntry 中转再装入 payload,两路径仍 identity
       review.push({
-        task_ref: (extra.task_ref as string) ?? entry.task_ref,
+        task_ref: extra.task_ref as string,
         implementer_commit: extra.implementer_commit as string,
-        spec_reviewer_iterations: (extra.spec_iterations as ReviewIterationProjection[]) ?? [],
-        quality_reviewer_iterations:
-          (extra.quality_iterations as ReviewIterationProjection[]) ?? [],
-        main_agent_check_off_at: (extra.main_check_off_at as string) ?? entry.timestamp,
+        spec_reviewer_iterations: extra.spec_iterations as ReviewIterationProjection[],
+        quality_reviewer_iterations: extra.quality_iterations as ReviewIterationProjection[],
+        main_agent_check_off_at: extra.main_check_off_at as string,
       });
     }
   }

@@ -83,6 +83,9 @@ describe('forge evidence record-tdd', () => {
     const root1 = setupChange();
     const root2 = setupChange();
     try {
+      // round 2 (Critical fix):payload 现在 = staging-built tddEntry,含 timestamp/exit 等
+      //   staging-side fallback(`?? new Date().toISOString()` / `?? -1` / `?? 0`)。
+      // 为保持 determinism,必须显式传 timestamp + exit code,避免依赖系统时钟。
       const args = [
         'evidence',
         'record-tdd',
@@ -93,6 +96,14 @@ describe('forge evidence record-tdd', () => {
         'deadbeef',
         '--green-commit',
         'cafebabe',
+        '--red-timestamp',
+        '2026-05-13T10:00:00Z',
+        '--green-timestamp',
+        '2026-05-13T11:00:00Z',
+        '--red-exit',
+        '1',
+        '--green-exit',
+        '0',
       ];
 
       runCli(args, root1);

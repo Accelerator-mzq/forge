@@ -242,55 +242,11 @@ export function buildEvidenceCommand(): Command {
           process.exit(2);
         }
 
-        // 构建 payload extra 对象(沿 plan §4.3.0 表 "写入 ack-log entry.extra 字段" 列)
-        // round 2 fix (I3):tddExemption 非空时 red_commit 设 null(沿 schema)
-        const payload = {
-          helper: 'record-tdd',
-          change_id: changeId,
-          task_ref: opts.task,
-          red_commit: tddExemption
-            ? null
-            : {
-                sha: opts.redCommit!,
-                timestamp: opts.redTimestamp ?? null,
-                red_log_path: opts.redLog ?? null,
-                red_log_hash: opts.redLogHash ?? null,
-                runner_report_path: opts.redReport ?? null,
-                runner_report_hash: opts.redReportHash ?? null,
-                exit_code: opts.redExit !== undefined ? parseInt(opts.redExit, 10) : null,
-                expected_failures: expectedFailures,
-              },
-          green_commit: {
-            sha: opts.greenCommit,
-            timestamp: opts.greenTimestamp ?? null,
-            green_log_path: opts.greenLog ?? null,
-            green_log_hash: opts.greenLogHash ?? null,
-            runner_report_path: opts.greenReport ?? null,
-            runner_report_hash: opts.greenReportHash ?? null,
-            exit_code: opts.greenExit !== undefined ? parseInt(opts.greenExit, 10) : null,
-          },
-          mode: opts.mode ?? null,
-          tdd_exemption: tddExemption,
-          tdd_exemption_acked_by: opts.tddExemptionAckedBy ?? null,
-        };
-
-        const payloadHash = canonicalHash(payload);
-
-        // 构建 EvidenceHelperEntry 并追加到 ack-log.jsonl
-        const entry: EvidenceHelperEntry = {
-          schema: 'forge-ack-log/v1',
-          kind: 'evidence-helper',
-          timestamp: new Date().toISOString(),
-          helper_name: 'record-tdd',
-          change_id: changeId,
-          task_ref: opts.task,
-          payload_hash: payloadHash,
-          status: 'success',
-          git_head: getGitHead(changeRoot),
-          extra: payload,
-        };
-
-        // plan-9g Task 3.3:staging.yaml 写入(acquireStagingLock wrapper)
+        // plan-9g Task 5 round 2 (Critical fix):payload = staging-built object
+        // 历史 bug:payload 用 `?? null` fallback;staging 用 `?? ''` / `?? -1` / `?? new Date()` fallback
+        //  → record-tdd 省略 optional arg 时两路径 hash 不同 → fence-9.2 永误报 → archive 系统性 broken
+        // 修复:先构造 tddEntry(staging-side fallback,single source of truth),
+        //       再用 tddEntry 字段构造 payload(identity mapping,无需额外 fallback)
         const release = await acquireStagingLock(changeRoot);
         try {
           const existing = await readStagingYaml(changeRoot);
@@ -311,8 +267,8 @@ export function buildEvidenceCommand(): Command {
             staging.process_verification_mode = mode;
           }
 
-          // 构建 TddEventChain 条目(沿 plan §4.3.0 表 "写入 staging.yaml 字段" 列)
-          // round 2 fix (I3):tddExemption 非空时 red_commit = null(schema TddEventChain.red_commit | null)
+          // 构建 TddEventChain 条目 — single source of truth
+          // (沿 plan §4.3.0 表 "写入 staging.yaml 字段" 列;round 2 (I3):tddExemption 非空时 red_commit = null)
           const tddEntry: TddEventChain = {
             task_ref: opts.task,
             red_commit: tddExemption
@@ -338,6 +294,35 @@ export function buildEvidenceCommand(): Command {
             },
             tdd_exemption: tddExemption,
             tdd_exemption_acked_by: opts.tddExemptionAckedBy ?? null,
+          };
+
+          // payload = tddEntry 字段 + helper 元数据(reconstructProjectionFromAckLog identity cast 用)
+          // 关键:payload 字段名与 TddEventChain 严格一致,无独立 fallback default
+          const payload = {
+            helper: 'record-tdd',
+            change_id: changeId,
+            task_ref: tddEntry.task_ref,
+            red_commit: tddEntry.red_commit,
+            green_commit: tddEntry.green_commit,
+            mode: opts.mode ?? null,
+            tdd_exemption: tddEntry.tdd_exemption,
+            tdd_exemption_acked_by: tddEntry.tdd_exemption_acked_by,
+          };
+
+          const payloadHash = canonicalHash(payload);
+
+          // 构建 EvidenceHelperEntry(extra = payload,reconstructProjectionFromAckLog identity cast)
+          const entry: EvidenceHelperEntry = {
+            schema: 'forge-ack-log/v1',
+            kind: 'evidence-helper',
+            timestamp: new Date().toISOString(),
+            helper_name: 'record-tdd',
+            change_id: changeId,
+            task_ref: opts.task,
+            payload_hash: payloadHash,
+            status: 'success',
+            git_head: getGitHead(changeRoot),
+            extra: payload,
           };
 
           staging.tdd_event_chain.push(tddEntry);
@@ -409,37 +394,7 @@ export function buildEvidenceCommand(): Command {
           .map((r) => r.trim())
           .filter((r) => r.length > 0);
 
-        // 构建 payload extra 对象(沿 plan §4.3.0 表 "写入 ack-log entry.extra 字段" 列)
-        const payload = {
-          helper: 'record-verify',
-          change_id: changeId,
-          task_refs: taskRefList,
-          verify_scope: opts.scope,
-          runner_report_path: opts.report,
-          result: opts.result ?? null,
-          runner_report_hash: opts.reportHash ?? null,
-          log_path: opts.log ?? null,
-          log_hash: opts.logHash ?? null,
-          exit_code: opts.exitCode !== undefined ? parseInt(opts.exitCode, 10) : null,
-          invoked_at: opts.invokedAt ?? null,
-        };
-
-        const payloadHash = canonicalHash(payload);
-
-        const entry: EvidenceHelperEntry = {
-          schema: 'forge-ack-log/v1',
-          kind: 'evidence-helper',
-          timestamp: new Date().toISOString(),
-          helper_name: 'record-verify',
-          change_id: changeId,
-          task_ref: opts.taskRefs,
-          payload_hash: payloadHash,
-          status: 'success',
-          git_head: getGitHead(changeRoot),
-          extra: payload,
-        };
-
-        // plan-9g Task 3.3:staging.yaml 写入
+        // plan-9g Task 5 round 2 (Critical fix):payload = staging-built object(同 record-tdd 模式)
         const release = await acquireStagingLock(changeRoot);
         try {
           const existing = await readStagingYaml(changeRoot);
@@ -454,7 +409,8 @@ export function buildEvidenceCommand(): Command {
             subagent_review_chain: [],
           };
 
-          // 构建 VerifyInvocation 条目(沿 plan §4.3.0 表 "写入 staging.yaml 字段" 列)
+          // 构建 VerifyInvocation 条目 — single source of truth
+          // (沿 plan §4.3.0 表 "写入 staging.yaml 字段" 列)
           const verifyEntry: VerifyInvocation = {
             invoked_at: opts.invokedAt ?? new Date().toISOString(),
             task_refs: taskRefList,
@@ -465,6 +421,36 @@ export function buildEvidenceCommand(): Command {
             log_hash: opts.logHash ?? '',
             runner_report_path: opts.report,
             runner_report_hash: opts.reportHash ?? '',
+          };
+
+          // payload = verifyEntry 字段 + helper 元数据(identity mapping;无独立 fallback default)
+          const payload = {
+            helper: 'record-verify',
+            change_id: changeId,
+            task_refs: verifyEntry.task_refs,
+            verify_scope: verifyEntry.verify_scope,
+            result: verifyEntry.result,
+            invoked_at: verifyEntry.invoked_at,
+            exit_code: verifyEntry.exit_code,
+            log_path: verifyEntry.log_path,
+            log_hash: verifyEntry.log_hash,
+            runner_report_path: verifyEntry.runner_report_path,
+            runner_report_hash: verifyEntry.runner_report_hash,
+          };
+
+          const payloadHash = canonicalHash(payload);
+
+          const entry: EvidenceHelperEntry = {
+            schema: 'forge-ack-log/v1',
+            kind: 'evidence-helper',
+            timestamp: new Date().toISOString(),
+            helper_name: 'record-verify',
+            change_id: changeId,
+            task_ref: opts.taskRefs,
+            payload_hash: payloadHash,
+            status: 'success',
+            git_head: getGitHead(changeRoot),
+            extra: payload,
           };
 
           staging.verify_invocations.push(verifyEntry);
@@ -541,33 +527,7 @@ export function buildEvidenceCommand(): Command {
           }
         }
 
-        // 构建 payload extra 对象(沿 plan §4.3.0 表)
-        const payload = {
-          helper: 'record-review',
-          change_id: changeId,
-          task_ref: opts.task,
-          implementer_commit: opts.implementerCommit,
-          spec_iterations: specIterations,
-          quality_iterations: qualityIterations,
-          main_check_off_at: opts.mainCheckOffAt ?? null,
-        };
-
-        const payloadHash = canonicalHash(payload);
-
-        const entry: EvidenceHelperEntry = {
-          schema: 'forge-ack-log/v1',
-          kind: 'evidence-helper',
-          timestamp: new Date().toISOString(),
-          helper_name: 'record-review',
-          change_id: changeId,
-          task_ref: opts.task,
-          payload_hash: payloadHash,
-          status: 'success',
-          git_head: getGitHead(changeRoot),
-          extra: payload,
-        };
-
-        // plan-9g Task 3.3:staging.yaml 写入
+        // plan-9g Task 5 round 2 (Critical fix):payload = staging-built object(同 record-tdd 模式)
         const release = await acquireStagingLock(changeRoot);
         try {
           const existing = await readStagingYaml(changeRoot);
@@ -582,13 +542,42 @@ export function buildEvidenceCommand(): Command {
             subagent_review_chain: [],
           };
 
-          // 构建 SubagentReviewChain 条目(沿 plan §4.3.0 表 "写入 staging.yaml 字段" 列)
+          // 构建 SubagentReviewChain 条目 — single source of truth
+          // (沿 plan §4.3.0 表 "写入 staging.yaml 字段" 列)
           const reviewEntry: SubagentReviewChain = {
             task_ref: opts.task,
             implementer_commit: opts.implementerCommit,
             spec_reviewer_iterations: specIterations as ReviewIteration[],
             quality_reviewer_iterations: qualityIterations as ReviewIteration[],
             main_agent_check_off_at: opts.mainCheckOffAt ?? new Date().toISOString(),
+          };
+
+          // payload = reviewEntry 字段 + helper 元数据(identity mapping)
+          // 注:ack-log payload 字段名沿用历史 record-review payload key 名(spec_iterations / quality_iterations /
+          //     main_check_off_at),reconstructProjectionFromAckLog 已按这些 key 名 cast,无 mismatch
+          const payload = {
+            helper: 'record-review',
+            change_id: changeId,
+            task_ref: reviewEntry.task_ref,
+            implementer_commit: reviewEntry.implementer_commit,
+            spec_iterations: reviewEntry.spec_reviewer_iterations,
+            quality_iterations: reviewEntry.quality_reviewer_iterations,
+            main_check_off_at: reviewEntry.main_agent_check_off_at,
+          };
+
+          const payloadHash = canonicalHash(payload);
+
+          const entry: EvidenceHelperEntry = {
+            schema: 'forge-ack-log/v1',
+            kind: 'evidence-helper',
+            timestamp: new Date().toISOString(),
+            helper_name: 'record-review',
+            change_id: changeId,
+            task_ref: opts.task,
+            payload_hash: payloadHash,
+            status: 'success',
+            git_head: getGitHead(changeRoot),
+            extra: payload,
           };
 
           staging.subagent_review_chain.push(reviewEntry);

@@ -2,6 +2,7 @@
 
 import type { Finding } from '../schemas/severity.js';
 import type { Severity } from '../schemas/severity.js';
+import type { ProcessEvidence } from '../schemas/process-evidence.js'; // plan-9g Task 1
 
 export interface VerifyMarker {
   schema: 'forge-verify/v1';
@@ -21,6 +22,16 @@ export interface VerifyMarker {
   // v3 BLOCKER 2 新增 — superset additive,沿 v2 选项 C 修订(plan-9j §0)
   // 仅在 marker 经过 `forge upgrade --resign-markers` 后存在;与 created 配对区分 native v1.0 vs resigned legacy
   resigned_by_tool_version?: string;
+  // plan-9g Task 1 新增 — superset additive(沿 plan-9c/9d/9j 同模式)
+  // brainstorm spec §2.2.2 + §9.11 — process_evidence schema + 三源 cross-check + ack-log chain
+  /** v1.0 process_evidence 完整结构(沿 design §2.7.2);老 marker 缺等价 undefined */
+  process_evidence?: ProcessEvidence;
+  /** freeze 时 staging.yaml 三数组 JCS canonicalize hash 快照(archive fence cross-check 用) */
+  process_evidence_staging_hash?: string;
+  /** freeze 时全 JSONL ack-log.jsonl 末行 canonicalize hash 快照(挡"改最后一行"攻击) */
+  ack_log_tail_hash?: string;
+  /** freeze 时全 JSONL ack-log.jsonl 行数固化(挡"重写整链 + 链内自洽"攻击,brainstorm SUG1) */
+  ack_log_entry_count?: number;
 }
 
 /**
@@ -107,6 +118,11 @@ export interface ReviewMarker {
   created_by_tool_version?: string;
   // v3 BLOCKER 2 新增 — resigned 字段(沿 v2 选项 C)
   resigned_by_tool_version?: string;
+  // plan-9g Task 1 新增 — superset additive(同 VerifyMarker)
+  process_evidence?: ProcessEvidence;
+  process_evidence_staging_hash?: string;
+  ack_log_tail_hash?: string;
+  ack_log_entry_count?: number;
 }
 
 export interface GitInfo {

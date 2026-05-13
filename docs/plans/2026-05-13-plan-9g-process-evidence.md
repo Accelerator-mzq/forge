@@ -222,3 +222,918 @@ src/cli/commands/scope.ts / finding.ts / upgrade.ts / migrate.ts / config.ts  �
 ```
 
 ---
+
+## 2. Task 1 — process_evidence schema + dimension enum 扩 + marker schema 扩 4 字段 + ForgeConfig 三子树 + 8 case 单测
+
+**Files:**
+
+- Create: `src/core/schemas/process-evidence.ts`
+- Create: `src/core/schema/process-verification-config.ts`
+- Modify: `src/core/schemas/severity.ts:56`(FindingHashPayload.dimension enum 扩第 4 值)
+- Modify: `src/core/validate/marker-schema.ts:44,498-503`(运行时 DIMENSION_VALUES + error message)
+- Modify: `src/cli/commands/finding.ts:68-70`(stdin JSON dimension 校验)
+- Modify: `src/core/markers/types.ts:6-24,33-35`(VerifyMarker + ReviewMarker 加 4 个 optional 字段)
+- Modify: `src/core/schema/types.ts`(ForgeConfig 加 process_verification + test + ack 三子树 + 3 DEFAULT 常量)
+- Test: `tests/core/schemas/process-evidence.test.ts`(8 case)
+
+### 2.1 步骤 1.1:写 process-evidence.ts schema
+
+- [ ] **Step 1.1.1: 写 `src/core/schemas/process-evidence.ts` 完整字面**
+
+```typescript
+// src/core/schemas/process-evidence.ts — plan-9g Task 1
+// §2.7.2 forge-process-evidence/v1 schema:14 不变量字段 + 五源 cross-check(brainstorm v16)
+// 沿 archive-summary.ts 模式:schema literal + 手写 interface + JSDoc
+//
+// 关键设计(brainstorm spec §4):
+//   - RedCommitRecord / GreenCommitRecord 拆两 interface(Codex 一轮 M-1)
+//   - 字段名严格沿 master spec §2.7.2 行 1115/1116 / 1127/1128 字面
+//     (red_log_path / red_log_hash / green_log_path / green_log_hash;
+//      runner_report_path / runner_report_hash 通用)
+//   - GreenCommitRecord 无 expected_failures 字段(schema 层禁止 GREEN 含)
+
+/** ProcessEvidence 顶级 schema(沿 design §2.7.2 字段表) */
+export interface ProcessEvidence {
+  /** YAML schema identifier(沿 forge marker schema 同约定) */
+  schema: 'forge-process-evidence/v1';
+
+  /** 模式:full(默认重跑全部)| sample(抽样)| hash-only(仅 hash 校验,等同 v0.4 弱 fence) */
+  process_verification_mode: 'full' | 'sample' | 'hash-only';
+  /** mode != full 时必填 — ack-log 含对应 ack-mode 条目;CI 模式拒签 mode != full(沿 §2.7.4 B) */
+  process_verification_mode_acked_by: string | null;
+  /** ISO 8601 UTC */
+  process_verification_mode_acked_at: string | null;
+
+  /** 环境三因子(MAJOR #23 — 重跑前 env 一致校验,不一致 → WARNING) */
+  env_hash: EnvHash;
+
+  /** TDD RED→GREEN 事件序列(每 task 一条;沿 §2.7.2 + 不变量 1-6 + 11) */
+  tdd_event_chain: TddEventChain[];
+
+  /** verify 命令每次跑都 append(沿 §2.7.6 helper append-only;不变量 7) */
+  verify_invocations: VerifyInvocation[];
+
+  /** subagent 二段 review 痕迹(不变量 8) */
+  subagent_review_chain: SubagentReviewChain[];
+}
+
+/** 环境三因子哈希(MAJOR #23) */
+export interface EnvHash {
+  /** sha256(pnpm-lock.yaml 或 package-lock.json) */
+  lockfile_hash: string;
+  /** semver,e.g. "20.10.0" */
+  node_version: string;
+  /** "win32" | "darwin" | "linux"(沿 Node os.platform()) */
+  os_platform: 'win32' | 'darwin' | 'linux';
+}
+
+/** TDD 单 task RED→GREEN 事件链(每 task 一条) */
+export interface TddEventChain {
+  /** task 引用(沿 tasks.md 锚点) */
+  task_ref: string;
+  /** RED 阶段记录(tdd_exemption 非空时可省) */
+  red_commit: RedCommitRecord | null;
+  /** GREEN 阶段记录(必填) */
+  green_commit: GreenCommitRecord;
+  /** light mode trivial change 免 RED 的 ack 引用(沿 §2.7.2 MAJOR #37;不变量 11) */
+  tdd_exemption: TddExemption | null;
+  /** tdd_exemption 非空时必填 — ack-log 中对应 user ack 的 acked_by */
+  tdd_exemption_acked_by: string | null;
+}
+
+/**
+ * RED commit 记录(brainstorm v6 修订,Codex 一轮 M-1 修复)
+ * 字段名严格沿 master spec §2.7.2 行 1115/1116 字面 — red_commit 节点下的 log/hash 字段
+ * 是 red_log_path / red_log_hash 而非通用 log_path / log_hash
+ */
+export interface RedCommitRecord {
+  /** git sha(40 hex) */
+  sha: string;
+  /** ISO 8601 UTC */
+  timestamp: string;
+  /** RED plain log 路径(forge/changes/<id>/.evidence/ 相对路径;沿 master spec 行 1115) */
+  red_log_path: string;
+  /** sha256(red log content);沿 master spec 行 1116 */
+  red_log_hash: string;
+  /** 进程 exit code — RED 必 != 0(MAJOR #19,不变量 3) */
+  exit_code: number;
+  /** 结构化 reporter 报告路径(JUnit XML / TAP / Vitest JSON;MAJOR #20) */
+  runner_report_path: string;
+  /** sha256(reporter content) */
+  runner_report_hash: string;
+  /** RED 阶段必填:绑定具体失败的 test(MAJOR #24;不变量 5) */
+  expected_failures: ExpectedFailure[];
+}
+
+/**
+ * GREEN commit 记录(brainstorm v6 修订,Codex 一轮 M-1 修复)
+ * 字段名沿 master spec §2.7.2 行 1127/1128 字面 — green_commit 节点下用 green_log_path/hash
+ * 注:无 expected_failures 字段(schema 层禁止 GREEN 含)
+ */
+export interface GreenCommitRecord {
+  /** git sha(40 hex) */
+  sha: string;
+  /** ISO 8601 UTC */
+  timestamp: string;
+  /** GREEN plain log 路径;沿 master spec 行 1127 */
+  green_log_path: string;
+  /** sha256(green log content);沿 master spec 行 1128 */
+  green_log_hash: string;
+  /** 进程 exit code — GREEN 必 == 0(MAJOR #19,不变量 4) */
+  exit_code: number;
+  /** 结构化 reporter 报告路径 */
+  runner_report_path: string;
+  /** sha256(reporter content) */
+  runner_report_hash: string;
+}
+
+/** RED 阶段期望失败的 test(MAJOR #24) */
+export interface ExpectedFailure {
+  /** 相对 repo 根 */
+  test_file: string;
+  /** 测试名(对应 reporter 中的 test 标识) */
+  test_name: string;
+  /** 失败类型 */
+  failure_type: 'assertion' | 'timeout' | 'error' | 'not-implemented';
+}
+
+/** light mode trivial change 免 RED(沿 §2.7.2 MAJOR #37) */
+export interface TddExemption {
+  /** 沿 config.yaml#writing_plans.light_threshold 触发(默认 200 行) */
+  reason: 'light-mode-trivial';
+  /** 变更行数 */
+  loc_delta: number;
+}
+
+/** verify 命令单次调用记录(沿 §2.7.6 helper append-only) */
+export interface VerifyInvocation {
+  /** ISO 8601 UTC */
+  invoked_at: string;
+  /** 涉及的 task(MAJOR #22:list,支持 per-task / change-level) */
+  task_refs: string[];
+  /** per-task = subagent 实施完单 task 立即跑;change-level = 主代理统一跑 */
+  verify_scope: 'per-task' | 'change-level';
+  /** pass | fail | skip */
+  result: 'pass' | 'fail' | 'skip';
+  /** 进程 exit code */
+  exit_code: number;
+  /** plain log 路径 */
+  log_path: string;
+  log_hash: string;
+  /** 结构化 reporter 报告路径 */
+  runner_report_path: string;
+  runner_report_hash: string;
+}
+
+/** subagent 二段 review 链(沿 §2.7.2 + 不变量 8) */
+export interface SubagentReviewChain {
+  task_ref: string;
+  /** subagent 实施的 commit */
+  implementer_commit: string;
+  /** spec 维度 review 多次迭代(每次都 append) */
+  spec_reviewer_iterations: ReviewIteration[];
+  /** quality 维度 review 多次迭代 */
+  quality_reviewer_iterations: ReviewIteration[];
+  /** 主代理 check-off 时间(ISO 8601 UTC) */
+  main_agent_check_off_at: string;
+}
+
+/** 单次 reviewer 迭代 */
+export interface ReviewIteration {
+  /** reviewer subagent 跑完时的 commit sha */
+  reviewer_commit: string;
+  /** needs-fix 走下一轮;approved 终态 */
+  outcome: 'needs-fix' | 'approved';
+  /** review 笔记 log 路径(forge/changes/<id>/.evidence/ 相对) */
+  notes_log_path: string;
+}
+
+/**
+ * ProcessVerificationConfig:forge/config.yaml#process_verification 字段类型
+ * validateProcessVerificationConfig 校验阈值,见 src/core/schema/process-verification-config.ts
+ */
+export interface ProcessVerificationConfig {
+  /** 默认 'full' */
+  mode: 'full' | 'sample' | 'hash-only';
+  /** sample 模式抽样比例(0..1,默认 0.3) */
+  sample_ratio: number;
+  /** 单 task 重跑超时秒(默认 300) */
+  test_timeout_per_task: number;
+  /** 并发 worktree 上限(默认 2) */
+  max_parallel_reruns: number;
+}
+```
+
+- [ ] **Step 1.1.2:跑 typecheck 验证 schema 文件**
+
+```bash
+pnpm typecheck
+```
+
+Expected: PASS(纯 type 文件,无 runtime 代码)
+
+- [ ] **Step 1.1.3:commit Step 1.1**
+
+```bash
+git add src/core/schemas/process-evidence.ts
+# Windows + PowerShell:用 git commit -F file 模式(memory)
+echo "feat(9g Task 1.1): process-evidence.ts schema — 11 interface + schema literal" > .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "11 interface 沿 master spec §2.7.2 字面(brainstorm spec §4 完整 inline):" >> .git/COMMIT_MSG
+echo "- ProcessEvidence(顶级)+ EnvHash + TddEventChain + RedCommitRecord +" >> .git/COMMIT_MSG
+echo "  GreenCommitRecord(brainstorm v6 拆两 interface,沿 master spec 字面)+" >> .git/COMMIT_MSG
+echo "  ExpectedFailure + TddExemption + VerifyInvocation + SubagentReviewChain +" >> .git/COMMIT_MSG
+echo "  ReviewIteration + ProcessVerificationConfig" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "字段命名沿 master spec §2.7.2 字面:red_log_path/red_log_hash(行 1115/1116) +" >> .git/COMMIT_MSG
+echo "  green_log_path/green_log_hash(行 1127/1128)+ runner_report_path/hash 通用" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "schema literal: 'forge-process-evidence/v1'" >> .git/COMMIT_MSG
+git commit -F .git/COMMIT_MSG
+rm .git/COMMIT_MSG
+```
+
+Expected: typecheck PASS;commit hash 输出
+
+### 2.2 步骤 1.2:写 process-verification-config.ts validator
+
+- [ ] **Step 1.2.1:写 `src/core/schema/process-verification-config.ts` 完整字面**
+
+```typescript
+// src/core/schema/process-verification-config.ts — plan-9g Task 1.2
+// v1.0 process_verification 配置 validation(沿 validateWritingPlansConfig 模式)
+//
+// 规则(brainstorm spec §6.1):
+//   - 缺失字段 → 返回默认值(DEFAULT_PROCESS_VERIFICATION)
+//   - 类型错 / 范围外 → stderr warn + fallback 默认
+//   - 合法值 → 直接返回
+
+import type { ForgeConfig } from './types.js';
+import { DEFAULT_PROCESS_VERIFICATION } from './types.js';
+
+/** 默认值类型(sanitize 后必填三字段返回) */
+export interface SanitizedProcessVerificationConfig {
+  mode: 'full' | 'sample' | 'hash-only';
+  sample_ratio: number;
+  test_timeout_per_task: number;
+  max_parallel_reruns: number;
+}
+
+/**
+ * 验证并 sanitize process_verification 配置。
+ * 永远返回合法值(用 default fallback,不抛错 — 配置层 graceful degradation)。
+ *
+ * @param config — forge/config.yaml 解析结果(可缺 process_verification 段)
+ * @param warn — 注入 console.warn 用于测试 / 自定义 logger
+ * @returns 合法的 SanitizedProcessVerificationConfig
+ */
+export function validateProcessVerificationConfig(
+  config: ForgeConfig | undefined,
+  warn: (msg: string) => void = (msg) => console.warn(msg),
+): SanitizedProcessVerificationConfig {
+  const raw = config?.process_verification;
+
+  // 缺失 → 全默认
+  if (!raw) {
+    return { ...DEFAULT_PROCESS_VERIFICATION };
+  }
+
+  // mode 校验
+  let mode: SanitizedProcessVerificationConfig['mode'] = DEFAULT_PROCESS_VERIFICATION.mode;
+  if (raw.mode !== undefined && raw.mode !== null) {
+    if (raw.mode === 'full' || raw.mode === 'sample' || raw.mode === 'hash-only') {
+      mode = raw.mode;
+    } else {
+      warn(
+        `forge config: process_verification.mode must be 'full'|'sample'|'hash-only', got ${JSON.stringify(raw.mode)}; falling back to ${DEFAULT_PROCESS_VERIFICATION.mode}`,
+      );
+    }
+  }
+
+  // sample_ratio 校验(0..1)
+  let sample_ratio = DEFAULT_PROCESS_VERIFICATION.sample_ratio;
+  if (raw.sample_ratio !== undefined && raw.sample_ratio !== null) {
+    if (
+      typeof raw.sample_ratio === 'number' &&
+      !Number.isNaN(raw.sample_ratio) &&
+      raw.sample_ratio >= 0 &&
+      raw.sample_ratio <= 1
+    ) {
+      sample_ratio = raw.sample_ratio;
+    } else {
+      warn(
+        `forge config: process_verification.sample_ratio must be number in [0,1], got ${JSON.stringify(raw.sample_ratio)}; falling back to ${DEFAULT_PROCESS_VERIFICATION.sample_ratio}`,
+      );
+    }
+  }
+
+  // test_timeout_per_task 校验([10, 3600] 秒)
+  let test_timeout_per_task = DEFAULT_PROCESS_VERIFICATION.test_timeout_per_task;
+  if (raw.test_timeout_per_task !== undefined && raw.test_timeout_per_task !== null) {
+    if (
+      typeof raw.test_timeout_per_task === 'number' &&
+      Number.isInteger(raw.test_timeout_per_task) &&
+      raw.test_timeout_per_task >= 10 &&
+      raw.test_timeout_per_task <= 3600
+    ) {
+      test_timeout_per_task = raw.test_timeout_per_task;
+    } else {
+      warn(
+        `forge config: process_verification.test_timeout_per_task must be integer in [10, 3600], got ${JSON.stringify(raw.test_timeout_per_task)}; falling back to ${DEFAULT_PROCESS_VERIFICATION.test_timeout_per_task}`,
+      );
+    }
+  }
+
+  // max_parallel_reruns 校验([1, 8])
+  let max_parallel_reruns = DEFAULT_PROCESS_VERIFICATION.max_parallel_reruns;
+  if (raw.max_parallel_reruns !== undefined && raw.max_parallel_reruns !== null) {
+    if (
+      typeof raw.max_parallel_reruns === 'number' &&
+      Number.isInteger(raw.max_parallel_reruns) &&
+      raw.max_parallel_reruns >= 1 &&
+      raw.max_parallel_reruns <= 8
+    ) {
+      max_parallel_reruns = raw.max_parallel_reruns;
+    } else {
+      warn(
+        `forge config: process_verification.max_parallel_reruns must be integer in [1, 8], got ${JSON.stringify(raw.max_parallel_reruns)}; falling back to ${DEFAULT_PROCESS_VERIFICATION.max_parallel_reruns}`,
+      );
+    }
+  }
+
+  return { mode, sample_ratio, test_timeout_per_task, max_parallel_reruns };
+}
+```
+
+- [ ] **Step 1.2.2:写测试 fixture(skip,在 Step 1.6 统一 8 case)**
+
+(测试在 §2.6 集中写)
+
+### 2.3 步骤 1.3:扩 src/core/schema/types.ts(ForgeConfig 三子树 + 3 DEFAULT)
+
+- [ ] **Step 1.3.1:编辑 `src/core/schema/types.ts`,在 `writing_plans?:` 段之后追加**
+
+```typescript
+  /**
+   * v1.0 process_verification(plan-9g §2.7 — 14 不变量 + worktree 重跑配置)
+   * 缺失时调用方应以 `??` fallback 取 DEFAULT_PROCESS_VERIFICATION 值
+   * 或调 validateProcessVerificationConfig 拿 sanitized 完整值
+   */
+  process_verification?: {
+    /** 默认 'full'(沿 §2.7.4 B);mode != full 必须 CLI ack 写 marker */
+    mode?: 'full' | 'sample' | 'hash-only';
+    /** sample 模式抽样比例 [0..1],默认 0.3 */
+    sample_ratio?: number;
+    /** 单 task 重跑 timeout 秒(默认 300;full 模式触发 → CRITICAL,沿 §2.7.4 D) */
+    test_timeout_per_task?: number;
+    /** 并发 worktree 上限(默认 2;Windows 磁盘空间约束更紧) */
+    max_parallel_reruns?: number;
+  };
+
+  /**
+   * v1.0 test reporter(plan-9g §2.7.4 C — 解析结构化测试报告)
+   * 缺失时调用方应以 `??` fallback 'junit'
+   */
+  test?: {
+    /** 默认 'junit';reporter 类型决定 parseReporter 走哪个分支 */
+    reporter?: 'junit' | 'tap' | 'vitest-json';
+    /** 单 task 测试命令(用于 worktree 重跑;沿 commands/verify.md:29) */
+    test_command?: string;
+  };
+
+  /**
+   * v1.0 ack CLI 安全开关(plan-9g §2.7.4 B — CI 模式拒绝 ack 防静默降级)
+   * 缺失时调用方应以 `??` fallback false(更安全)
+   */
+  ack?: {
+    /** false(默认):检测 CI=true 时 `forge ack propose` 拒绝触发 */
+    allow_ci_mode?: boolean;
+  };
+}
+```
+
+(注:把 `}` 闭合 ForgeConfig interface;紧接 `}` 之后 + `export const DEFAULT_LIGHT_THRESHOLD` 之前插入)
+
+- [ ] **Step 1.3.2:在 `export const DEFAULT_LIGHT_THRESHOLD = 200;` 之后追加 3 个 DEFAULT 常量**
+
+```typescript
+/**
+ * 默认 process_verification 配置(plan-9g §6;调用方 fallback 用)
+ * brainstorm spec §6 锁定四档默认值
+ */
+export const DEFAULT_PROCESS_VERIFICATION = {
+  mode: 'full' as const,
+  sample_ratio: 0.3,
+  test_timeout_per_task: 300, // 秒
+  max_parallel_reruns: 2,
+};
+
+/** 默认 test.reporter(plan-9g §6) */
+export const DEFAULT_TEST_REPORTER = 'junit' as const;
+
+/** 默认 ack.allow_ci_mode(plan-9g §6;false 防 CI 静默降级) */
+export const DEFAULT_ACK_ALLOW_CI_MODE = false;
+```
+
+- [ ] **Step 1.3.3:跑 typecheck**
+
+```bash
+pnpm typecheck
+```
+
+Expected: PASS
+
+- [ ] **Step 1.3.4:commit Step 1.2 + Step 1.3**
+
+```bash
+git add src/core/schema/types.ts src/core/schema/process-verification-config.ts
+# 用 git commit -F 模式
+> .git/COMMIT_MSG
+echo "feat(9g Task 1.2-1.3): ForgeConfig 扩 process_verification/test/ack 三子树 + validator" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "src/core/schema/types.ts:" >> .git/COMMIT_MSG
+echo "- ForgeConfig 加 process_verification? / test? / ack? 三 optional 子树" >> .git/COMMIT_MSG
+echo "  (沿 legacy_bridge / writing_plans 模式,brainstorm spec §6)" >> .git/COMMIT_MSG
+echo "- DEFAULT_PROCESS_VERIFICATION / DEFAULT_TEST_REPORTER /" >> .git/COMMIT_MSG
+echo "  DEFAULT_ACK_ALLOW_CI_MODE 三 const(调用方 fallback 用)" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "src/core/schema/process-verification-config.ts:" >> .git/COMMIT_MSG
+echo "- validateProcessVerificationConfig 沿 validateWritingPlansConfig 同模式" >> .git/COMMIT_MSG
+echo "- 阈值校验:mode 三档 enum / sample_ratio [0,1] /" >> .git/COMMIT_MSG
+echo "  test_timeout_per_task [10,3600] / max_parallel_reruns [1,8]" >> .git/COMMIT_MSG
+echo "- 类型错 / 范围外 → warn + fallback 默认(graceful degradation)" >> .git/COMMIT_MSG
+git commit -F .git/COMMIT_MSG
+rm .git/COMMIT_MSG
+```
+
+Expected: typecheck PASS;commit 输出
+
+### 2.4 步骤 1.4:扩 dimension enum 三处(severity.ts + marker-schema.ts + finding.ts)
+
+- [ ] **Step 1.4.1:修改 `src/core/schemas/severity.ts:56` FindingHashPayload.dimension union 扩 'process_evidence' 第 4 值**
+
+老字面(severity.ts:56):
+```typescript
+  dimension: 'completeness' | 'correctness' | 'coherence';
+```
+
+改为:
+```typescript
+  /**
+   * dimension enum:plan-9d 三维度 + plan-9g 新增 process_evidence(brainstorm v10 Codex 六轮 M-1)
+   * 'process_evidence' 用于 plan-9g freeze-time WARNING(不变量 7/10)写入 marker.verify_findings;
+   * sub-enum 'invariant-7-verify-count' | 'invariant-10-env-drift' 用 check_type 字段
+   */
+  dimension: 'completeness' | 'correctness' | 'coherence' | 'process_evidence';
+```
+
+- [ ] **Step 1.4.2:修改 `src/core/validate/marker-schema.ts:44` DIMENSION_VALUES Set 扩 'process_evidence'**
+
+老字面(marker-schema.ts:43-44):
+```typescript
+// verify_findings.dimension 合法值(沿 design §2.2.2 三维度)
+const DIMENSION_VALUES = new Set(['completeness', 'correctness', 'coherence']);
+```
+
+改为:
+```typescript
+// verify_findings.dimension 合法值(沿 design §2.2.2 三维度 + plan-9g brainstorm v10 加 process_evidence)
+const DIMENSION_VALUES = new Set([
+  'completeness',
+  'correctness',
+  'coherence',
+  'process_evidence', // plan-9g freeze-time WARNING 7/10(brainstorm spec §3 修订)
+]);
+```
+
+- [ ] **Step 1.4.3:修改 `src/core/validate/marker-schema.ts:498-503` error message 扩**
+
+老字面(498-503):
+```typescript
+    if (typeof f.dimension !== 'string' || !DIMENSION_VALUES.has(f.dimension)) {
+      errors.push({
+        field: `verify_findings[${i}].dimension`,
+        message: 'must be completeness|correctness|coherence',
+      });
+    }
+```
+
+改为:
+```typescript
+    if (typeof f.dimension !== 'string' || !DIMENSION_VALUES.has(f.dimension)) {
+      errors.push({
+        field: `verify_findings[${i}].dimension`,
+        message: 'must be completeness|correctness|coherence|process_evidence',
+      });
+    }
+```
+
+- [ ] **Step 1.4.4:修改 `src/cli/commands/finding.ts:68-70` stdin JSON 校验扩**
+
+老字面(68-70):
+```typescript
+    o.dimension !== 'completeness' &&
+    o.dimension !== 'correctness' &&
+    o.dimension !== 'coherence'
+```
+
+改为:
+```typescript
+    o.dimension !== 'completeness' &&
+    o.dimension !== 'correctness' &&
+    o.dimension !== 'coherence' &&
+    o.dimension !== 'process_evidence' // plan-9g brainstorm v10 加(freeze-time WARNING 7/10 用)
+```
+
+- [ ] **Step 1.4.5:跑 typecheck + lint(确认三处 enum 扩没破坏现有代码)**
+
+```bash
+pnpm typecheck && pnpm lint
+```
+
+Expected: PASS
+
+- [ ] **Step 1.4.6:commit Step 1.4**
+
+```bash
+> .git/COMMIT_MSG
+echo "feat(9g Task 1.4): FindingHashPayload.dimension enum 扩 'process_evidence' 第 4 值" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "三处同步扩(沿 brainstorm spec v10 Codex 六轮 M-1 修复 — type + runtime 两层):" >> .git/COMMIT_MSG
+echo "- src/core/schemas/severity.ts:56 FindingHashPayload.dimension union 加 'process_evidence'" >> .git/COMMIT_MSG
+echo "- src/core/validate/marker-schema.ts:44 DIMENSION_VALUES Set 加 'process_evidence' +" >> .git/COMMIT_MSG
+echo "  :498 error message 扩 'must be ...|process_evidence'" >> .git/COMMIT_MSG
+echo "- src/cli/commands/finding.ts:70 stdin JSON dimension 校验扩 'process_evidence'" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "用途:plan-9g freeze-time WARNING(不变量 7 verify_invocations 计数 +" >> .git/COMMIT_MSG
+echo "  不变量 10 env_hash 漂移)走 marker.verify_findings 路径需 dimension='process_evidence'" >> .git/COMMIT_MSG
+echo "(brainstorm spec §3 WARNING 流转 + §9.11 计算 finding_hash 沿 9a 8 字段 schema)" >> .git/COMMIT_MSG
+git commit -F .git/COMMIT_MSG
+rm .git/COMMIT_MSG
+```
+
+Expected: typecheck + lint PASS;commit 输出
+
+### 2.5 步骤 1.5:扩 markers/types.ts(VerifyMarker / ReviewMarker 加 4 个 optional 字段)
+
+- [ ] **Step 1.5.1:先找 ReviewMarker interface 当前位置(可能在 types.ts 中段)**
+
+```bash
+pnpm exec grep -n "ReviewMarker" src/core/markers/types.ts
+```
+
+Expected: 找到 `export interface ReviewMarker {` 行号(后续 Step 1.5.2 用)
+
+- [ ] **Step 1.5.2:修改 VerifyMarker(types.ts:6-24)在 `resigned_by_tool_version?: string;` 之后追加 4 个新 optional 字段**
+
+```typescript
+  resigned_by_tool_version?: string;
+  // plan-9g Task 1 新增 — superset additive(沿 plan-9c/9d/9j 同模式)
+  // brainstorm spec §2.2.2 + §9.11 — process_evidence schema + 三源 cross-check + ack-log chain
+  /** v1.0 process_evidence 完整结构(沿 design §2.7.2);老 marker 缺等价 undefined */
+  process_evidence?: ProcessEvidence;
+  /** freeze 时 staging.yaml 三数组 JCS canonicalize hash 快照(archive fence cross-check 用) */
+  process_evidence_staging_hash?: string;
+  /** freeze 时全 JSONL ack-log.jsonl 末行 canonicalize hash 快照(挡"改最后一行"攻击) */
+  ack_log_tail_hash?: string;
+  /** freeze 时全 JSONL ack-log.jsonl 行数固化(挡"重写整链 + 链内自洽"攻击,brainstorm SUG1) */
+  ack_log_entry_count?: number;
+}
+```
+
+- [ ] **Step 1.5.3:在 types.ts:3 import 行追加 ProcessEvidence 导入**
+
+老字面(types.ts:3):
+```typescript
+import type { Finding } from '../schemas/severity.js';
+import type { Severity } from '../schemas/severity.js';
+```
+
+改为:
+```typescript
+import type { Finding } from '../schemas/severity.js';
+import type { Severity } from '../schemas/severity.js';
+import type { ProcessEvidence } from '../schemas/process-evidence.js'; // plan-9g Task 1
+```
+
+- [ ] **Step 1.5.4:同样在 ReviewMarker interface 内追加 4 个 optional 字段(沿同模式;positional 在 ReviewMarker.resigned_by_tool_version?: string 之后)**
+
+```typescript
+  resigned_by_tool_version?: string;
+  // plan-9g Task 1 新增 — superset additive(同 VerifyMarker)
+  process_evidence?: ProcessEvidence;
+  process_evidence_staging_hash?: string;
+  ack_log_tail_hash?: string;
+  ack_log_entry_count?: number;
+}
+```
+
+(若 ReviewMarker 当前无 resigned_by_tool_version 字段,则在末尾 `}` 之前插入 4 个新字段)
+
+- [ ] **Step 1.5.5:跑 typecheck 确认 import 路径 + interface 扩**
+
+```bash
+pnpm typecheck
+```
+
+Expected: PASS
+
+- [ ] **Step 1.5.6:commit Step 1.5**
+
+```bash
+> .git/COMMIT_MSG
+echo "feat(9g Task 1.5): markers/types.ts 扩 VerifyMarker/ReviewMarker 加 4 字段" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "Superset additive 扩四 optional 字段(沿 plan-9c/9d/9j 同模式):" >> .git/COMMIT_MSG
+echo "- process_evidence?: ProcessEvidence(v1.0 完整结构,沿 design §2.7.2)" >> .git/COMMIT_MSG
+echo "- process_evidence_staging_hash?: string(freeze 时 staging hash 快照)" >> .git/COMMIT_MSG
+echo "- ack_log_tail_hash?: string(全 JSONL ack-log 末行 hash 固化)" >> .git/COMMIT_MSG
+echo "- ack_log_entry_count?: number(全 JSONL ack-log 行数固化)" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "后三字段挡 brainstorm 五源 cross-check 反伪造矩阵:" >> .git/COMMIT_MSG
+echo "- staging_hash:挡 marker 与 staging 不一致" >> .git/COMMIT_MSG
+echo "- tail_hash:挡'改 ack-log 最后一行无下一行引用'攻击" >> .git/COMMIT_MSG
+echo "- entry_count:挡'重写整链 + 链内自洽'攻击(brainstorm Codex 二轮 M-3 SUG1)" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "import type { ProcessEvidence } from '../schemas/process-evidence.js'" >> .git/COMMIT_MSG
+git commit -F .git/COMMIT_MSG
+rm .git/COMMIT_MSG
+```
+
+Expected: typecheck PASS
+
+### 2.6 步骤 1.6:写 `tests/core/schemas/process-evidence.test.ts` 8 case
+
+- [ ] **Step 1.6.1:先 RED — 写测试 fail 验证 schema 行为**
+
+```typescript
+// tests/core/schemas/process-evidence.test.ts — plan-9g Task 1.6
+// 测 process-evidence.ts schema 8 case(brainstorm spec §4 + §8.2 测试矩阵)
+//
+// Case 1:schema literal 锁定为 'forge-process-evidence/v1'
+// Case 2:RedCommitRecord 含 red_log_path/red_log_hash(非 log_path)
+// Case 3:GreenCommitRecord 含 green_log_path/green_log_hash 且无 expected_failures
+// Case 4:process_verification_mode 三档 literal union('full'|'sample'|'hash-only')
+// Case 5:failure_type 四档 literal union('assertion'|'timeout'|'error'|'not-implemented')
+// Case 6:TddEventChain.red_commit 可 null(tdd_exemption 非空时)
+// Case 7:validateProcessVerificationConfig 默认值 fallback
+// Case 8:validateProcessVerificationConfig 范围 + 类型校验
+
+import { describe, it, expect } from 'vitest';
+import type {
+  ProcessEvidence,
+  RedCommitRecord,
+  GreenCommitRecord,
+  ExpectedFailure,
+  TddEventChain,
+  TddExemption,
+  VerifyInvocation,
+  SubagentReviewChain,
+  EnvHash,
+  ProcessVerificationConfig,
+} from '../../../src/core/schemas/process-evidence.js';
+import { validateProcessVerificationConfig } from '../../../src/core/schema/process-verification-config.js';
+import { DEFAULT_PROCESS_VERIFICATION } from '../../../src/core/schema/types.js';
+
+describe('process-evidence schema', () => {
+  it('Case 1: schema literal 锁定 forge-process-evidence/v1', () => {
+    const pe: ProcessEvidence = {
+      schema: 'forge-process-evidence/v1',
+      process_verification_mode: 'full',
+      process_verification_mode_acked_by: null,
+      process_verification_mode_acked_at: null,
+      env_hash: {
+        lockfile_hash: 'sha256:placeholder',
+        node_version: '20.10.0',
+        os_platform: 'linux',
+      },
+      tdd_event_chain: [],
+      verify_invocations: [],
+      subagent_review_chain: [],
+    };
+    expect(pe.schema).toBe('forge-process-evidence/v1');
+    // TypeScript 编译期验证 literal 唯一(以下行不应编译通过,留作 type test):
+    // const wrong: ProcessEvidence = { schema: 'forge-process-evidence/v2', ... };
+  });
+
+  it('Case 2: RedCommitRecord 字段名严格 red_log_path/red_log_hash(沿 master spec 行 1115/1116)', () => {
+    const red: RedCommitRecord = {
+      sha: 'abc123',
+      timestamp: '2026-05-12T14:00:00Z',
+      red_log_path: '.evidence/task-1-red.log',
+      red_log_hash: 'sha256:redhash',
+      exit_code: 1, // RED 必 != 0
+      runner_report_path: '.evidence/task-1-red-junit.xml',
+      runner_report_hash: 'sha256:reportshash',
+      expected_failures: [
+        {
+          test_file: 'src/auth/refresh.test.ts',
+          test_name: 'refreshToken returns new token',
+          failure_type: 'assertion',
+        },
+      ],
+    };
+    // 字段名严格沿 master spec §2.7.2 字面
+    expect(red.red_log_path).toBe('.evidence/task-1-red.log');
+    expect(red.red_log_hash).toBe('sha256:redhash');
+    // TypeScript 编译期验证 — RedCommitRecord 不应含 log_path 字段:
+    // @ts-expect-error 不允许 log_path
+    // const r2: RedCommitRecord = { ...red, log_path: 'x' };
+    expect(red.exit_code).not.toBe(0);
+  });
+
+  it('Case 3: GreenCommitRecord 含 green_log_path/green_log_hash 且无 expected_failures', () => {
+    const green: GreenCommitRecord = {
+      sha: 'def456',
+      timestamp: '2026-05-12T14:30:00Z',
+      green_log_path: '.evidence/task-1-green.log',
+      green_log_hash: 'sha256:greenhash',
+      exit_code: 0, // GREEN 必 == 0
+      runner_report_path: '.evidence/task-1-green-junit.xml',
+      runner_report_hash: 'sha256:gxhash',
+    };
+    expect(green.green_log_path).toBe('.evidence/task-1-green.log');
+    expect(green.exit_code).toBe(0);
+    // TypeScript 编译期验证 — GreenCommitRecord schema 层禁止 expected_failures
+    // @ts-expect-error 不允许 expected_failures
+    // const g2: GreenCommitRecord = { ...green, expected_failures: [] };
+  });
+
+  it('Case 4: process_verification_mode 三档 literal union', () => {
+    const modes: ProcessEvidence['process_verification_mode'][] = ['full', 'sample', 'hash-only'];
+    expect(modes).toHaveLength(3);
+    // TypeScript 编译期验证:
+    // const wrong: ProcessEvidence['process_verification_mode'] = 'invalid'; // @ts-expect-error
+  });
+
+  it('Case 5: failure_type 四档 literal union', () => {
+    const failures: ExpectedFailure['failure_type'][] = [
+      'assertion',
+      'timeout',
+      'error',
+      'not-implemented',
+    ];
+    expect(failures).toHaveLength(4);
+  });
+
+  it('Case 6: TddEventChain.red_commit 可 null(tdd_exemption 非空时)', () => {
+    const exemption: TddExemption = {
+      reason: 'light-mode-trivial',
+      loc_delta: 50,
+    };
+    const chain: TddEventChain = {
+      task_ref: 'tasks.md#task-1',
+      red_commit: null, // tdd_exemption 非空时 RED 可省
+      green_commit: {
+        sha: 'def456',
+        timestamp: '2026-05-12T14:30:00Z',
+        green_log_path: '.evidence/task-1-green.log',
+        green_log_hash: 'sha256:greenhash',
+        exit_code: 0,
+        runner_report_path: '.evidence/task-1-green-junit.xml',
+        runner_report_hash: 'sha256:gxhash',
+      },
+      tdd_exemption: exemption,
+      tdd_exemption_acked_by: 'msc',
+    };
+    expect(chain.red_commit).toBeNull();
+    expect(chain.tdd_exemption?.reason).toBe('light-mode-trivial');
+  });
+
+  it('Case 7: validateProcessVerificationConfig 默认值 fallback(缺 process_verification 段)', () => {
+    const sanitized = validateProcessVerificationConfig(undefined);
+    expect(sanitized).toEqual(DEFAULT_PROCESS_VERIFICATION);
+
+    const sanitized2 = validateProcessVerificationConfig({ schema: 'forge-spec-driven/v1' });
+    expect(sanitized2).toEqual(DEFAULT_PROCESS_VERIFICATION);
+  });
+
+  it('Case 8: validateProcessVerificationConfig 范围 + 类型校验', () => {
+    const warns: string[] = [];
+    const warn = (msg: string) => warns.push(msg);
+
+    // sample_ratio 超范围
+    const r1 = validateProcessVerificationConfig(
+      {
+        schema: 'forge-spec-driven/v1',
+        process_verification: { sample_ratio: 1.5 },
+      },
+      warn,
+    );
+    expect(r1.sample_ratio).toBe(DEFAULT_PROCESS_VERIFICATION.sample_ratio);
+    expect(warns[0]).toMatch(/sample_ratio.*\[0,1\]/);
+
+    // mode 非法 string
+    warns.length = 0;
+    const r2 = validateProcessVerificationConfig(
+      {
+        schema: 'forge-spec-driven/v1',
+        // @ts-expect-error - test 故意传非法值校验
+        process_verification: { mode: 'invalid' },
+      },
+      warn,
+    );
+    expect(r2.mode).toBe('full');
+
+    // test_timeout_per_task 非整数
+    warns.length = 0;
+    const r3 = validateProcessVerificationConfig(
+      {
+        schema: 'forge-spec-driven/v1',
+        process_verification: { test_timeout_per_task: 3.14 },
+      },
+      warn,
+    );
+    expect(r3.test_timeout_per_task).toBe(DEFAULT_PROCESS_VERIFICATION.test_timeout_per_task);
+
+    // max_parallel_reruns 超上限
+    warns.length = 0;
+    const r4 = validateProcessVerificationConfig(
+      {
+        schema: 'forge-spec-driven/v1',
+        process_verification: { max_parallel_reruns: 100 },
+      },
+      warn,
+    );
+    expect(r4.max_parallel_reruns).toBe(DEFAULT_PROCESS_VERIFICATION.max_parallel_reruns);
+
+    // 合法值通过
+    warns.length = 0;
+    const r5 = validateProcessVerificationConfig(
+      {
+        schema: 'forge-spec-driven/v1',
+        process_verification: {
+          mode: 'sample',
+          sample_ratio: 0.5,
+          test_timeout_per_task: 600,
+          max_parallel_reruns: 4,
+        },
+      },
+      warn,
+    );
+    expect(r5).toEqual({
+      mode: 'sample',
+      sample_ratio: 0.5,
+      test_timeout_per_task: 600,
+      max_parallel_reruns: 4,
+    });
+    expect(warns).toHaveLength(0);
+  });
+});
+```
+
+- [ ] **Step 1.6.2:跑测试**
+
+```bash
+pnpm test tests/core/schemas/process-evidence.test.ts
+```
+
+Expected: 8 case 全 PASS
+
+- [ ] **Step 1.6.3:跑全本地 verify 收尾 Task 1**
+
+```bash
+pnpm typecheck && pnpm lint && pnpm format:check && pnpm build && pnpm test
+```
+
+Expected: 全 PASS(memory:本地 verification 必须含 format:check)
+
+- [ ] **Step 1.6.4:commit Step 1.6 + 收尾 Task 1**
+
+```bash
+> .git/COMMIT_MSG
+echo "feat(9g Task 1.6): process-evidence schema 8 case 单测 + Task 1 完成" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "tests/core/schemas/process-evidence.test.ts — 8 case:" >> .git/COMMIT_MSG
+echo "- Case 1: schema literal 锁定 forge-process-evidence/v1" >> .git/COMMIT_MSG
+echo "- Case 2: RedCommitRecord red_log_path/red_log_hash(沿 master spec 行 1115/1116)" >> .git/COMMIT_MSG
+echo "- Case 3: GreenCommitRecord green_log_path 且 schema 层禁 expected_failures" >> .git/COMMIT_MSG
+echo "- Case 4: process_verification_mode 三档 literal" >> .git/COMMIT_MSG
+echo "- Case 5: failure_type 四档 literal" >> .git/COMMIT_MSG
+echo "- Case 6: TddEventChain.red_commit 可 null(tdd_exemption 非空)" >> .git/COMMIT_MSG
+echo "- Case 7: validateProcessVerificationConfig 缺段 fallback DEFAULT" >> .git/COMMIT_MSG
+echo "- Case 8: 范围 + 类型 + 合法值四档校验" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "Task 1 完成:11 interface schema + dimension enum 扩 + marker 4 字段 +" >> .git/COMMIT_MSG
+echo "  ForgeConfig 三子树 + 8 case 单测 全本地 verify PASS" >> .git/COMMIT_MSG
+git add tests/core/schemas/process-evidence.test.ts
+git commit -F .git/COMMIT_MSG
+rm .git/COMMIT_MSG
+```
+
+Expected: 全本地 verify PASS;commit 输出
+
+### 2.7 Task 1 完成定义(DoD)
+
+- [x] `src/core/schemas/process-evidence.ts` 创建,11 interface + schema literal
+- [x] `src/core/schema/process-verification-config.ts` 创建,validateProcessVerificationConfig 函数
+- [x] `src/core/schemas/severity.ts:56` FindingHashPayload.dimension union 扩 'process_evidence'
+- [x] `src/core/validate/marker-schema.ts:44+498` DIMENSION_VALUES + error message 扩
+- [x] `src/cli/commands/finding.ts:68-70` stdin JSON 校验扩 'process_evidence'
+- [x] `src/core/markers/types.ts` VerifyMarker + ReviewMarker 加 4 个 optional 字段 + ProcessEvidence import
+- [x] `src/core/schema/types.ts` ForgeConfig 加 process_verification / test / ack 三子树 + 3 个 DEFAULT 常量
+- [x] `tests/core/schemas/process-evidence.test.ts` 8 case PASS
+- [x] 全本地 verify(typecheck + lint + format:check + build + test)PASS
+
+---
+

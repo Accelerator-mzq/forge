@@ -301,7 +301,7 @@ const summary = await buildArchiveSummary(
 
 ### 3.7 `archive.md` 文档更新(v2 codex 一轮 MAJOR 修订:双改 + 加 warning 字段说明)
 
-**双文件同步改(沿 §2.3 改动 surface,v2 修订)**:`commands/archive.md`(根级 slash command)+ `src/core/templates/commands/archive.md`(模板),两份 md5 完全一致(05a3713...),9e2 实施时**逐行同步双改**;CI 加 md5 比对断言守 sync。
+**双文件同步改(沿 §2.3 改动 surface,v2 修订)**:`commands/archive.md`(根级 slash command)+ `src/core/templates/commands/archive.md`(模板),两份 md5 完全一致(实施前基线;v3 codex 二轮 NIT 残留清理:删字面 hash),9e2 实施时**逐行同步双改**;CI 加 md5 比对断言守 sync。
 
 **4 处文案校正**(两份各 4 处):
 - line 53:`process_evidence_summary`(9e1 placeholder,9e2 接 9g 真实统计)→ 改为字段语义说明
@@ -311,7 +311,7 @@ const summary = await buildArchiveSummary(
 
 **短段解释字段语义(新增 ~8-10 行,v2 修订加 invariants_with_warning)**:
 - `invariants_passed`:fence 14 不变量真过且**无 WARNING** 的数(non-legacy + 无软告警路径下 = 14)
-- `invariants_with_warning`:fence 14 不变量中**有 WARNING 软告警但未阻断**的数(沿 design §2.7.3:#7 verify_invocations 不足 / #10 env_hash 不一致 / #13 sample/hash-only 模式 timeout);WARNING 详情同时走 `acked_warnings` 字段(freeze-time)或 stderr(rerun-time),summary 仅统计计数
+- `invariants_with_warning`:fence mapper 经 fail / legacy-skip 优先级筛选后**仍保留为 `status='warning'`** 的 invariant 数(沿 design §2.7.3 WARNING 来源:#7 verify_invocations 不足 / #10 env_hash 不一致 / #13 sample/hash-only 模式 timeout)。**精度损失(v3 codex 二轮 MAJOR 自我修订)**:legacy 路径下被豁免的 invariant 即使产 WARNING 也优先标 'legacy-skip' 不计入本字段(沿 mapper 优先级 fail > legacy-skip > warning > pass);特别是 review-only legacy + verify-side WARNING 的副作用(沿 §4.3 边界场景行);WARNING 实际信息仍走 `acked_warnings`(freeze-time)或 stderr(rerun-time)双路径不丢,**summary 中仅 `invariants_with_warning` 计数可能偏低**;v1.1+ side-aware mapper 修复(沿 §7 遗留 #8)
 - `invariants_failed`:**v1.0 永远 = 0**;fence 任一不变量失败时 archive 直接 exit 1 拒签,summary 不写入。字段对称保留,未来 v1.1+ 若引入 fail-soft 模式可填非零
 - `legacy_exempt`:`process_evidence_unavailable_legacy: true` 路径下被精确豁免的不变量数(沿 master §3.4.4.1 表,legacy 路径恒 = 10),非 legacy 路径恒 = 0;**legacy flag 取自 verify || review 任一为 true**(v2 codex 一轮 MAJOR 修订)
 

@@ -243,8 +243,7 @@ tests/core/worktree.test.ts                   — timeout + cleanup + parallel +
 tests/core/schemas/process-evidence.test.ts   — schema literal + type guard
 
 forge-eval/scenarios/(沿 forge-eval §5.5 现有约定:单 yaml per skill,RED/GREEN 双跑 + judge 评分)
-  ─── 实际形态待 §9 Open question 8 决定(P1 加 scenario 到 3 个现有 skill yaml /
-       P2 新增 process-evidence skill + 独立 yaml)
+  ─── 实际形态:§9.8 已锁 P2(新增 process-evidence skill + 独立 yaml,沿 plan-9i writing-skills 协议)
   ─── 测的是 AI 行为压力(在 time/social/authority 压力下是否拒绝走捷径 +
        坚持调 helper / 不跳 RED commit / 不静默切 mode=hash-only)
   ─── 8 attack 的 fence 拦截不在此层(v6 brainstorm Codex 一轮加 A8 旁支造链 + 主分支换实现) — 完全由 tests/cli/process-evidence-fence.test.ts
@@ -614,7 +613,7 @@ archive 流程:
   ├── 步骤 3.6 plan-9d verify_findings fence(接 freeze-time 写入 marker.verify_findings 的 fence-ctx WARNING)
   ├── 步骤 3.7 plan-9c pause(不动)
   ├── 步骤 3.8 plan-9d ack-log consistency(扩 9g 三 helper entries cross-check + ack-log 尾 hash 校验)
-  └── 步骤 3.9 plan-9e1 three-level fence(接 freeze-time WARNING + v7 新增 rerun-time 内存 WARNING)
+  └── 步骤 3.9 plan-9e1 three-level fence(仅接 freeze-time WARNING;rerun-time WARNING 已 v9 简化为 ack-mode 隐含覆盖 stderr 不阻断,不进 fence)
 ```
 
 ### 5.1 五源 cross-check 反伪造矩阵(v8 修订,Codex 三轮 MINOR-2:四 → 五,把 ack-log tail+count 视为独立源)
@@ -837,7 +836,7 @@ A6 marker 字段绕 helper 直写 / A7 hash-only 无 ack /
 
 ### 8.3 forge-eval 端到端布局(沿 forge-eval §5.5 现有约定:单 yaml per skill + RED/GREEN 双跑 + judge 评分)
 
-**实际形态待 §9 Open question 8 决定**(P1 加 scenario 到 3 个现有 skill yaml / P2 新增 process-evidence skill + 独立 yaml)。
+**实际形态:§9.8 已锁 P2 路径**(新增 process-evidence skill + 独立 yaml,沿 plan-9i writing-skills 协议)。
 
 无论哪条路径,forge-eval 测的都是 **AI 行为压力**,不是 fence 函数代码:
 
@@ -1061,7 +1060,7 @@ freeze-time WARNING(仅不变量 7/10)写 marker.verify_findings 时**沿 plan-9
 - `dimension`: `'process_evidence'`(沿 9d 三维度扩 1)
 - `check_type`: `'invariant-7-verify-count' | 'invariant-10-env-drift'`(每不变量一档)
 - `automated`: `true`
-- 其余字段沿 9d 协议(`validate_run_id` / `content_hash` / `git_head` / `severity='WARNING'` / `evidence` / `recommendation`)
+- 其余字段沿 9d 协议(`content_hash` / `git_head` / `severity='WARNING'` / `evidence` / `recommendation`)
 
 rerun-time WARNING(仅不变量 13 在 sample/hash-only 模式)**不算 finding_hash**(隐含被 ack-mode 覆盖,见 §5 数据流 v9 修订),不写 marker。
 

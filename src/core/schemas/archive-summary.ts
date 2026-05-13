@@ -57,9 +57,19 @@ export interface ReviewPassedRef {
  *
  * placeholder=true 表示本字段是 9e1 占位,9e2 实施时改为真实统计:
  *   - placeholder: false
- *   - invariants_passed: number(0-14)
- *   - invariants_failed: number
- *   - legacy_exempt: number(legacy marker 豁免数)
+ *   - invariants_passed: number(经 mapper 优先级筛选后仍为 status='pass' 的 invariant 数)
+ *   - invariants_with_warning: number(经 mapper 优先级筛选后仍为 status='warning' 的 invariant 数)
+ *   - invariants_failed: number(v1.0 永远 = 0,fence.ok=false 时 archive 直接 exit 1,summary 不写入)
+ *   - legacy_exempt: number(legacy marker 豁免数 — verify || review 任一为 legacy 即触发,沿 §3.4.4.1)
+ *
+ * **精度损失说明(v1.0 接受)**:legacy 路径下被豁免的 invariant 即使产 WARNING 也优先标 'legacy-skip'
+ * 不计入 invariants_with_warning;特别是 review-only legacy + verify-side WARNING 副作用
+ * (沿 brainstorm spec §4.3 边界场景 + §7 遗留 #8);WARNING 实际信息仍走 acked_warnings(freeze-time)
+ * 或 stderr(rerun-time)双路径不丢,仅 summary 中 invariants_with_warning 计数偏低;
+ * v1.1+ side-aware mapper 修复。
+ *
+ * **sum 不变式**:invariants_passed + invariants_with_warning + invariants_failed + legacy_exempt
+ *               === FENCE_INVARIANT_NAMES.length(14)
  */
 export interface ProcessEvidenceSummary {
   /** true = 9e1 占位;false = 9e2 真实统计 */
@@ -68,7 +78,11 @@ export interface ProcessEvidenceSummary {
   note?: string;
   /** placeholder=false 时填具体数;9e2 接 9g */
   invariants_passed?: number;
+  /** placeholder=false 时填具体数;9e2 v2 codex 一轮 MAJOR 修订新增字段;legacy 路径下被豁免 invariant 的 WARNING 不计入(精度损失,见上述说明) */
+  invariants_with_warning?: number;
+  /** placeholder=false 时填具体数;v1.0 永远 = 0(fence.ok=false 时 archive exit 1,summary 不写入) */
   invariants_failed?: number;
+  /** placeholder=false 时填具体数;verify || review 任一为 legacy 时该 invariant 在 §3.4.4.1 豁免表内被跳 */
   legacy_exempt?: number;
 }
 

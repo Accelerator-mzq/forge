@@ -22,10 +22,13 @@ import type {
 // 沿 Task 5 top-level import 一致性 — dynamic import 影响测试性能且 Task 5 已统一 top-level)
 import { runRerunFence } from './process-evidence-rerun.js';
 
-/** 单个不变量的检查结果 */
+/** 单个不变量的检查结果(plan-9e2 v2 codex 一轮 MAJOR 修订:加 status 4 态 enum) */
 export interface FenceInvariantResult {
   invariant: string;
+  /** plan-9g 现有字段,保留 backwards-compat;不变式 status === 'fail' ⟺ ok === false */
   ok: boolean;
+  /** plan-9e2 新增 4 态 status;优先级 fail > legacy-skip > warning > pass */
+  status: 'pass' | 'warning' | 'fail' | 'legacy-skip';
   reason: string;
 }
 
@@ -62,6 +65,17 @@ export const FENCE_INVARIANT_NAMES = [
 ] as const;
 
 export type FenceInvariantName = (typeof FENCE_INVARIANT_NAMES)[number];
+
+/**
+ * plan-9e2 v2 codex 一轮 MAJOR 修订:legacy 路径下被精确豁免的 invariant 编号集合
+ * 沿 master §3.4.4.1:14 不变量中 #1-8/10/13 跳过(共 10 个),#9/11/12/14 保留校验
+ *
+ * 导出供测试断言用(`expect(LEGACY_EXEMPT_INVARIANTS.size).toBe(10)`)
+ * + summary builder summarizeProcessEvidence reference(但不直接用,通过 status='legacy-skip' 折数)
+ */
+export const LEGACY_EXEMPT_INVARIANTS: ReadonlySet<number> = new Set([
+  1, 2, 3, 4, 5, 6, 7, 8, 10, 13,
+]);
 
 /**
  * 横切 fence 检查入口(plan-9g 填实)
@@ -190,23 +204,72 @@ export async function crossCuttingFenceCheck(
   const rerunFindings = await runRerunFence(ctx);
 
   // 5. 汇合 + 输出 FenceCheckResult(verify + review + rerun;v2 M-1 加 reviewFindings)
+  // plan-9e2 v2 codex 一轮 MAJOR 修订:同时筛 CRITICAL + WARNING + 取 verify||review legacy 并集
   const allFindings = [...fieldFindings, ...reviewFindings, ...rerunFindings];
-  const criticalFindings = allFindings.filter((f) => f.severity === 'CRITICAL');
 
-  // 把 14 个不变量映射到 FenceInvariantResult
-  const results: FenceInvariantResult[] = FENCE_INVARIANT_NAMES.map((name) => {
-    const inv = parseInt(name.replace('fence-', ''), 10);
-    const fail = criticalFindings.find((f) => f.invariant === inv);
-    return {
-      invariant: name,
-      ok: !fail,
-      reason: fail?.message ?? 'pass',
-    };
+  // plan-9e2 v2 codex 一轮 MAJOR 修订:legacyExempt 取 verify || review 并集
+  // 沿 fence.ts:115/153-164 当前已两源独立读约定;v1.0 精度损失 = 无法区分 verify-only / review-only legacy
+  const reviewLegacyExempt =
+    (reviewMarker?.process_evidence_unavailable_legacy as boolean | undefined) === true;
+  const effectiveLegacyExempt = legacyExempt || reviewLegacyExempt;
+
+  const results = mapFindingsToResults({
+    findings: allFindings,
+    effectiveLegacyExempt,
   });
+  const ok = !results.some((r) => r.status === 'fail');
 
   return {
-    ok: criticalFindings.length === 0,
+    ok,
     results,
     notImplementedCount: 0, // 9g 完成,permanent 0
   };
+}
+
+/**
+ * mapFindingsToResults — 14 不变量 finding → FenceInvariantResult[14] 纯函数 mapper
+ *
+ * plan-9e2 v2 codex 一轮 MAJOR 修订:从内联代码提取为纯函数(沿 plan-9d / 9j 同模式),便于单元测试
+ *
+ * 优先级:fail > legacy-skip > warning > pass
+ *   1. 任一 invariant 有 CRITICAL → status='fail' / ok=false
+ *   2. legacy 路径下被豁免 invariant(在 LEGACY_EXEMPT_INVARIANTS 集合内)→ status='legacy-skip' / ok=true
+ *   3. 任一 invariant 有 WARNING(未被前两级覆盖)→ status='warning' / ok=true
+ *   4. 默认 → status='pass' / ok=true
+ *
+ * 精度损失:legacy 路径下被豁免 invariant 即使产 WARNING 也被吞为 'legacy-skip',不计入 warning
+ *           (沿 brainstorm spec §4.3 副作用,v1.0 接受,v1.1+ side-aware 拆分)
+ */
+export function mapFindingsToResults(opts: {
+  findings: readonly ProcessEvidenceFinding[];
+  effectiveLegacyExempt: boolean;
+}): FenceInvariantResult[] {
+  const { findings, effectiveLegacyExempt } = opts;
+  const criticalFindings = findings.filter((f) => f.severity === 'CRITICAL');
+  const warningFindings = findings.filter((f) => f.severity === 'WARNING');
+
+  return FENCE_INVARIANT_NAMES.map<FenceInvariantResult>((name) => {
+    const inv = parseInt(name.replace('fence-', ''), 10);
+    // 1. fail 最高优先级
+    const fail = criticalFindings.find((f) => f.invariant === inv);
+    if (fail) {
+      return { invariant: name, ok: false, status: 'fail', reason: fail.message };
+    }
+    // 2. legacy-skip 次优先(legacy 路径下被豁免 invariant 不论是否产 WARNING 均标 skip)
+    if (effectiveLegacyExempt && LEGACY_EXEMPT_INVARIANTS.has(inv)) {
+      return {
+        invariant: name,
+        ok: true,
+        status: 'legacy-skip',
+        reason: 'legacy-exempt per master §3.4.4.1',
+      };
+    }
+    // 3. warning 次次优先(沿 design §2.7.3 #7/#10/#13)
+    const warn = warningFindings.find((f) => f.invariant === inv);
+    if (warn) {
+      return { invariant: name, ok: true, status: 'warning', reason: warn.message };
+    }
+    // 4. 真过
+    return { invariant: name, ok: true, status: 'pass', reason: 'pass' };
+  });
 }

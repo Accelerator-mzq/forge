@@ -49,4 +49,29 @@ describe('parseJUnit', () => {
     expect(result.totalCount).toBe(0);
     expect(result.tests).toEqual([]);
   });
+
+  it('Case 4: <failure/> + <error/> 自闭合空元素不 crash(C-1 regression)', () => {
+    // fast-xml-parser 对 <failure/>/<error/> 自闭合空元素返 "" 而非 undefined/{},
+    // 旧实现 Boolean("") = false → 走 else 分支 + tc.error[0] 越界 → undefined-deref TypeError
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="self-closing-edges" tests="2" failures="2">
+    <testcase name="empty-failure" classname="src/a.test.ts">
+      <failure/>
+    </testcase>
+    <testcase name="empty-error" classname="src/a.test.ts">
+      <error/>
+    </testcase>
+  </testsuite>
+</testsuites>`;
+    // 不应抛错
+    const result = parseJUnit(xml);
+    expect(result.totalCount).toBe(2);
+    expect(result.failCount).toBe(2);
+    // 空元素 → 无 @_type → 走 else 兜底 'error'
+    expect(result.tests[0]?.failure_type).toBe('error');
+    expect(result.tests[0]?.message).toBe('');
+    expect(result.tests[1]?.failure_type).toBe('error');
+    expect(result.tests[1]?.message).toBe('');
+  });
 });

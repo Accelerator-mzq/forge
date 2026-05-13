@@ -93,17 +93,21 @@ export function parseJUnit(xmlContent: string): ReporterResult {
       if (tc.skipped !== undefined) {
         test.status = 'skip';
       } else if (tc.failure !== undefined || tc.error !== undefined) {
-        const failNode = tc.failure
-          ? Array.isArray(tc.failure)
-            ? (tc.failure[0] ?? { '@_message': '', '#text': '', '@_type': '' })
-            : tc.failure
-          : Array.isArray(tc.error!)
-            ? ((tc.error as JUnitFailureNode[])[0] ?? {
-                '@_message': '',
-                '#text': '',
-                '@_type': '',
-              })
-            : (tc.error as JUnitFailureNode);
+        // C-1 修:fast-xml-parser 对 <failure/> 自闭合空元素返 ""(empty string),
+        //         直接 truthy 判断会误入 else 分支 + 越界拿 undefined → TypeError;
+        //         用 typeof === 'object' guard 排除空字符串/null,兜底空对象不抛错
+        const rawFailure = tc.failure ?? null;
+        const rawError = tc.error ?? null;
+        const failNode: JUnitFailureNode =
+          rawFailure && typeof rawFailure === 'object'
+            ? Array.isArray(rawFailure)
+              ? (rawFailure[0] ?? { '@_message': '', '#text': '', '@_type': '' })
+              : rawFailure
+            : rawError && typeof rawError === 'object'
+              ? Array.isArray(rawError)
+                ? (rawError[0] ?? { '@_message': '', '#text': '', '@_type': '' })
+                : rawError
+              : { '@_message': '', '#text': '', '@_type': '' }; // 空元素/无内容兜底
         test.status = 'fail';
         test.message = failNode['@_message'] ?? failNode['#text'] ?? '';
         // failure type 映射(JUnit 标准 type 字段 → ExpectedFailure.failure_type)

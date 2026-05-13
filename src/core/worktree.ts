@@ -83,15 +83,20 @@ export async function runInWorktree<T>(
     }
 
     // 3. 跑 fn 含 timeout
+    // I-1 修:setTimeout handle 在 fn 完成后必须 clearTimeout,
+    //         否则 timeoutMs 默认 300s 内 process 退出会被 pending timer 卡住
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
     const result = await Promise.race([
       fn(workPath),
-      new Promise<never>((_, reject) =>
-        setTimeout(
+      new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(
           () => reject(new WorktreeError(`worktree fn timeout after ${timeoutMs}ms`, 'timeout')),
           timeoutMs,
-        ),
-      ),
-    ]);
+        );
+      }),
+    ]).finally(() => {
+      if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+    });
 
     return result;
   } catch (e) {

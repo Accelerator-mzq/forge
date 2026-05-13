@@ -13,7 +13,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm as fsRm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runInWorktree, ParallelGate, WorktreeError } from '../../src/core/worktree.js';
@@ -43,7 +43,9 @@ describe('runInWorktree', () => {
   });
 
   afterEach(async () => {
-    await execFileAsync('rm', ['-rf', repoPath]).catch(() => {});
+    // I-3 修:用 Node fs/promises.rm 跨平台替代 GNU rm -rf
+    //         (原 execFileAsync('rm',['-rf',...]) 依赖 Git-Bash coreutils,不跨平台)
+    await fsRm(repoPath, { recursive: true, force: true }).catch(() => {});
   });
 
   it('Case 1: happy path 返 fn 结果 + cleanup', async () => {

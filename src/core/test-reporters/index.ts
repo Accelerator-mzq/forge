@@ -60,7 +60,7 @@ export async function parseReporter(
     case 'junit':
       return parseJUnit(content); // 注:parseJUnit 返 ReporterResult 同步,await 不影响
     case 'tap':
-      return await parseTAP(content); // async Promise
+      return parseTAP(content); // async Promise(M-1 修:去 await,no-return-await rule)
     case 'vitest-json':
       return parseVitestJSON(content);
     default: {

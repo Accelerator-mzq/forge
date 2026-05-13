@@ -1,10 +1,10 @@
 # Plan 9e2 — ProcessEvidenceSummary 真实统计接入
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development(推荐)或 superpowers:executing-plans。Steps 用 checkbox(`- [ ]`)语法跟踪。沿 plan-9g / plan-9e1 / plan-9j 同模式,Task 1-6 走标准 TDD/SDD。
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development(推荐)或 superpowers:executing-plans。Steps 用 checkbox(`- [ ]`)语法跟踪。沿 plan-9g / plan-9e1 / plan-9j 同模式,Task 1-5 走标准 TDD/SDD(v3 codex 二轮 plan review 修订:Task 6 删,留 plan-v1.1)。
 
 **Goal**:把 plan-9e1 留下的 `archive_summary.process_evidence_summary` placeholder 字面接到 plan-9g 实施的 14 不变量真实 pass/warning/fail/legacy_exempt 统计;同步双改根级 `commands/archive.md` + 模板 `src/core/templates/commands/archive.md`(md5 sync 守护)+ 5 case integration 覆盖含 review-only legacy + verify-side WARNING 副作用回归。
 
-**Architecture**:四层 — (1) **Schema 层**:`src/core/schemas/archive-summary.ts` `ProcessEvidenceSummary` interface 加 `invariants_with_warning?: number` 字段(v2 codex 一轮 MAJOR 修订),从 3 计数字段扩 4 计数字段;`PLACEHOLDER_PROCESS_EVIDENCE_SUMMARY` 常量保留(测试 fixture 用),生产路径不再使用,JSDoc 注释更新。 (2) **Fence 层**:`src/core/archive/fence.ts` `FenceInvariantResult` 加 `status: 'pass' | 'warning' | 'fail' | 'legacy-skip'` 4 态 enum 字段(沿 plan-9g 现有 `ok: boolean` + `reason: string` 保留 backwards-compat,但新 mapper 维持 `status === 'fail' ⟺ ok === false` 不变式);加 `LEGACY_EXEMPT_INVARIANTS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 10, 13])` 模块级常量(沿 master §3.4.4.1 表);`crossCuttingFenceCheck()` mapper 重写 — `effectiveLegacyExempt = verifyLegacy || reviewLegacy`(v2 codex 一轮 MAJOR 修订并集);从 allFindings 同时筛 CRITICAL + WARNING;mapper 优先级 `fail > legacy-skip > warning > pass`(legacy 路径下被豁免的 invariant 即使产 WARNING 也优先 'legacy-skip',这是 v1.0 接受的精度损失,v1.1+ side-aware 拆分修复)。 (3) **Builder + Validator 层**:`src/core/archive/summary-builder.ts` 加私有 `summarizeProcessEvidence(fenceResult): ProcessEvidenceSummary`(4 字段),`buildArchiveSummary()` 签名扩 `fenceResult: FenceCheckResult` 入参,line 118 placeholder 替换;`src/core/validate/archive-summary-schema.ts` 加 placeholder=false 路径严格校验 — 4 字段必填 + number + 值域 [0, EXPECTED_INVARIANT_COUNT] + sum 不变式;`EXPECTED_INVARIANT_COUNT = FENCE_INVARIANT_NAMES.length` 派生常量(自动跟随 invariant 数演化)。 (4) **CLI + 文档 + 测试层**:`src/cli/commands/archive.ts:231` fence 调用后透传 fenceResult 到 `buildArchiveSummary()`;**双改** `commands/archive.md` + `src/core/templates/commands/archive.md`(实施前 md5 完全一致,实施时逐行同步双改;CI + unit md5 比对断言守 sync);**4 case integration 通过 test-runtime builder helper 构造 fixture**(v2 codex 一轮 plan review BLOCKER 1 修订:仓库无 plan-9g `tests/fixtures/process-evidence-*` baseline,改为代码构造 marker — sha256 hash 链由 helper 实时计算避免手写 hash 失效),覆盖含副作用回归。
+**Architecture**:四层 — (1) **Schema 层**:`src/core/schemas/archive-summary.ts` `ProcessEvidenceSummary` interface 加 `invariants_with_warning?: number` 字段(v2 codex 一轮 MAJOR 修订),从 3 计数字段扩 4 计数字段;`PLACEHOLDER_PROCESS_EVIDENCE_SUMMARY` 常量保留(测试 fixture 用),生产路径不再使用,JSDoc 注释更新。 (2) **Fence 层**:`src/core/archive/fence.ts` `FenceInvariantResult` 加 `status: 'pass' | 'warning' | 'fail' | 'legacy-skip'` 4 态 enum 字段(沿 plan-9g 现有 `ok: boolean` + `reason: string` 保留 backwards-compat,但新 mapper 维持 `status === 'fail' ⟺ ok === false` 不变式);加 `LEGACY_EXEMPT_INVARIANTS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 10, 13])` 模块级常量(沿 master §3.4.4.1 表);`crossCuttingFenceCheck()` mapper 重写 — `effectiveLegacyExempt = verifyLegacy || reviewLegacy`(v2 codex 一轮 MAJOR 修订并集);从 allFindings 同时筛 CRITICAL + WARNING;mapper 优先级 `fail > legacy-skip > warning > pass`(legacy 路径下被豁免的 invariant 即使产 WARNING 也优先 'legacy-skip',这是 v1.0 接受的精度损失,v1.1+ side-aware 拆分修复)。 (3) **Builder + Validator 层**:`src/core/archive/summary-builder.ts` 加私有 `summarizeProcessEvidence(fenceResult): ProcessEvidenceSummary`(4 字段),`buildArchiveSummary()` 签名扩 `fenceResult: FenceCheckResult` 入参,line 118 placeholder 替换;`src/core/validate/archive-summary-schema.ts` 加 placeholder=false 路径严格校验 — 4 字段必填 + number + 值域 [0, EXPECTED_INVARIANT_COUNT] + sum 不变式;`EXPECTED_INVARIANT_COUNT = FENCE_INVARIANT_NAMES.length` 派生常量(自动跟随 invariant 数演化)。 (4) **CLI + 文档 + 单测层**(v3 codex 二轮 plan review 4 BLOCKER 修订:e2e archive CLI 测试在当前仓库不可行,改 unit-only):`src/cli/commands/archive.ts:444-446` 透传 fenceResult 到 `buildArchiveSummary()`;**双改** `commands/archive.md` + `src/core/templates/commands/archive.md`(实施前 md5 完全一致;CI + unit md5 比对断言守 sync);**Task 1/2/3 单测全覆盖**(fence mapper 9 case / summarize 5 case / schema validator 10 case;副作用回归在 Task 1 case 6 + Task 2 case 4 钉住);**Task 4 = 透传 + 跑 plan-9e1/9g 现有 archive 集成测试无回归**(回归 guard);**Task 6(原 e2e + builder helper)整删**留 plan-v1.1。
 
 **Tech Stack**:Node 20+ / TypeScript ESM strict + noUncheckedIndexedAccess / commander 12 / `yaml` v2 / vitest 1.x / pnpm 9+ / `crypto` 内置(md5 sync 守护用);现有 `src/core/schemas/archive-summary.ts`(plan-9e1 已立 ProcessEvidenceSummary 3 字段,本 plan 扩第 4 字段)+ `src/core/archive/fence.ts`(plan-9g 已填实 crossCuttingFenceCheck + 14 不变量 mapper,本 plan 加 status enum + LEGACY_EXEMPT_INVARIANTS + 改 mapper)+ `src/core/archive/summary-builder.ts`(plan-9e1 已立 buildArchiveSummary,本 plan 扩签名 + 加 summarizeProcessEvidence)+ `src/core/validate/archive-summary-schema.ts`(plan-9e1 已立,本 plan 扩 placeholder=false 路径严格校验)+ `src/cli/commands/archive.ts`(plan-9e1/9g/9j 已合,本 plan 改 line 231 区段透传)+ `commands/archive.md` × 2(plan-9e1/9g 已合,本 plan 同步双改)。
 
@@ -16,8 +16,8 @@
 - plan-9g(crossCuttingFenceCheck 填实 + 14 不变量 fence + WARNING via stderr)— 本 plan 复用 fence 输出
 - plan-9j(legacy-exemption + version-retrograde fence)— 本 plan archive.ts:341/349 兜底拒签 v1.0 native marker 误带 legacy flag
 
-**P50 工日**:**3.0**(brainstorm v6 codex 五轮收敛 — 0.75 brainstorm + 0.75 writing-plans + 1.25 SDD + 0.25 retrospect)
-**P90 工日**:**4.0**(P50 + 1.0d buffer ~33%)
+**P50 工日**:**2.5**(v3 codex 二轮 plan review 4 BLOCKER 修订:删 Task 6 e2e + builder 后 scope 缩 — 1.0 brainstorm + 1.0 writing-plans + 1.0 SDD(5 Task 含 retrospect))
+**P90 工日**:**3.5**(P50 + 1.0d buffer ~40%;含跨 OS CI / DONE_REPORT 等纪律时长)
 
 **前置(必须完成)**:
 - plan-9e1 archive 软告警基础(已完成,`dde9209`):`archive_summary.process_evidence_summary` placeholder + `PLACEHOLDER_PROCESS_EVIDENCE_SUMMARY` 常量 + `ProcessEvidenceSummary` interface 3 字段 + `summary-builder.ts` line 118 placeholder 写入 + `summary-render.ts:26-31` placeholder=false 渲染分支(已留好,本 plan 让分支生效)
@@ -40,14 +40,14 @@
   - `tests/core/archive/fence-mapper.test.ts`(新)— 9 case 覆盖 4 态 mapper + dual-legacy 并集 + 优先级
   - `tests/core/archive/summary-builder.test.ts` 扩 — 5 case 覆盖 summarize + 签名扩
   - `tests/core/validate/archive-summary-schema.test.ts` 扩 — 8 case 覆盖 4 字段严格校验 + sum 不变式
-  - `tests/cli/archive-process-evidence-summary.test.ts`(新)— 5 case integration(含副作用回归;v2 codex 一轮 plan review BLOCKER 1 修订:用 test-runtime builder helper 构造 marker,不依赖物理 fixture 目录)
+  - ~~`tests/cli/archive-process-evidence-summary.test.ts`~~ — **删除**(v3 codex 二轮 plan review 4 BLOCKER 修订:e2e archive CLI 测试在当前仓库不可行;副作用回归在 Task 1/2 单测已钉住)
   - `tests/integration/archive-md-sync.test.ts`(新)— 1 case md5 sync 守护
-  - `tests/utils/build-archive-fixture.ts`(新,v2 codex 一轮 plan review BLOCKER 1 修订)— `buildProcessEvidenceFixture(opts)` helper 函数,programmatically 构造完整 verify/review marker(含 process_evidence 字段 + sha256 hash 链 + JCS canonical 序列化),返回 marker objects + helper 写入 mkdtemp 目录;4 种 scenario:`warning` / `verify-legacy` / `review-legacy` / `review-legacy-with-verify-warning`
-- 物理 fixture:**仅 tasks.md / proposal.md / design.md stub 文件**(不含 marker yaml,marker 由 builder helper 注入)— 实施时如发现 plan-9g 已合后 base dev 补全了 `tests/fixtures/process-evidence-*`,Task 6 可改回复用物理 fixture(但 builder helper 仍保留为 backstop)
+  - ~~`tests/utils/build-archive-fixture.ts`~~ — **删除**(v3 修订:Task 6 整删,builder helper 留给 plan-v1.1 整合 e2e fixture)
+- 物理 fixture:**无新增**(v3 修订;副作用回归全部在单测层面)
 - 全本地 verify 通过(`pnpm typecheck && pnpm lint && pnpm format:check && pnpm build && pnpm vitest run`)
 - 跨 OS CI(Linux/Windows × Node 20/22)全绿
 
-**Shell 假设 + commit block 跨 shell 兼容**(沿 plan-9j / plan-9g 同模式):本 plan 6 个 Task commit block 全用 `git commit -F file` 模式(Windows + PowerShell 用户偏好;memory `本地 verification 必须含 format:check`)。**实施者必须先确认当前 shell + 按下表转换**:
+**Shell 假设 + commit block 跨 shell 兼容**(沿 plan-9j / plan-9g 同模式):本 plan 5 个 Task commit block 全用 `git commit -F file` 模式(Windows + PowerShell 用户偏好;memory `本地 verification 必须含 format:check`)。**实施者必须先确认当前 shell + 按下表转换**:
 
 | Shell | commit 命令模式 | 说明 |
 |---|---|---|
@@ -90,8 +90,8 @@
 | `tests/core/validate/archive-summary-schema.test.ts` | 扩 ~150 行 | 8 case schema 严格校验 | T3 |
 | `tests/cli/archive-process-evidence-summary.test.ts` | 新文件 ~300 行 | 5 case integration(含副作用)| T4 |
 | `tests/integration/archive-md-sync.test.ts` | 新文件 ~30 行 | md5 sync 守护单测 | T5 |
-| `tests/utils/build-archive-fixture.ts` | 新文件 ~200 行 | `buildProcessEvidenceFixture(opts)` helper 程序化构造 verify/review marker + sha256 hash 链(v2 codex 一轮 plan review BLOCKER 1 修订:仓库无 plan-9g baseline fixture,改为代码构造)| T6 |
-| `tests/fixtures/archive-9e2-stub/` | 新 fixture stub 目录 | 4 scenario 共享的 tasks.md / proposal.md / design.md(不含 marker yaml,marker 由 builder helper 注入到 mkdtemp)| T6 |
+| ~~`tests/utils/build-archive-fixture.ts`~~ | ~~新文件 ~200 行~~ | ~~builder helper~~ | ~~T6~~(v3 codex 二轮 plan review 删 Task 6;builder helper 留给 plan-v1.1 整合 e2e fixture)|
+| ~~`tests/fixtures/archive-9e2-stub/`~~ | ~~新 fixture stub 目录~~ | ~~stub files~~ | ~~T6~~(v3 删 Task 6)|
 
 ---
 
@@ -1221,25 +1221,44 @@ Remove-Item .git/COMMIT_MSG_T3_GREEN
 
 ---
 
-## 5. Task 4 — archive.ts:231 fenceResult 透传 + integration 5 case
+## 5. Task 4 — archive.ts:231 fenceResult 透传 + 回归 guard(unit-only,v3 codex 二轮 plan review 4 BLOCKER 修订:删 e2e CLI 路径)
 
-**Implementer**:haiku(mechanical — 透传 + integration test 沿 plan-9e1 现有 archive 测试模式)
+**v3 codex 二轮 plan review 4 BLOCKER 集中根因**:plan-9g `tests/fixtures/process-evidence-*` baseline 未合 dev,e2e archive CLI 测试在当前仓库状态下不可行(fence 字段类不变量需真实 marker)。Task 4/Task 6 改为 unit-only — archive.ts:444-446 透传纯代码改动 + 跑 plan-9e1/9g 现有所有测试作为回归 guard,不引入新 e2e 集成测试。副作用回归在 Task 1 unit case 6(`legacy + 1 WARNING 落豁免 invariant fence-10`)+ Task 2 unit case 4 (`legacy + 1 WARNING 落保留 invariant`) 已经钉住。
+
+**Implementer**:haiku(mechanical — 纯透传 + 跑现有测试回归 guard)
 **Spec reviewer**:sonnet
 **Quality reviewer**:sonnet
 
 **Files**:
-- Modify: `src/cli/commands/archive.ts:231-241`(fence 调用区段确认 fenceResult 透传到 buildArchiveSummary;Task 2 Step 3.1b 已临时改,本 Task 整理调用顺序确认)
-- Create: `tests/cli/archive-process-evidence-summary.test.ts`
+- Modify: `src/cli/commands/archive.ts:444-446`(确认 Task 2 Step 3.1b 已加 fenceResult 入参 + fenceResult 变量 scope 正确)
+- **不创建** `tests/cli/archive-process-evidence-summary.test.ts`(v3 codex 二轮 plan review 4 BLOCKER 修订:e2e archive CLI 测试在 plan-9g e2e fixture 未合 dev 时不可行;改为 unit-level regression guard,e2e 留 plan-v1.1 整合)
 
-### Step 1: 先写 RED 失败测试(TDD red)
+### Step 1: 跑现有测试基线 — 确认 archive.ts:444-446 改动未引入回归(v3 codex 二轮 plan review 4 BLOCKER 修订)
 
-- [ ] **Step 1.1: 创建 `tests/cli/archive-process-evidence-summary.test.ts`**
+- [ ] **Step 1.1: 跑 plan-9e1/9g 现有 archive 集成测试基线**
+
+Run: `pnpm vitest run tests/cli/archive*.test.ts`
+Expected: 全 PASS(plan-9e1/9g 现有 archive 集成测试在 base dev HEAD c670876 全绿)
+
+记录基线 PASS 数(沿 plan-9g DONE_REPORT log paths 协议)。
+
+### Step 1 legacy 内容(v3 codex 二轮 plan review 4 BLOCKER 修订:全部废弃,跳到 Step 2)
+
+~~原计划 5 case:non-legacy / non-legacy+WARNING / verify-legacy / review-legacy / review-only legacy + verify WARNING 副作用回归~~
+
+**废弃原因**:plan-9g e2e fixture 未合 dev,e2e archive CLI 测试 setup 完整 marker 不可行。Task 1/2/3 单测已覆盖核心 mapper / summarize / schema 行为;副作用回归在 Task 1 case 6(`legacy + 1 WARNING 落豁免 invariant fence-10`)已钉住。
+
+**完整旧 e2e 测试代码(~200 行)已 git history archived**;可在 `git show 6f08b42 -- docs/plans/2026-05-13-plan-9e2-process-evidence-summary.md` 找回;v3 plan 不再 inline。
+
+实施者:**跳过老 Step 1.x / Step 2 / Step 3 内容,直接走以下新 Step 2 + Step 3**(沿 Task 4 unit-only scope):
+
+<!-- LEGACY CONTENT REMOVED — see git history at 6f08b42 if needed -->
+
+<details>
+<summary>(已废弃 legacy block,展开仅看历史)</summary>
 
 ```typescript
-// archive-process-evidence-summary.test.ts — plan-9e2 Task 4 integration
-// 5 case:non-legacy / non-legacy+WARNING / verify-legacy / review-legacy / review-only legacy + verify WARNING 副作用回归
-// 沿 plan-9e1 tests/cli/archive*.test.ts 同 e2e 模式;fixture 在 Task 6 创建,本 Task 用临时 mkdtemp + 手写 marker
-
+// 旧 e2e 测试 imports
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -1425,7 +1444,9 @@ git commit -F .git/COMMIT_MSG_T4_RED
 Remove-Item .git/COMMIT_MSG_T4_RED
 ```
 
-### Step 2: 实现 — archive.ts:231 区段确认 fenceResult 透传到 buildArchiveSummary(GREEN)
+</details>
+
+### Step 2: 实现 — archive.ts:444-446 fenceResult 透传确认(v3 unit-only,沿 brainstorm spec §3.6)
 
 - [ ] **Step 2.1: 检查 `src/cli/commands/archive.ts:444-446` Task 2 已临时修改的 buildArchiveSummary 调用**
 
@@ -1449,15 +1470,12 @@ Task 4 本步骤检查该改动落地,且 `fenceResult` 变量正确 reference �
 
 如 fenceResult 变量未在该函数 scope 内(可能 Task 2 临时 stub 漏改),修正 — 把 `crossCuttingFenceCheck()` 的返回值 hoisted 到 buildArchiveSummary 调用前可见的 scope。
 
-- [ ] **Step 2.2: 跑测试确认 active case PASS**
-
-Run: `pnpm vitest run tests/cli/archive-process-evidence-summary.test.ts`
-Expected: 1 active case PASS + 4 it.todo skipped
-
-- [ ] **Step 2.3: 跑完整 archive 集成测试确认未回归**
+- [ ] **Step 2.2: 跑 plan-9e1/9g 现有 archive 集成测试确认 fenceResult 透传未引入回归(v3 unit-only)**
 
 Run: `pnpm vitest run tests/cli/archive*.test.ts`
-Expected: 全 PASS(plan-9e1/9g 现有 archive 集成测试不破)
+Expected: 全 PASS(plan-9e1/9g 现有 archive 集成测试不破;Task 4 不引入新 e2e 测试)
+
+注:此 step 是 Task 4 的核心验收 — 透传 fenceResult 后,plan-9e1 现有测试(用 mixed-all-three 等 fixture,缺 process_evidence 的 legacy / pre-9g marker)仍正确产 archive 输出。**Task 4 GREEN 等价于 plan-9e1/9g 测试无回归 + Task 2 单测 5 case + Task 1/3 单测全 PASS**。
 
 ### Step 3: 全本地 verify + commit Task 4
 
@@ -1470,21 +1488,23 @@ Expected: 全 PASS
 
 ```powershell
 @'
-feat(9e2 Task 4 GREEN): archive.ts fenceResult 透传 + 1 active integration case
+feat(9e2 Task 4 GREEN): archive.ts:444-446 fenceResult 透传确认 + 回归 guard(unit-only)
 
-实施 plan-9e2 brainstorm spec §3.6:
-- archive.ts:444-446 buildArchiveSummary 调用接 fenceResult 入参(Task 2 已临时改,Task 4 确认 fenceResult 变量在 scope 内)
-- 1 active integration case 落地:non-legacy + 缺 process_evidence → fence 反向加固拦截 exit 1(plan-9g B-3 修订路径回归 guard)
-- 4 it.todo 占位等 Task 6 fixture 完成
+实施 plan-9e2 brainstorm spec §3.6 + v3 codex 二轮 plan review 4 BLOCKER 修订(改 unit-only):
+- archive.ts:444-446 buildArchiveSummary 调用接 fenceResult 入参(Task 2 Step 3.1b 已临时改,本 Task 4 确认 fenceResult 变量在该 scope 可见)
+- 不引入新 e2e 测试文件(plan-9g fixture 未合 dev,e2e 不可行)
+- 回归 guard:plan-9e1/9g 现有 tests/cli/archive*.test.ts 全 PASS;Task 1/2/3 单测全 PASS
 
-active case PASS,plan-9e1/9g 现有 archive 集成测试无回归。
+副作用回归在 Task 1 单测 case 6 已钉住(legacy + 1 WARNING 落豁免 invariant fence-10);Task 2 单测 case 4(legacy + 1 WARNING 落保留 invariant)覆盖另一路径。
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 '@ | Out-File -Encoding utf8 .git/COMMIT_MSG_T4_GREEN
-git add src/cli/commands/archive.ts tests/cli/archive-process-evidence-summary.test.ts
+git add src/cli/commands/archive.ts
 git commit -F .git/COMMIT_MSG_T4_GREEN
 Remove-Item .git/COMMIT_MSG_T4_GREEN
 ```
+
+注:Task 4 GREEN commit 只 add archive.ts(不 add 新 test 文件,沿 v3 unit-only 修订);archive.ts:444-446 实际改动可能在 Task 2 Step 3.1b 已 committed。本 Task 4 commit 可能是"empty / docs note only" commit,标 Task 4 完成。implementer 视实际改动决定 add 内容。
 
 ---
 
@@ -1687,9 +1707,19 @@ Remove-Item .git/COMMIT_MSG_T5_GREEN
 
 ---
 
-## 7. Task 6 — build-archive-fixture.ts builder helper + 4 it.todo integration case enable
+## 7. ~~Task 6~~ — 已删除(v3 codex 二轮 plan review 4 BLOCKER 修订)
 
-**v2 codex 一轮 plan review BLOCKER 1 修订**:plan-9g `tests/fixtures/process-evidence-*` baseline 在仓库不存在(实际 ls tests/fixtures 仅 archive-warnings/ + legacy-bridge/);改为 **test-runtime builder helper 程序化构造完整 marker**(含 process_evidence + sha256 hash 链 + JCS canonical),不依赖物理 fixture 目录。
+**删除原因**:Task 6 原设计为 e2e archive CLI 集成测试 + builder helper 程序化构造 v1.0 marker。但:
+- builder 产物中 sha256 hash 链 + JCS canonical + ack-log 链构造极复杂,且无法在 mkdtemp 内通过 fence 实际校验(invariant 2/8/9/14 字段类不变量需真实 git history + canonical hash 链一致)
+- plan-9g e2e fixture 未合 dev,无 baseline 可复用
+- 副作用回归(review-only legacy + verify-side WARNING 被吞)在 **Task 1 单测 case 6 已钉住**(`legacy + 1 WARNING 落豁免 invariant fence-10 → status='legacy-skip' 优先级高于 warning,不计 warning`)+ Task 2 单测 case 4 covers 保留 invariant 路径
+
+**Task 6 删除后 plan-9e2 总 5 Task**:T1 fence + schema 扩字段 / T2 builder + 签名扩 / T3 schema validator / T4 archive.ts 透传 + 回归 guard / T5 archive.md 双改 + md5 sync
+
+**v1.1+ 整合**(沿 §9.2 遗留 #2):forge backlog index 消费 archive_summary.yaml 时,真实 archive integration test 由 plan-v1.1 引入(届时 plan-9g e2e fixture 已合 dev);builder helper 可作为 v1.1+ test infrastructure 的 starting point。
+
+<details>
+<summary>(已废弃 legacy Task 6 内容,展开仅看历史)</summary>
 
 **Implementer**:sonnet(test infra — builder helper 设计 + 4 case enable + 副作用回归)
 **Spec reviewer**:sonnet
@@ -2043,9 +2073,11 @@ git commit -F .git/COMMIT_MSG_T6_GREEN
 Remove-Item .git/COMMIT_MSG_T6_GREEN
 ```
 
+</details>
+
 ---
 
-## 8. 综合 DoD 验收(所有 6 Task 完成后)
+## 8. 综合 DoD 验收(所有 5 Task 完成后,v3 codex 二轮 plan review 4 BLOCKER 修订:6→5 Task)
 
 - [ ] **DoD 1: 全本地 verify 通过**
 
@@ -2092,7 +2124,8 @@ gh pr create --base dev --head <feature-branch> --title "feat: plan-9e2 ProcessE
 - FenceInvariantResult 扩 status 4 态 enum + mapper 重写(WARNING + dual-legacy 并集)
 - schema validator 严格化 + sum 不变式守护
 - 双改根级 + 模板 archive.md + md5 sync 守护
-- build-archive-fixture builder helper(v2 codex 一轮 plan review BLOCKER 1 修订:不依赖 plan-9g 物理 fixture)+ 5 integration case 含副作用回归
+- 5 Task 完成(v3 codex 二轮 plan review 修订:删 Task 6 e2e + builder helper,留给 plan-v1.1)
+- 副作用回归在 Task 1 单测 case 6 + Task 2 单测 case 4 已钉住
 
 ## Test plan
 - [x] pnpm typecheck && pnpm lint && pnpm format:check && pnpm build && pnpm vitest run 全 PASS

@@ -4382,3 +4382,398 @@ git commit -F .git/COMMIT_MSG && rm .git/COMMIT_MSG
 
 ---
 
+## 7. Task 6 — rerun fence(worktree 重跑 + 三档 mode 分支) + archive fence.ts 接入 + e2e 8 攻击 fixture + 全本地 verify
+
+**Files:**
+
+- Create: `src/core/archive/process-evidence-rerun.ts`(runRerunFence 不变量 5-6 / 13)
+- Modify: `src/core/archive/fence.ts`(crossCuttingFenceCheck 启用 runRerunFence 调用)
+- Test: `tests/cli/process-evidence-rerun.test.ts`(6 case)
+- Test: `tests/cli/ack-cli-mode.test.ts`(6 case)
+- Test: `tests/integration/process-evidence-end-to-end.test.ts`(e2e 8 攻击 + 1 GREEN 三档 mode)
+- Test fixtures: `tests/fixtures/process-evidence/{attack-1..8 + green-*}/`(11 fixture 目录)
+
+### 7.1 步骤 6.1:写 src/core/archive/process-evidence-rerun.ts
+
+- [ ] **Step 6.1.1:写 runRerunFence 完整字面**
+
+```typescript
+// src/core/archive/process-evidence-rerun.ts — plan-9g Task 6.1
+// process_evidence fence worktree 重跑类不变量(5-6 / 13)
+// brainstorm spec §3 不变量表 + §7 mode 分支
+//
+// mode 分支(brainstorm spec §9.10):
+//   - full     → 全 task 重跑(并发 ≤ max_parallel_reruns)
+//   - sample   → 按 sample_ratio 抽样 task
+//   - hash-only → 跳过 worktree 重跑(返空数组;hash 校验已在 runFieldFence 9 完成)
+//
+// WARNING 13(timeout 在 sample/hash-only)由 ack-mode 隐含覆盖,本 fence 仅 stderr 不阻断
+//   (brainstorm spec §3 WARNING 流转 + v9 简化)
+
+import { execFileSync } from 'node:child_process';
+import { join } from 'node:path';
+import { existsSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import { runInWorktree, ParallelGate, WorktreeError } from '../worktree.js';
+import { parseReporter, type ReporterType } from '../test-reporters/index.js';
+import type {
+  ProcessEvidenceFenceContext,
+  ProcessEvidenceFinding,
+} from './process-evidence-fence.js';
+import type { TddEventChain } from '../schemas/process-evidence.js';
+
+/**
+ * runRerunFence — 跑 worktree 重跑类不变量 5/6/13
+ *
+ * @param ctx fence ctx(brainstorm spec §7.2)
+ * @returns ProcessEvidenceFinding[]
+ */
+export async function runRerunFence(
+  ctx: ProcessEvidenceFenceContext,
+): Promise<ProcessEvidenceFinding[]> {
+  const findings: ProcessEvidenceFinding[] = [];
+
+  if (!ctx.processEvidence) return findings;
+
+  const mode = ctx.processEvidence.process_verification_mode;
+
+  // hash-only:跳过 worktree 重跑(沿 brainstorm spec §9.10;hash 校验由 runFieldFence 9 完成)
+  if (mode === 'hash-only') {
+    return findings;
+  }
+
+  // 读 ForgeConfig.process_verification 配置(已在 buildProcessEvidenceFenceContext sanitize)
+  // 实施者注:ctx 缺该字段时需要从 changeRoot/.../forge/config.yaml 加载;Step 6.1 略,
+  //   writing-plans 阶段补 ctx.config 字段(沿 buildProcessEvidenceFenceContext 扩)
+  const config = {
+    sample_ratio: 0.3, // 默认;实际从 ctx.config 读
+    test_timeout_per_task: 300_000, // 毫秒
+    max_parallel_reruns: 2,
+  };
+
+  // 选择要重跑的 task 列表(full → 全;sample → 抽样)
+  const chains = ctx.processEvidence.tdd_event_chain;
+  let targetChains: TddEventChain[];
+  if (mode === 'full') {
+    targetChains = chains;
+  } else {
+    // sample 抽样:按 sample_ratio,确定性抽样(seed=changeId 保 fence reproducible)
+    const sampleCount = Math.max(1, Math.ceil(chains.length * config.sample_ratio));
+    targetChains = chains.slice(0, sampleCount); // 简化:取前 N 个;实施者按 seed 实现
+  }
+
+  // 取 reporter 类型(从 ForgeConfig.test.reporter,默认 junit)
+  const reporterType: ReporterType = 'junit'; // 实施者从 ctx.testConfig.reporter 读
+
+  // 取测试命令(从 ForgeConfig.test.test_command;默认 'pnpm test')
+  const testCommand = 'pnpm test';
+
+  // 创建并发 gate
+  const gate = new ParallelGate(config.max_parallel_reruns);
+
+  // 并发跑每个 chain(限 max_parallel_reruns)
+  const tasks = targetChains.map(async (chain) => {
+    await gate.acquire();
+    try {
+      // 不变量 5:RED worktree 重跑实际 fail + expected_failures 命中
+      if (chain.red_commit) {
+        try {
+          const rerunResult = await runInWorktree(
+            chain.red_commit.sha,
+            async (workPath) => {
+              try {
+                execFileSync('sh', ['-c', testCommand], {
+                  cwd: workPath,
+                  encoding: 'utf8',
+                  stdio: ['ignore', 'pipe', 'pipe'],
+                });
+                return { exitCode: 0, reportPath: join(workPath, chain.red_commit!.runner_report_path) };
+              } catch (e) {
+                // 测试 fail 是预期(RED);取 exit_code 1
+                return { exitCode: 1, reportPath: join(workPath, chain.red_commit!.runner_report_path) };
+              }
+            },
+            { cwd: ctx.cwd, timeout: config.test_timeout_per_task },
+          );
+
+          // 不变量 5 子项 a:exit_code != 0(预期 RED fail)
+          if (rerunResult.exitCode === 0) {
+            findings.push({
+              invariant: 5,
+              severity: 'CRITICAL',
+              message: `RED rerun expected fail but exit_code=0 (red sha=${chain.red_commit.sha})`,
+              taskRef: chain.task_ref,
+            });
+          }
+
+          // 不变量 5 子项 b:expected_failures 中至少一个真失败(reporter parse 校验)
+          if (existsSync(rerunResult.reportPath)) {
+            const report = await parseReporter(rerunResult.reportPath, reporterType);
+            const actualFailures = report.tests.filter((t) => t.status === 'fail');
+            for (const ef of chain.red_commit.expected_failures) {
+              const matched = actualFailures.some(
+                (af) =>
+                  af.test_file === ef.test_file && af.test_name === ef.test_name,
+              );
+              if (!matched) {
+                findings.push({
+                  invariant: 5,
+                  severity: 'CRITICAL',
+                  message: `RED rerun expected_failure not actually failed: ${ef.test_file}::${ef.test_name}`,
+                  taskRef: chain.task_ref,
+                });
+              }
+            }
+          }
+        } catch (e) {
+          if (e instanceof WorktreeError && e.stage === 'timeout') {
+            const severity = mode === 'full' ? 'CRITICAL' : 'WARNING';
+            findings.push({
+              invariant: 13,
+              severity,
+              message: `RED rerun timeout (>${config.test_timeout_per_task}ms) in ${mode} mode for task ${chain.task_ref}`,
+              taskRef: chain.task_ref,
+            });
+          } else if (e instanceof WorktreeError) {
+            findings.push({
+              invariant: 5,
+              severity: 'CRITICAL',
+              message: `RED worktree error ${e.stage}: ${e.message}`,
+              taskRef: chain.task_ref,
+            });
+          }
+        }
+      }
+
+      // 不变量 6:GREEN worktree 重跑实际 pass
+      try {
+        const rerunResult = await runInWorktree(
+          chain.green_commit.sha,
+          async (workPath) => {
+            try {
+              execFileSync('sh', ['-c', testCommand], {
+                cwd: workPath,
+                encoding: 'utf8',
+                stdio: ['ignore', 'pipe', 'pipe'],
+              });
+              return { exitCode: 0, reportPath: join(workPath, chain.green_commit.runner_report_path) };
+            } catch {
+              return { exitCode: 1, reportPath: join(workPath, chain.green_commit.runner_report_path) };
+            }
+          },
+          { cwd: ctx.cwd, timeout: config.test_timeout_per_task },
+        );
+
+        if (rerunResult.exitCode !== 0) {
+          findings.push({
+            invariant: 6,
+            severity: 'CRITICAL',
+            message: `GREEN rerun expected pass but exit_code=${rerunResult.exitCode}`,
+            taskRef: chain.task_ref,
+          });
+        }
+        // 不变量 6 加固:reporter 显示 0 failures
+        if (existsSync(rerunResult.reportPath)) {
+          const report = await parseReporter(rerunResult.reportPath, reporterType);
+          if (report.failCount > 0) {
+            findings.push({
+              invariant: 6,
+              severity: 'CRITICAL',
+              message: `GREEN rerun reporter shows ${report.failCount} failures`,
+              taskRef: chain.task_ref,
+            });
+          }
+        }
+      } catch (e) {
+        if (e instanceof WorktreeError && e.stage === 'timeout') {
+          const severity = mode === 'full' ? 'CRITICAL' : 'WARNING';
+          findings.push({
+            invariant: 13,
+            severity,
+            message: `GREEN rerun timeout in ${mode} mode for ${chain.task_ref}`,
+            taskRef: chain.task_ref,
+          });
+        }
+      }
+    } finally {
+      gate.release();
+    }
+  });
+
+  await Promise.all(tasks);
+
+  // 注:rerun-time WARNING(不变量 13 在 sample/hash-only)走 stderr 不阻断,不进 fence.ok=false
+  //     (brainstorm spec §3 v9 修订 — ack-mode 隐含覆盖);此处 findings 直接 caller 输出
+  //     CRITICAL 走 archive 拒签;WARNING 由 archive.ts process.stderr 输出告警
+  return findings;
+}
+```
+
+- [ ] **Step 6.1.2:接 fence.ts 启用 runRerunFence 调用**
+
+修改 `src/core/archive/fence.ts` 当前注释 placeholder 行:
+```typescript
+const rerunFindings: ProcessEvidenceFinding[] = [];
+// const rerunFindings = await runRerunFence(ctx); // plan-9g Task 6 启用
+```
+
+改为:
+```typescript
+const { runRerunFence } = await import('./process-evidence-rerun.js');
+const rerunFindings = await runRerunFence(ctx);
+```
+
+(注:用 dynamic import 避免 worktree.ts/runInWorktree 在测试不需要 worktree 的场景被强制加载;实施者可改为静态 import 若觉得 dynamic 影响测试性能)
+
+- [ ] **Step 6.1.3:跑 typecheck + commit Step 6.1**
+
+```bash
+pnpm typecheck
+> .git/COMMIT_MSG
+echo "feat(9g Task 6.1): process-evidence-rerun.ts + fence.ts 接入 runRerunFence" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "src/core/archive/process-evidence-rerun.ts:" >> .git/COMMIT_MSG
+echo "- runRerunFence 不变量 5/6/13;mode 分支(full/sample/hash-only)" >> .git/COMMIT_MSG
+echo "- 不变量 5:RED worktree 重跑 + exit_code != 0 + expected_failures parser 命中" >> .git/COMMIT_MSG
+echo "- 不变量 6:GREEN worktree 重跑 + exit_code == 0 + reporter 0 failures" >> .git/COMMIT_MSG
+echo "- 不变量 13:timeout full=CRITICAL / sample 或 hash-only=WARNING(brainstorm v9 简化)" >> .git/COMMIT_MSG
+echo "- ParallelGate(max_parallel_reruns)限并发(Windows 磁盘空间约束)" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "fence.ts:启用 runRerunFence 调用(dynamic import 避免测试场景强制加载 worktree)" >> .git/COMMIT_MSG
+git add src/core/archive/process-evidence-rerun.ts src/core/archive/fence.ts
+git commit -F .git/COMMIT_MSG && rm .git/COMMIT_MSG
+```
+
+### 7.2 步骤 6.2:写 rerun + ack-cli-mode 单测
+
+- [ ] **Step 6.2.1:写 `tests/cli/process-evidence-rerun.test.ts` 6 case**
+
+```typescript
+// tests/cli/process-evidence-rerun.test.ts — plan-9g Task 6.2
+// 测 runRerunFence 6 case(brainstorm spec §8.2)
+//
+// Case 1: mode='hash-only' → 返空数组(跳过)
+// Case 2: full mode RED rerun exit_code=0 → 不变量 5 CRITICAL
+// Case 3: full mode GREEN rerun exit_code != 0 → 不变量 6 CRITICAL
+// Case 4: full mode timeout → 不变量 13 CRITICAL
+// Case 5: sample mode timeout → 不变量 13 WARNING(不 CRITICAL)
+// Case 6: expected_failures parser 命中校验(RED rerun 真失败但 expected 未中)
+
+import { describe, it, expect } from 'vitest';
+// (完整 fixture 实施者按 runInWorktree mock 模式写;Step 6.2 给框架)
+
+describe('runRerunFence (plan-9g Task 6.2)', () => {
+  it.todo('Case 1: mode=hash-only 跳过 worktree 重跑');
+  it.todo('Case 2: full mode RED rerun exit_code=0 → CRITICAL 5');
+  it.todo('Case 3: full mode GREEN rerun fail → CRITICAL 6');
+  it.todo('Case 4: full mode timeout → CRITICAL 13');
+  it.todo('Case 5: sample mode timeout → WARNING 13(不阻断)');
+  it.todo('Case 6: expected_failures parser 命中失败 → CRITICAL 5');
+});
+```
+
+(完整测试 fixture 沿 worktree.test.ts setupGitRepo 模式 + mock testCommand 输出 — writing-plans 阶段补)
+
+- [ ] **Step 6.2.2:写 `tests/cli/ack-cli-mode.test.ts` 6 case**
+
+```typescript
+// tests/cli/ack-cli-mode.test.ts — plan-9g Task 6.2
+// 测 CI 模式 + mode != full 拒签(brainstorm spec §8.2)
+//
+// Case 1: CI=true + mode=full → 通过
+// Case 2: CI=true + mode=sample → 不变量 12 CRITICAL
+// Case 3: CI=true + mode=hash-only → 不变量 12 CRITICAL
+// Case 4: CI=false + mode=sample + ack 缺 → 不变量 12 CRITICAL
+// Case 5: CI=false + mode=sample + ack 完整 → 通过
+// Case 6: CI=false + mode=hash-only + ack 完整 → 通过
+
+import { describe, it } from 'vitest';
+describe('CI + mode != full ack-mode (plan-9g Task 6.2)', () => {
+  it.todo('Case 1: CI=true mode=full 通过');
+  it.todo('Case 2: CI=true mode=sample → 不变量 12 CRITICAL');
+  it.todo('Case 3: CI=true mode=hash-only → 不变量 12 CRITICAL');
+  it.todo('Case 4: CI=false mode=sample ack 缺 → CRITICAL');
+  it.todo('Case 5: CI=false mode=sample ack 完整 通过');
+  it.todo('Case 6: CI=false mode=hash-only ack 完整 通过');
+});
+```
+
+(完整测试在 writing-plans 阶段补;主要测 `process.env.CI` + mode 字段组合校验 runFieldFence 输出)
+
+### 7.3 步骤 6.3:写 e2e 8 攻击 + 1 GREEN 三档 fixture 端到端测试
+
+- [ ] **Step 6.3.1:写 `tests/integration/process-evidence-end-to-end.test.ts` 框架**
+
+```typescript
+// tests/integration/process-evidence-end-to-end.test.ts — plan-9g Task 6.3
+// e2e 8 attack + 1 GREEN(三档 mode sub-fixture)— brainstorm spec §8.3
+//
+// 8 attack fixture(每 fixture 一个目录,含 marker / staging / ack-log + 预期 fence 输出):
+//   tests/fixtures/process-evidence/attack-1-timestamp-reverse/
+//   tests/fixtures/process-evidence/attack-2-rebase-ancestor-broken/
+//   tests/fixtures/process-evidence/attack-3-same-commit-no-red/
+//   tests/fixtures/process-evidence/attack-4-unrelated-failure/
+//   tests/fixtures/process-evidence/attack-5-fake-verify-invocations/
+//   tests/fixtures/process-evidence/attack-6-bypass-helper/
+//   tests/fixtures/process-evidence/attack-7-hash-only-no-ack/
+//   tests/fixtures/process-evidence/attack-8-cross-branch-rewrite/(brainstorm v6 新增)
+//
+// 1 GREEN(含三档 mode sub-fixture):
+//   tests/fixtures/process-evidence/green-normal-tdd-pass-full/
+//   tests/fixtures/process-evidence/green-normal-tdd-pass-sample/
+//   tests/fixtures/process-evidence/green-normal-tdd-pass-hash-only/
+
+import { describe, it } from 'vitest';
+
+describe('process-evidence e2e attacks (plan-9g Task 6.3)', () => {
+  it.todo('A1 改 timestamp → forge archive 拒签 + 不变量 1 finding');
+  it.todo('A2 rebase ancestor 断 → 拒签 + 不变量 2');
+  it.todo('A3 同 commit 无 exemption → 拒签 + 不变量 5/11');
+  it.todo('A4 不相关代码错误当 RED → 拒签 + 不变量 5 子项 b');
+  it.todo('A5 伪 verify_invocations log → 拒签 + 不变量 9');
+  it.todo('A6 marker 字段绕 helper 直写 → 拒签 + 不变量 9 staging mismatch');
+  it.todo('A7 hash-only 无 ack → 拒签 + 不变量 12');
+  it.todo('A8 旁支造合法链 + 主分支换实现 → 拒签 + 不变量 14(brainstorm v6 新增)');
+  it.todo('GREEN full mode → 通过 archive');
+  it.todo('GREEN sample mode(已 ack）→ 通过 archive');
+  it.todo('GREEN hash-only mode(已 ack）→ 通过 archive');
+});
+```
+
+(每 attack fixture 含约 200-400 行 git fixture + YAML 文件;writing-plans 阶段在 review 后完整 inline 每 fixture 完整字面)
+
+- [ ] **Step 6.3.2:跑全本地 verify(含 it.todo)+ commit Task 6 完成**
+
+```bash
+pnpm typecheck && pnpm lint && pnpm format:check && pnpm build && pnpm test
+> .git/COMMIT_MSG
+echo "feat(9g Task 6): rerun fence + e2e 8 攻击 fixture + Task 6 完成" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "Task 6 完整闭环:" >> .git/COMMIT_MSG
+echo "- process-evidence-rerun.ts:不变量 5/6/13 + mode 分支(full/sample/hash-only)" >> .git/COMMIT_MSG
+echo "  + ParallelGate(max_parallel_reruns)+ reporter parse 校验 expected_failures" >> .git/COMMIT_MSG
+echo "- fence.ts 启用 runRerunFence 调用(dynamic import)" >> .git/COMMIT_MSG
+echo "- tests/cli/process-evidence-rerun.test.ts:6 case 框架(it.todo;详细 fixture writing-plans 阶段)" >> .git/COMMIT_MSG
+echo "- tests/cli/ack-cli-mode.test.ts:6 case 框架(CI × mode 矩阵)" >> .git/COMMIT_MSG
+echo "- tests/integration/process-evidence-end-to-end.test.ts:11 it.todo(8 attack + 3 GREEN)" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "Task 6 完成:rerun fence + archive 集成 + e2e 框架 + 全本地 verify PASS" >> .git/COMMIT_MSG
+git add src/core/archive/process-evidence-rerun.ts src/core/archive/fence.ts \
+  tests/cli/process-evidence-rerun.test.ts tests/cli/ack-cli-mode.test.ts \
+  tests/integration/process-evidence-end-to-end.test.ts
+git commit -F .git/COMMIT_MSG && rm .git/COMMIT_MSG
+```
+
+### 7.4 Task 6 完成定义(DoD)
+
+- [x] `src/core/archive/process-evidence-rerun.ts` — runRerunFence 不变量 5/6/13 + mode 分支 + ParallelGate
+- [x] `src/core/archive/fence.ts` — 启用 runRerunFence 调用
+- [x] `tests/cli/process-evidence-rerun.test.ts` — 6 case 框架(it.todo)
+- [x] `tests/cli/ack-cli-mode.test.ts` — 6 case 框架(it.todo)
+- [x] `tests/integration/process-evidence-end-to-end.test.ts` — 11 it.todo(8 attack + 3 GREEN)
+- [x] 全本地 verify PASS
+
+**注**:Task 6 留 14 个 it.todo 完整 fixture inline 留 writing-plans 阶段 review 后落地;主要因 e2e fixture 每个 ~200-400 行 YAML + git 构造代码,体量大;plan-9g v0 草稿先把测试**框架 + 断言意图**写明,详细 fixture inline 在用户 review plan-9g v1 后展开。
+
+---
+

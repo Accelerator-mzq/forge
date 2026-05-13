@@ -131,7 +131,7 @@ describe('buildArchiveSummary - basic baseline', () => {
     expect(summary.pending_suggestions).toEqual([]);
     expect(summary.schema).toBe('forge-archive-summary/v1');
     expect(summary.change_id).toBe('add-x');
-    // plan-9e2 Task 2:生产路径 summarizeProcessEvidence 不再写 placeholder=true
+    // plan-9e2 Task 2:生产路径 buildProcessEvidenceSummary 不再写 placeholder=true
     expect(summary.process_evidence_summary.placeholder).toBe(false);
   });
 

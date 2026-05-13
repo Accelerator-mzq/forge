@@ -71,7 +71,7 @@ export type FenceInvariantName = (typeof FENCE_INVARIANT_NAMES)[number];
  * 沿 master §3.4.4.1:14 不变量中 #1-8/10/13 跳过(共 10 个),#9/11/12/14 保留校验
  *
  * 导出供测试断言用(`expect(LEGACY_EXEMPT_INVARIANTS.size).toBe(10)`)
- * + summary builder summarizeProcessEvidence reference(但不直接用,通过 status='legacy-skip' 折数)
+ * + summary builder buildProcessEvidenceSummary reference(但不直接用,通过 status='legacy-skip' 折数)
  */
 export const LEGACY_EXEMPT_INVARIANTS: ReadonlySet<number> = new Set([
   1, 2, 3, 4, 5, 6, 7, 8, 10, 13,

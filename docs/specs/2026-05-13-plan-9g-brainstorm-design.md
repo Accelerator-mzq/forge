@@ -1277,15 +1277,16 @@ function checkInvariant14(ctx: ProcessEvidenceFenceContext): ProcessEvidenceFind
 **未修(留 writing-plans)**:
 - 沿 §13 v7 留项:SUG1 schema 测试断言、SUG2 rerun-time WARNING 临时 finding schema(已在 v8 B1 修复中走 ack-log 模式覆盖)
 
-**v10 已直接修订 master spec 项目**(沿 Codex 五轮 M-3 + 六轮 M-4 修复):
-1. §2.7.6 行 1280-1282 helper 表格:接收完整字段,不自跑测试(已修)
-2. §2.7.6 行 1286-1289 "为什么 CLI helper" 段:helper 是 ground truth 写入路径 + worktree 重跑放 archive(已修)
-3. §2.7.8 行 1316-1319 实施清单:helper options 完整列 + freeze CLI 子命令(已修)
+**v11 已直接修订 master spec 项目**(沿 Codex 五~八轮 修复):
+1. §2.7.6 行 1280-1282 helper 表格:接收完整字段,不自跑测试(v10 已修)
+2. §2.7.6 行 1286-1289 "为什么 CLI helper" 段:helper 是 ground truth 写入路径 + worktree 重跑放 archive(v10 已修)
+3. §2.7.8 行 1314 / 1329 / 1340 / 1343 数字残留 13→14 / 7→8 attack(v10 已修)
+4. §2.7.8 行 1316-1319 实施清单:helper options 完整列 + freeze CLI 子命令(v10 已修)
+5. §3.3.2 enforcement matrix 行 1688:14 不变量 + green↞HEAD + ack-log 链 + WARNING 流转两段(v11 已修)
+6. §2.7.3 不变量表行 1189 加第 14 行:green↞HEAD ancestor(v12 本次修,Codex 八轮 M-2)
 
-**待 9g writing-plans 阶段同步的 master spec 修订项**:
-- §2.7.2 schema 加 marker 三新字段(staging_hash + ack_log_tail_hash + ack_log_entry_count)
-- §2.7.3 字面加不变量 14(green↞HEAD)
-- §2.7.8 行 1314 / 1329 / 1340 / 1343 数字残留 13→14 / 7→8 attack(v10 brainstorm 阶段未改 — 留 9g writing-plans 同步)
+**待 9g writing-plans 阶段同步的 master spec 修订项**(已收敛到 1 项):
+- §2.7.2 schema 加 marker 三新字段(staging_hash + ack_log_tail_hash + ack_log_entry_count)— 沿 plan-9c/9d/9j superset additive 模式,writing-plans 实施 marker schema 时同步
 
 ---
 

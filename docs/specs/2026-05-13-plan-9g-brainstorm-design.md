@@ -259,16 +259,19 @@ forge-eval/scenarios/(沿 forge-eval §5.5 现有约定:单 yaml per skill,RED/G
 | 4 | GREEN `exit_code == 0` | CRITICAL | fence.ts | 字段值断言 |
 | **5** | **RED worktree 实际 fail + `expected_failures` 命中** | **CRITICAL** | **rerun.ts** | **runInWorktree + parseReporter** |
 | **6** | **GREEN worktree 实际 pass** | **CRITICAL** | **rerun.ts** | **runInWorktree + parseReporter** |
-| 7 | `verify_invocations 总数 ≥ task 数` | WARNING → marker.verify_findings | fence.ts | 计数 + parseTasks(tasks.md);WARNING 转 VerifyFinding(Codex BLOCKER #3) |
+| 7 | `verify_invocations 总数 ≥ task 数` | WARNING(freeze-time → marker.verify_findings;沿 9a 8 字段 finding_hash + plan-9d ack 流程) | fence.ts | 计数 + parseTasks(tasks.md) |
 | 8 | `subagent_review_chain` 顺序合理 | CRITICAL | fence.ts | git ancestor + timestamp 链 |
 | 9 | process_evidence JCS hash 三源一致 + ack-log prev_entry_hash 链完整 | CRITICAL | fence.ts | canonicalHash() × 3 源 + ack-log chain 重算(Codex SUGGESTION #1) |
-| 10 | env_hash 一致性 | WARNING → marker.verify_findings | fence.ts | lockfile + node_version + os_platform 比对;WARNING 转 VerifyFinding |
+| 10 | env_hash 一致性 | WARNING(freeze-time → marker.verify_findings;沿 9a 8 字段 finding_hash + plan-9d ack 流程) | fence.ts | lockfile + node_version + os_platform 比对 |
 | 11 | tdd_exemption 非空时 ack-log 含条目 | CRITICAL | fence.ts | ack-log scan(复用 ack-log-consistency.ts) |
 | 12 | mode != full 时 acked_by 非空 + CI 拒签 | CRITICAL | fence.ts | ack-log scan + `process.env.CI` |
-| **13** | **重跑 timeout** | **full=CRITICAL / 其他=WARNING → verify_findings** | **rerun.ts** | **runInWorktree opts.timeout** |
+| **13** | **重跑 timeout** | **full=CRITICAL / sample 或 hash-only=WARNING(rerun-time stderr 不阻断;ack-mode 隐含覆盖,无独立 ack;v9 简化,Codex 四轮 B-1)** | **rerun.ts** | **runInWorktree opts.timeout** |
 | **14** | **`green_commit.sha` ↞ archive HEAD ancestor**(v6 新增,Codex BLOCKER #2 修复) | **CRITICAL** | **fence.ts** | **`git merge-base --is-ancestor green_commit.sha HEAD`**;挡旁支造合法 RED/GREEN 链 + 主分支换实现的攻击 |
 
-**WARNING 流转**(Codex BLOCKER #3 修复):不变量 7/10/13 产 WARNING 时,fence 不直接 fail,**转 VerifyFinding schema**(沿 plan-9d Task 3)+ 在 `forge evidence freeze` 时写入 marker.verify_findings 数组。archive.ts 步骤 3.6(verify_findings fence)+ 步骤 3.9(three-level fence)自动接 ack 流程 — WARNING+resolved=false+无 ack 拒签 / WARNING+acked 通过(沿 plan-9e1 三级业务行为 fence 字面)。
+**WARNING 流转**(v9 修订,Codex 五轮 B-1 修复 — 两段闭合区分 freeze-time vs rerun-time):
+
+- **freeze-time WARNING(仅不变量 7 + 10)**:fence-ctx 阶段算,**转 VerifyFinding schema**(沿 plan-9d Task 3),freeze 时写入 marker.verify_findings 数组。archive 步骤 3.6 verify_findings fence + 步骤 3.9 three-level fence 自动接 ack 流程 — WARNING+resolved=false+无 ack 拒签 / +acked 通过(沿 plan-9e1)。finding_hash 沿 9a `computeFindingHash` 8 字段 schema,**dimension 字段扩 enum 加 `process_evidence`**(v9 简化路径需 9g writing-plans 阶段扩 `src/core/schemas/severity.ts:53` FindingHashPayload.dimension enum + plan-9d 三维度 enum,沿 plan-9c/9d/9j superset additive 模式;Codex 五轮 B-2 修复)
+- **rerun-time WARNING(仅不变量 13 在 sample/hash-only 模式)**:fence 在 archive 阶段算,**不写 marker**(避免破坏 freeze 不变性),**仅 stderr 输出告警 + 不阻断 archive**。ack-mode(沿不变量 12 用户必须先 ack)**隐含覆盖**该模式下 rerun-time WARNING。rerun.ts 实现约束:不得为 env drift / 抽样未命中 / reporter fallback 产生额外 rerun-time WARNING(沿 Codex 五轮 SUG-1) — 此类问题应在 freeze-time(不变量 10 env_hash)或 mode ack(不变量 12)处理
 
 ### 3.1 fence.ts 关键函数签名
 
@@ -1145,7 +1148,32 @@ function checkInvariant14(ctx: ProcessEvidenceFenceContext): ProcessEvidenceFind
 
 ---
 
-**Status: ready for fifth-round Codex review**
+**Status: ready for sixth-round Codex review**
+
+---
+
+## 16. Codex 五轮审查修复摘要(v10 修订,本节供六轮审查 cross-check 用)
+
+**真 BLOCKER 修复(2 项,Codex 五轮 B-1 + B-2)**:
+
+- **B1 §3 表格 vs §5/§9.12 矛盾修复**:§3 表格不变量 7/10/13 描述同步 v9 字面 — 7/10 标"WARNING freeze-time → marker.verify_findings(沿 9a 8 字段 finding_hash + plan-9d ack 流程)";13 标"sample/hash-only=WARNING(rerun-time stderr 不阻断;ack-mode 隐含覆盖,无独立 ack)";加不变量 14 行(原表只 13 行)
+- **B2 dimension='process_evidence' enum 扩展**:freeze-time WARNING 沿 9a `computeFindingHash` 8 字段 schema 必须扩 `src/core/schemas/severity.ts:53` FindingHashPayload.dimension enum **加 'process_evidence'**(superset additive,沿 plan-9c/9d/9j 同模式)+ plan-9d 三维度 enum 同步;9g writing-plans 阶段实施;brainstorm spec §3 WARNING 流转段显式声明此修订
+
+**真 MAJOR 修复(3 项,Codex 五轮 M-1/-2/-3)**:
+
+- **M1 master spec §2.7.6 行 1286-1289 + 1319 修订**:
+  - 行 1286-1289 "为什么 CLI helper(关键设计)" 段:helper 不自跑测试,接收字段后 append staging.yaml + ack-log.jsonl(双源 + JCS 链);archive `runRerunFence` 在 worktree 重跑验证 exit_code;marker 写入由独立 freeze CLI 子命令
+  - 行 1319 §2.7.8 实施清单:`forge evidence record-tdd/verify/review` options 列完整(19 个新选项);加 `forge evidence freeze --kind` 子命令;每个 helper 内部"append staging + ack-log,worktree 重跑放 archive"
+- **M2 master plan §3.7 标题修订**:line 324 标题改"v9 brainstorm Codex 一轮~四轮修订:加不变量 14 / freeze CLI / ack-log 链 + tail_hash + entry_count / 9i 前置 / helper 接收字段 / freeze-time WARNING 7/10 走 9a 8 字段 + 扩 dimension enum / rerun-time WARNING 13 ack-mode 隐含覆盖 stderr 不阻断"
+- **M3 master plan §3.7 实施分阶段 9g.1 修订**:line 330 改"helper 接收完整字段不自跑测试",列扩展的 commander options + freeze CLI 子命令 + staging 锁 + ack-log chain + dimension enum 扩
+
+**真 MINOR 修复(1 项)**:
+
+- **MIN-1 master plan 选项 B 9g(7) → 9g(8)**:line 52 同步 v9 工日变化,slice 总和 39 → 40.5(与 §0 总计 P50 40.5 闭合)
+
+**SUGGESTION 修复(1 项)**:
+
+- **SUG-1 rerun.ts 约束**:§3 WARNING 流转段加显式约束 — rerun.ts 不得为 env drift / 抽样未命中 / reporter fallback 产生额外 rerun-time WARNING,此类问题应在 freeze-time(不变量 10 env_hash)或 mode ack(不变量 12)处理
 
 ---
 

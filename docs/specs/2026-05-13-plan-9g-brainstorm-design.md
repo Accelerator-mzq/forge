@@ -247,7 +247,7 @@ forge-eval/scenarios/(沿 forge-eval §5.5 现有约定:单 yaml per skill,RED/G
        P2 新增 process-evidence skill + 独立 yaml)
   ─── 测的是 AI 行为压力(在 time/social/authority 压力下是否拒绝走捷径 +
        坚持调 helper / 不跳 RED commit / 不静默切 mode=hash-only)
-  ─── 7 attack 的 fence 拦截不在此层 — 完全由 tests/cli/process-evidence-fence.test.ts
+  ─── 8 attack 的 fence 拦截不在此层(v6 brainstorm Codex 一轮加 A8 旁支造链 + 主分支换实现) — 完全由 tests/cli/process-evidence-fence.test.ts
        fixture 单元测试覆盖(沿 §5.3)
 ```
 
@@ -299,7 +299,7 @@ export interface ProcessEvidenceFenceContext {
 }
 
 export interface ProcessEvidenceFinding {
-  invariant: number;                       // 1..13
+  invariant: number;                       // 1..14(v6 brainstorm Codex 一轮加不变量 14)
   severity: Severity;                      // CRITICAL | WARNING | SUGGESTION
   message: string;
   taskRef?: string;
@@ -802,21 +802,23 @@ export async function buildProcessEvidenceFenceContext(args: {
 ### 8.1 14 不变量 × 8 攻击场景命中点(v6 brainstorm Codex 一轮:加不变量 14 + A8 旁支造链)
 
 ```
-                            ┌──┬──┬──┬──┬──┬──┬──┐
-                            │A1│A2│A3│A4│A5│A6│A7│
-─────────────────────────────┼──┼──┼──┼──┼──┼──┼──┤
-不变量 1  timestamp           │✓ │  │  │  │  │  │  │
-不变量 2  ancestor            │✓ │✓ │  │  │  │  │  │
-不变量 3  RED exit            │  │  │  │✓ │  │  │  │
-不变量 5  RED 重跑 + EF 命中  │  │  │✓ │✓ │  │  │  │
-不变量 6  GREEN 重跑          │  │  │✓ │  │  │  │  │
-不变量 9  JCS 三源            │  │  │  │  │✓ │✓ │  │
-不变量 11 tdd_exemption ack   │  │  │✓ │  │  │  │  │
-不变量 12 mode + ack          │  │  │  │  │  │  │✓ │
-─────────────────────────────┴──┴──┴──┴──┴──┴──┴──┘
+                            ┌──┬──┬──┬──┬──┬──┬──┬──┐
+                            │A1│A2│A3│A4│A5│A6│A7│A8│
+─────────────────────────────┼──┼──┼──┼──┼──┼──┼──┼──┤
+不变量 1  timestamp           │✓ │  │  │  │  │  │  │  │
+不变量 2  ancestor            │✓ │✓ │  │  │  │  │  │  │
+不变量 3  RED exit            │  │  │  │✓ │  │  │  │  │
+不变量 5  RED 重跑 + EF 命中  │  │  │✓ │✓ │  │  │  │  │
+不变量 6  GREEN 重跑          │  │  │✓ │  │  │  │  │  │
+不变量 9  JCS 五源            │  │  │  │  │✓ │✓ │  │  │
+不变量 11 tdd_exemption ack   │  │  │✓ │  │  │  │  │  │
+不变量 12 mode + ack          │  │  │  │  │  │  │✓ │  │
+**不变量 14 green↞HEAD**     │  │  │  │  │  │  │  │**✓** │
+─────────────────────────────┴──┴──┴──┴──┴──┴──┴──┴──┘
 A1 改 timestamp / A2 rebase 断链 / A3 同 commit 无 exemption /
 A4 不相关代码错误当 RED / A5 伪 verify_invocations log /
-A6 marker 字段绕 helper 直写 / A7 hash-only 无 ack
+A6 marker 字段绕 helper 直写 / A7 hash-only 无 ack /
+**A8 旁支造合法 RED/GREEN 链 + 主分支换实现**(v6 brainstorm 新增,Codex 一轮 BLOCKER-2)
 ```
 
 ### 8.2 单元测试覆盖率目标(tests/cli/ + tests/core/)
@@ -860,7 +862,7 @@ scenarios:
 **关键区分**:
 - forge-eval(§5.5)= AI 行为压力测试,RED/GREEN 双跑,judge 评分;**走 API key 烧钱**($1-2/PR)
 - tests/cli/(§5.3)= fence 函数 fixture 单元测试,vitest 跑,纯 Node;**零成本**
-- 7 attack 的 fence 拦截能力**完全靠 tests/cli/process-evidence-fence.test.ts 验证**,不靠 forge-eval
+- 8 attack 的 fence 拦截能力**完全靠 tests/cli/process-evidence-fence.test.ts 验证**,不靠 forge-eval
 
 ---
 
@@ -1159,7 +1161,22 @@ function checkInvariant14(ctx: ProcessEvidenceFenceContext): ProcessEvidenceFind
 
 ---
 
-**Status: ready for eighth-round Codex review**
+**Status: ready for ninth-round Codex review**
+
+---
+
+## 19. Codex 九轮终审修复摘要(v13 最终修订)
+
+**进展**:0 BLOCKER 四连(六/七/八/九轮),2 MAJOR 全修(预期 0 BLOCKER + 0 MAJOR 终态)。
+
+**真 MAJOR 修复(2 项)**:
+
+- **M-1 §17 待同步矛盾闭合**:§17 line 1197 "保留真正待同步项(§2.7.2 marker 字段 + §2.7.3 不变量 14 + §2.7.8 数字残留)" 改字面 — 说明 §2.7.3 不变量 14 已在 v12 修(§2.7.3 表加第 14 行) + §2.7.8 数字残留已在 v10 修(行 1314/1329/1340/1343);唯一剩余待同步项是 §2.7.2 marker 三字段,与 §13 最新声明一致
+- **M-2 brainstorm 自身正文 13/7 字面终扫**:
+  - §3.1 fence ctx 函数签名 `invariant: number; // 1..13` → `// 1..14`
+  - §2.3 测试清单 "7 attack" → "8 attack" + 加 A8 注脚
+  - §8.1 矩阵表头扩 A8 列 + 加 "不变量 14 green↞HEAD" 行 + 列出 A8 完整字面("旁支造合法 RED/GREEN 链 + 主分支换实现")+ JCS 三源 → 五源 注
+  - §8.3 forge-eval 关键区分段 "7 attack" → "8 attack"
 
 ---
 
@@ -1194,7 +1211,7 @@ function checkInvariant14(ctx: ProcessEvidenceFenceContext): ProcessEvidenceFind
 - **M1 dimension enum 扩展操作指引完整化**:§3 WARNING 流转段列出完整文件清单 — `src/core/schemas/severity.ts:53` + `src/core/validate/marker-schema.ts:44+498` + `src/cli/commands/finding.ts:68` + `docs/plans/2026-05-11-plan-9d-verify-three-dimensions.md:3612` + 对应 tests;明确"type + runtime validator 两层"修订(v10 修复 v9 只说 type 层的遗漏)
 - **M2 FindingHashPayload 字段错写修正**:§9.12 finding_hash 字面从 9 字段错写改为 **8 字段实际**(去掉 `validate_run_id` ephemeral 字段,沿 src/core/schemas/scope-entries.ts:161 注释)
 - **M3 master spec §2.7.8 行 1314/1329/1340/1343 残留 13/7 修正**:本次直接改 master spec — `13 不变量` → `14 不变量`(行 1314/1329);`13 不变量 × 7 攻击场景` → `14 不变量 × 8 攻击场景`(行 1340);`forge-eval/scenarios/process-evidence/ 7 攻击` → `process-evidence.yaml 3 scenario AI 行为压力测试`(行 1343,沿 v9 forge-eval 修订)
-- **M4 §9.12 "待同步 master spec" 矛盾修正**:删 §9.12 末尾"待 9g writing-plans 阶段同步 master spec §2.7.6 行 1280 文字"段;改为列举 v10 已直接修订项(行 1280-1282 + 1286-1289 + 1316-1319);保留真正待同步项(§2.7.2 marker 字段 + §2.7.3 不变量 14 + §2.7.8 数字残留)
+- **M4 §9.12 "待同步 master spec" 矛盾修正**:删 §9.12 末尾"待 9g writing-plans 阶段同步 master spec §2.7.6 行 1280 文字"段;改为列举 v10 已直接修订项(行 1280-1282 + 1286-1289 + 1316-1319);**v11/v12 七~八轮后续修复**:§2.7.3 不变量 14 + §2.7.8 数字残留也已直接修订,§2.7.2 marker 三字段是唯一剩余待同步项(收敛到 §13 最新声明)
 
 **真 MINOR 修复(2 项)**:
 

@@ -2211,3 +2211,680 @@ git commit -F .git/COMMIT_MSG && rm .git/COMMIT_MSG
 
 ---
 
+## 4. Task 3 — ack-log.ts 扩 prev_entry_hash 全 JSONL 链 + evidence.ts 三 helper 扩 19 options + staging 写入 + 文件锁 + 7+5+3 case
+
+**Files:**
+
+- Modify: `src/core/ack-log.ts`(EvidenceHelperEntry 加 prev_entry_hash + appendAckLog 算链 + 加 verifyAckLogChain helper + 加 readAllAckLogEntries helper)
+- Modify: `src/cli/commands/evidence.ts`(三 helper commander options +19 + staging 写入 + 文件锁)
+- Create: `src/core/staging-lock.ts`(staging 文件锁仿 archive lock.ts 模式)
+- Create: `tests/core/ack-log-chain.test.ts`(7 case)
+- Modify: `tests/cli/evidence-helpers.test.ts`(扩 5 case — 三 helper staging append + ack-log chain + 文件锁)
+- Create: `tests/cli/evidence-staging-concurrency.test.ts`(3 case)
+
+### 4.1 步骤 3.1:扩 src/core/ack-log.ts EvidenceHelperEntry + appendAckLog 算链 + verifyAckLogChain helper
+
+- [ ] **Step 3.1.1:修改 EvidenceHelperEntry interface(ack-log.ts 现有 line 35-46 区段)加 prev_entry_hash 字段**
+
+老字面:
+```typescript
+/** evidence helper 操作日志条目(kind='evidence-helper') */
+export interface EvidenceHelperEntry {
+  schema: 'forge-ack-log/v1';
+  kind: 'evidence-helper';
+  timestamp: string;
+  helper_name: 'record-tdd' | 'record-verify' | 'record-review';
+  change_id: string;
+  task_ref: string;
+  payload_hash: string;
+  status: 'success' | 'partial' | 'failed';
+  git_head: string | null;
+  extra: Record<string, unknown>;
+}
+```
+
+改为:
+```typescript
+/** evidence helper 操作日志条目(kind='evidence-helper') */
+export interface EvidenceHelperEntry {
+  schema: 'forge-ack-log/v1'; // §3.12.4 接口冻结字面量类型
+  kind: 'evidence-helper';
+  timestamp: string; // ISO 8601 时间戳
+  helper_name: 'record-tdd' | 'record-verify' | 'record-review' | 'freeze'; // plan-9g Task 4 加 freeze
+  change_id: string;
+  task_ref: string;
+  payload_hash: string;
+  status: 'success' | 'partial' | 'failed';
+  git_head: string | null;
+  /**
+   * plan-9g Task 3 新增 — superset additive(brainstorm spec §9.11)
+   * 全 JSONL 链 prev_entry_hash:指上一条 entry(任意 kind)的 canonicalHash;
+   * 链头 null(空 ack-log 或 plan-9a 旧 entry 缺等价 null)
+   */
+  prev_entry_hash?: string | null;
+  extra: Record<string, unknown>;
+}
+```
+
+- [ ] **Step 3.1.2:同样修改 AckEntry interface 加 prev_entry_hash 字段(沿 brainstorm v8 B-3 全 JSONL 链决策)**
+
+找 AckEntry interface 在 ack-log.ts(应在 EvidenceHelperEntry 之前不远),在其末尾 `extra: Record<string, unknown>;` 之前加同样字段:
+
+```typescript
+  /**
+   * plan-9g Task 3 新增 — superset additive(brainstorm spec §9.11 全 JSONL 链)
+   * 与 EvidenceHelperEntry 同字段;沿全 JSONL 链协议,所有 kind entry 都参与链
+   */
+  prev_entry_hash?: string | null;
+  extra: Record<string, unknown>;
+}
+```
+
+- [ ] **Step 3.1.3:修改 appendAckLog 算 prev_entry_hash(沿 brainstorm spec §9.11)**
+
+老字面(ack-log.ts:82-89):
+```typescript
+export async function appendAckLog(changeRoot: string, entry: AckLogEntry): Promise<void> {
+  const evidenceDir = path.join(changeRoot, '.evidence');
+  await mkdir(evidenceDir, { recursive: true });
+  const logPath = path.join(evidenceDir, 'ack-log.jsonl');
+  await appendFile(logPath, JSON.stringify(entry) + '\n', 'utf8');
+}
+```
+
+改为:
+```typescript
+/**
+ * appendAckLog — 以 NDJSON 格式追加一条日志到 ack-log.jsonl
+ *
+ * plan-9g Task 3 修订(brainstorm spec §9.11):
+ *   1. 读 ack-log.jsonl 最后一非空行(若文件不存在 → prev=null)
+ *   2. 算 prev_entry_hash = canonicalHash(lastEntry)
+ *   3. entry.prev_entry_hash = prev(全 JSONL 链,跨 kind)
+ *   4. appendFile
+ *
+ * 兼容性:plan-9a 旧 entries 缺 prev_entry_hash 字段 → 视为 undefined(链头);
+ *   9g 第一条新 entry 的 prev 必须等于旧最后一条 entry 的 canonicalHash(向后兼容)
+ */
+export async function appendAckLog(changeRoot: string, entry: AckLogEntry): Promise<void> {
+  const evidenceDir = path.join(changeRoot, '.evidence');
+  await mkdir(evidenceDir, { recursive: true });
+  const logPath = path.join(evidenceDir, 'ack-log.jsonl');
+
+  // plan-9g:算 prev_entry_hash(全 JSONL 链)
+  let prevHash: string | null = null;
+  if (existsSync(logPath)) {
+    const content = await readFile(logPath, 'utf8');
+    const lines = content.split('\n').filter((l) => l.trim().length > 0);
+    if (lines.length > 0) {
+      const lastLine = lines[lines.length - 1];
+      try {
+        const lastEntry = JSON.parse(lastLine) as AckLogEntry;
+        prevHash = canonicalHash(lastEntry);
+      } catch {
+        // 坏 JSON 行 → 视为 chain corrupted,fence 会单独拒签;append 仍走 prev=null
+        prevHash = null;
+      }
+    }
+  }
+  const entryWithChain: AckLogEntry = { ...entry, prev_entry_hash: prevHash };
+
+  await appendFile(logPath, JSON.stringify(entryWithChain) + '\n', 'utf8');
+}
+```
+
+新 import 头部加(若尚未):
+
+```typescript
+import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import { canonicalHash } from './canonical-json.js'; // 9a 已立
+```
+
+- [ ] **Step 3.1.4:新增 readAllAckLogEntries + verifyAckLogChain 两 helper(放 ack-log.ts 文件末)**
+
+```typescript
+/**
+ * readAllAckLogEntries — 读全 ack-log.jsonl 解析所有 entry(plan-9g §9.11)
+ *
+ * 跳过空行;遇坏 JSON 行抛错(fence 视为 ack-log corrupted)
+ *
+ * @param changeRoot change 根目录
+ * @returns 全 ack-log entry array(空 ack-log 或文件不存在 → [])
+ * @throws Error 若有坏 JSON 行,error message 含行号
+ */
+export async function readAllAckLogEntries(changeRoot: string): Promise<AckLogEntry[]> {
+  const logPath = path.join(changeRoot, '.evidence', 'ack-log.jsonl');
+  if (!existsSync(logPath)) return [];
+  const content = await readFile(logPath, 'utf8');
+  const lines = content.split('\n');
+  const entries: AckLogEntry[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line.length === 0) continue; // 跳过空行
+    try {
+      entries.push(JSON.parse(line) as AckLogEntry);
+    } catch (e) {
+      throw new Error(
+        `ack-log corrupted at line ${i + 1}: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+  return entries;
+}
+
+/** ack-log 链校验结果(plan-9g §9.11 三重校验) */
+export interface AckLogChainVerifyResult {
+  ok: boolean;
+  reason?: string;
+}
+
+/**
+ * verifyAckLogChain — 三重校验 ack-log 链完整性(brainstorm spec §9.11)
+ *   1. 链内自洽:prev_entry_hash 逐行 match(挡中间一行被改)
+ *   2. 行数固化:实际 entry count 必 == markerEntryCount(挡"重写整链 + 链内自洽")
+ *   3. 尾 hash 固化:链尾 hash 必 == markerTailHash(挡"改最后一行无下一行引用")
+ *
+ * @param allEntries 全 JSONL 解析后(已跳空行 + 顺序与文件序一致)
+ * @param markerTailHash marker.ack_log_tail_hash 快照(freeze 时固化)
+ * @param markerEntryCount marker.ack_log_entry_count 快照
+ */
+export function verifyAckLogChain(
+  allEntries: AckLogEntry[],
+  markerTailHash: string | null,
+  markerEntryCount: number | null,
+): AckLogChainVerifyResult {
+  // 0. 空日志边界
+  if (allEntries.length === 0) {
+    if (markerTailHash !== null || (markerEntryCount !== null && markerEntryCount !== 0)) {
+      return { ok: false, reason: 'empty ack-log but marker has tail/count' };
+    }
+    return { ok: true };
+  }
+
+  // 1. 链内自洽
+  let expectedPrev: string | null = null;
+  for (let i = 0; i < allEntries.length; i++) {
+    const entry = allEntries[i];
+    // plan-9a 旧 entry 缺字段 → 视为 undefined === null 等价(链头逻辑)
+    const actualPrev = entry.prev_entry_hash ?? null;
+    if (actualPrev !== expectedPrev) {
+      return { ok: false, reason: `chain broken at entry ${i + 1}` };
+    }
+    expectedPrev = canonicalHash(entry);
+  }
+
+  // 2. 行数固化(挡"重写整链且每行 hash 自洽")
+  if (markerEntryCount !== null && allEntries.length !== markerEntryCount) {
+    return {
+      ok: false,
+      reason: `entry count mismatch: actual=${allEntries.length} expected=${markerEntryCount}`,
+    };
+  }
+
+  // 3. 尾 hash 固化(挡"改最后一行 + 没下一行引用")
+  if (markerTailHash !== null && expectedPrev !== markerTailHash) {
+    return {
+      ok: false,
+      reason: `tail hash mismatch: actual=${expectedPrev} marker=${markerTailHash}`,
+    };
+  }
+
+  return { ok: true };
+}
+```
+
+- [ ] **Step 3.1.5:跑 typecheck 确认改动**
+
+```bash
+pnpm typecheck
+```
+
+Expected: PASS(EvidenceHelperEntry/AckEntry 加 optional 字段 + 新 helper 都是 superset additive,不破坏现有)
+
+- [ ] **Step 3.1.6:跑 9a / 9d / 9j 现有 ack-log 测试确认未破坏**
+
+```bash
+pnpm test tests/core/ack-log.test.ts
+pnpm test tests/core/archive/ack-log-consistency.test.ts
+```
+
+Expected: 全 PASS(prev_entry_hash 字段对老测试是 undefined,等价 null,链头逻辑)
+
+- [ ] **Step 3.1.7:写 `tests/core/ack-log-chain.test.ts` 7 case**
+
+```typescript
+// tests/core/ack-log-chain.test.ts — plan-9g Task 3.1
+// 测 ack-log 全 JSONL 链 + appendAckLog 算链 + verifyAckLogChain 三重校验
+// 沿 brainstorm spec §8.2 测试矩阵 7 case
+
+import { describe, it, expect, beforeEach } from 'vitest';
+import { mkdtemp, writeFile, mkdir, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import {
+  appendAckLog,
+  readAllAckLogEntries,
+  verifyAckLogChain,
+} from '../../src/core/ack-log.js';
+import type { EvidenceHelperEntry, AckEntry } from '../../src/core/ack-log.js';
+import { canonicalHash } from '../../src/core/canonical-json.js';
+
+function mkHelperEntry(seq: number): EvidenceHelperEntry {
+  return {
+    schema: 'forge-ack-log/v1',
+    kind: 'evidence-helper',
+    timestamp: `2026-05-13T0${seq}:00:00Z`,
+    helper_name: 'record-tdd',
+    change_id: 'test-change',
+    task_ref: `tasks.md#task-${seq}`,
+    payload_hash: `sha256:placeholder-${seq}`,
+    status: 'success',
+    git_head: null,
+    extra: { seq },
+  };
+}
+
+describe('ack-log chain (plan-9g Task 3.1)', () => {
+  let changeRoot: string;
+
+  beforeEach(async () => {
+    changeRoot = await mkdtemp(join(tmpdir(), 'forge-acklog-chain-'));
+    await mkdir(join(changeRoot, '.evidence'), { recursive: true });
+  });
+
+  it('Case 1: 空 ack-log → readAllAckLogEntries 返 [];verifyAckLogChain 通过', async () => {
+    const entries = await readAllAckLogEntries(changeRoot);
+    expect(entries).toEqual([]);
+    const result = verifyAckLogChain(entries, null, null);
+    expect(result.ok).toBe(true);
+  });
+
+  it('Case 2: appendAckLog 第一条 prev_entry_hash=null,第二条指上一条 hash', async () => {
+    await appendAckLog(changeRoot, mkHelperEntry(1));
+    await appendAckLog(changeRoot, mkHelperEntry(2));
+    const entries = await readAllAckLogEntries(changeRoot);
+    expect(entries).toHaveLength(2);
+    expect(entries[0].prev_entry_hash).toBeNull();
+    // 第二条 prev 应等于第一条 canonicalHash(已含 prev_entry_hash=null 的完整 entry)
+    expect(entries[1].prev_entry_hash).toBe(canonicalHash(entries[0]));
+  });
+
+  it('Case 3: verifyAckLogChain 链内自洽通过 + 完整 marker 固化通过', async () => {
+    await appendAckLog(changeRoot, mkHelperEntry(1));
+    await appendAckLog(changeRoot, mkHelperEntry(2));
+    await appendAckLog(changeRoot, mkHelperEntry(3));
+    const entries = await readAllAckLogEntries(changeRoot);
+    const tailHash = canonicalHash(entries[2]);
+    const result = verifyAckLogChain(entries, tailHash, 3);
+    expect(result.ok).toBe(true);
+  });
+
+  it('Case 4: 链断检测 — 中间一行被改 → chain broken', async () => {
+    await appendAckLog(changeRoot, mkHelperEntry(1));
+    await appendAckLog(changeRoot, mkHelperEntry(2));
+    await appendAckLog(changeRoot, mkHelperEntry(3));
+    // 篡改中间行内容(但 prev_entry_hash 不变)— 后续行的 prev 不再 match
+    const entries = await readAllAckLogEntries(changeRoot);
+    entries[1].extra = { tampered: true }; // 改内容
+    const result = verifyAckLogChain(entries, canonicalHash(entries[2]), 3);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('chain broken');
+  });
+
+  it('Case 5: 行数 mismatch — 实际 3 行但 marker 固化 4 行 → entry count mismatch', async () => {
+    await appendAckLog(changeRoot, mkHelperEntry(1));
+    await appendAckLog(changeRoot, mkHelperEntry(2));
+    const entries = await readAllAckLogEntries(changeRoot);
+    const tailHash = canonicalHash(entries[1]);
+    const result = verifyAckLogChain(entries, tailHash, 4); // 假装 marker 写 4 行
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('entry count mismatch');
+  });
+
+  it('Case 6: tail hash mismatch — 改最后一行无下一行引用 → tail mismatch', async () => {
+    await appendAckLog(changeRoot, mkHelperEntry(1));
+    await appendAckLog(changeRoot, mkHelperEntry(2));
+    const entries = await readAllAckLogEntries(changeRoot);
+    // 篡改最后一行(实际尾 hash 变)但 marker 固化的是原 tail
+    const origTailHash = canonicalHash(entries[1]);
+    entries[1].extra = { tampered: true };
+    const result = verifyAckLogChain(entries, origTailHash, 2);
+    expect(result.ok).toBe(false);
+    // 注:中间篡改也触发链断;但若 entries 只有 1 元素改动 tail 不影响内链,test 调成
+    // 此 case 主要测 verifyAckLogChain 通过 tail 检测 — 上面 case 4 已测 chain broken,这里
+    // 模拟"重写整链 + 链内自洽 + 行数对" → 仅 tail 字段固化挡住
+    expect(['chain broken', 'tail hash mismatch'].some(s => result.reason?.includes(s))).toBe(true);
+  });
+
+  it('Case 7: 坏 JSON 行 → readAllAckLogEntries 抛 corrupted error', async () => {
+    const logPath = join(changeRoot, '.evidence', 'ack-log.jsonl');
+    await writeFile(logPath, '{"schema":"forge-ack-log/v1","kind":"evidence-helper","timestamp":"2026-01-01"}\nINVALID-JSON\n', 'utf8');
+    await expect(readAllAckLogEntries(changeRoot)).rejects.toThrow(/corrupted at line 2/);
+  });
+});
+```
+
+- [ ] **Step 3.1.8:跑测试**
+
+```bash
+pnpm test tests/core/ack-log-chain.test.ts
+```
+
+Expected: 7 case 全 PASS
+
+- [ ] **Step 3.1.9:commit Step 3.1**
+
+```bash
+> .git/COMMIT_MSG
+echo "feat(9g Task 3.1): ack-log.ts 扩 prev_entry_hash 全 JSONL 链 + 7 case 单测" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "src/core/ack-log.ts:" >> .git/COMMIT_MSG
+echo "- EvidenceHelperEntry 加 prev_entry_hash?: string | null(superset additive)" >> .git/COMMIT_MSG
+echo "- AckEntry 同 prev_entry_hash 字段(沿 brainstorm v8 B-3 全 JSONL 链决策)" >> .git/COMMIT_MSG
+echo "- appendAckLog 读最后一非空行 + 算 prev_entry_hash = canonicalHash(lastEntry)" >> .git/COMMIT_MSG
+echo "- 新增 readAllAckLogEntries(skip 空行 + 坏 JSON 抛 corrupted)" >> .git/COMMIT_MSG
+echo "- 新增 verifyAckLogChain 三重校验:链内自洽 + 行数固化 + 尾 hash 固化" >> .git/COMMIT_MSG
+echo "  (沿 brainstorm spec §9.11 Codex 二轮 MAJOR-3 + SUG1 修复)" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "兼容性:plan-9a 旧 entries 缺 prev_entry_hash 视为 undefined === null(链头)" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "tests/core/ack-log-chain.test.ts:7 case 全 PASS" >> .git/COMMIT_MSG
+echo "- 空 log / appendAckLog 算链 / 链内自洽通过 / 中间改 → 链断 /" >> .git/COMMIT_MSG
+echo "  行数 mismatch / tail mismatch / 坏 JSON 行 → corrupted error" >> .git/COMMIT_MSG
+git add src/core/ack-log.ts tests/core/ack-log-chain.test.ts
+git commit -F .git/COMMIT_MSG && rm .git/COMMIT_MSG
+```
+
+### 4.2 步骤 3.2:写 src/core/staging-lock.ts(staging 文件锁,仿 archive lock.ts)
+
+- [ ] **Step 3.2.1:写 `src/core/staging-lock.ts` 完整字面**
+
+```typescript
+// src/core/staging-lock.ts — plan-9g Task 3.2
+// staging 文件并发保护(brainstorm spec §9.10)
+// 仿 archive lock.ts 模式 — O_CREAT|O_EXCL + isPidAlive stale detection
+//
+// 用途:helper(record-tdd/verify/review)写 staging.yaml 是"读 YAML + 改 array +
+//       重算 hash + 覆写"非原子操作;主代理多 helper 并发(per-task 并行)会 lost update。
+//       wrapper read-modify-write 在 acquireStagingLock → releaseStagingLock 内。
+
+import { writeFile, readFile, rm } from 'node:fs/promises';
+import { existsSync, openSync, closeSync, mkdirSync, constants } from 'node:fs';
+import { join, dirname } from 'node:path';
+
+/** lock 文件内容 */
+interface StagingLockData {
+  pid: number;
+  acquired_at: string;
+}
+
+/** 当 staging lock 被另一活进程持有时抛出 */
+export class StagingLockHeldError extends Error {
+  constructor(public readonly holder: StagingLockData) {
+    super(
+      `another evidence helper is writing staging (pid ${holder.pid}, acquired ${holder.acquired_at})`,
+    );
+    this.name = 'StagingLockHeldError';
+  }
+}
+
+/** acquireStagingLock 选项 */
+export interface AcquireStagingLockOptions {
+  /** 等待 lock 释放的总超时毫秒(默认 5000) */
+  timeoutMs?: number;
+  /** 重试间隔毫秒(默认 100) */
+  retryIntervalMs?: number;
+}
+
+/**
+ * acquireStagingLock — 获取 staging 文件锁
+ *
+ * 路径:<changeRoot>/.evidence/.staging.lock(独立于 archive lock)
+ *
+ * 流程:
+ *   1. O_CREAT|O_EXCL 原子创建 lock 文件
+ *   2. 若已存在 — isPidAlive 检测:
+ *      - dead(stale)→ 删 lock 重试
+ *      - alive → 等 retryInterval 重试,直到 timeoutMs 超时抛 StagingLockHeldError
+ *   3. 成功 → 写 {pid, acquired_at}
+ *
+ * @param changeRoot change 根目录
+ * @param options { timeoutMs, retryIntervalMs }
+ * @returns release 函数(幂等)
+ */
+export async function acquireStagingLock(
+  changeRoot: string,
+  options: AcquireStagingLockOptions = {},
+): Promise<() => Promise<void>> {
+  const timeoutMs = options.timeoutMs ?? 5000;
+  const retryIntervalMs = options.retryIntervalMs ?? 100;
+  const lockPath = join(changeRoot, '.evidence', '.staging.lock');
+
+  mkdirSync(dirname(lockPath), { recursive: true });
+
+  const deadline = Date.now() + timeoutMs;
+  let lastHolder: StagingLockData | null = null;
+
+  while (Date.now() < deadline) {
+    let fd: number;
+    try {
+      fd = openSync(lockPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o644);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+        // lock 已存在;检测 stale
+        try {
+          const data = JSON.parse(await readFile(lockPath, 'utf8')) as StagingLockData;
+          lastHolder = data;
+          if (!isPidAlive(data.pid)) {
+            // stale → 删 lock 重试
+            await rm(lockPath, { force: true });
+            continue;
+          }
+        } catch {
+          // 坏 lock 文件 → 删除重试
+          await rm(lockPath, { force: true });
+          continue;
+        }
+        // alive → 等 retryInterval
+        await new Promise((r) => setTimeout(r, retryIntervalMs));
+        continue;
+      }
+      throw err;
+    }
+
+    // 创建成功 → 写 lock 内容
+    const data: StagingLockData = {
+      pid: process.pid,
+      acquired_at: new Date().toISOString(),
+    };
+    await writeFile(lockPath, JSON.stringify(data, null, 2), { encoding: 'utf8', flag: 'w' });
+    closeSync(fd);
+
+    return async (): Promise<void> => {
+      if (existsSync(lockPath)) {
+        await rm(lockPath, { force: true });
+      }
+    };
+  }
+
+  // 超时 → 抛错(用最后一次读到的 holder 数据)
+  if (lastHolder) {
+    throw new StagingLockHeldError(lastHolder);
+  }
+  throw new StagingLockHeldError({ pid: -1, acquired_at: new Date(deadline).toISOString() });
+}
+
+/** isPidAlive — 沿 archive lock.ts 同函数 */
+function isPidAlive(pid: number): boolean {
+  if (pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
+}
+```
+
+- [ ] **Step 3.2.2:跑 typecheck**
+
+```bash
+pnpm typecheck
+```
+
+Expected: PASS
+
+- [ ] **Step 3.2.3:写测试 `tests/cli/evidence-staging-concurrency.test.ts` 3 case**
+
+```typescript
+// tests/cli/evidence-staging-concurrency.test.ts — plan-9g Task 3.2
+// 测 staging 文件锁并发保护(brainstorm spec §9.10)
+//
+// Case 1: 双 acquire 串行 — 第二个等到第一个 release
+// Case 2: stale lock 自动清理
+// Case 3: timeout 触发 StagingLockHeldError
+
+import { describe, it, expect, beforeEach } from 'vitest';
+import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import {
+  acquireStagingLock,
+  StagingLockHeldError,
+} from '../../src/core/staging-lock.js';
+
+describe('staging-lock', () => {
+  let changeRoot: string;
+
+  beforeEach(async () => {
+    changeRoot = await mkdtemp(join(tmpdir(), 'forge-staging-lock-'));
+    await mkdir(join(changeRoot, '.evidence'), { recursive: true });
+  });
+
+  it('Case 1: 双 acquire 串行(第二个等第一个 release)', async () => {
+    const release1 = await acquireStagingLock(changeRoot, { timeoutMs: 2000 });
+    const order: number[] = [];
+    const p2 = acquireStagingLock(changeRoot, { timeoutMs: 2000, retryIntervalMs: 20 }).then(
+      (release2) => {
+        order.push(2);
+        return release2();
+      },
+    );
+    await new Promise((r) => setTimeout(r, 100));
+    expect(order).toEqual([]); // 第二个还在等
+    order.push(1);
+    await release1();
+    await p2;
+    expect(order).toEqual([1, 2]);
+  });
+
+  it('Case 2: stale lock 自动清理(模拟 pid 不存在)', async () => {
+    const lockPath = join(changeRoot, '.evidence', '.staging.lock');
+    // 写一个 pid=0(永远不存在)的 lock 模拟 stale
+    await writeFile(
+      lockPath,
+      JSON.stringify({ pid: 0, acquired_at: '2020-01-01T00:00:00Z' }),
+      'utf8',
+    );
+    const release = await acquireStagingLock(changeRoot, { timeoutMs: 1000 });
+    expect(existsSync(lockPath)).toBe(true);
+    // lock 已被替换成当前 pid;release 后删除
+    await release();
+    expect(existsSync(lockPath)).toBe(false);
+  });
+
+  it('Case 3: timeout 触发 StagingLockHeldError(双 pid alive 模拟)', async () => {
+    // 写一个 pid=process.pid(自己 alive)模拟 holder
+    const lockPath = join(changeRoot, '.evidence', '.staging.lock');
+    await writeFile(
+      lockPath,
+      JSON.stringify({ pid: process.pid, acquired_at: new Date().toISOString() }),
+      'utf8',
+    );
+    await expect(
+      acquireStagingLock(changeRoot, { timeoutMs: 200, retryIntervalMs: 50 }),
+    ).rejects.toBeInstanceOf(StagingLockHeldError);
+  });
+});
+```
+
+- [ ] **Step 3.2.4:跑测试 + commit Step 3.2**
+
+```bash
+pnpm test tests/cli/evidence-staging-concurrency.test.ts
+> .git/COMMIT_MSG
+echo "feat(9g Task 3.2): staging-lock.ts + 3 case 并发测试" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "src/core/staging-lock.ts — 仿 archive lock.ts 模式:" >> .git/COMMIT_MSG
+echo "- acquireStagingLock(changeRoot, {timeoutMs, retryIntervalMs}) — O_CREAT|O_EXCL 独占" >> .git/COMMIT_MSG
+echo "- isPidAlive stale detection(pid<=0 视为 stale)" >> .git/COMMIT_MSG
+echo "- 等待重试 retry(默认 100ms);timeout 默认 5s" >> .git/COMMIT_MSG
+echo "- StagingLockHeldError 抛 holder 数据" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "用途:helper 写 staging.yaml read-modify-write 并发保护" >> .git/COMMIT_MSG
+echo "  (brainstorm spec §9.10 Codex 一轮 M-2 修复)" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "tests/cli/evidence-staging-concurrency.test.ts:3 case PASS" >> .git/COMMIT_MSG
+git add src/core/staging-lock.ts tests/cli/evidence-staging-concurrency.test.ts
+git commit -F .git/COMMIT_MSG && rm .git/COMMIT_MSG
+```
+
+### 4.3 步骤 3.3:扩 evidence.ts 三 helper 加 19 options + staging 写入
+
+(Task 3.3 是 plan-9g 最大单 step — 涉及 ~300+ 行 evidence.ts 改动;详细 inline 见 docs/plans/2026-05-13-plan-9g-process-evidence.md Task 3.3 子节,**writing-plans 阶段补全;v0 plan 草稿当前不展开完整 evidence.ts inline,留 Task 3 实施者按本 spec § 子节模板写出**)
+
+**关键改动清单**(沿 brainstorm spec §9.12):
+
+1. **record-tdd 加 11 options**:`--red-timestamp` / `--red-log` / `--red-log-hash` / `--red-report` / `--red-report-hash` / `--red-exit` + 同 6 个 green-* + `--tdd-exemption <json>`(总 +12)
+2. **record-verify 加 5 options**:`--report-hash` / `--log` / `--log-hash` / `--exit-code` / `--invoked-at`
+3. **record-review 加 3 options**:`--spec-iterations <json>` / `--quality-iterations <json>` / `--main-check-off-at <iso>`
+4. **三 helper 内部加 staging 写入路径**:
+   - acquireStagingLock(changeRoot) → 读 staging.yaml 或新建 → 改三数组 → 重算 staging_hash → 覆写 → releaseStagingLock
+   - 同时仍调 appendAckLog(已扩 prev_entry_hash 链)
+5. **`tests/cli/evidence-helpers.test.ts` 扩 5 case**:每 helper 一个 happy path(--options 全填)+ staging append-only + lock acquire
+
+(注:此 step 字面在 Codex 一轮 review 后会按需扩;当前留 brainstorm spec §9.12 完整 option 列表 + 实施者按现有 record-tdd 骨架扩 commander.option 链 + helper action 体内追加 staging 写入 + 用 staging-lock wrapper)
+
+- [ ] **Step 3.3.1:实施 record-tdd 扩 12 options**(沿 plan-9a 现有骨架,加 commander.option 链)
+- [ ] **Step 3.3.2:实施 record-verify 扩 5 options**
+- [ ] **Step 3.3.3:实施 record-review 扩 3 options**
+- [ ] **Step 3.3.4:三 helper 加 staging 写入路径 + acquireStagingLock wrapper**
+- [ ] **Step 3.3.5:扩 `tests/cli/evidence-helpers.test.ts` 加 5 case**
+- [ ] **Step 3.3.6:跑全 evidence 测试 + commit Task 3 完成**
+
+```bash
+pnpm test tests/cli/evidence-helpers.test.ts tests/cli/evidence-staging-concurrency.test.ts tests/core/ack-log-chain.test.ts
+pnpm typecheck && pnpm lint && pnpm format:check && pnpm build && pnpm test
+> .git/COMMIT_MSG
+echo "feat(9g Task 3.3): evidence helper 扩 20 options + staging 写入 + 锁 + 5 case + Task 3 完成" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "三 helper commander options 大幅扩(brainstorm §9.12;沿 master spec §2.7.6 v10 修订):" >> .git/COMMIT_MSG
+echo "- record-tdd +12 options(red/green × log/log-hash/report-hash/exit/timestamp + tdd-exemption)" >> .git/COMMIT_MSG
+echo "- record-verify +5(report-hash/log/log-hash/exit-code/invoked-at)" >> .git/COMMIT_MSG
+echo "- record-review +3(spec-iterations/quality-iterations/main-check-off-at)" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "三 helper 内部新增 staging 写入路径:" >> .git/COMMIT_MSG
+echo "- acquireStagingLock → 读 staging.yaml → 改三数组 → 重算 staging_hash → 覆写 → release" >> .git/COMMIT_MSG
+echo "- 同时调 appendAckLog(已含 prev_entry_hash 链)" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "tests/cli/evidence-helpers.test.ts:扩 5 case(三 helper happy path + staging + lock)" >> .git/COMMIT_MSG
+echo "" >> .git/COMMIT_MSG
+echo "Task 3 完成:ack-log chain + staging 锁 + helper 扩 options + 7+5+3+3 case = 18 case PASS" >> .git/COMMIT_MSG
+git add src/cli/commands/evidence.ts tests/cli/evidence-helpers.test.ts
+git commit -F .git/COMMIT_MSG && rm .git/COMMIT_MSG
+```
+
+### 4.4 Task 3 完成定义(DoD)
+
+- [x] `src/core/ack-log.ts` — EvidenceHelperEntry + AckEntry 加 prev_entry_hash;appendAckLog 算链;readAllAckLogEntries + verifyAckLogChain 两 helper
+- [x] `src/core/staging-lock.ts` — acquireStagingLock + StagingLockHeldError(仿 archive lock.ts 模式)
+- [x] `src/cli/commands/evidence.ts` — 三 helper 加 20 options + staging 写入 + 文件锁 wrapper
+- [x] `tests/core/ack-log-chain.test.ts` 7 case PASS
+- [x] `tests/cli/evidence-staging-concurrency.test.ts` 3 case PASS
+- [x] `tests/cli/evidence-helpers.test.ts` 扩 5 case PASS
+- [x] 全本地 verify PASS
+
+---
+

@@ -9,6 +9,21 @@
 
 ---
 
+## 0.0 文档状态声明(v7 新增,Codex 二轮 BLOCKER-1/-2 修)
+
+**本文档是 brainstorming 阶段产物,描述 plan-9g 的"实施清单"而非"已实施成果"。** 全文出现的"9g 改"、"扩 helper options"、"删 opt-in flag"、"加不变量 14"、"加 prev_entry_hash chain"、"加 staging 锁"、"加 freeze 子命令"等表述,都是 9g writing-plans 阶段拆 task + 实施时的目标,**当前代码库尚未包含这些改动**。
+
+- `src/cli/commands/evidence.ts` 当前仍是 plan-9a 骨架(record-tdd/verify/review 三 helper,无 freeze 子命令,无 staging 写入)
+- `src/core/ack-log.ts` 当前 EvidenceHelperEntry 无 prev_entry_hash 字段
+- `src/core/archive/fence.ts` 当前 FENCE_INVARIANT_NAMES 是 13 项 stub,9g writing-plans 阶段扩到 14 并填实
+- `src/cli/commands/archive.ts` 当前保留 `--enable-cross-cutting-fence` + `--allow-stub-fence` 两 opt-in flag,9g writing-plans 阶段移除
+
+**本文档是 plan-9g writing-plans 阶段的输入 spec**,不是验证当前代码状态的 checklist。Codex 后续审查请按此区分:
+- 设计漏洞 / scope / inconsistency / 沟通断层 → 应作 BLOCKER/MAJOR 报告
+- "spec 与代码不一致" → 仅当 spec 自相矛盾(如声明 9a 已完成 X 但 9a 实际未完成)才是问题;否则属预期(spec 描述未来 9g 实施)
+
+---
+
 ## 0. 目的与边界
 
 本文档是 `superpowers:brainstorming` skill 流程的产物,**记录 plan-9g 实施路径选型决策**,而非重新设计 §2.7 内容。
@@ -28,7 +43,7 @@
 | 3 | Worktree helper 接口抽象层 | **高阶 `runInWorktree(sha, fn, opts)`** | try/finally 强制 cleanup,丢 cleanup 不可能;test 时 mock 整个 helper 简单;sample 模式多 task 重跑可通过 `max_parallel_reruns` 并发 gate |
 | 4 | process_evidence helper append-only 写入路径 | **staging 文件 + archive 聚合(三源 cross-check)** | helper 调用不依赖 marker 存在;marker 字段是凝固快照;**marker == staging == ack-log 三源 cross-check 反伪造强度最高**;不动现有 marker reader 代码(archive/validate/recover) |
 | 5 | forge-eval RED scenario 组织 | **7 个独立 attack scenario + 1 GREEN(含三档 mode sub-fixture)** | 沿 v0.4 forge-eval/scenarios/ 模式,目录隔离;debug 时一眼看出当前测哪类攻击;改一个不连累别的 |
-| 6 | Staging → marker freeze 触发点 | **新 CLI 子命令 `forge evidence freeze`**(v6 修订,Codex BLOCKER #1) | 原 v5 锁"verify.ts/review CLI 内联"基于错误假设(verify.ts/review.ts 不存在);v6 改为新 CLI 子命令挂 evidence Command 下,主代理在 commands/verify.md 步骤 4.3 写完 .verify-passed.yaml 后显式调 |
+| 6 | Staging → marker freeze 触发点 | **新 CLI 子命令 `forge evidence freeze`**(v6 修订,Codex BLOCKER #1) | 原 v5 锁"verify.ts/review CLI 内联"基于错误假设(verify.ts/review.ts 不存在);v6 改为新 CLI 子命令挂 evidence Command 下,主代理在 commands/verify.md 步骤 4.3 写完 .verify-passed 后显式调 |
 | 7 | Schema 校验工具 | **手写 TS interface + 沿 archive-summary.ts JSDoc 风格** | 现有 src/core/schemas/ 全用手写 interface(无 zod),沿同风格一致;运行时校验由 fence 函数显式做 |
 
 ---
@@ -103,7 +118,7 @@ src/cli/commands/evidence.ts
       原本只写 ack-log.jsonl 一行;9g 加 staging.yaml 同步 append(read-modify-write 模式)
       staging 写入走文件锁(Codex MAJOR #2 修复:.evidence/.staging.lock)
    3. 新增子命令 forge evidence freeze <changeId>:
-      读 staging.yaml + 校验 staging_hash + 读 .verify-passed.yaml(或 .review-passed) +
+      读 staging.yaml + 校验 staging_hash + 读 .verify-passed(或 .review-passed) +
       复制三数组到 marker.process_evidence 字段 + 写 process_evidence_staging_hash 快照 +
       transaction 落盘(§9.6 锁定 B:tmp + rename atomic,沿 archive transaction.ts 模式)
       主代理在 commands/verify.md 步骤 4.3 写完 marker YAML 后显式调
@@ -149,6 +164,13 @@ src/core/markers/types.ts
    老 marker 缺等价 undefined,沿 plan-9c pause_decisions / plan-9d verify_findings /
    plan-9j created_by_tool_version 同模式)
    + process_evidence_staging_hash?: string(freeze 时 snapshot,archive fence cross-check)
+   + ack_log_tail_hash?: string(v7 新增,Codex 二轮 MAJOR-3 修复:freeze 时固化 ack-log 尾 hash,
+     archive 验证防"重写整链 + 链内自洽"攻击)
+   + ack_log_entry_count?: number(v7 新增,同 MAJOR-3:固化 evidence-helper entry 行数)
+
+src/core/schemas/archive-summary.ts(v7 新增修订项,Codex 二轮 MINOR-2)
+   ProcessEvidenceSummary 字段统计从 13 不变量 → 14 不变量(plan-9e1 留的 placeholder
+   原写 13,9g 接入时同步改 14;archive-summary.ts:33 / 133 行)
 ```
 
 #### 2.2.3 Config schema(2 个;v6 编号不变)
@@ -526,46 +548,56 @@ helper 每次 append 后重算 `staging_hash` 覆盖。freeze 时 `forge evidenc
                                           ▼
                             releaseStagingLock(changeRoot)
 
-[verify slash 模板完成 — 主代理在 commands/verify.md 步骤 4.3 写完 .verify-passed.yaml 后调]
+[verify slash 模板完成 — 主代理在 commands/verify.md 步骤 4.3 写完 .verify-passed 后调]
 
-主代理 ──→ forge evidence freeze <changeId>     ← v6 修订:新 CLI 子命令(挂 evidence Command)
+主代理 ──→ forge evidence freeze <changeId> --kind <verify|review>     ← v7 修订:新 CLI 子命令 + --kind 区分两 marker(Codex 二轮 BLOCKER-4)
                              │
                              │ 1. acquireStagingLock(防 freeze 期间 helper 再 append)
                              │ 2. 读 staging.yaml
                              │ 3. 重算 staging_hash 校验未被中间篡改
-                             │ 4. 读 .verify-passed.yaml(主代理刚写的 marker)
+                             │ 4. 读 .verify-passed 或 .review-passed(按 --kind;主代理刚写的 marker)
                              │ 5. 复制三数组到 marker.process_evidence 字段
                              │ 6. marker 加 process_evidence_staging_hash 快照
-                             │ 7. WARNING 转 VerifyFinding 写入 marker.verify_findings
-                             │    (Codex BLOCKER #3 修复:WARNING 不丢)
-                             │ 8. executeTransaction()(§9.6 锁定 B,沿
+                             │ 7. marker 加 ack_log_tail_hash + ack_log_entry_count
+                             │    (v7 新增,Codex 二轮 MAJOR-3 修复:固化 ack-log 尾 + 行数,
+                             │     挡"重写整链 + 链内自洽"攻击)
+                             │ 8. 写 fence-ctx-only WARNING 到 marker.verify_findings:
+                             │    只写不变量 7(verify_invocations 计数)+ 10(env_hash)+
+                             │    11(tdd_exemption ack)+ 12(mode != full 时 ack)
+                             │    (Codex 二轮 BLOCKER-3 修复:freeze-time 不算 rerun-time WARNING)
+                             │ 9. executeTransaction()(§9.6 锁定 B,沿
                              │    src/core/archive/transaction.ts:tmp + rename atomic)
-                             │ 9. releaseStagingLock
+                             │ 10. releaseStagingLock
                              ▼
-                    .verify-passed.yaml / .review-passed.yaml(含 process_evidence + verify_findings)
+                    .verify-passed / .review-passed(含 process_evidence + 部分 verify_findings)
 
-[forge archive — archive.ts:240 现有 crossCuttingFenceCheck() 调用,v6 修订:9g 填实 13+1 不变量]
+[forge archive — archive.ts:240 现有 crossCuttingFenceCheck() 调用,v6 修订:9g 填实 14 不变量]
 
 archive 流程:
   ├── 步骤 3.4 plan-9j legacy/retrograde fence(不动)
   ├── 步骤 3.5 plan-9d evidence 完整性(不动)
   ├── 步骤 3.5(同 line)plan-9a crossCuttingFenceCheck() ← v6 修订:9g 填实
   │      内部:
-  │        buildProcessEvidenceFenceContext(...) 一次读全(marker/staging/ack-log/parseTasks/CI)
+  │        buildProcessEvidenceFenceContext(...) 一次读全(marker/staging/ack-log/parseTasks/CI/HEAD)
   │        ├── runFieldFence(ctx) → 不变量 1-4 / 7-12 / 14 finding[]
-  │        │   不变量 9 三源 + 链 cross-check:
+  │        │   不变量 9 四源 + 链 cross-check:
   │        │     marker_hash = canonicalHash(marker.process_evidence)
   │        │     stagingHash = ctx.stagingHash(从 marker.process_evidence_staging_hash 快照对比)
   │        │     ackLogChainHash = canonicalHash(ack-log evidence-helper entries 还原的三数组)
   │        │     ack-log 链完整性 = 逐行重算 prev_entry_hash 必匹配上一条 hash
-  │        │     四源不等 → CRITICAL "process_evidence tampered"
+  │        │     ack-log 尾 + 行数固化 = ack-log 实际尾 hash + entry count 必 == marker.ack_log_tail_hash + marker.ack_log_entry_count
+  │        │       (v7 新增,Codex 二轮 MAJOR-3:挡"改最后一行" + "整链重写")
+  │        │     五源不等 → CRITICAL "process_evidence tampered"
   │        │   不变量 14:git merge-base --is-ancestor green_commit.sha HEAD ≠ 0 → CRITICAL
   │        └── runRerunFence(ctx) → 不变量 5-6 / 13 finding[](mode 分支 / 抽样 / timeout)
   │      CRITICAL finding → fence.ok=false → archive.ts process.exit(1)
-  ├── 步骤 3.6 plan-9d verify_findings fence(自动接 9g WARNING,Codex BLOCKER #3 修复)
+  │      v7 修订(Codex 二轮 BLOCKER-3 修复):rerun-time WARNING(不变量 13 timeout 在 sample/hash-only 模式 +
+  │        不变量 5/6 关联的 env 漂移 WARNING)不写回已 frozen marker,**直接合并到 archive 会话内 finding 池**,
+  │        交步骤 3.9 three-level fence 即场处理(WARNING+resolved=false+无 ack 拒签 / +ack 通过)
+  ├── 步骤 3.6 plan-9d verify_findings fence(接 freeze-time 写入 marker.verify_findings 的 fence-ctx WARNING)
   ├── 步骤 3.7 plan-9c pause(不动)
-  ├── 步骤 3.8 plan-9d ack-log consistency(扩 9g 三 helper entries cross-check)
-  └── 步骤 3.9 plan-9e1 three-level fence(自动接 9g WARNING acked 矩阵)
+  ├── 步骤 3.8 plan-9d ack-log consistency(扩 9g 三 helper entries cross-check + ack-log 尾 hash 校验)
+  └── 步骤 3.9 plan-9e1 three-level fence(接 freeze-time WARNING + v7 新增 rerun-time 内存 WARNING)
 ```
 
 ### 5.1 四源 cross-check 反伪造矩阵(v6 修订:加 ack-log chain 完整性)
@@ -735,7 +767,7 @@ export async function buildProcessEvidenceFenceContext(args: {
 ```
 
 内部一次读全:
-- `.verify-passed.yaml` / `.review-passed.yaml`(marker.process_evidence + process_evidence_staging_hash)
+- `.verify-passed` / `.review-passed`(marker.process_evidence + process_evidence_staging_hash)
 - `.evidence/process-evidence.staging.yaml`(staging.staging_hash)
 - `.evidence/ack-log.jsonl`(evidence-helper entries + prev_entry_hash chain)
 - `tasks.md`(parseTasks → tasksCount)
@@ -820,7 +852,7 @@ scenarios:
 3. **Plan inline 完整代码范围**:fence/rerun 函数全量 inline 还是仅 signature + 关键 helper?(沿 plan-9j Pattern A 教训:**全量 inline**)
 4. **forge-eval fixture 内容生成策略**(若选 P2 路径):手写 fixture 还是用真 forge 流程跑出来再篡改?— **注**:此项仅当 §9.9 选 P2 时适用;若选 P1 则不需新 fixture(沿现有 skill yaml 加 scenario)
 5. **vitest --reporter=json schema 锁定**:Vitest 不同版本 JSON schema 微调,plan 阶段锁定一个版本 + 兼容窗口
-6. ~~freeze 时点细节~~ — **已锁:走 transaction(选项 B)**。verify-passed 生成的 staging → marker freeze 步骤走 `src/core/archive/transaction.ts` 现有抽象(plan-9c/9d/9e1 archive 步骤已用同模式:tmp + rename atomic + crash 回滚)。**理由**:freeze 失败留半成品 marker 会让下次 `forge archive` 因 yaml 解析失败报错,用户需手动修;transaction 模式代码复用现有 lib 成本低,且 verify-passed 内含 process_evidence 后 schema 复杂度上升,半成品风险变大。**v6 修订实施位**(原写 verify.ts/review.ts 但这两个文件不存在,Codex BLOCKER #1):freeze 实现在新 CLI 子命令 `forge evidence freeze <changeId>`(挂 evidence Command 下,与 record-tdd/verify/review 平级);主代理在 commands/verify.md 步骤 4.3 写完 .verify-passed.yaml 后显式调;freeze 子命令内 import `executeTransaction()`(沿 plan-9c/9d 调用模式)
+6. ~~freeze 时点细节~~ — **已锁:走 transaction(选项 B)**。verify-passed 生成的 staging → marker freeze 步骤走 `src/core/archive/transaction.ts` 现有抽象(plan-9c/9d/9e1 archive 步骤已用同模式:tmp + rename atomic + crash 回滚)。**理由**:freeze 失败留半成品 marker 会让下次 `forge archive` 因 yaml 解析失败报错,用户需手动修;transaction 模式代码复用现有 lib 成本低,且 verify-passed 内含 process_evidence 后 schema 复杂度上升,半成品风险变大。**v6 修订实施位**(原写 verify.ts/review.ts 但这两个文件不存在,Codex BLOCKER #1):freeze 实现在新 CLI 子命令 `forge evidence freeze <changeId>`(挂 evidence Command 下,与 record-tdd/verify/review 平级);主代理在 commands/verify.md 步骤 4.3 写完 .verify-passed 后显式调;freeze 子命令内 import `executeTransaction()`(沿 plan-9c/9d 调用模式)
 7. **codex review 轮数预期**:plan-9j 9 轮 / 9e1 12 轮,9g spec 已 v3 充分,预计 5-8 轮
 
 ### 9.8 forge-eval 集成路径 ─ 锁定 P2(brainstorm 阶段已选)
@@ -884,19 +916,43 @@ export interface EvidenceHelperEntry {
 3. entry.prev_entry_hash = prev_entry_hash(null if 链头)
 4. `appendFile(logPath, JSON.stringify(entry) + '\n')`
 
-Fence 验证(不变量 9 子项):
+Fence 验证(不变量 9 子项,v7 修订:链内自洽 + 尾固化 + 行数固化三重校验,Codex 二轮 MAJOR-3 修复):
 ```typescript
-function verifyAckLogChain(entries: EvidenceHelperEntry[]): boolean {
+function verifyAckLogChain(
+  entries: EvidenceHelperEntry[],
+  markerTailHash: string | null,        // marker.ack_log_tail_hash(freeze 时固化)
+  markerEntryCount: number | null,      // marker.ack_log_entry_count(freeze 时固化)
+): { ok: boolean; reason?: string } {
+  // 1. 链内自洽:prev_entry_hash 逐行 match(挡中间一行被改)
   let expectedPrev: string | null = null;
   for (const entry of entries) {
-    if (entry.prev_entry_hash !== expectedPrev) return false;
+    if (entry.prev_entry_hash !== expectedPrev) return { ok: false, reason: 'chain broken' };
     expectedPrev = canonicalHash(entry);
   }
-  return true;
+
+  // 2. 行数固化:实际 entry count 必 == marker.ack_log_entry_count
+  //    (挡"重写整链且每行 hash 自洽" — 行数必然不一致,除非攻击者也精准凑齐行数)
+  if (markerEntryCount !== null && entries.length !== markerEntryCount) {
+    return { ok: false, reason: `entry count mismatch: actual=${entries.length} expected=${markerEntryCount}` };
+  }
+
+  // 3. 尾 hash 固化:链尾 hash 必 == marker.ack_log_tail_hash
+  //    (挡"改最后一行 + 没下一行引用" — 改了尾 hash 必然不匹配 marker 快照)
+  if (markerTailHash !== null && expectedPrev !== markerTailHash) {
+    return { ok: false, reason: `tail hash mismatch: actual=${expectedPrev} marker=${markerTailHash}` };
+  }
+
+  return { ok: true };
 }
 ```
 
 兼容性:plan-9a 已写入的旧 entries 缺 prev_entry_hash 字段 → fence 视为 `undefined`,与 null 等价(链头);9g 第一条新 entry 的 prev_entry_hash 必须等于 plan-9a 最后一条 entry 的 canonicalHash(向后兼容,不重写历史)。
+
+freeze 时固化:`forge evidence freeze --kind verify|review` 子命令在写 marker.process_evidence 同时:
+```typescript
+marker.ack_log_tail_hash = canonicalHash(lastEvidenceHelperEntry);  // 链尾固化
+marker.ack_log_entry_count = evidenceHelperEntries.length;          // 行数固化
+```
 
 ### 9.12 evidence helper option 完整清单(v6 新增,Codex MAJOR #3 修复)
 
@@ -938,9 +994,21 @@ forge evidence record-review <changeId>
   --main-check-off-at <iso-8601>    (v6 新增)
 
 forge evidence freeze <changeId>     (v6 新增子命令)
-  --marker <path>                   (默认 forge/changes/<id>/.verify-passed)
-  --kind <verify|review>            (默认 verify)
+  --kind <verify|review>            (必填,v7 修订:Codex 二轮 BLOCKER-4 修复 — 两 marker 共存时必须显式指定;
+                                    无默认值避免歧义;主代理在 commands/verify.md 步骤 4.3 后调时 --kind verify;
+                                    review slash 模板末尾调时 --kind review)
+  --marker <path>                   (可选,默认按 --kind 派生 forge/changes/<id>/.verify-passed
+                                    或 forge/changes/<id>/.review-passed)
 ```
+
+**helper 语义协议**(v7 新增,Codex 二轮 MAJOR-2 修复 — master spec §2.7.6 行 1280 字面与 v6 设计冲突):
+
+master spec §2.7.6 行 1280 字面说"helper 内部:解析 commit + 跑测试取 exit_code + 解析 reporter + append-only 写 marker + 写 ack-log"(helper 自跑模式);v6/v7 设计选 **"helper 接收完整字段,不自跑测试"**(沿 plan-9a 骨架已实现路径 + worktree 重跑留 archive 阶段)。理由:
+- 沿 plan-9a 骨架一致性(plan-9a Task 5 已是 "接收字段"路径,v6/v7 仅扩 options 数量,不改语义)
+- worktree 重跑放 archive 阶段更克制(主代理在 task 实施时已经跑过测试一次,helper 再跑等于跑两次浪费;archive worktree 重跑作为反伪造重跑独立一次足够)
+- helper "自跑"会让 helper 调用变重(每次调要等测试跑完),主代理实施流程受阻
+
+**待 9g writing-plans 阶段同步 master spec §2.7.6 行 1280 文字**:在该处加注"v1.0 实施时改为 helper 接收字段;worktree 重跑统一放 archive `crossCuttingFenceCheck()` 内 runRerunFence(沿 §2.7.4 A)"。
 
 ### 9.13 不变量 14 实施细节(v6 新增,Codex BLOCKER #2 修复)
 
@@ -1027,4 +1095,27 @@ function checkInvariant14(ctx: ProcessEvidenceFenceContext): ProcessEvidenceFind
 
 ---
 
-**Status: ready for second-round Codex review**
+**Status: ready for third-round Codex review**
+
+---
+
+## 13. Codex 二轮审查修复摘要(v7 修订,本节供三轮审查 cross-check 用)
+
+**真 BLOCKER 修复(2 项,Codex 二轮 BLOCKER-3 + BLOCKER-4)**:
+- **B3 WARNING 时序闭合**:freeze-time 只写 fence-ctx-only WARNING(不变量 7/10/11/12)到 marker.verify_findings;rerun-time WARNING(不变量 5/6/13)由 archive `crossCuttingFenceCheck()` 直接合并到 archive 会话内 finding 池 → 步骤 3.9 three-level fence 即场处理(WARNING+resolved=false+无 ack 拒签 / +ack 通过)。两条路径互补无丢
+- **B4 freeze --kind 必填**:命令签名改为 `forge evidence freeze <changeId> --kind <verify|review>`,无默认值避免歧义;marker 路径由 --kind 派生(.verify-passed / .review-passed)
+
+**真 MAJOR 修复(3 项,Codex 二轮 MAJOR-1/-2/-3)**:
+- **M1 master plan line 30 同步**:本次直接修订 `docs/plans/2026-05-10-plan-9-v1.0-fusion-completion-master.md` line 30 — 不变量 13 → 14,依赖加 9i,P50 7→8 / P90 9→11,§0 总计 P50 39.5→40.5 / P90 52.5→54.5
+- **M2 helper 自跑 vs 接收字段语义**:brainstorm spec 显式说明 v6/v7 选"接收字段"路径(沿 plan-9a 骨架),master spec §2.7.6 行 1280 "helper 自跑"字面待 9g writing-plans 阶段同步修订(加注 v1.0 实施时改为接收字段)
+- **M3 ack-log 尾 + 行数固化**:marker 加 `ack_log_tail_hash?: string` + `ack_log_entry_count?: number` 字段;freeze 时固化;archive 不变量 9 三重校验(链内自洽 + 尾 hash + 行数);挡"改最后一行"(链内挡不住但尾 hash 挡)+ "重写整链"(链内自洽但行数大概率不匹配)
+
+**真 MINOR 修复(2 项)**:
+- **MIN1 .yaml 后缀清理**:全文 `.verify-passed.yaml` / `.review-passed.yaml` → `.verify-passed` / `.review-passed`(沿 archive.ts:271 真实文件名)
+- **MIN2 archive-summary 13 → 14 同步**:§2.2.2 加新条目 — `src/core/schemas/archive-summary.ts:33/133` 行 ProcessEvidenceSummary 字段统计 13 → 14
+
+**伪 BLOCKER 澄清(2 项,Codex 二轮 BLOCKER-1/-2)**:
+- 本文档是 brainstorm spec 设计文档,描述 plan-9g writing-plans → 实施阶段的目标。Codex 二轮指出"v6 修复在代码库中未落地"是认知错位 — brainstorm 阶段当然没改代码。§0.0 文档状态声明明示此区分,避免后续审查再误判
+
+**未修(留 writing-plans)**:
+- **SUG1 schema 测试断言**:实施 src/core/schemas/process-evidence.ts 时加 unit test,断言 GREEN 不含 expected_failures + RED/GREEN 用各自字段名;沿 §8.2 测试矩阵列入

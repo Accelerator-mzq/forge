@@ -562,9 +562,10 @@ helper 每次 append 后重算 `staging_hash` 覆盖。freeze 时 `forge evidenc
                              │    (v7 新增,Codex 二轮 MAJOR-3 修复:固化 ack-log 尾 + 行数,
                              │     挡"重写整链 + 链内自洽"攻击)
                              │ 8. 写 fence-ctx-only WARNING 到 marker.verify_findings:
-                             │    只写不变量 7(verify_invocations 计数)+ 10(env_hash)+
-                             │    11(tdd_exemption ack)+ 12(mode != full 时 ack)
-                             │    (Codex 二轮 BLOCKER-3 修复:freeze-time 不算 rerun-time WARNING)
+                             │    **仅**不变量 7(verify_invocations 计数)+ 10(env_hash 漂移)
+                             │    (v8 修订,Codex 三轮 BLOCKER-2 修复:不变量 11/12 是 CRITICAL,
+                             │    freeze 时若失败 → exit 1 拒绝写 marker,提示用户先跑 forge ack;
+                             │    rerun-time WARNING 5/6/13 也不在此处理 — 见步骤 3.5 内 archive 流程)
                              │ 9. executeTransaction()(§9.6 锁定 B,沿
                              │    src/core/archive/transaction.ts:tmp + rename atomic)
                              │ 10. releaseStagingLock
@@ -591,25 +592,34 @@ archive 流程:
   │        │   不变量 14:git merge-base --is-ancestor green_commit.sha HEAD ≠ 0 → CRITICAL
   │        └── runRerunFence(ctx) → 不变量 5-6 / 13 finding[](mode 分支 / 抽样 / timeout)
   │      CRITICAL finding → fence.ok=false → archive.ts process.exit(1)
-  │      v7 修订(Codex 二轮 BLOCKER-3 修复):rerun-time WARNING(不变量 13 timeout 在 sample/hash-only 模式 +
-  │        不变量 5/6 关联的 env 漂移 WARNING)不写回已 frozen marker,**直接合并到 archive 会话内 finding 池**,
-  │        交步骤 3.9 three-level fence 即场处理(WARNING+resolved=false+无 ack 拒签 / +ack 通过)
+  │      v8 修订(Codex 三轮 BLOCKER-1 修复):rerun-time WARNING(不变量 13 timeout 在 sample/hash-only 模式 +
+  │        不变量 5/6 关联的 env 漂移 WARNING)走 plan-9d ack-log consistency 模式 — fence 内为每条
+  │        rerun WARNING 算 finding_hash(沿 plan-9d Task 6 schema:canonicalHash({invariant, severity,
+  │        message_template, task_ref})),检 ack-log 是否含对应 ack-log entry(action='ack-rerun-warning'):
+  │          无 ack → archive 拒签 + stderr 提示 "forge ack propose --action ack-rerun-warning --finding <hash>"
+  │          有 ack → 通过(沿 9a 两步协议:propose 写 pending + confirm 写 ack-log)
+  │        finding 不写回 marker(避免 freeze 后 marker 不可变约束被破坏);finding_hash 决定 ack-log lookup
+  │        即"finding 在内存,ack 状态在 ack-log";retry archive 时 fence 重算 hash 复查 ack-log,实现 ack 闭环
+  │      WARNING dedup(Codex 三轮 MAJOR-2 修复):finding_hash 算法在 freeze-time 和 rerun-time 同一不变量
+  │        产相同 hash → 同 finding 不会在 marker.verify_findings 和 archive 内存 finding 池中重复
   ├── 步骤 3.6 plan-9d verify_findings fence(接 freeze-time 写入 marker.verify_findings 的 fence-ctx WARNING)
   ├── 步骤 3.7 plan-9c pause(不动)
   ├── 步骤 3.8 plan-9d ack-log consistency(扩 9g 三 helper entries cross-check + ack-log 尾 hash 校验)
   └── 步骤 3.9 plan-9e1 three-level fence(接 freeze-time WARNING + v7 新增 rerun-time 内存 WARNING)
 ```
 
-### 5.1 四源 cross-check 反伪造矩阵(v6 修订:加 ack-log chain 完整性)
+### 5.1 五源 cross-check 反伪造矩阵(v8 修订,Codex 三轮 MINOR-2:四 → 五,把 ack-log tail+count 视为独立源)
 
-| 攻击 | marker | staging | ack-log content | ack-log chain | 检测点 |
-|---|---|---|---|---|---|
-| 直接改 marker.process_evidence | ✗ | ✓ | ✓ | ✓ | 不变量 9 marker hash != staging hash |
-| 删/改 staging.yaml 后改 marker | ✗ | ✗ | ✓ | ✓ | marker hash != ackLogChainHash |
-| 改 ack-log.jsonl 一行内容 | ✓ | ✓ | ✗ | ✗ | prev_entry_hash 链断(下一行 hash mismatch) |
-| 删 ack-log.jsonl 一行 | ✓ | ✓ | ✗ | ✗ | 行数与 staging entries 不一致 + chain 断 |
-| 旁支造 RED/GREEN + 主分支换实现 | ✓ | ✓ | ✓ | ✓ | **不变量 14**:green ↞ HEAD ancestor check 失败 |
-| 四源全改 + 改 git 主分支 | ✗ | ✗ | ✗ | ✗ | **不变量 5/6 worktree 重跑** — AI 改不动测试运行结果 |
+| 攻击 | marker | staging | ack-log content | ack-log chain | ack-log tail+count | 检测点 |
+|---|---|---|---|---|---|---|
+| 直接改 marker.process_evidence | ✗ | ✓ | ✓ | ✓ | ✓ | 不变量 9 marker hash != staging hash |
+| 删/改 staging.yaml 后改 marker | ✗ | ✗ | ✓ | ✓ | ✓ | marker hash != ackLogChainHash(evidence-helper projection) |
+| 改 ack-log.jsonl 中间一行内容 | ✓ | ✓ | ✗ | ✗ | ✓ | prev_entry_hash 链断(下一行 hash mismatch) |
+| 删 ack-log.jsonl 中间一行 | ✓ | ✓ | ✗ | ✗ | ✗ | chain 断 + count mismatch + tail mismatch |
+| **改 ack-log.jsonl 最后一行(无下一行引用)** | ✓ | ✓ | ✗ | ✓(链内自洽) | ✗ | **tail_hash != marker.ack_log_tail_hash**(v7 新增,Codex 二轮 M-3) |
+| **重写整个 ack-log.jsonl 且每行 hash 自洽** | ✓ | ✓ | ✗ | ✓(伪造链) | ✗ | **行数 / tail 大概率不匹配**(攻击者必须精准凑齐 marker 固化的 count + tail,极难) |
+| 旁支造 RED/GREEN + 主分支换实现 | ✓ | ✓ | ✓ | ✓ | ✓ | **不变量 14**:green ↞ HEAD ancestor check 失败 |
+| 五源全改 + 改 git 主分支 + 重凑 tail+count | ✗ | ✗ | ✗ | ✗ | ✗ | **不变量 5/6 worktree 重跑** — AI 改不动测试运行结果 |
 
 ---
 
@@ -891,9 +901,15 @@ skill-eval CI workflow(`.github/workflows/skill-eval.yml`)第一步检测 `ANTHR
 - helper / freeze 调 `acquireStagingLock(changeRoot, { timeoutMs: 5000 })`,timeout → exit 1 + 友好错误
 - writing-plans 阶段需考虑:lock 文件本身是否需要写入 ack-log?决策:**否**(lock 是 OS 层并发原语,不参与 process_evidence 反伪造)
 
-### 9.11 ack-log prev_entry_hash chain 实现细节(v6 新增,Codex SUGGESTION #1 修复)
+### 9.11 ack-log prev_entry_hash chain 实现细节(v8 修订:全 JSONL 链 + evidence-helper projection 分离,Codex 三轮 BLOCKER-3 + MAJOR-3 修复)
 
-EvidenceHelperEntry schema 扩:
+**关键决策**(v8,Codex 三轮 B-3):ack-log.jsonl 同时承载 `kind: 'ack'` 和 `kind: 'evidence-helper'` 两类 entry(plan-9a 协议)。chain 校验必须基于**全 JSONL**(每行计入),不基于 evidence-helper 子集 — 否则中间 ack 行会让 prev_entry_hash 链断。process_evidence 三数组的内容 hash 单独基于 evidence-helper projection 算(独立于 chain)。
+
+**两层独立**:
+- **chain 层**(全 JSONL):append 时 prev = canonicalHash(全文件最后一行任意 entry);fence 验证 chain 时按文件序逐行 match
+- **projection 层**(evidence-helper 子集):marker.process_evidence 三数组的 hash = canonicalHash(filter(entries, kind='evidence-helper') 还原的三数组);archive 校验 marker.process_evidence_staging_hash 与此 projection hash 一致
+
+EvidenceHelperEntry / AckLogEntry 共同 schema 扩:
 ```typescript
 export interface EvidenceHelperEntry {
   schema: 'forge-ack-log/v1';
@@ -910,30 +926,38 @@ export interface EvidenceHelperEntry {
 }
 ```
 
-`appendAckLog` 实现:
-1. 读 ack-log.jsonl 最后一行(若文件不存在 → prev=null)
-2. 算 `prev_entry_hash = canonicalHash(lastEntry)`(若有)
+`appendAckLog` 实现(v8 修订:基于全 JSONL,任何 kind 都计入链):
+1. 读 ack-log.jsonl 最后一**非空**行(空文件 → prev=null;末尾空行跳过)
+2. 算 `prev_entry_hash = canonicalHash(lastEntry)`(若有)— lastEntry 可能是 ack 行或 evidence-helper 行(类型不限)
 3. entry.prev_entry_hash = prev_entry_hash(null if 链头)
 4. `appendFile(logPath, JSON.stringify(entry) + '\n')`
 
-Fence 验证(不变量 9 子项,v7 修订:链内自洽 + 尾固化 + 行数固化三重校验,Codex 二轮 MAJOR-3 修复):
+Fence 验证(v8 修订,Codex 三轮 B-3 + M-3 修复:全 JSONL 链 + 边界覆盖):
 ```typescript
 function verifyAckLogChain(
-  entries: EvidenceHelperEntry[],
-  markerTailHash: string | null,        // marker.ack_log_tail_hash(freeze 时固化)
-  markerEntryCount: number | null,      // marker.ack_log_entry_count(freeze 时固化)
+  allEntries: AckLogEntry[],            // 全 JSONL 解析(任何 kind),空行已跳过,顺序与文件序一致
+  markerTailHash: string | null,        // marker.ack_log_tail_hash(freeze 时固化全 JSONL 尾)
+  markerEntryCount: number | null,      // marker.ack_log_entry_count(freeze 时固化全 JSONL 行数)
 ): { ok: boolean; reason?: string } {
+  // 0. 空日志边界(Codex 三轮 M-3):空 entries 链头 null,count 0
+  if (allEntries.length === 0) {
+    if (markerTailHash !== null || (markerEntryCount !== null && markerEntryCount !== 0)) {
+      return { ok: false, reason: 'empty ack-log but marker has tail/count' };
+    }
+    return { ok: true };
+  }
+
   // 1. 链内自洽:prev_entry_hash 逐行 match(挡中间一行被改)
   let expectedPrev: string | null = null;
-  for (const entry of entries) {
+  for (const entry of allEntries) {
     if (entry.prev_entry_hash !== expectedPrev) return { ok: false, reason: 'chain broken' };
     expectedPrev = canonicalHash(entry);
   }
 
   // 2. 行数固化:实际 entry count 必 == marker.ack_log_entry_count
   //    (挡"重写整链且每行 hash 自洽" — 行数必然不一致,除非攻击者也精准凑齐行数)
-  if (markerEntryCount !== null && entries.length !== markerEntryCount) {
-    return { ok: false, reason: `entry count mismatch: actual=${entries.length} expected=${markerEntryCount}` };
+  if (markerEntryCount !== null && allEntries.length !== markerEntryCount) {
+    return { ok: false, reason: `entry count mismatch: actual=${allEntries.length} expected=${markerEntryCount}` };
   }
 
   // 3. 尾 hash 固化:链尾 hash 必 == marker.ack_log_tail_hash
@@ -946,12 +970,25 @@ function verifyAckLogChain(
 }
 ```
 
+JSONL 解析边界(Codex 三轮 M-3):
+- 空文件 → entries=[],count=0,tail=null
+- 末尾空行 / 行间空行 → 跳过(不计入)
+- 坏 JSON 行(任何 line trim 后非空但 JSON.parse 失败) → fence CRITICAL "ack-log corrupted at line N"
+- entry count 为非负整数,upper bound 无限制(实际项目千行内)
+
 兼容性:plan-9a 已写入的旧 entries 缺 prev_entry_hash 字段 → fence 视为 `undefined`,与 null 等价(链头);9g 第一条新 entry 的 prev_entry_hash 必须等于 plan-9a 最后一条 entry 的 canonicalHash(向后兼容,不重写历史)。
 
-freeze 时固化:`forge evidence freeze --kind verify|review` 子命令在写 marker.process_evidence 同时:
+freeze 时固化(v8 修订:基于全 JSONL,不是 evidence-helper 子集):
 ```typescript
-marker.ack_log_tail_hash = canonicalHash(lastEvidenceHelperEntry);  // 链尾固化
-marker.ack_log_entry_count = evidenceHelperEntries.length;          // 行数固化
+// 全 JSONL 链固化
+const allEntries = await readAllAckLogEntries(changeRoot);  // 跳过空行 + 解析
+marker.ack_log_tail_hash = allEntries.length > 0 ? canonicalHash(allEntries[allEntries.length - 1]) : null;
+marker.ack_log_entry_count = allEntries.length;
+
+// evidence-helper projection 单独算(用于不变量 9 内容 hash 比对)
+const helperEntries = allEntries.filter(e => e.kind === 'evidence-helper');
+const helperProjection = helperEntriesTo Arrays(helperEntries);  // 三数组(tdd_event_chain / verify_invocations / subagent_review_chain)
+marker.process_evidence_staging_hash = canonicalHash(helperProjection);  // staging snapshot hash
 ```
 
 ### 9.12 evidence helper option 完整清单(v6 新增,Codex MAJOR #3 修复)
@@ -994,12 +1031,35 @@ forge evidence record-review <changeId>
   --main-check-off-at <iso-8601>    (v6 新增)
 
 forge evidence freeze <changeId>     (v6 新增子命令)
-  --kind <verify|review>            (必填,v7 修订:Codex 二轮 BLOCKER-4 修复 — 两 marker 共存时必须显式指定;
-                                    无默认值避免歧义;主代理在 commands/verify.md 步骤 4.3 后调时 --kind verify;
-                                    review slash 模板末尾调时 --kind review)
+  --kind <verify|review>            (commander .requiredOption();v7 修订:Codex 二轮 BLOCKER-4 修复 —
+                                    两 marker 共存时必须显式指定;无默认值避免歧义;omit 时 commander
+                                    自动 exit 1 + stderr "required option '--kind' not specified"
+                                    (v8 修订,Codex 三轮 M-1);主代理在 commands/verify.md 步骤 4.3 后调
+                                    时 --kind verify;review slash 模板末尾调时 --kind review)
   --marker <path>                   (可选,默认按 --kind 派生 forge/changes/<id>/.verify-passed
-                                    或 forge/changes/<id>/.review-passed)
+                                    或 forge/changes/<id>/.review-passed;若 --marker 与 --kind 派生
+                                    路径不一致,以 --marker 为准但 stderr WARNING)
 ```
+
+**finding_hash 算法**(v8 新增,Codex 三轮 M-2 修复 — WARNING dedup 用):
+
+```typescript
+// 沿 plan-9d Task 6 schema,freeze-time 和 rerun-time 同一不变量产相同 hash
+function computeFindingHash(finding: ProcessEvidenceFinding): string {
+  return canonicalHash({
+    invariant: finding.invariant,         // 1..14
+    severity: finding.severity,            // CRITICAL | WARNING | SUGGESTION
+    message_template: finding.message_template,  // 沿 9d 协议字面,不含动态字段
+    task_ref: finding.taskRef ?? null,
+  });
+}
+```
+
+dedup 协议:
+- freeze-time 写 marker.verify_findings 时,每个 finding 含 `finding_hash` 字段
+- rerun-time 在 archive crossCuttingFenceCheck 内产 finding 时,也算 finding_hash
+- 步骤 3.6 verify_findings fence + 步骤 3.9 three-level fence 处理时,以 finding_hash 为唯一 key dedup
+- ack-log 中 ack entry 引用 finding_hash(沿 9a 两步协议 + 9d ack-log consistency 模式),retry archive 时按 hash lookup ack 状态
 
 **helper 语义协议**(v7 新增,Codex 二轮 MAJOR-2 修复 — master spec §2.7.6 行 1280 字面与 v6 设计冲突):
 
@@ -1095,7 +1155,35 @@ function checkInvariant14(ctx: ProcessEvidenceFenceContext): ProcessEvidenceFind
 
 ---
 
-**Status: ready for third-round Codex review**
+**Status: ready for fourth-round Codex review**
+
+---
+
+## 14. Codex 三轮审查修复摘要(v8 修订,本节供四轮审查 cross-check 用)
+
+**真 BLOCKER 修复(3 项)**:
+- **B1 rerun-time WARNING 走 9d ack-log consistency 模式**:fence 内每条 rerun WARNING 算 finding_hash(沿 plan-9d Task 6 canonicalHash schema),检 ack-log 是否含 action='ack-rerun-warning' 对应 entry;无 ack → archive 拒签 + stderr 提示 `forge ack propose --action ack-rerun-warning --finding <hash>`;有 ack → 通过;finding 不写回 marker(避免破坏 freeze 不变性);retry archive 时 hash 重算复查 ack-log 实现 ack 闭环
+- **B2 不变量 11/12 freeze-time 拒签**:11/12 是 CRITICAL(沿 master spec §2.7.3),freeze-time 若 fence-ctx 检测失败 → exit 1 拒绝写 marker,提示用户先跑 `forge ack`;**仅 7(verify_invocations 计数)+ 10(env_hash 漂移)**作为 freeze-time WARNING 写 marker.verify_findings
+- **B3 ack-log chain 全 JSONL 链 + evidence-helper projection 分离**:chain/tail/count 基于全 JSONL(每行计入,任何 kind);process_evidence 三数组 hash 基于 evidence-helper 子集 projection;append 时 prev_entry_hash 指文件最后一行任意 entry(沿 plan-9a 双 kind 协议)
+
+**真 MAJOR 修复(4 项)**:
+- **M1 --kind commander requiredOption**:omit 时 commander 自动 exit 1 + stderr;--marker 与 --kind 派生路径不一致时以 --marker 为准但 stderr WARNING
+- **M2 finding_hash dedup**:沿 plan-9d Task 6 schema `canonicalHash({invariant, severity, message_template, task_ref})`,freeze-time 和 rerun-time 同一不变量同 hash → 步骤 3.6/3.9 dedup
+- **M3 ack-log tail/count 边界**:空文件 → tail=null/count=0;空行跳过;坏 JSON 行 → fence CRITICAL "ack-log corrupted at line N";count 非负整数
+- **M4 master spec §2.7.2 同步项**:v7/v8 新增 marker 字段(`process_evidence_staging_hash` / `ack_log_tail_hash` / `ack_log_entry_count`)未在 master spec §2.7.2 字面体现,**待 9g writing-plans 阶段同步修订**(加注 v1.0 实施时三字段为 superset additive)
+
+**真 MINOR 修复(2 项)**:
+- **MIN-1 master plan 全文同步**:line 30(已二轮修)+ line 118-120(关键路径 P50 25 → 26 / P90 33 → 35)+ line 324(§3.7 标题 P50 7→8/P90 9→11)+ line 471(Interface Freeze 13→14)
+- **MIN-2 五源标题**:§5.1 标题"四源 → 五源",反伪造矩阵加 ack-log tail+count 列
+
+**未修(留 writing-plans)**:
+- 沿 §13 v7 留项:SUG1 schema 测试断言、SUG2 rerun-time WARNING 临时 finding schema(已在 v8 B1 修复中走 ack-log 模式覆盖)
+
+**待 9g writing-plans 阶段同步的 master spec 修订项**(汇总):
+1. §2.7.2 字面加注 v1.0 helper "接收字段"语义(取代 §2.7.6 行 1280 "helper 自跑")
+2. §2.7.2 schema 加 marker 三新字段(staging_hash + ack_log_tail_hash + ack_log_entry_count)
+3. §2.7.3 字面加不变量 14(green↞HEAD)
+4. §2.7.6 行 1280 helper 实现描述同步(配 §2.7.2 修订)
 
 ---
 

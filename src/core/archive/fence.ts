@@ -163,13 +163,15 @@ export async function crossCuttingFenceCheck(
   // 3. **v3 修订(Codex 三轮 M-1)**:fence 对 verify + review 各跑 process_evidence 校验
   //    含 review 侧 bypass 检测(review marker 存在但缺 process_evidence 也 CRITICAL)
   //    沿 brainstorm spec §5.1 五源 cross-check;finding source 字段区分 verify / review
+  // plan-9e2 v2 quality fix I-1:reviewLegacyExempt 提到 if block 之前统一声明
+  //   bypass 检测(block 内)+ mapper 并集(step 5)共用同一变量,避免重复声明
+  const reviewLegacyExempt =
+    (reviewMarker?.process_evidence_unavailable_legacy as boolean | undefined) === true;
   const reviewFindings: ProcessEvidenceFinding[] = [];
   if (reviewMarker) {
     // review 侧 bypass 检测(对称 verify 侧 B-3,v3 修订 Codex 三轮 M-1):
     //   review marker 含 v1.0 marker version 标志(`created_by_tool_version >= 1.0.0`)
     //   且无 legacy_exempt → 必须含 process_evidence;否则 CRITICAL
-    const reviewLegacyExempt =
-      (reviewMarker.process_evidence_unavailable_legacy as boolean | undefined) === true;
     const reviewMarkerVersion = reviewMarker.created_by_tool_version as string | undefined;
     const reviewIsV10Native = reviewMarkerVersion
       ? parseSemverMajor(reviewMarkerVersion) >= 1
@@ -209,8 +211,7 @@ export async function crossCuttingFenceCheck(
 
   // plan-9e2 v2 codex 一轮 MAJOR 修订:legacyExempt 取 verify || review 并集
   // 沿 fence.ts:115/153-164 当前已两源独立读约定;v1.0 精度损失 = 无法区分 verify-only / review-only legacy
-  const reviewLegacyExempt =
-    (reviewMarker?.process_evidence_unavailable_legacy as boolean | undefined) === true;
+  // quality fix I-1:reviewLegacyExempt 已在上方 step 3 之前统一声明,此处复用
   const effectiveLegacyExempt = legacyExempt || reviewLegacyExempt;
 
   const results = mapFindingsToResults({

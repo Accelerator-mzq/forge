@@ -87,16 +87,10 @@ describe('mapFindingsToResults — 4 态 mapper 纯函数', () => {
     ]);
   });
 
-  it('legacy(并集等价于 verify-only legacy) + 14 全无 finding → 等同上一 case', () => {
-    // mapFindingsToResults 入参只看 effectiveLegacyExempt boolean,并集语义在 caller(crossCuttingFenceCheck)
-    // 本测试钉住 boolean=true 路径与 verify-only 路径输出一致
-    const results = mapFindingsToResults({
-      findings: [],
-      effectiveLegacyExempt: true,
-    });
-    expect(results.filter((r) => r.status === 'legacy-skip')).toHaveLength(10);
-    expect(results.filter((r) => r.status === 'pass')).toHaveLength(4);
-  });
+  // quality fix I-2:删除原 case 4 "legacy(并集等价于 verify-only legacy)..."
+  //   理由:mapFindingsToResults 是纯函数只看 effectiveLegacyExempt boolean,不接触并集语义;
+  //   入参与 case 3 完全相同 + 断言子集,实质是 case 3 路径重复测试,不验证并集。
+  //   并集语义由 caller(crossCuttingFenceCheck)负责,不属于本纯函数单测覆盖范围。
 
   it('legacy + 1 WARNING 落保留 invariant(fence-9)→ fence-9 status="warning",豁免表中仍 "legacy-skip"', () => {
     const findings: ProcessEvidenceFinding[] = [

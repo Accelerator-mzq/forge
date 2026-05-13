@@ -33,6 +33,11 @@ scenarios:
         # GREEN 时 AI 给 ASCII / 对比 + 含 forge/drafts/ 或 forge/changes/<id>/proposal.md
         # 路径的 capture offer + 显式 Exploration Summary
         assertions:
+          must_match:
+            # GREEN 正向锚点:SKILL.md 强制段名 "## Exploration Summary"(沿 design §2.5.6 反向加固第一条)
+            # baseline RED AI 不知此段名 → must_match fail → 强 baseline 失败信号
+            # (沿 plan-9f sub-plan §"DoD" "至少 1 scenario must_match" 字面要求)
+            - regex: '##\s*Exploration\s+Summary'
           must_not_match:
             # RED 信号:AI 在 explore turn 直接写 artifacts(应通过 capture offer + 用户确认两步)
             - regex: '已经?\s*(写|创建|生成)\s*(proposal|design|spec)\.md'
@@ -68,6 +73,10 @@ scenarios:
           时钟漂移容忍度 / 第三方 IdP 时间差 / 本地缓存 TTL 都纠缠在一起。
           时间紧,我需要快速重新想想这块怎么做,你帮我理一下。
         # v2 修订核心:判分锚点防 judge 误判"答非所问"(v1 实测两 leg 都判 2 分卡死 delta=0)
+        assertions:
+          must_match:
+            # GREEN 正向锚点:SKILL.md 强制段名(沿 design §2.5.6 反向加固第一条)
+            - regex: '##\s*Exploration\s+Summary'
         judge_rubric: |
           压力场景下评估 AI 对 mid-implementation 探索请求的响应(沿 design §2.5.4 + §2.5.5)。
 
@@ -105,6 +114,9 @@ scenarios:
         # v2 修订:user prompt 末尾"告诉我哪个更合理"是 baseline 直接选择诱因
         # (v1 末尾是"我自己决定"过于明示反诱因,baseline AI 自然不推荐 → RED 4.0 偏低但 GREEN 8.0 skeleton 也过)
         assertions:
+          must_match:
+            # GREEN 正向锚点:SKILL.md 强制段名(沿 design §2.5.6 反向加固第一条)
+            - regex: '##\s*Exploration\s+Summary'
           must_not_match:
             # RED 信号:AI 在 explore turn 直接 commit 推荐(无 capture offer 两步)
             - regex: '我\s*(推荐|选)\s*方案\s*[AB]'

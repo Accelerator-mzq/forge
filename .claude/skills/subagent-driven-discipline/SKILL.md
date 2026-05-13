@@ -1030,7 +1030,7 @@ git update-ref refs/heads/<wrong-branch> <prior-base-sha>
 
 **Date**:2026-05-14
 **Trigger Type**:**NEW Type 6 — forge:writing-skills 协议(docs-heavy + forge-eval RED-GREEN automated judge 验证)**;非 SDD;controller(opus 4.7)单线程执行 + forge-eval 12-API-call automated judge(sonnet-4-6)替代 subagent reviewer
-**Project context**:forge-repo / plan-9f exploring skill(`skills/exploring/SKILL.md` 476 行 / 15 section / 5 标定 example / §2.5.6 反向加固三条 + §2.5.5 Fluid Pause 边界 + §2.6.6 区分指引表 + 12 红旗清单)+ `commands/explore.md` 薄包装(32 行)+ `forge-eval/scenarios/exploring.yaml`(3 scenarios:vague-idea / mid-implementation-stuck / option-compare)+ `skills/using-forge/SKILL.md` meta-entry 加 explore 入口 + 红旗清单 2 条;**9 commits** 直接到 dev(非 feature branch);plan-9i forge:writing-skills 协议 first real use case(沿 design §2.9.5 dogfood 设计意图)+ forge-eval Task 4 delta +8.0/+6.0/+7.0(3 scenarios 全 pair_pass)+ 0 BLOCKER/MAJOR codex review;累计 forge-eval cost $0.61
+**Project context**:forge-repo / plan-9f exploring skill(`skills/exploring/SKILL.md` 476 行 / 15 section / 5 标定 example / §2.5.6 反向加固三条 + §2.5.5 Fluid Pause 边界 + §2.6.6 区分指引表 + 12 红旗清单)+ `commands/explore.md` 薄包装(32 行)+ `forge-eval/scenarios/exploring.yaml`(3 scenarios:vague-idea / mid-implementation-stuck / option-compare)+ `skills/using-forge/SKILL.md` meta-entry 加 explore 入口 + 红旗清单 2 条;**8 commits** 直接到 dev(非 feature branch);plan-9i forge:writing-skills 协议 first real use case(沿 design §2.9.5 dogfood 设计意图)+ forge-eval Task 4 delta +8.0/+6.0/+7.0(3 scenarios 全 pair_pass)+ 0 BLOCKER/MAJOR codex review;累计 forge-eval cost $0.61
 
 **Subagent dispatch**:**N/A**(non-SDD trigger type)。Controller 单 pass + forge-eval automated judge:
 
@@ -1091,10 +1091,10 @@ git update-ref refs/heads/<wrong-branch> <prior-base-sha>
 
 **Cost vs SDD baseline**:
 
-- 实际:9 commits(sub-plan 2 + Task 0+1 / 1v2 / 2 / 3 / 5 retrospect)controller(opus 4.7)~$1.50 + forge-eval automated judge 3 轮(v1 + v2 + Task 4)~$0.61 ≈ **$2.10**
+- 实际:8 commits(sub-plan 2 + Task 0+1 / 1v2 / 2 / 3 / 5 retrospect)controller(opus 4.7)~$1.50 + forge-eval automated judge 3 轮(v1 + v2 + Task 4)~$0.61 ≈ **$2.10**
 - SDD baseline 假设(若按 SDD 流程做 6 Task):per-Task implementer(sonnet)+ spec reviewer + quality reviewer + final reviewer + retrospect ≈ $4-5
 - 节省 ratio:~50%(non-SDD trigger type 节省的是 SDD overhead 不是 model 降级 — controller 仍 opus;docs-heavy 任务 SDD 的 spec/quality reviewer 价值低,controller 单 pass 更高效)
-- **质量**:9 commits + dev-direct push + 0 BLOCKER/MAJOR codex review(本会话内无 codex review;后续若需可补)+ forge-eval Task 4 一次性 PASS delta +8.0/+6.0/+7.0(3/3 pair_pass)+ verify 全 PASS(typecheck/lint/format:check/vitest 139 files / 1011 tests / +1 explore-md-sync guard)+ 4 new patterns 沉淀(O/P/Q/R)+ 1 reinforce(A)
+- **质量**:8 commits + dev-direct push + 0 BLOCKER/MAJOR codex review(本会话内无 codex review;后续若需可补)+ forge-eval Task 4 一次性 PASS delta +8.0/+6.0/+7.0(3/3 pair_pass)+ verify 全 PASS(typecheck/lint/format:check/vitest 139 files / 1011 tests / +1 explore-md-sync guard)+ 4 new patterns 沉淀(O/P/Q/R)+ 1 reinforce(A)
 
 **Followup 建议**(由 plan-9z polish 或 plan-v1.1 消化;**本次 retrospect 仅沉淀 lesson,不实施 forge 协议本身的修订**):
 

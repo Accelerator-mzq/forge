@@ -85,7 +85,7 @@ forge:exploring 是 forge 协议的**非线性思考空间** — 任何阶段主
 - brainstorm 多种方案
 - 建对比表
 - 勾画 tradeoff
-- 给出推荐(**仅在用户明确问时**;否则沿 OpenSpec `explore.ts:132` "用户自己决定")
+- 给对比表 + tradeoff sketch + capture offer;**默认不替用户选**,沿 OpenSpec `explore.ts:132` "用户自己决定";**仅在用户明确委托决策时**(具体触发词:"你帮我定" / "你帮我决定" / "我让你选" / "你做主"等清晰委托)才给推荐 — "告诉我哪个更合理" / "你怎么看" / "你倾向哪个"等**不算**明确委托,仍走 capture offer 模式
 
 **可视化**
 
@@ -446,20 +446,20 @@ AI 倾向把所有"不做"的项都塞 SUGGESTION 持挂,而不写到 out-of-sco
 
 这些念头说明你正在 rationalize,STOP:
 
-| 想法                                                                       | 现实                                                                                                                                  |
-| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| "用户没说要 capture,我不给 capture offer 直接结束"                         | Capture offer **必须**给(沿 §2.5.6 第二条)— 即使是"capture 这次讨论的摘要到 `design.md ## Background`"                                |
-| "我直接 Write/Edit 改 `design.md`,反正用户应该会同意"                      | 禁止 — 写 artifacts 必须经 capture offer + 用户**明确**确认两步(沿 §2.5.6 第三条)                                                     |
-| "用户在 mid-impl,我建议他在 apply 阶段直接做,不走 explore 协议"            | 错。mid-impl **阻塞** issue 走 Fluid Pause(§2.1);**开放思考**走 explore — 都不是"在 apply 中直接做"                                   |
-| "时间紧,跳 Exploration Summary 收尾直接答"                                 | 时间紧时跳协议正是 baseline AI 的失败模式。即使时间压力下也给 Summary(可短,但**必须**有)                                              |
-| "用户问'选 A 还是 B',我直接选 A 给他"                                      | 错。沿 OpenSpec `explore.ts:132` "用户自己决定",AI 只给对比 + capture offer,不替用户选(仅在用户明确要求"给我推荐"时给)                |
-| "用户说'随便改一下 design',我直接改"                                       | 错。仍需 capture offer 明确"我把 X 改成 Y,可以吗?",得到明确"yes"再改                                                                  |
-| "archived change 已冻结但用户说改,我改"                                    | 错。archived 不变量优先,引导用户起新 change supersede                                                                                 |
-| "explore 是 thinking time,我可以无限发散"                                  | 错。forge 加了显式收尾约束 — 即使发散也要回到 Exploration Summary                                                                     |
-| "capture offer 写 vague '更新一下 design' 就行"                            | 错。必须 `file:section` 具体(沿 §2.5.6 第二条)                                                                                        |
-| "vague idea 没有上下文,不需要 capture offer"                               | 错。零上下文也给 offer — 至少"capture 到 `forge/drafts/<topic>.md` 新建 draft"                                                        |
-| "用户给的是技术问题(如 OAuth refresh token),我直接答技术不走 explore 协议" | 错(沿 plan-9f scenario 2 RED 抓的失败模式)。即使是技术问题,若用户表达探索意图(如"想想"/"重新想"),仍走 explore 协议 + 给 capture offer |
-| "对比选项时已经画了表,够了不用 capture offer"                              | 错。对比表是"探索结果"中间产物;capture offer 是"用户决定哪个" + "落到哪个 forge artifact"(沿 §2.5.4 capture decisions 表)             |
+| 想法                                                                       | 现实                                                                                                                                                                                             |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| "用户没说要 capture,我不给 capture offer 直接结束"                         | Capture offer **必须**给(沿 §2.5.6 第二条)— 即使是"capture 这次讨论的摘要到 `design.md ## Background`"                                                                                           |
+| "我直接 Write/Edit 改 `design.md`,反正用户应该会同意"                      | 禁止 — 写 artifacts 必须经 capture offer + 用户**明确**确认两步(沿 §2.5.6 第三条)                                                                                                                |
+| "用户在 mid-impl,我建议他在 apply 阶段直接做,不走 explore 协议"            | 错。mid-impl **阻塞** issue 走 Fluid Pause(§2.1);**开放思考**走 explore — 都不是"在 apply 中直接做"                                                                                              |
+| "时间紧,跳 Exploration Summary 收尾直接答"                                 | 时间紧时跳协议正是 baseline AI 的失败模式。即使时间压力下也给 Summary(可短,但**必须**有)                                                                                                         |
+| "用户问'选 A 还是 B'/'告诉我哪个更合理'/'你怎么看',我直接选 A 给他"        | 错。沿 OpenSpec `explore.ts:132` "用户自己决定" — 默认走 capture offer 模式不替用户选;**仅在用户明确委托决策**(具体触发词:"你帮我定" / "你帮我决定" / "我让你选" / "你做主"等清晰委托语)才给推荐 |
+| "用户说'随便改一下 design',我直接改"                                       | 错。仍需 capture offer 明确"我把 X 改成 Y,可以吗?",得到明确"yes"再改                                                                                                                             |
+| "archived change 已冻结但用户说改,我改"                                    | 错。archived 不变量优先,引导用户起新 change supersede                                                                                                                                            |
+| "explore 是 thinking time,我可以无限发散"                                  | 错。forge 加了显式收尾约束 — 即使发散也要回到 Exploration Summary                                                                                                                                |
+| "capture offer 写 vague '更新一下 design' 就行"                            | 错。必须 `file:section` 具体(沿 §2.5.6 第二条)                                                                                                                                                   |
+| "vague idea 没有上下文,不需要 capture offer"                               | 错。零上下文也给 offer — 至少"capture 到 `forge/drafts/<topic>.md` 新建 draft"                                                                                                                   |
+| "用户给的是技术问题(如 OAuth refresh token),我直接答技术不走 explore 协议" | 错(沿 plan-9f scenario 2 RED 抓的失败模式)。即使是技术问题,若用户表达探索意图(如"想想"/"重新想"),仍走 explore 协议 + 给 capture offer                                                            |
+| "对比选项时已经画了表,够了不用 capture offer"                              | 错。对比表是"探索结果"中间产物;capture offer 是"用户决定哪个" + "落到哪个 forge artifact"(沿 §2.5.4 capture decisions 表)                                                                        |
 
 **全部触发表示**:回到协议步骤,从"显式收尾 + 可执行 capture offer + 不写 artifacts"三条反向加固 reinforce 整个响应。
 

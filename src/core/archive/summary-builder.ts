@@ -117,7 +117,7 @@ export async function buildArchiveSummary(
     review_passed: {
       reviewers: [String(reviewMarker.reviewed_by ?? 'unknown')],
     },
-    process_evidence_summary: summarizeProcessEvidence(fenceResult),
+    process_evidence_summary: buildProcessEvidenceSummary(fenceResult),
     handoff_to_backlog,
     acked_warnings,
     pending_suggestions,
@@ -320,7 +320,7 @@ function toIso8601(d: Date): string {
 }
 
 /**
- * summarizeProcessEvidence — fence 14 不变量统计折数为 ProcessEvidenceSummary
+ * buildProcessEvidenceSummary — fence 14 不变量统计折数为 ProcessEvidenceSummary
  *
  * plan-9e2 v2 codex 一轮 MAJOR 修订:4 字段计数
  *
@@ -335,7 +335,7 @@ function toIso8601(d: Date): string {
  * 注:不在 builder 内 throw — 让 archive-summary-schema validator 单点把守不变式
  *     (避免双源校验路径分歧;沿 brainstorm spec §4.2 决策 #1)
  */
-function summarizeProcessEvidence(fenceResult: FenceCheckResult): ProcessEvidenceSummary {
+function buildProcessEvidenceSummary(fenceResult: FenceCheckResult): ProcessEvidenceSummary {
   // 按 status 4 态分类统计
   const passed = fenceResult.results.filter((r) => r.status === 'pass').length;
   const warning = fenceResult.results.filter((r) => r.status === 'warning').length;

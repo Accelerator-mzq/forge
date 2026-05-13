@@ -14,12 +14,63 @@ import { tmpdir } from 'node:os';
 import { buildArchiveSummary } from '../../../src/core/archive/summary-builder.js';
 import type { FenceCheckResult } from '../../../src/core/archive/fence.js';
 
-// plan-9e2 Task 2:既有测试用 stub fenceResult(全 pass,不影响 collector 逻辑测试)
-const STUB_FENCE_RESULT: FenceCheckResult = {
-  ok: true,
-  results: [],
-  notImplementedCount: 0,
-};
+// helper:构造 stub FenceCheckResult(plan-9e2 Task 2;quality review I-1:前移到 STUB_FENCE_RESULT 之前)
+// 注:const 不能引用文件后部声明的 function — TS function declaration hoisting 只对 function 不对 const = ...
+function buildStubFenceResult(opts: {
+  passed: number;
+  warning: number;
+  failed: number;
+  exempt: number;
+}): FenceCheckResult {
+  const results = [];
+  let idx = 1;
+  for (let i = 0; i < opts.passed; i++) {
+    results.push({
+      invariant: `fence-${idx++}`,
+      ok: true,
+      status: 'pass' as const,
+      reason: 'pass',
+    });
+  }
+  for (let i = 0; i < opts.warning; i++) {
+    results.push({
+      invariant: `fence-${idx++}`,
+      ok: true,
+      status: 'warning' as const,
+      reason: 'env_hash mismatch',
+    });
+  }
+  for (let i = 0; i < opts.failed; i++) {
+    results.push({
+      invariant: `fence-${idx++}`,
+      ok: false,
+      status: 'fail' as const,
+      reason: 'CRITICAL bug',
+    });
+  }
+  for (let i = 0; i < opts.exempt; i++) {
+    results.push({
+      invariant: `fence-${idx++}`,
+      ok: true,
+      status: 'legacy-skip' as const,
+      reason: 'legacy-exempt per master §3.4.4.1',
+    });
+  }
+  return {
+    ok: opts.failed === 0,
+    results,
+    notImplementedCount: 0,
+  };
+}
+
+// plan-9e2 Task 2:既有测试用 stub fenceResult(14 全 pass,sum 不变式 14+0+0+0=14 成立)
+// quality review I-1:防 Task 3 schema validator 严格化后既有 ~17 test 集体失败
+const STUB_FENCE_RESULT: FenceCheckResult = buildStubFenceResult({
+  passed: 14,
+  warning: 0,
+  failed: 0,
+  exempt: 0,
+});
 
 // helper:在 tmpdir 建一个最小 change 目录(proposal + design + tasks + specs)
 function setupChangeDir(): { changeDir: string; cleanup: () => void } {
@@ -654,59 +705,11 @@ describe('buildArchiveSummary - collector3 handoff_to_backlog 三类聚合', () 
 });
 
 // ============================================================
-// plan-9e2 Task 2:summarizeProcessEvidence + buildArchiveSummary 签名扩 5 case
+// plan-9e2 Task 2:buildProcessEvidenceSummary + buildArchiveSummary 签名扩 5 case
 // ============================================================
-// 注:buildArchiveSummary + FenceCheckResult 已在文件顶部 import,本块不重复 import(v2 codex 一轮 plan review MAJOR 3 修订)
+// 注:buildArchiveSummary + FenceCheckResult + buildStubFenceResult helper 已在文件顶部定义/import(quality review I-1 修订前移)
 
-// helper:构造 stub FenceCheckResult
-function buildStubFenceResult(opts: {
-  passed: number;
-  warning: number;
-  failed: number;
-  exempt: number;
-}): FenceCheckResult {
-  const results = [];
-  let idx = 1;
-  for (let i = 0; i < opts.passed; i++) {
-    results.push({
-      invariant: `fence-${idx++}`,
-      ok: true,
-      status: 'pass' as const,
-      reason: 'pass',
-    });
-  }
-  for (let i = 0; i < opts.warning; i++) {
-    results.push({
-      invariant: `fence-${idx++}`,
-      ok: true,
-      status: 'warning' as const,
-      reason: 'env_hash mismatch',
-    });
-  }
-  for (let i = 0; i < opts.failed; i++) {
-    results.push({
-      invariant: `fence-${idx++}`,
-      ok: false,
-      status: 'fail' as const,
-      reason: 'CRITICAL bug',
-    });
-  }
-  for (let i = 0; i < opts.exempt; i++) {
-    results.push({
-      invariant: `fence-${idx++}`,
-      ok: true,
-      status: 'legacy-skip' as const,
-      reason: 'legacy-exempt per master §3.4.4.1',
-    });
-  }
-  return {
-    ok: opts.failed === 0,
-    results,
-    notImplementedCount: 0,
-  };
-}
-
-describe('summarizeProcessEvidence 通过 buildArchiveSummary 接入 — plan-9e2 Task 2', () => {
+describe('buildProcessEvidenceSummary 通过 buildArchiveSummary 接入 — plan-9e2 Task 2', () => {
   const baselineVerifyMarker = {
     schema: 'forge-verify/v1',
     verify_findings: [],
@@ -774,7 +777,7 @@ describe('summarizeProcessEvidence 通过 buildArchiveSummary 接入 — plan-9e
     });
   });
 
-  it('legacy + 1 WARNING 落保留 invariant + 3 真过 + 10 skip → {placeholder:false, passed:3, warning:1, failed:0, exempt:10}', async () => {
+  it('mixed:3 pass + 1 WARNING + 0 fail + 10 exempt → 4 字段计数正确', async () => {
     const fenceResult = buildStubFenceResult({ passed: 3, warning: 1, failed: 0, exempt: 10 });
     const summary = await buildArchiveSummary(
       baselineVerifyMarker,

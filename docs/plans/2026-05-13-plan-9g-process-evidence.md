@@ -5782,7 +5782,7 @@ it('A8 旁支造合法 RED/GREEN 链 + 主分支换实现 → 不变量 14 green
 
 ---
 
-**Status**: plan-9g v8(沿 plan-9j v1→v9 模式;Codex 八轮已审 2 BLOCKER 全修;接 v9 终审)
+**Status**: plan-9g v8 ✅ **Codex 九轮终审通过 — 0 BLOCKER + 0 MAJOR,可进 writing-plans 阶段**(沿 plan-9j v1→v9 模式;9 轮迭代 commits 070015f→b920035)
 
 实施前必跑:`pnpm install`(fast-xml-parser + tap-parser 两新 deps)
 

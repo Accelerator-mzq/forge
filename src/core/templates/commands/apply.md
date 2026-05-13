@@ -32,6 +32,8 @@ You are about to handle `/forge:apply $ARGUMENTS`.
 
 ## Fluid Pause Decision Point(v1.0,沿 design §2.1)
 
+> **与 `/forge:explore` 边界提示**(沿 design §2.5.5 + plan-9f):Fluid Pause 是**被动**触发(subagent 报告阻塞型 issue 时主代理进入);若是**开放思考**(非阻塞 issue,如"实施途中想重新评估某个 design 决策"),应主动触发 `/forge:explore --change <id>` 而非 Fluid Pause。两者边界详见 `forge:exploring` skill 的"与 §2.1 Fluid Pause 边界"段。
+
 ### 触发条件
 
 subagent 在 apply 中段报告以下三档之一时,主代理**不直接处理**,改进 Fluid Pause:

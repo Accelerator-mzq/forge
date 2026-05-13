@@ -1,4 +1,4 @@
-# Plan-9g brainstorm design — process_evidence + 13 不变量 + worktree 重跑 + reporter parser
+# Plan-9g brainstorm design — process_evidence + 14 不变量 + worktree 重跑 + reporter parser
 
 > **Status**: brainstorming 产物,作为 writing-plans 阶段的输入。
 > **Date**: 2026-05-13
@@ -28,7 +28,7 @@
 
 本文档是 `superpowers:brainstorming` skill 流程的产物,**记录 plan-9g 实施路径选型决策**,而非重新设计 §2.7 内容。
 
-- **Spec 层(不动)**:`docs/specs/2026-05-10-v1.0-fusion-completion-design.md` §2.7 已 v3 完整定型 — 13 不变量字面、7 攻击场景、3 个 CLI helper 接口签名、三档 mode + ack 流程都已锁定。本文档**完全沿用**,不重复其字面定义。
+- **Spec 层(不动 + v10 已修订 §2.7.8 数字残留)**:`docs/specs/2026-05-10-v1.0-fusion-completion-design.md` §2.7 已 v3 完整定型 — 14 不变量字面(v6 brainstorm 加不变量 14)、8 攻击场景(v6 加 A8 旁支造链)、3 个 CLI helper 接口签名(v9/v10 修订 helper 接收字段不自跑)、三档 mode + ack 流程都已锁定。本文档**完全沿用**,不重复其字面定义。
 - **Plan 层(本文档落地)**:reporter parser 包选型、fence 代码拆分粒度、worktree helper 抽象层、process_evidence lifecycle、archive.ts 集成切口、测试组织 — 这些是 spec → plan 之间的**实现路径选型**。
 - **Task 层(writing-plans 阶段产出)**:本文档不拆 task。后续由 `superpowers:writing-plans` skill 基于本文档生成 `docs/plans/2026-05-10-plan-9g-process-evidence.md`,内含每个 Task 的 inline 完整代码(沿 plan-9j Pattern A 教训)。
 
@@ -39,7 +39,7 @@
 | # | 决策点 | 选定 | 选定理由 |
 |---|---|---|---|
 | 1 | Reporter parser 三档(`junit | tap | vitest-json`)实现路径 | **三档各引独立 npm 包** | 生态最成熟 — JUnit 用 `fast-xml-parser`、TAP 用 `tap-parser`(isaacs 维护)、Vitest 用原生 JSON.parse;统一抽象成 `ReporterResult` 类型,parseReporter(path, type) factory 分发 |
-| 2 | 13 不变量 fence 代码拆分粒度 | **二分:fence.ts(字段类)+ rerun.ts(worktree 类)** | 沿 src/core/archive/ 现有模式(legacy-exemption / version-retrograde / verify-findings / pause-decisions / three-level fence 各成模块);IO/纯函数分离,test 时 rerun.ts 可整体 mock |
+| 2 | 14 不变量 fence 代码拆分粒度 | **二分:fence.ts(字段类)+ rerun.ts(worktree 类)** | 沿 src/core/archive/ 现有模式(legacy-exemption / version-retrograde / verify-findings / pause-decisions / three-level fence 各成模块);IO/纯函数分离,test 时 rerun.ts 可整体 mock |
 | 3 | Worktree helper 接口抽象层 | **高阶 `runInWorktree(sha, fn, opts)`** | try/finally 强制 cleanup,丢 cleanup 不可能;test 时 mock 整个 helper 简单;sample 模式多 task 重跑可通过 `max_parallel_reruns` 并发 gate |
 | 4 | process_evidence helper append-only 写入路径 | **staging 文件 + archive 聚合(三源 cross-check)** | helper 调用不依赖 marker 存在;marker 字段是凝固快照;**marker == staging == ack-log 三源 cross-check 反伪造强度最高**;不动现有 marker reader 代码(archive/validate/recover) |
 | 5 | forge-eval RED scenario 组织 | **7 个独立 attack scenario + 1 GREEN(含三档 mode sub-fixture)** | 沿 v0.4 forge-eval/scenarios/ 模式,目录隔离;debug 时一眼看出当前测哪类攻击;改一个不连累别的 |
@@ -127,7 +127,7 @@ src/cli/commands/archive.ts
    1. 9g 填实 src/core/archive/fence.ts 的 13 stub(Codex MAJOR #4 修复)
    2. 移除 --enable-cross-cutting-fence opt-in flag(默认开启)
    3. 移除 --allow-stub-fence opt-in flag(stub 已实,不需要)
-   4. archive.ts:240 现有 crossCuttingFenceCheck() 调用保留不动(默认开启 = 默认跑 13 不变量)
+   4. archive.ts:240 现有 crossCuttingFenceCheck() 调用保留不动(默认开启 = 默认跑 14 不变量)
    5. WARNING 处理(Codex BLOCKER #3 修复):fence 返回的 WARNING finding 转 VerifyFinding
       schema(沿 plan-9d Task 3)+ 写入 marker.verify_findings(superset additive 扩),
       archive 步骤 3.6 verify_findings fence + 步骤 3.9 three-level fence 自动接 ack 流程
@@ -168,9 +168,13 @@ src/core/markers/types.ts
      archive 验证防"重写整链 + 链内自洽"攻击)
    + ack_log_entry_count?: number(v7 新增,同 MAJOR-3:固化 evidence-helper entry 行数)
 
-src/core/schemas/archive-summary.ts(v7 新增修订项,Codex 二轮 MINOR-2)
+src/core/schemas/archive-summary.ts(v7 新增修订项,Codex 二轮 MINOR-2 + 七轮 MINOR-3)
    ProcessEvidenceSummary 字段统计从 13 不变量 → 14 不变量(plan-9e1 留的 placeholder
-   原写 13,9g 接入时同步改 14;archive-summary.ts:33 / 133 行)
+   原写 13,9g 接入时同步改 14;archive-summary.ts:33 / 56 / 133 行)
+
+commands/archive.md / src/core/templates/commands/archive.md(v10 新增,Codex 七轮 MINOR-3)
+   slash 模板内 13 不变量字面同步 14(commands/archive.md:141 + 顶层同步;沿 plan-9j Task 6.2
+   commands 双同步模式)
 ```
 
 #### 2.2.3 Config schema(2 个;v6 编号不变)
@@ -225,7 +229,7 @@ package.json
 ### 2.3 新增测试(8 类)
 
 ```
-tests/cli/process-evidence-fence.test.ts      — fieldFence 13×7 + 三档 mode + WARNING/CRITICAL
+tests/cli/process-evidence-fence.test.ts      — fieldFence 14×8 + 三档 mode + WARNING/CRITICAL
 tests/cli/process-evidence-rerun.test.ts      — rerunFence 不变量 5/6/13 + worktree + timeout
 tests/cli/evidence-helpers.test.ts            — 三 helper staging append-only + freeze
 tests/cli/evidence-freeze.test.ts             — forge evidence freeze 子命令(v6 修订):staging → marker 拷贝 + transaction 回滚 + WARNING 转 VerifyFinding + 锁
@@ -275,7 +279,7 @@ forge-eval/scenarios/(沿 forge-eval §5.5 现有约定:单 yaml per skill,RED/G
 - `src/core/validate/marker-schema.ts:44 + :498` 运行时 validator dimension 校验扩 4 值
 - `src/cli/commands/finding.ts:68` finding hash CLI 接收 stdin JSON 时 dimension 校验扩 4 值
 - `docs/plans/2026-05-11-plan-9d-verify-three-dimensions.md:3612` plan-9d 三维度 enum 锁定段加 v1.0 修订注(superset additive,沿 plan-9c/9d/9j 同模式)
-- 对应 tests/cli/marker-schema.test.ts + tests/cli/finding.test.ts 加 process_evidence 用例
+- 对应测试 fixture 扩(v10 修订,Codex 七轮 M-1:测试路径修正):`tests/core/validate/marker-schema.test.ts`(dimension=process_evidence 不被拒签)+ `tests/core/markers/verify-findings-schema.test.ts`(VerifyFinding 接受 process_evidence)+ `tests/cli/finding-hash.test.ts`(finding hash CLI 接受 process_evidence dimension)
 - **rerun-time WARNING(仅不变量 13 在 sample/hash-only 模式)**:fence 在 archive 阶段算,**不写 marker**(避免破坏 freeze 不变性),**仅 stderr 输出告警 + 不阻断 archive**。ack-mode(沿不变量 12 用户必须先 ack)**隐含覆盖**该模式下 rerun-time WARNING。rerun.ts 实现约束:不得为 env drift / 抽样未命中 / reporter fallback 产生额外 rerun-time WARNING(沿 Codex 五轮 SUG-1) — 此类问题应在 freeze-time(不变量 10 env_hash)或 mode ack(不变量 12)处理
 
 ### 3.1 fence.ts 关键函数签名
@@ -327,7 +331,7 @@ mode 分支处理:
 
 ```typescript
 // src/core/schemas/process-evidence.ts — plan-9g Task 1
-// §2.7.2 forge-process-evidence/v1 schema:13 不变量字段 + 三源 cross-check
+// §2.7.2 forge-process-evidence/v1 schema:14 不变量字段 + 五源 cross-check(v10)
 // 沿 archive-summary.ts 模式:schema literal + 手写 interface + JSDoc
 
 /** ProcessEvidence 顶级 schema(沿 design §2.7.2 字段表) */
@@ -795,7 +799,7 @@ export async function buildProcessEvidenceFenceContext(args: {
 
 ## 8. 测试矩阵 + forge-eval scenario
 
-### 8.1 13 不变量 × 7 攻击场景命中点
+### 8.1 14 不变量 × 8 攻击场景命中点(v6 brainstorm Codex 一轮:加不变量 14 + A8 旁支造链)
 
 ```
                             ┌──┬──┬──┬──┬──┬──┬──┐
@@ -877,7 +881,7 @@ scenarios:
 §2.7 process_evidence 行为约束(走 helper / 不跳 RED / 不静默切 mode)的 skill-level 测试集成路径,brainstorm 阶段锁定 **P2:新增 process-evidence skill + 独立 yaml**。
 
 **P2 选定理由**:
-- 协议独立成形 — process_evidence 是 §2.7 完整一节(13 不变量 + 三 helper + 三档 mode + worktree + reporter),作为独立 skill 文本比拆散到 SDD/TDD/verification 三 skill 段落更清晰
+- 协议独立成形 — process_evidence 是 §2.7 完整一节(14 不变量 + 三 helper + 三档 mode + worktree + reporter),作为独立 skill 文本比拆散到 SDD/TDD/verification 三 skill 段落更清晰
 - 沿 forge §2.9 writing-skills 协议路径(plan-9i 9g 实施前已完成,提供新 skill 创建协议)
 - 长期可维护性优:后续 v1.1 / v1.2 增删 process_evidence 不变量时只动一个 skill 文档
 
@@ -1061,14 +1065,14 @@ rerun-time WARNING(仅不变量 13 在 sample/hash-only 模式)**不算 finding_
 
 WARNING dedup(v9 简化):freeze-time WARNING 由 freeze 单次写入 marker,不存在重入;rerun-time WARNING 不持久化,无 dedup 需求 — 整套 dedup 协议**删除**。
 
-**helper 语义协议**(v7 新增,Codex 二轮 MAJOR-2 修复 — master spec §2.7.6 行 1280 字面与 v6 设计冲突):
+**helper 语义协议**(v10 修订,Codex 五轮+六轮 MAJOR 修复完成):
 
-master spec §2.7.6 行 1280 字面说"helper 内部:解析 commit + 跑测试取 exit_code + 解析 reporter + append-only 写 marker + 写 ack-log"(helper 自跑模式);v6/v7 设计选 **"helper 接收完整字段,不自跑测试"**(沿 plan-9a 骨架已实现路径 + worktree 重跑留 archive 阶段)。理由:
+master spec §2.7.6 行 1280-1289 + §2.7.8 行 1316-1319 **已在 v10 直接修订**为"helper 接收完整字段,不自跑测试"(沿 plan-9a 骨架已实现路径 + worktree 重跑留 archive 阶段)。理由:
 - 沿 plan-9a 骨架一致性(plan-9a Task 5 已是 "接收字段"路径,v6/v7 仅扩 options 数量,不改语义)
 - worktree 重跑放 archive 阶段更克制(主代理在 task 实施时已经跑过测试一次,helper 再跑等于跑两次浪费;archive worktree 重跑作为反伪造重跑独立一次足够)
 - helper "自跑"会让 helper 调用变重(每次调要等测试跑完),主代理实施流程受阻
 
-**待 9g writing-plans 阶段同步 master spec §2.7.6 行 1280 文字**:在该处加注"v1.0 实施时改为 helper 接收字段;worktree 重跑统一放 archive `crossCuttingFenceCheck()` 内 runRerunFence(沿 §2.7.4 A)"。
+**v10 已直接同步项**(沿 Codex 五轮 M-3 + 六轮 M-3):master spec 行 1280-1282 helper 调用表;行 1286-1289 "为什么 CLI helper" 段;行 1314/1329/1340/1343 数字残留(13→14, 7→8);行 1316-1319 §2.7.8 实施清单。writing-plans 实施者可直接以 master spec 当前字面为准。
 
 ### 9.13 不变量 14 实施细节(v6 新增,Codex BLOCKER #2 修复)
 
@@ -1119,7 +1123,7 @@ function checkInvariant14(ctx: ProcessEvidenceFenceContext): ProcessEvidenceFind
 
 ## 11. 引用与版本对齐(v6 修订)
 
-- master spec §2.7 全节(行 1076-1342)— 13 不变量字面 + 三 helper 接口签名 + 三档 mode + worktree 重跑
+- master spec §2.7 全节(行 1076-1342)— 14 不变量字面(v10 修订)+ 三 helper 接口签名(v10 修订接收字段)+ 三档 mode + worktree 重跑
 - master spec §2.9 全节(writing-skills 协议 — §9.8 P2 路径 process-evidence skill 创建依此协议)
 - master plan §0 总览表 line 30(v6 待 9g writing-plans 前修订)
 - **plan-9a Task 5**(evidence CLI 骨架 + ack-log + canonical hash)— 9g 扩三 helper options + 加 freeze 子命令 + ack-log prev_entry_hash chain
@@ -1155,7 +1159,29 @@ function checkInvariant14(ctx: ProcessEvidenceFenceContext): ProcessEvidenceFind
 
 ---
 
-**Status: ready for seventh-round Codex review**
+**Status: ready for eighth-round Codex review**
+
+---
+
+## 18. Codex 七轮审查修复摘要(v11 修订,本节供八轮审查 cross-check 用)
+
+**进展**:Codex 七轮 0 BLOCKER + 3 MAJOR + 3 MINOR;0 BLOCKER 第二次确认;3 MAJOR 全修。
+
+**真 MAJOR 修复(3 项)**:
+
+- **M1 操作指引完整化**:
+  - plan-9d enum 锁定段(`docs/plans/2026-05-11-plan-9d-verify-three-dimensions.md:3612`)本次直接加 v1.0 修订注 — "plan-9g brainstorm v10 修订:9g writing-plans 阶段加 `process_evidence` 为第 4 个 enum 值"
+  - 测试路径修正(v10 spec 写 `tests/cli/marker-schema.test.ts` 不存在):改为实际路径 `tests/core/validate/marker-schema.test.ts` + `tests/core/markers/verify-findings-schema.test.ts` + `tests/cli/finding-hash.test.ts`
+- **M4 §9.12 "待同步" 矛盾真删除**:§9.12 末段从"待 9g writing-plans 阶段同步 master spec §2.7.6 行 1280 文字"改为"v10 已直接同步项"列举,与 §13/§14/§17 一致
+- **M-3 brainstorm 自身 13/7 残留全扫除**:§1 标题 / §0.0 Spec 层声明 / §1 决策摘要表 第 2 项 / §2.2.1 archive.ts 注 / §2.2.2 archive-summary 注 / §2.3 测试清单 / §4 schema 注 / §8.1 测试矩阵 / §9.8 P2 理由 / §11 引用 — 全部 13→14, 7→8
+
+**真 MINOR 修复(3 项)**:
+
+- **MIN-1 master plan §4.1 schedule 修订**:Week 7/8/9 重排 + 关键路径 P50 25→26 / P90 33→35 + 单人总 39→40.5(与 §0 闭合)
+- **MIN-2 master spec §3.3.2 enforcement matrix 修订**:行 1688 §2.7 process_evidence 描述 13 → 14 + 加 green↞HEAD + ack-log 链 + tail/count 固化 + WARNING 流转两段(v9 简化)字面
+- **MIN-3 archive-summary.ts + commands/archive.md 13 字面同步**:加入 §2.2 修改文件清单(archive-summary.ts:33/56/133 行 + commands/archive.md:141 双同步沿 plan-9j Task 6.2 模式)
+
+**SUG-1**:M1 已涵盖 — type + runtime validator + CLI + tests + plan-9d 文档同步
 
 ---
 

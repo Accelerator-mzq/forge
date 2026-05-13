@@ -3609,7 +3609,7 @@ design §2.3.3 表 line 443-448 列了 6 类 `candidate_type` enum,工程实施�
 - `FindingHashPayload`(9a 8 字段)在 Task 4 `buildAutoCriticalFinding` + Task 6 `validateVerifyFindingsFence` 一致使用
 - `computeFindingHash` / `extractHashPayload`(9a)签名在 Task 4 + Task 6 一致
 - 字段大小写一致:`severity_acked_by` / `severity_acked_at` / `downgraded_from` / `downgrade_acked_by` / `downgrade_rationale`(沿 9a)
-- dimension enum:`completeness | correctness | coherence`(沿 design §2.2.2 + 9a 全 plan 一致)
+- dimension enum:`completeness | correctness | coherence`(沿 design §2.2.2 + 9a 全 plan 一致;**plan-9g brainstorm v10 修订**:9g writing-plans 阶段加 `process_evidence` 为第 4 个 enum 值,沿 superset additive 模式,挂 process_evidence freeze-time WARNING 7/10 用)
 - severity enum:`CRITICAL | WARNING | SUGGESTION`(沿 9a SEVERITY_VALUES)
 - check_type 字符串自由形式但本 plan 标定:`task-completion` / `spec-coverage` / `spec-files-missing` / `requirement-mapping` / `scenario-coverage` / `design-traceability` / `pattern-consistency` — example 与 SKILL.md 三维度协议表 + commands/verify.md 4.2 段一致
 

@@ -18,7 +18,7 @@
 import { Command } from 'commander';
 import { execFileSync } from 'node:child_process';
 import { resolve, join } from 'node:path';
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { stringify, parse } from 'yaml';
@@ -108,6 +108,11 @@ async function readStagingYaml(changeRoot: string): Promise<ProcessEvidence | nu
 /**
  * writeStagingYaml — 覆写 staging.yaml(重算 staging_hash 写入)
  * staging_hash = canonicalHash(ProcessEvidence struct)(plan §4.3 留白展开)
+ *
+ * round 2 fix (I2):改原子写 — 先写 .tmp,再 rename 到目标
+ * 沿 plan-9e1 transaction.ts atomic 模式
+ * POSIX 平台 rename 是 atomic;NTFS 是 near-atomic
+ * 中途崩溃(磁盘满 / SIGKILL)→ staging.yaml 不会半写损坏
  */
 async function writeStagingYaml(changeRoot: string, data: ProcessEvidence): Promise<void> {
   const evidenceDir = join(changeRoot, '.evidence');
@@ -117,7 +122,10 @@ async function writeStagingYaml(changeRoot: string, data: ProcessEvidence): Prom
   const stagingHash = canonicalHash(data);
   // 写入时附加 staging_hash 顶级字段(额外信封字段,不影响 schema)
   const withHash = { ...data, staging_hash: stagingHash };
-  await writeFile(stagingPath, stringify(withHash), 'utf8');
+  // round 2 (I2):原子写 — tmp + rename
+  const tmpPath = stagingPath + '.tmp';
+  await writeFile(tmpPath, stringify(withHash), 'utf8');
+  await rename(tmpPath, stagingPath);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -143,7 +151,9 @@ export function buildEvidenceCommand(): Command {
     .description('记录 TDD red→green 事件:写 payload hash 到 ack-log.jsonl + staging.yaml')
     .argument('<changeId>', 'change 目录 ID,如 add-login')
     .requiredOption('--task <task-ref>', 'task 引用,如 tasks.md#task-1')
-    .requiredOption('--red-commit <sha>', 'failing test(红) 提交 SHA')
+    // round 2 fix (I3):--red-commit 改 optional,以兼容 schema TddEventChain.red_commit | null
+    // 验证:若 !tddExemption && !redCommit → exit 2(在 action 内显式检查)
+    .option('--red-commit <sha>', 'failing test(红) 提交 SHA;tdd_exemption 非空时可省')
     .requiredOption('--green-commit <sha>', 'passing test(绿) 提交 SHA')
     .option('--expected-failures <json>', '预期失败列表,JSON 数组格式,如 ["test-a"]')
     // plan-9g Task 3.3 新增 options(red 系列 — 沿 plan §4.3.0 表)
@@ -172,7 +182,8 @@ export function buildEvidenceCommand(): Command {
         changeId: string,
         opts: {
           task: string;
-          redCommit: string;
+          // round 2 fix (I3):redCommit 改 optional 配合 schema
+          redCommit?: string;
           greenCommit: string;
           expectedFailures?: string;
           redTimestamp?: string;
@@ -220,21 +231,33 @@ export function buildEvidenceCommand(): Command {
           }
         }
 
+        // round 2 fix (I3):--red-commit 必填校验
+        // 仅当 tdd_exemption 非空时可省;否则必须提供 --red-commit
+        if (!tddExemption && !opts.redCommit) {
+          process.stderr.write(
+            `forge evidence record-tdd: --red-commit is required unless --tdd-exemption is provided\n`,
+          );
+          process.exit(2);
+        }
+
         // 构建 payload extra 对象(沿 plan §4.3.0 表 "写入 ack-log entry.extra 字段" 列)
+        // round 2 fix (I3):tddExemption 非空时 red_commit 设 null(沿 schema)
         const payload = {
           helper: 'record-tdd',
           change_id: changeId,
           task_ref: opts.task,
-          red_commit: {
-            sha: opts.redCommit,
-            timestamp: opts.redTimestamp ?? null,
-            red_log_path: opts.redLog ?? null,
-            red_log_hash: opts.redLogHash ?? null,
-            runner_report_path: opts.redReport ?? null,
-            runner_report_hash: opts.redReportHash ?? null,
-            exit_code: opts.redExit !== undefined ? parseInt(opts.redExit, 10) : null,
-            expected_failures: expectedFailures,
-          },
+          red_commit: tddExemption
+            ? null
+            : {
+                sha: opts.redCommit!,
+                timestamp: opts.redTimestamp ?? null,
+                red_log_path: opts.redLog ?? null,
+                red_log_hash: opts.redLogHash ?? null,
+                runner_report_path: opts.redReport ?? null,
+                runner_report_hash: opts.redReportHash ?? null,
+                exit_code: opts.redExit !== undefined ? parseInt(opts.redExit, 10) : null,
+                expected_failures: expectedFailures,
+              },
           green_commit: {
             sha: opts.greenCommit,
             timestamp: opts.greenTimestamp ?? null,
@@ -287,18 +310,21 @@ export function buildEvidenceCommand(): Command {
           }
 
           // 构建 TddEventChain 条目(沿 plan §4.3.0 表 "写入 staging.yaml 字段" 列)
+          // round 2 fix (I3):tddExemption 非空时 red_commit = null(schema TddEventChain.red_commit | null)
           const tddEntry: TddEventChain = {
             task_ref: opts.task,
-            red_commit: {
-              sha: opts.redCommit,
-              timestamp: opts.redTimestamp ?? new Date().toISOString(),
-              red_log_path: opts.redLog ?? '',
-              red_log_hash: opts.redLogHash ?? '',
-              exit_code: opts.redExit !== undefined ? parseInt(opts.redExit, 10) : -1,
-              runner_report_path: opts.redReport ?? '',
-              runner_report_hash: opts.redReportHash ?? '',
-              expected_failures: expectedFailures as ExpectedFailure[],
-            },
+            red_commit: tddExemption
+              ? null
+              : {
+                  sha: opts.redCommit!,
+                  timestamp: opts.redTimestamp ?? new Date().toISOString(),
+                  red_log_path: opts.redLog ?? '',
+                  red_log_hash: opts.redLogHash ?? '',
+                  exit_code: opts.redExit !== undefined ? parseInt(opts.redExit, 10) : -1,
+                  runner_report_path: opts.redReport ?? '',
+                  runner_report_hash: opts.redReportHash ?? '',
+                  expected_failures: expectedFailures as ExpectedFailure[],
+                },
             green_commit: {
               sha: opts.greenCommit,
               timestamp: opts.greenTimestamp ?? new Date().toISOString(),
@@ -314,12 +340,13 @@ export function buildEvidenceCommand(): Command {
 
           staging.tdd_event_chain.push(tddEntry);
           await writeStagingYaml(changeRoot, staging);
+          // round 2 fix (C5):appendAckLog 移入 lock 内防并发链断 race
+          // 否则 staging release 与 ack-log 读 last entry 之间存在 race window,
+          // 双进程可能读到同一 last 写入相同 prev_entry_hash → 链断
+          await appendAckLog(changeRoot, entry);
         } finally {
           await release();
         }
-
-        // 追加 ack-log(含 prev_entry_hash 链)
-        await appendAckLog(changeRoot, entry);
 
         process.exit(0);
       },
@@ -440,11 +467,11 @@ export function buildEvidenceCommand(): Command {
 
           staging.verify_invocations.push(verifyEntry);
           await writeStagingYaml(changeRoot, staging);
+          // round 2 fix (C5):appendAckLog 移入 lock 内防并发链断 race
+          await appendAckLog(changeRoot, entry);
         } finally {
           await release();
         }
-
-        await appendAckLog(changeRoot, entry);
 
         process.exit(0);
       },
@@ -564,11 +591,11 @@ export function buildEvidenceCommand(): Command {
 
           staging.subagent_review_chain.push(reviewEntry);
           await writeStagingYaml(changeRoot, staging);
+          // round 2 fix (C5):appendAckLog 移入 lock 内防并发链断 race
+          await appendAckLog(changeRoot, entry);
         } finally {
           await release();
         }
-
-        await appendAckLog(changeRoot, entry);
 
         process.exit(0);
       },

@@ -9,8 +9,8 @@
 // 语义差异:archive lock 是 fail-immediately;staging lock 是 wait-retry-timeout
 // (合理因 staging 是 short-lived per-call)
 
-import { writeFile, readFile, rm } from 'node:fs/promises';
-import { existsSync, openSync, closeSync, mkdirSync, constants } from 'node:fs';
+import { readFile, rm } from 'node:fs/promises';
+import { existsSync, openSync, closeSync, writeSync, mkdirSync, constants } from 'node:fs';
 import { join, dirname } from 'node:path';
 
 /** lock 文件内容 */
@@ -95,14 +95,18 @@ export async function acquireStagingLock(
       throw err;
     }
 
-    // 创建成功 → 写 lock 内容
+    // 创建成功 → 通过 fd 写内容(round 2 fix I1):
+    //   - 避免 path-write race window:openSync 后立即用 fd 写,无 empty 中间态
+    //   - 避免 fd leak:try/finally 保证 closeSync 必走;writeSync 抛错 fd 仍关闭
     const data: StagingLockData = {
       pid: process.pid,
       acquired_at: new Date().toISOString(),
     };
-    // 先写内容,再关闭 fd(fd 只是用于原子创建)
-    await writeFile(lockPath, JSON.stringify(data, null, 2), { encoding: 'utf8', flag: 'w' });
-    closeSync(fd);
+    try {
+      writeSync(fd, JSON.stringify(data, null, 2));
+    } finally {
+      closeSync(fd);
+    }
 
     // 返回幂等 release 函数
     return async (): Promise<void> => {

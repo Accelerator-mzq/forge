@@ -158,6 +158,15 @@ export async function runRerunFence(
               message: `RED worktree error ${e.stage}: ${e.message}`,
               taskRef: chain.task_ref,
             });
+          } else {
+            // v8.1 final review fix:parseReporter 抛 Error(corrupted XML 等)不能静默吞
+            // 攻击路径:attacker 提交 corrupted XML report → parseReporter throws → 之前被吞 → invariant 5 sub-b 跳过
+            findings.push({
+              invariant: 5,
+              severity: 'CRITICAL',
+              message: `RED reporter parse error: ${e instanceof Error ? e.message : String(e)}`,
+              taskRef: chain.task_ref,
+            });
           }
         }
       }
@@ -225,6 +234,15 @@ export async function runRerunFence(
             invariant: 6,
             severity: 'CRITICAL',
             message: `GREEN worktree error ${e.stage}: ${e.message}`,
+            taskRef: chain.task_ref,
+          });
+        } else {
+          // v8.1 final review fix:parseReporter 抛 Error(corrupted XML 等)不能静默吞
+          // 攻击路径:attacker 提交 corrupted XML report → parseReporter throws → 之前被吞 → invariant 6 sub-b 跳过
+          findings.push({
+            invariant: 6,
+            severity: 'CRITICAL',
+            message: `GREEN reporter parse error: ${e instanceof Error ? e.message : String(e)}`,
             taskRef: chain.task_ref,
           });
         }

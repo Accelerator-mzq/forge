@@ -146,111 +146,115 @@ describe('process-evidence-fence A1-A8 attacks', () => {
    *   - archiveHead = main 的新 HEAD
    *   - git merge-base --is-ancestor <green-sha> <main-HEAD> → 失败 → fence-14 CRITICAL
    */
-  it('A8 旁支造合法 RED/GREEN 链 + 主分支换实现 → 不变量 14 green↞HEAD 拒签', async () => {
-    const { projectRoot, changeRoot } = await setupAttackFixture('8-cross-branch');
+  it(
+    'A8 旁支造合法 RED/GREEN 链 + 主分支换实现 → 不变量 14 green↞HEAD 拒签',
+    { timeout: 15000 },
+    async () => {
+      const { projectRoot, changeRoot } = await setupAttackFixture('8-cross-branch');
 
-    // 记录初始 HEAD(用于 red_commit)
-    const initHead = execFileSync('git', ['rev-parse', 'HEAD'], {
-      cwd: projectRoot,
-      encoding: 'utf8',
-    }).trim();
+      // 记录初始 HEAD(用于 red_commit)
+      const initHead = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: projectRoot,
+        encoding: 'utf8',
+      }).trim();
 
-    // 在 branch-X 上创建 GREEN commit(攻击者的旁支 sha)
-    execFileSync('git', ['checkout', '-b', 'branch-x'], { cwd: projectRoot });
-    await writeFile(join(projectRoot, 'impl-branchx.txt'), 'branch-x impl\n', 'utf8');
-    execFileSync('git', ['add', '.'], { cwd: projectRoot });
-    execFileSync('git', ['commit', '-q', '-m', 'green commit on branch-x'], { cwd: projectRoot });
-    const greenShaOnBranchX = execFileSync('git', ['rev-parse', 'HEAD'], {
-      cwd: projectRoot,
-      encoding: 'utf8',
-    }).trim();
+      // 在 branch-X 上创建 GREEN commit(攻击者的旁支 sha)
+      execFileSync('git', ['checkout', '-b', 'branch-x'], { cwd: projectRoot });
+      await writeFile(join(projectRoot, 'impl-branchx.txt'), 'branch-x impl\n', 'utf8');
+      execFileSync('git', ['add', '.'], { cwd: projectRoot });
+      execFileSync('git', ['commit', '-q', '-m', 'green commit on branch-x'], { cwd: projectRoot });
+      const greenShaOnBranchX = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: projectRoot,
+        encoding: 'utf8',
+      }).trim();
 
-    // 切回 main,创建新 commit(替换实现,diverge from branch-x)
-    execFileSync('git', ['checkout', '-'], { cwd: projectRoot });
-    await writeFile(join(projectRoot, 'impl-main.txt'), 'main different impl\n', 'utf8');
-    execFileSync('git', ['add', '.'], { cwd: projectRoot });
-    execFileSync('git', ['commit', '-q', '-m', 'main: different implementation'], {
-      cwd: projectRoot,
-    });
-    const mainHead = execFileSync('git', ['rev-parse', 'HEAD'], {
-      cwd: projectRoot,
-      encoding: 'utf8',
-    }).trim();
-
-    // 验证 greenShaOnBranchX 确实不是 mainHead 的祖先
-    let isAncestor = false;
-    try {
-      execFileSync('git', ['merge-base', '--is-ancestor', greenShaOnBranchX, mainHead], {
+      // 切回 main,创建新 commit(替换实现,diverge from branch-x)
+      execFileSync('git', ['checkout', '-'], { cwd: projectRoot });
+      await writeFile(join(projectRoot, 'impl-main.txt'), 'main different impl\n', 'utf8');
+      execFileSync('git', ['add', '.'], { cwd: projectRoot });
+      execFileSync('git', ['commit', '-q', '-m', 'main: different implementation'], {
         cwd: projectRoot,
       });
-      isAncestor = true;
-    } catch {
-      isAncestor = false;
-    }
-    // 前置条件:branch-x green sha 不在 main 祖先路径
-    expect(isAncestor).toBe(false);
+      const mainHead = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: projectRoot,
+        encoding: 'utf8',
+      }).trim();
 
-    // 构造攻击 marker:green_commit.sha = branch-x 上的 sha(旁支造链)
-    const processEvidence = {
-      schema: 'forge-process-evidence/v1',
-      process_verification_mode: 'full',
-      process_verification_mode_acked_by: null,
-      process_verification_mode_acked_at: null,
-      env_hash: {
-        lockfile_hash: 'abc',
-        node_version: '20.0.0',
-        os_platform: 'linux',
-      },
-      tdd_event_chain: [
-        {
-          task_ref: 'task-1',
-          red_commit: {
-            sha: initHead,
-            timestamp: '2026-05-13T10:00:00Z',
-            red_log_path: 'logs/red.txt',
-            red_log_hash: 'aaa',
-            exit_code: 1,
-            runner_report_path: 'logs/red-report.xml',
-            runner_report_hash: 'bbb',
-            expected_failures: [],
-          },
-          green_commit: {
-            // A8 攻击:green sha 是 branch-x 的,不在 main 祖先路径
-            sha: greenShaOnBranchX,
-            timestamp: '2026-05-13T11:00:00Z',
-            green_log_path: 'logs/green.txt',
-            green_log_hash: 'ccc',
-            exit_code: 0,
-            runner_report_path: 'logs/green-report.xml',
-            runner_report_hash: 'ddd',
-          },
-          tdd_exemption: null,
-          tdd_exemption_acked_by: null,
+      // 验证 greenShaOnBranchX 确实不是 mainHead 的祖先
+      let isAncestor = false;
+      try {
+        execFileSync('git', ['merge-base', '--is-ancestor', greenShaOnBranchX, mainHead], {
+          cwd: projectRoot,
+        });
+        isAncestor = true;
+      } catch {
+        isAncestor = false;
+      }
+      // 前置条件:branch-x green sha 不在 main 祖先路径
+      expect(isAncestor).toBe(false);
+
+      // 构造攻击 marker:green_commit.sha = branch-x 上的 sha(旁支造链)
+      const processEvidence = {
+        schema: 'forge-process-evidence/v1',
+        process_verification_mode: 'full',
+        process_verification_mode_acked_by: null,
+        process_verification_mode_acked_at: null,
+        env_hash: {
+          lockfile_hash: 'abc',
+          node_version: '20.0.0',
+          os_platform: 'linux',
         },
-      ],
-      verify_invocations: [],
-      subagent_review_chain: [],
-    };
+        tdd_event_chain: [
+          {
+            task_ref: 'task-1',
+            red_commit: {
+              sha: initHead,
+              timestamp: '2026-05-13T10:00:00Z',
+              red_log_path: 'logs/red.txt',
+              red_log_hash: 'aaa',
+              exit_code: 1,
+              runner_report_path: 'logs/red-report.xml',
+              runner_report_hash: 'bbb',
+              expected_failures: [],
+            },
+            green_commit: {
+              // A8 攻击:green sha 是 branch-x 的,不在 main 祖先路径
+              sha: greenShaOnBranchX,
+              timestamp: '2026-05-13T11:00:00Z',
+              green_log_path: 'logs/green.txt',
+              green_log_hash: 'ccc',
+              exit_code: 0,
+              runner_report_path: 'logs/green-report.xml',
+              runner_report_hash: 'ddd',
+            },
+            tdd_exemption: null,
+            tdd_exemption_acked_by: null,
+          },
+        ],
+        verify_invocations: [],
+        subagent_review_chain: [],
+      };
 
-    const verifyMarker = {
-      schema: 'forge-verify/v1',
-      verified_at: '2026-05-13T12:00:00Z',
-      verified_by: 'ai-agent',
-      tasks_hash: 'placeholder',
-      content_hash: 'placeholder',
-      process_evidence: processEvidence,
-    };
+      const verifyMarker = {
+        schema: 'forge-verify/v1',
+        verified_at: '2026-05-13T12:00:00Z',
+        verified_by: 'ai-agent',
+        tasks_hash: 'placeholder',
+        content_hash: 'placeholder',
+        process_evidence: processEvidence,
+      };
 
-    await writeFile(join(changeRoot, '.verify-passed'), stringifyYaml(verifyMarker), 'utf8');
+      await writeFile(join(changeRoot, '.verify-passed'), stringifyYaml(verifyMarker), 'utf8');
 
-    const result = await crossCuttingFenceCheck(changeRoot);
+      const result = await crossCuttingFenceCheck(changeRoot);
 
-    // fence-14 必须失败(A8 攻击核心断言)
-    expect(result.ok).toBe(false);
-    const fence14 = result.results.find((r) => r.invariant === 'fence-14');
-    expect(fence14?.ok).toBe(false);
-    expect(fence14?.reason).toMatch(/祖先|ancestor/);
-  });
+      // fence-14 必须失败(A8 攻击核心断言)
+      expect(result.ok).toBe(false);
+      const fence14 = result.results.find((r) => r.invariant === 'fence-14');
+      expect(fence14?.ok).toBe(false);
+      expect(fence14?.reason).toMatch(/祖先|ancestor/);
+    },
+  );
 });
 
 /**

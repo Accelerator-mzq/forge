@@ -185,15 +185,12 @@ describe('archive_summary schema validation', () => {
       );
     });
 
-    it('placeholder=false invariants_with_warning = -1 → "must be in [0, 14]"', () => {
+    it('placeholder=false invariants_with_warning = -1 → 越界 + sum 不变式破,with_warning 错误存在', () => {
+      // I-2 quality review 修订:数学根本矛盾 — sum=14 时单字段越界必须另字段负数补偿
+      //   故只让 with_warning=-1,接受 sum 也错;断言只查 with_warning 越界错误存在
       const result = validateArchiveSummarySchema(
-        buildWithPeSummary({
-          ...realSummaryBaseline,
-          invariants_with_warning: -1,
-          invariants_passed: 15,
-        }),
+        buildWithPeSummary({ ...realSummaryBaseline, invariants_with_warning: -1 }),
       );
-      // 注:passed=15 也越界,但本 case 主断 with_warning;sum 不变式由后续 case 单独测
       expect(result.valid).toBe(false);
       expect(
         result.errors.some(
@@ -204,13 +201,10 @@ describe('archive_summary schema validation', () => {
       ).toBe(true);
     });
 
-    it('placeholder=false invariants_passed = 15 → "must be in [0, 14]"', () => {
+    it('placeholder=false invariants_passed = 15 → 越界 + sum 不变式破,passed 错误存在', () => {
+      // I-2 quality review 修订:同 case 5,只让 passed=15,接受 sum 也错;断言只查 passed 越界
       const result = validateArchiveSummarySchema(
-        buildWithPeSummary({
-          ...realSummaryBaseline,
-          invariants_passed: 15,
-          invariants_with_warning: -1, // 拉低让 sum 仍 = 14 避免触发 sum 错混淆
-        }),
+        buildWithPeSummary({ ...realSummaryBaseline, invariants_passed: 15 }),
       );
       expect(result.valid).toBe(false);
       expect(

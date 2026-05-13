@@ -16,6 +16,18 @@ import { FENCE_INVARIANT_NAMES } from '../archive/fence.js';
 const EXPECTED_INVARIANT_COUNT = FENCE_INVARIANT_NAMES.length;
 
 /**
+ * plan-9e2 Task 3 quality review I-1 修订:placeholder=false 路径必填的 4 个 number 字段
+ * 沿仓库约定:SCREAMING_SNAKE_CASE = 模块级常量(参 marker-schema.ts 模块级 const 模式)
+ * 与 EXPECTED_INVARIANT_COUNT 对称,避免函数内 inline 声明违约
+ */
+const REQUIRED_FIELDS = [
+  'invariants_passed',
+  'invariants_with_warning',
+  'invariants_failed',
+  'legacy_exempt',
+] as const;
+
+/**
  * 校验 archive_summary 对象的 schema 合法性
  * @param m 已解析的对象
  * @param file 可选错误报告用 archive_summary.yaml 路径
@@ -135,13 +147,7 @@ export function validateArchiveSummarySchema(m: unknown, file?: string): Validat
   ) {
     const peSummary = obj.process_evidence_summary as Record<string, unknown>;
     if (peSummary.placeholder === false) {
-      // EXPECTED_INVARIANT_COUNT 从模块顶层 import(v2 codex 一轮 plan review MAJOR 5 修订)
-      const REQUIRED_FIELDS = [
-        'invariants_passed',
-        'invariants_with_warning',
-        'invariants_failed',
-        'legacy_exempt',
-      ] as const;
+      // EXPECTED_INVARIANT_COUNT 与 REQUIRED_FIELDS 都从模块顶层引用(I-1 quality review 修订)
 
       // 1. 4 字段必填 + number
       for (const field of REQUIRED_FIELDS) {

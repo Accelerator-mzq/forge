@@ -91,6 +91,21 @@ export interface ForgeConfig {
     /** false(默认):检测 CI=true 时 `forge ack propose` 拒绝触发 */
     allow_ci_mode?: boolean;
   };
+
+  /**
+   * v1.0 protected branches(plan-9h §2.8.3 C — main/master 分支保护)
+   * 缺失时调用方应以 `??` fallback `DEFAULT_PROTECTED_BRANCHES`;
+   * 空数组等价于禁用分支保护(不推荐,沿 design §2.8.3 C line 1438)。
+   *
+   * 由 `forge preflight branch-check` CLI helper 读取(沿 spec §2.8.5 第 3 项)。
+   * 用户项目 `forge/config.yaml` 设置形如:
+   *   protected_branches:
+   *     - main
+   *     - master
+   *     - develop
+   *     - trunk
+   */
+  protected_branches?: string[];
 }
 
 /**
@@ -115,6 +130,12 @@ export const DEFAULT_TEST_REPORTER = 'junit' as const;
 
 /** 默认 ack.allow_ci_mode(plan-9g §6;false 防 CI 静默降级) */
 export const DEFAULT_ACK_ALLOW_CI_MODE = false;
+
+/**
+ * 默认 protected branches(plan-9h §2.8.3 C;调用方 fallback 用)。
+ * 详见 design v3 §2.8.3 C line 1432-1438。
+ */
+export const DEFAULT_PROTECTED_BRANCHES = ['main', 'master', 'develop', 'trunk'] as const;
 
 /**
  * 默认 spec-driven schema 的 artifact 列表(决定哪些文件构成一个 change)。

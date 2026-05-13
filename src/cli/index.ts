@@ -15,6 +15,7 @@ import { buildAckCommand } from './commands/ack.js';
 import { buildEvidenceCommand } from './commands/evidence.js';
 import { buildScopeCommand } from './commands/scope.js';
 import { buildFindingCommand } from './commands/finding.js';
+import { buildPreflightCommand } from './commands/preflight.js';
 
 // 创建主命令
 const program = new Command();
@@ -59,6 +60,9 @@ program.addCommand(buildScopeCommand());
 
 // 注册 finding 子命令(plan-9d Task 4 — finding hash helper)
 program.addCommand(buildFindingCommand());
+
+// 注册 preflight 子命令组(plan-9h §2.8.3 C — main/master 分支保护)
+program.addCommand(buildPreflightCommand());
 
 // 解析命令行参数,遇到错误时打印并退出
 program.parseAsync(process.argv).catch((err: unknown) => {

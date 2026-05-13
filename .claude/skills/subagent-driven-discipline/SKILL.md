@@ -7,7 +7,7 @@ metadata:
   author: forgeue project (extracted to generic)
   version: "1.0-generic"
   scenario_subtype_count: 28
-  case_study_count: 4
+  case_study_count: 5
   retrospect_protocol: trigger-type-matrix(5 types × per-type intensity)
 ---
 
@@ -828,6 +828,122 @@ git update-ref refs/heads/<wrong-branch> <prior-base-sha>
 
 ---
 
+### Case 05: forge-repo / Plan 9g / process_evidence 完整协议 + 14 不变量 fence 全 7 task
+
+**Date**:2026-05-13
+**Trigger Type**:Type 1(3-stage full retrospect mandatory + final reviewer cross-task synthesis)
+**Project context**:TS/Node monorepo(opsp/forge-repo),plan-9g 落 process_evidence 完整协议 — 7 Task 跨 ack-log entry.extra schema 扩展 / staging.yaml process_evidence 字段 / marker.process_evidence + verify_findings 字段 / 14 不变量 fence(含 9.1/9.2 cross-source projection hash + sec=10 prev_entry_hash chain) / record-tdd/record-verify/record-review 三 helper + freeze coordinator / fence-9.2 worktree rerun integration / process-evidence skill 文档 + scenarios + slash/skill 模板双同步;28 commits + 1 ack-cli CI fix(`3f1e622`)+ 1 final fix(`4e41064`);plan-9g v8 经多轮 codex review 收敛;PR #29 合入 dev
+
+**Subagent dispatch**:
+| Subagent | Scenario subtype(§1.X.Y)| Model | $cost | Verdict |
+|---|---|---|---|---|
+| Task 1 implementer(ack-log entry.extra schema + 1-line JSON 容错) | §1.1.1 Mechanical | haiku | ~$0.10 | DONE — self-report 数错 commit 数 5 vs 6(Q2 hallucinate partial) |
+| Task 1 spec_reviewer | §1.2.1 string matching | sonnet | ~$0.10 | ✅ |
+| Task 1 code_quality_reviewer | §1.3.4 runtime correctness | sonnet | ~$0.15 | ⚠️ Important × N inline-fixable |
+| Task 2 implementer(JUnit XML reporter parse + fast-xml-parser 集成) | §1.1.3 Multi-file integration | sonnet | ~$0.25 | DONE |
+| Task 2 spec_reviewer | §1.2.1 string matching | sonnet | ~$0.10 | ✅ |
+| Task 2 code_quality_reviewer | §1.3.4 runtime correctness(第三方包 edge case 实测) | sonnet | ~$0.20 | ⚠️ Critical:`<failure/>` self-closing 返 `""` ternary 走错分支 |
+| Task 2 round 2 + re-review | §1.1.3 + §1.3.4 | sonnet | ~$0.25 | ✅ — guard 改 `typeof X === 'object'` |
+| Task 3 implementer(record-tdd helper + appendAckLog lock atomic) | §1.1.3 Multi-file integration + plan 留白 §4.3.0 字段映射展开 | sonnet | ~$0.30 | DONE — implementer 自加 prettier chore(Pattern B 重现) |
+| Task 3 spec_reviewer | §1.2.4 acceptance criteria | sonnet | ~$0.10 | ✅ |
+| Task 3 code_quality_reviewer | §1.3.4 runtime correctness(race condition) | sonnet | ~$0.25 | ⚠️ Critical:appendAckLog 放在 release 之后非 lock 内 → 并发 race prev_entry_hash 链断 |
+| Task 3 round 2 + re-review | §1.1.3 + §1.3.4 | sonnet | ~$0.30 | ✅ — 移入 try 块尾 lock 内 + 加 regression test 并发 spawn 子进程 |
+| Task 4 implementer(verify-findings + marker-schema + 14 不变量 fence) | §1.1.1 Mechanical + §1.3.4 schema validation | sonnet | ~$0.30 | DONE — 严格 transcribe plan inline placeholder/lookup |
+| Task 4 spec_reviewer | §1.2.4 acceptance criteria | sonnet | ~$0.10 | ✅ |
+| Task 4 code_quality_reviewer | §1.3.4 schema validation + plan-字面 vs schema 现状对照 | sonnet | ~$0.25 | ⚠️ Critical × 2:C-1 placeholder `'sha256:placeholder'` 不符 SHA256_RE 64-char + C-2 lookup `e.extra?.task_ref` AckEntry.extra 无 task_ref 永远 false |
+| Task 4 round 2 + re-review | §1.1.1 + §1.3.4 | sonnet | ~$0.30 | ✅ — placeholder 改 `sha256:${'0'.repeat(64)}` + lookup 改 Option C 简化 |
+| Task 5 implementer(process-evidence-fence.ts + freeze coordinator + fence-9.2) | §1.1.3 Multi-file integration + cross-Task data contract | sonnet | ~$0.40 | DONE — plan 留白 §4.3 展开,多路径 fallback divergence |
+| Task 5 spec_reviewer | §1.2.4 acceptance criteria | sonnet | ~$0.15 | ⚠️ 把 design 矛盾误标 spec violation(Q2 partial — controller override Case 8 dead-code 判断) |
+| Task 5 code_quality_reviewer | §1.3.4 + cross-source projection hash | sonnet | ~$0.30 | ⚠️ Important(I-1)payload fallback `?? null` vs staging fallback `?? '' / ?? -1 / ?? new Date()` → canonicalHash mismatch — **controller 实测后升级 Critical** |
+| Task 5 round 2 + re-review | §1.1.3 + §1.3.4 | sonnet | ~$0.40 | ✅ — 跨 Task scope fix evidence.ts 三 helper "payload = staging-built object" single source of truth(Pattern A 重现) |
+| Task 6 implementer(fence-9.2 worktree rerun 启用 + Task 5 regression test 调整) | §1.1.3 Multi-file integration + cross-Task test interaction | sonnet | ~$0.35 | DONE — implementer 自报 "flaky" 误判 fence-9.2 test timeout(Q2 partial) |
+| Task 6 spec_reviewer | §1.2.1 string matching | sonnet | ~$0.10 | ✅ |
+| Task 6 code_quality_reviewer | §1.3.4 runtime + test stability | sonnet | ~$0.25 | ⚠️ Important(I-1)parseReporter error 静默吞 + A8 timeout 距 5000ms bound 距离 < 200ms buffer(后 final reviewer 升级)|
+| Task 6 round 2 + re-review | §1.1.3 + §1.3.4 | sonnet | ~$0.35 | ✅ — Task 5 test 改 staging mode='hash-only' 走 skip 路径 |
+| Task 7.1 implementer(process-evidence skill 文档新建) | §1.5.2 doc creation | sonnet | ~$0.20 | DONE |
+| Task 7.2 implementer(forge-eval scenarios YAML) | §1.5.2 doc + §1.1.1 Mechanical | haiku | ~$0.10 | DONE |
+| Task 7.3 implementer(4 slash/skill 模板双同步) | §1.1.1 Mechanical | haiku | ~$0.10 | DONE |
+| Task 7 reviewer × 3 | §1.5.2 + §1.2.1 | sonnet | ~$0.20 | ✅ |
+| **Final reviewer** | cross-task synthesis(Type 1 mandate) | sonnet | ~$0.50 | ⚠️ I-1 parseReporter + A8 timeout 实测 2 次确认(4674/4834ms < 200ms buffer 真 flaky risk)|
+| **Final fix(commit `4e41064`)** | direct | controller(opus) | ~$0.10 | I-1 catch else 转 CRITICAL 5/6 finding + A8 `{ timeout: 15000 }` |
+| **CI 环境 ack-cli test fix(`3f1e622`)** | direct | controller(opus) | ~$0.10 | plan-9a 老 test 4 case 加 `CI=''` env override(CI=true 默认拒) |
+| Retrospect(本次)| Type 1 mandatory(§3.4.1)| controller(opus) | ~$0.50 | Q1/Q3/Q4 YES → add Case 05 + §6 7 new rows |
+
+**Real issues caught / failed**:
+| Issue | Severity | Caught by | Scenario subtype 验证 |
+|---|---|---|---|
+| **Task 2 `fast-xml-parser` 对 `<failure/>` self-closing 返 `""` empty string;ternary `tc.failure ? ... : ...` Boolean("") = false 走 tc.error undefined-deref crash** | **Critical(real runtime crash)**| Task 2 sonnet code_quality round 1 + controller 实测 `fast-xml-parser` 验证 | **NEW Pattern G — 第三方包 self-closing/empty payload + plan 双层 guard 间隙** |
+| **Task 3 plan 文字"**同时**仍调 appendAckLog"被 implementer 解读为 "另外"(parallel)而非 "在 lock 内"(atomic),appendAckLog 放 release 之后 → 并发 race prev_entry_hash 链断 → 下游 Task 5/6 fence 拒签合法工作流** | **Critical(并发 race system-wide broken)**| Task 3 sonnet code_quality round 1 + controller `evidence.ts:317-322` 行号对照 release line 319 在 appendAckLog line 322 之前 | **NEW Pattern H — plan 留白展开 "同时"/"并且" 文字 atomic boundary 歧义** |
+| **Task 4 C-1 plan inline `'sha256:placeholder'`(15-char)+ `'placeholder'`(11-char) vs `marker-schema.ts:585-604` SHA256_RE `^sha256:[a-f0-9]{64}$` + GIT_HEAD_RE `^[a-f0-9]{40}$` 不符 → 触发 WARNING 7/10 写入 marker 必拒** | **Critical(schema-invalid latent bug)**| Task 4 sonnet code_quality round 1 + controller `marker-schema.ts` 对照 | **NEW Pattern I — plan inline placeholder/lookup 与现有 schema regex/interface 不符** |
+| **Task 4 C-2 plan inline 不变量 11 lookup `e.extra?.task_ref === chain.task_ref` 永远 false — `ack.ts:218-222` AckEntry.extra = `{proposed_at, target_severity}` 不含 task_ref → 任何 `tdd_exemption != null` change freeze 时永久 CRITICAL exit 1** | **Critical(永远 fail-closed latent bug)**| Task 4 sonnet code_quality round 1 + controller `ack.ts` AckEntry interface 对照 | NEW Pattern I 同(plan 字面 vs interface 现状不符) |
+| **Task 5 I-1 evidence.ts 多路径 fallback divergence:payload fallback `?? null` / staging fallback `?? '' / ?? -1 / ?? new Date().toISOString()` → 任何省略 optional CLI arg → 两路径 canonicalHash 不同 → fence-9.2 永远 CRITICAL → 所有合法 archive 拒签 → 用户工作流 system-wide broken** | **Critical(reviewer 标 Important 低估;controller 升级 Critical)**| Task 5 sonnet code_quality round 1 标 Important + controller cross-verify line 247-275 vs line ~323 实测确认 → 升级 Critical | **NEW Pattern J — 多路径 fallback divergence cross-source hash mismatch + reviewer Important 低估 → controller 必实测升级** |
+| **Task 6 Task 5 regression test(fence-9.2 cross-source projection hash)Task 5 阶段 rerunFindings = `[]` placeholder PASS 1.3s,Task 6 启用 `runRerunFence(ctx)` 真跑 worktree → timeout 5000ms fail** | **Critical(cross-Task test interaction)**| Task 6 sonnet implementer 跑全 verify 发现 fail 自报"flaky"误判 + controller cross-verify 实测 stash 前后 deterministic 触发 | **NEW Pattern K — cross-Task test interaction(N regression test assume N+1 logic placeholder;N+1 enable real logic 后同 test 触发 long-running operation timeout)** |
+| **Final review Task 6 I-1 parseReporter catch 静默吞 + A8 实测距 5000ms bound 4674/4834ms < 200ms buffer 真 flaky risk** | **Important+(implementer self-report "acceptable risk" 误导;final review 实测升级)**| Sonnet final reviewer Type 1 mandate cross-task + 实测 2 次 | **NEW Pattern L — implementer "acceptable risk"/"flaky" 自报 → controller final review 必实测 verify(攻击路径模拟 / 实测 timing 距 bound 距离 / deterministic verify)** |
+| **CI 环境 plan-9a 老 test ack-cli.test.ts 4 case 不 override `CI` env;GitHub runner 默认 `CI=true` → ack propose exit 2 拒;本地 `process.env.CI=undefined` PASS;plan-9a-9j 从未 PR 到 dev,CI 环境未跑过** | **Important(long-lived feature branch first CI run 累积 latent bug)**| GitHub Actions CI fail 触发 → controller commit `3f1e622` | **NEW Pattern M — CI 环境 env var 累积 latent bug(long-lived feature branch first CI run)** |
+| Task 1 implementer self-report 数错 commit 数 5 vs 6 | Minor cosmetic(Q2 hallucinate partial) | controller cross-verify `git log` | §1.1.1 implementer self-report numeric drift |
+| Task 5 spec_reviewer 把 design 矛盾误标 spec violation(Case 8 dead-code) | False positive(Q2 partial) | controller override + 对照 plan §X.X 设计意图 | §1.2.x spec_reviewer 越权 claim → controller override(Case 01 Lesson 3 重现) |
+| Task 6 implementer 自报 fence-9.2 test fail "flaky 与 Task 6 无关" 误导 | Important(implementer self-report 系统性误判;Q2 partial) | controller cross-verify stash 前后 deterministic 触发 | NEW Pattern L 同(self-report 不能 substitute 实测 verify) |
+
+**Lesson**(reinforce / new pattern / 边界 refinement):
+
+1. **NEW Pattern G — 第三方包 self-closing/empty payload + plan 双层 guard 间隙**(Task 2 实证)
+   - 实证:plan inline `tc.failure[0] ?? {...}` 防 `noUncheckedIndexedAccess` 数组越界;`tc.failure ? ... : ...` ternary 防 falsy 走错分支。两层 guard 各自合理,**间隙**:第三方包 `fast-xml-parser` 对 `<failure/>` self-closing 返 `""` empty string,`Boolean("") = false` → ternary 走 tc.error 分支 → undefined-deref crash。
+   - **与 §6 catalog "Plan inline code 含 latent bug" 行区别**:那是 plan inline code 自带 bug;Pattern G 是**第三方包返回类型与 plan 假设不符 + 双层 guard 间隙**(一个防 index undefined,另一个防 falsy,但 empty string 在 Boolean coercion 是 falsy 但语义上是"有内容"被误剪)。
+   - **fix 模式**:guard 改 `typeof X === 'object' && X !== null` 排除空字符串(明确 type 边界而非 truthy/falsy 边界)。
+   - **dispatch prompt 加**:涉及第三方包 parser/serializer 时,**Pre-verified Data 段列出该包对 edge input(empty string / self-closing / null / undefined)的真实返回行为**(controller 实测验证 给 implementer),不要让 implementer 假设 truthy/falsy 边界与"内容存在"边界等价。
+
+2. **NEW Pattern H — plan 留白展开 "同时"/"并且" 文字 atomic boundary 歧义**(Task 3 实证)
+   - 实证:plan-9g §4.3 是 §0.0 留白展开;plan 文字 "**同时**仍调 appendAckLog(已扩 prev_entry_hash 链)" 中 "同时" 被 sonnet implementer 解读为 "另外"(parallel,在 lock 释放之外)而非 "在 lock 内"(atomic,同一 critical section)。Implementer 把 `appendAckLog` 放 `finally { release() }` **之后** → 并发 race。
+   - **与 Case 04 Pattern A 区别**:那是 plan 字面要求行为但 inline 缺完整实现(下游 e2e 发现);Pattern H 是**plan 文字描述 atomic boundary("同时"/"并且"/"在...的同时")被 implementer 解读不一致** — plan 写时假设 critical section 边界 X,implementer 展开时把代码放 critical section 边界 X' 不同位置 → silent lock-protected critical section 错位。
+   - **dispatch prompt 加**:plan 留白展开时,**显式标注 critical section boundary(eg. "appendAckLog 必须在 `finally { release() }` 之前,即 lock 仍持有时调用")** — 不依赖 implementer 解读 "同时"/"并且" 文字。
+   - **§2.1 implementer self-review checklist 加**:"plan 文字描述的 atomic boundary("同时"/"并且"/"在...的同时")— 我的代码是否真在该 boundary 内?有 lock 的情况下,critical section 内 vs 外位置不同 → silent race"
+
+3. **NEW Pattern I — plan inline placeholder/lookup 与现有 schema regex/interface 不符**(Task 4 实证 ×2)
+   - 实证 C-1:plan inline `content_hash: 'sha256:placeholder'`(15-char)+ `git_head: 'placeholder'`(11-char)字面 vs `marker-schema.ts:585-604` SHA256_RE `^sha256:[a-f0-9]{64}$` + GIT_HEAD_RE `^[a-f0-9]{40}$` 不符 → 任何触发 WARNING 写入 marker 必拒。
+   - 实证 C-2:plan inline 不变量 11 lookup `e.extra?.task_ref` vs `ack.ts:218-222` AckEntry.extra = `{proposed_at, target_severity}` 不含 task_ref → 任何 `tdd_exemption != null` change freeze 永久 CRITICAL exit 1。
+   - **与 §6 catalog "Plan inline code 含 latent bug" 行区别**:那是 plan inline code 自带 bug(逻辑 / 算法);Pattern I 是 **plan inline placeholder/lookup 字面与现有 schema regex 或 interface 假设不符**(plan 写时假设 schema/interface X 但实际 schema/interface Y)。
+   - **fix 模式**:placeholder 改 `sha256:${'0'.repeat(64)}` + `getGitHead(changeRoot) ?? '0'.repeat(40)` 满足 regex;lookup 改 Option C 简化(action 存在性,不查 extra.task_ref;失去 per-task 精度作为 polish trade-off)。
+   - **dispatch prompt 加**:Sonnet implementer 严格 transcribe plan 字面而**不 cross-check 现有 schema** — Pre-verified Data 段 controller 应 cat marker-schema.ts 全 regex + ack.ts 全 interface 给 implementer,要求"对照 schema regex / interface 字段 — 若 plan inline 字面与现有 schema 不符 → 标 observation 让 controller 决定 fix"。
+
+4. **NEW Pattern J — 多路径 fallback divergence cross-source hash mismatch + reviewer Important 低估 → controller 必实测升级**(Task 5 实证)
+   - 实证:plan-9g §4.3 留白展开时 Sonnet implementer 在 evidence.ts record-tdd helper 同时构造**两路径**数据:payload(写 ack-log entry.extra)用 `?? null`;staging(写 staging.yaml,被 freeze 复制到 marker.process_evidence)用 `?? '' / ?? -1 / ?? new Date().toISOString()`。Task 5 process-evidence-fence reconstructProjectionFromAckLog 从 ack-log payload fallback 还原 projection,vs projection_from_marker 用 staging fallback。任何省略 optional CLI arg → 两路径数据不同 → canonicalHash 不同 → fence-9.2 永远 CRITICAL → 所有合法 archive 拒签 → 用户工作流 system-wide broken。
+   - **与 Case 04 Pattern A 区别**:那是上游 plan 字面要求行为但 inline 缺;Pattern J 是**implementer 多路径构造同 schema 数据用了不同 fallback default**(payload 用 null / staging 用 placeholder string + new Date),下游 fence cross-source canonicalHash 比对永远 mismatch。
+   - **REINFORCE Case 04 Pattern A 跨 Task scope fix sister 行为**:Task 5 round 2 implementer 跨 Task scope 修 Task 3 已完成的 evidence.ts(改三 helper 为 "payload = staging-built object" single source of truth),沿 Case 04 Pattern A 模式(下游 Task 兜底修上游);transparent commit message 记录 + controller 接受。
+   - **NEW lesson — Sonnet code_quality reviewer 标 Important 但 controller 应实测 verify 后升级为 Critical**:Task 5 reviewer 标 I-1(I = Important);controller cross-verify 实测 line 247-275 payload `?? null` vs line ~323 staging `?? ''/?? -1/?? new Date()` 确认实在 → **升级为 Critical(system-wide broken)**。
+   - **§3.2 cross-verify 强化**:reviewer 标 Important 但描述含 "system-wide" / "always-fail" / "all-changes" 等关键词 → controller 必实测 evidence 验证(grep 涉及 file:line + 模拟 user happy path) → 决定升级 Critical 还是接受 Important。
+
+5. **NEW Pattern K — cross-Task test interaction(N regression test assume N+1 logic placeholder)**(Task 6 实证)
+   - 实证:Task 5 round 2 加 fence-9.2 regression test(controller 要求加,验 fence-9.2 cross-source projection hash 不误报)。Task 5 阶段 `fence.ts` 内 `const rerunFindings: ProcessEvidenceFinding[] = []` placeholder,runRerunFence 不真跑 → test PASS 1.3s。Task 6 改 fence.ts 启用 `runRerunFence(ctx)` 真调 worktree 重跑 → 同 test 现在真跑 GREEN worktree(git worktree add + run pnpm test + git worktree remove)→ timeout 5000ms fail。
+   - **与 §6 catalog "Plan inline code 含 latent bug" 区别**:不是 plan code bug,而是 **N Task regression test assumed N+1 Task logic 仍是 placeholder;N+1 Task enable real logic 后同 test 触发 long-running operation → timeout**。
+   - **fix 模式**:Task 5 test 改 `staging mode='hash-only'` 走 runRerunFence skip 路径(hash-only 直接 return),仍验 fence-9.2(因 runFieldFence 子检 9.2 仍跑)。
+   - **implementer "flaky" 自报误判**:Task 6 implementer 跑全 verify 发现 test fail,**自报 "flaky" 误判**(实际 deterministic regression);implementer 想急完成 task 倾向 self-report flaky 而非 real regression。**controller cross-verify 必须实测**(stash 前后对比 + deterministic 触发条件分析)拒绝 "flaky" self-report → 决定真 fix vs test 重设计。
+   - **dispatch prompt 加**:涉及多 Task 跨阶段 test setup 时,**显式标注 "N Task 加的 test 在 N+M Task enable real logic 后会不会触发新 long-running operation?若会 → N Task test 设计 hash-only / skip 路径走 fast path"**(test design 显式 forward-compat)。
+
+6. **NEW Pattern L — implementer "acceptable risk"/"flaky" 自报 → controller final review 必实测 verify**(Task 6 + Final review 实证)
+   - 实证:per-task sonnet code_quality reviewer round 1 标 Task 6 I-1 parseReporter catch 静默吞 + A8 timeout 距 bound 距离 < 200ms buffer 为 Important;implementer round 2 self-report "acceptable risk"(I-1 parseReporter)/ "flaky 与 Task 6 无关"(A8 timeout)误导。Final reviewer Type 1 mandate cross-task synthesis 实测 2 次 A8(4674/4834ms < 200ms buffer)确认真 flaky risk + parseReporter attack path 存在 → final fix commit `4e41064`(I-1 catch 块 else 转 CRITICAL 5/6 finding + A8 `{ timeout: 15000 }`)。
+   - **与 Case 02 Pattern B 区别**:Pattern B 是 implementer 测试断言 silent 降级(`>0` → `>=0`);Pattern L 是 **per-task reviewer 标 Important 但 implementer self-report "acceptable risk"/"flaky" 误导 final review 阶段需 controller 实测 verify** — 攻击路径模拟(parseReporter error 静默)/ 实测 timing 距 bound 距离 / deterministic verify 等。
+   - **Implementer 自报评估不能 substitute final review 实测验证**:implementer 想急完成 task 倾向自报 "acceptable risk" / "flaky";controller final review 必须独立实测决定是 release blocker / plan-9z polish / future enhancement。
+   - **§2.7 final reviewer playbook 加**:cross-task synthesis 必扫所有 per-task Important 中 implementer self-report "acceptable risk" / "flaky" / "low priority" 的 finding → 实测 verify(攻击路径模拟 / 实测 timing 距 bound 距离 / stash 前后 deterministic verify)→ 决定升级 Critical / 维持 Important / 接受 acceptable risk。
+
+7. **NEW Pattern M(bonus)— CI 环境 env var 累积 latent bug(long-lived feature branch first CI run)**(plan-9a 老 test 实证)
+   - 实证:plan-9a 老 test ack-cli.test.ts 4 case 不 override `CI` env;GitHub runner 默认 `CI=true` → ack propose exit 2 拒;本地 `process.env.CI=undefined` PASS;plan-9a-9j 从未 PR 到 dev,CI 环境未跑过 → plan-9g PR #29 触发 first CI run 暴露累积 latent bug。
+   - **类比 Case 03 Pattern E**(spike workaround dev 通过 prod build fail):Pattern M 是**本地 PASS / CI fail** 时间维度延迟(本次累积 ~7 plan 周期)。
+   - **fix 模式**:test setup 显式 `CI=''` env override(`{ env: { ...process.env, CI: '' } }` 给 spawnSync / execa)。
+   - **dispatch prompt 加**:test 涉及 child process spawn / shell command 时,**Pre-verified Data 段标"CI=true 环境下命令行为 vs 本地"** — 若 child process 检 `process.env.CI` 调整行为,test setup 必显式 override。
+   - **§3.2 cross-verify 加**:**long-lived feature branch(>3 plan 周期未 PR 到主干)PR 前必跑 `gh pr create --draft` 触发 CI dry run** — 累积 latent CI bug 早发现。
+
+8. **REINFORCE Pattern A(Case 04 cross-Task scope fix sister 行为)**:Finding 4 再次实证 — Task 5 round 2 implementer 跨 Task scope fix Task 3 evidence.ts 三 helper(改 "payload = staging-built object" single source of truth + reconstructProjectionFromAckLog 改 identity cast 简化 + record-review reverse key mapping)。Transparent commit message 记录 + controller 接受 — Case 04 Pattern A 模式累计 2 次,**plan 留白展开时下游 Task implementer 兜底修上游 Task plan inline gap / fallback divergence / 字段映射错** 是 systemic pattern(不是孤立 Case 04 exception)。
+
+9. **REINFORCE Pattern B(Case 04 git status -sb push 前 cross-verify)**:Task 3 implementer 自加 prettier chore commit(`pnpm format` 后 working tree 多文件 modified,implementer 一并 commit)+ Task 7 build script auto-sync 顶层 commands/*.md → src/core/templates/commands/*.md(plan-9g 7.3 双同步严格按 plan 字面 add 两边)— 两种方向都验证 Case 04 Pattern B 模式:**项目含 auto-copy build script 时 implementer self-review checklist `git status -sb` 必跑 + 一并 commit**。
+
+**Cost vs all-Opus alternative**:
+- 实际:7 Task implementer × (1-2 round)(sonnet $0.20-0.50 / haiku $0.10)+ 14 per-task reviewer(sonnet $0.10-0.30)+ 5 round 2 implementer(sonnet $0.25-0.40)+ 5 round 2 reviewer(sonnet $0.20-0.35)+ 1 final reviewer(sonnet $0.50)+ 2 controller direct fix(opus $0.10 ea)+ 1 retrospect(opus $0.50)≈ **$4-5**
+- 全 Opus 假设:7 implementer × 2 + 14 reviewer + 5 round 2 + 1 final + 2 direct + 1 retrospect ≈ **$22-28**
+- 节省 ratio:~80%
+- **质量**:28 commits + 1 CI fix + 1 final fix = 30 commits 全 commit + push origin/feature/v1.0-fusion-completion-design + PR #29 合入 dev + 0 regression + 14 不变量 fence 全 GREEN + e2e 用户工作流真闭环 + Final reviewer 实测 verify I-1/A8 升级 + 7 new patterns 沉淀
+
+---
+
 ## §6 Pattern Catalog(failure mode → scenario subtype + recovery)
 
 | Subagent failure mode | Root cause(scenario subtype 误配)| Prevention | Recovery |
@@ -849,6 +965,13 @@ git update-ref refs/heads/<wrong-branch> <prior-base-sha>
 | **Spike workaround 留 prod build 风险(dynamic import / `as unknown as` / `// @ts-ignore` / `/* @vite-ignore */` 解 typecheck 但不解 runtime;see §5 Case 03 Pattern E)**| 短期 unblock 但 dist/ build 不含跨包源 → ERR_MODULE_NOT_FOUND / runtime type error | Phase final reviewer **必扫**所有 escape hatch(grep `as unknown as / @ts-ignore / @vite-ignore / await import\\(`)→ PR description 必标 "release 前 follow-up: <issue>";不阻塞 PR merge 但记入 Phase F gate | Phase F release 前修(迁移到 src/ 内 / 改 build script 复制 / 改正式 env 加载) |
 | **下游 Task implementer 兜底跨 Task scope 修上游 Task plan 字面要求但 inline 缺实现的 latent gap(see §5 Case 04 Pattern A)**| 上游 Task plan 字面要求某 helper / 行为(eg. "confirm 后 marker 字段写回"),但 plan inline code 块缺该 helper 完整代码;上游 spec/code_quality reviewer 只对照"已 implemented 字面"无法发现 gap;下游 Task 真集成 e2e 时才暴露 | dispatch implementer prompt 强化 escape valve 第二条:"若 plan 字面要求 X 但 inline 缺该实现,implementer self-review 段标 observation,不擅自加。若后续 Task 集成必依赖,**explicit BLOCKED + escalate** 让 controller 决定派 emergent fix 还是退回 plan 修订"。Plan reviewer 在 plan 评审阶段加"plan 字面 vs inline 一致性"扫描 — 字面要求项必有 inline code | Controller 接受 emergent fix(commit message 透明记录"X Task 发现 Y Task 实现缺口"),或退回 plan 修订重跑上游 Task。**preferred**: e2e 测试设计成发现 plan inline gap 的 ground truth |
 | **implementer 改顶层 file 漏 sync build script auto-copy 副本(see §5 Case 04 Pattern B)**| 项目含 build script 自动 copy 顶层 file 到 generated/templates 目录(`scripts/copy-templates.mjs` 类);implementer 改顶层但漏 add 副本;`pnpm build` 后 working tree modified 但未 commit | §2.1 implementer self-review checklist 加最后一条:**`git status -sb` 检查无 modified file**;若 build script 自动 sync 副本 → 一并 `git add` + commit。Dispatch prompt 列出项目所有自动 copy script 路径让 implementer 知晓 | controller push 前 `git status -sb` 兜底发现 → 单独 chore commit `chore(sync): xxx-副本 同步顶层` 显式记录;**preferred**: 改 build script 直接 commit 副本而非生成(eliminate auto-copy ambiguity) |
+| **第三方包 self-closing/empty payload + plan 双层 guard 间隙(see §5 Case 05 Pattern G)**| plan inline 双层 guard:一层 `?? {...}` 防 `noUncheckedIndexedAccess` 数组越界;另一层 `X ? ... : ...` ternary 防 falsy。第三方包(如 fast-xml-parser)对 self-closing `<failure/>` / empty input 返 `""` empty string,`Boolean("") = false` → ternary 走 fallback 分支 → 该分支不防 undefined-deref → crash。两层 guard 各自合理但**语义间隙**:truthy/falsy 边界 ≠ "内容存在"边界 | dispatch prompt **Pre-verified Data 段列出第三方包对 edge input(empty string / self-closing / null / undefined)的真实返回行为**(controller 实测验证给 implementer);不要让 implementer 假设 truthy/falsy 边界与"内容存在"边界等价。Sonnet code_quality reviewer 涉及 parser/serializer 时必实测第三方包 edge case | guard 改 `typeof X === 'object' && X !== null` 排除空字符串(明确 type 边界而非 truthy/falsy 边界);round 2 fix + regression test 加 edge input 用例 |
+| **plan 留白展开 "同时"/"并且" 文字 atomic boundary 歧义(see §5 Case 05 Pattern H)**| plan 留白(§0.0 留白展开模式)文字描述 atomic boundary("同时"/"并且"/"在...的同时")被 implementer 解读不一致 — plan 写时假设 critical section 边界 X,implementer 展开时把代码放 critical section 边界 X' 不同位置;有 lock 时 critical section 内 vs 外位置不同 → silent lock-protected critical section 错位 → 并发 race | plan 留白展开时**显式标注 critical section boundary**(eg. "appendAckLog 必须在 `finally { release() }` 之前,即 lock 仍持有时调用")— 不依赖 implementer 解读 "同时"/"并且" 文字。§2.1 implementer self-review checklist 加:"plan 文字描述的 atomic boundary — 我的代码是否真在该 boundary 内?有 lock 时,critical section 内 vs 外位置不同 → silent race" | Sonnet code_quality reviewer round 1 抓到(runtime correctness race condition 子类);round 2 implementer 把 critical section call 移入 lock try 块尾 + 加 regression test spawn 子进程验链不断 |
+| **plan inline placeholder/lookup 与现有 schema regex/interface 不符(see §5 Case 05 Pattern I)**| plan inline placeholder(如 `'sha256:placeholder'` 15-char)/ lookup(如 `e.extra?.task_ref`)字面与现有 schema regex / interface 字段假设不符 — plan 写时假设 schema X 但实际 schema Y;Sonnet implementer 严格 transcribe plan 字面而**不 cross-check 现有 schema** → 数据 schema-invalid 必拒 / lookup 永远 false 永久 fail-closed | dispatch prompt Pre-verified Data 段 controller 应 cat 涉及 schema file 全 regex + interface 字段给 implementer,要求"对照 schema regex / interface 字段 — 若 plan inline 字面与现有 schema 不符 → 标 observation 让 controller 决定 fix"。Plan reviewer 在 plan 评审阶段加"plan inline placeholder / lookup vs 现有 schema regex / interface 字段一致性"扫描 | Sonnet code_quality reviewer round 1 + controller 对照 schema file 实测确认;round 2 fix placeholder 改满足 regex(`sha256:${'0'.repeat(64)}` 等);lookup 改简化方案(失去精度作为 polish trade-off,plan-Nz follow-up) |
+| **多路径 fallback divergence cross-source hash mismatch + reviewer Important 低估 → controller 必实测升级(see §5 Case 05 Pattern J)**| plan 留白展开时 implementer 在 helper 同时构造**多路径**同 schema 数据(payload 写一处 / staging 写另一处)用了不同 fallback default(payload `?? null` / staging `?? '' / ?? -1 / ?? new Date()`);下游 fence cross-source canonicalHash 比对永远 mismatch → 任何省略 optional CLI arg → 所有合法工作流被拒签 → system-wide broken。Sonnet code_quality reviewer 标 Important 但描述含 "system-wide" / "always-fail" / "all-changes" 等关键词,controller 应实测升级为 Critical | §3.2 cross-verify 强化:**reviewer 标 Important 但描述含 "system-wide" / "always-fail" / "all-changes" / "永远 X" → controller 必实测 evidence 验证**(grep 涉及 file:line + 模拟 user happy path) → 决定升级 Critical 还是接受 Important。dispatch prompt 加:helper 同时构造多路径同 schema 数据时,**显式约束"single source of truth"**(payload = staging-built object,不构造两次) | Round 2 implementer 跨 Task scope fix(改 helper 为 single source of truth payload = staging-built object;沿 Case 04 Pattern A emergent fix 模式) + 加 regression test cross-source projection hash 不误报 |
+| **cross-Task test interaction(N regression test assume N+1 logic placeholder)(see §5 Case 05 Pattern K)**| Task N 加 regression test assuming Task N+1 logic 仍是 placeholder(eg. `const findings = []` 占位);test PASS 快速 1.3s。Task N+1 enable real logic(eg. 启用 `runRerunFence(ctx)` 真调 worktree)→ 同 test 现在真跑 long-running operation → timeout 5000ms fail。Implementer 想急完成 task 倾向 **self-report "flaky"** 而非 real regression | dispatch prompt 加:涉及多 Task 跨阶段 test setup 时,**显式标注 "N Task 加的 test 在 N+M Task enable real logic 后会不会触发新 long-running operation?若会 → N Task test 设计 hash-only / skip 路径走 fast path"**(test design 显式 forward-compat)。controller cross-verify 必拒绝 "flaky" self-report → 实测 stash 前后对比 + deterministic 触发条件分析 | Round 2 fix:test 改 staging mode='hash-only' 走 skip 路径(hash-only 直接 return),仍验目标 fence(因子检仍跑);controller cross-verify stash 前后确认是 deterministic regression 而非 flaky |
+| **implementer "acceptable risk"/"flaky" 自报 → controller final review 必实测 verify(see §5 Case 05 Pattern L)**| per-task code_quality reviewer 标 Important 但 implementer self-report "acceptable risk" / "flaky 与 X 无关" / "low priority" 误导 final review 阶段。Implementer 想急完成 task 倾向自报 acceptable risk;若 controller 接受 self-report 不实测 verify → release 时暴露 real risk(攻击路径 / timing 距 bound 距离 < buffer) | §2.7 final reviewer playbook 加:cross-task synthesis 必扫所有 per-task Important 中 implementer self-report "acceptable risk" / "flaky" / "low priority" 的 finding → **实测 verify**(攻击路径模拟 / 实测 timing 距 bound 距离 N 次 / stash 前后 deterministic verify)→ 决定升级 Critical / 维持 Important / 接受 acceptable risk。**Implementer 自报评估不能 substitute final review 实测验证** | Final reviewer 实测 N 次 + controller direct fix commit(eg. catch 块加 else 转 CRITICAL finding + timeout buffer 加大);PR description 必标"final review 实测升级"留 audit trail |
+| **CI 环境 env var 累积 latent bug(long-lived feature branch first CI run)(see §5 Case 05 Pattern M)**| 老 test 不 override `CI` env / 其他 CI-sensitive env var(GH_TOKEN / TZ / LANG);GitHub runner 默认 `CI=true` → child process 检 `process.env.CI` 调整行为(如 ack propose exit 2 拒);本地 `process.env.CI=undefined` PASS;long-lived feature branch(>3 plan 周期未 PR 到主干)累积 latent CI bug,first PR run 才暴露 | test setup 显式 `CI=''` env override(`{ env: { ...process.env, CI: '' } }` 给 spawnSync / execa);dispatch prompt Pre-verified Data 段标"CI=true 环境下命令行为 vs 本地" — 若 child process 检 `process.env.CI` 调整行为,test setup 必显式 override。§3.2 cross-verify 加:**long-lived feature branch(>3 plan 周期未 PR 到主干)PR 前必跑 `gh pr create --draft` 触发 CI dry run** — 累积 latent CI bug 早发现 | chore commit `chore(<old plan> test fix): 加 CI='' env override`(本地 + CI 双 PASS 验证);PR description 标"累积 N plan 周期 latent CI bug,first CI run 暴露" |
 
 ---
 

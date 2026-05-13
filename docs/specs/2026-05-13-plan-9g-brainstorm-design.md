@@ -270,7 +270,12 @@ forge-eval/scenarios/(沿 forge-eval §5.5 现有约定:单 yaml per skill,RED/G
 
 **WARNING 流转**(v9 修订,Codex 五轮 B-1 修复 — 两段闭合区分 freeze-time vs rerun-time):
 
-- **freeze-time WARNING(仅不变量 7 + 10)**:fence-ctx 阶段算,**转 VerifyFinding schema**(沿 plan-9d Task 3),freeze 时写入 marker.verify_findings 数组。archive 步骤 3.6 verify_findings fence + 步骤 3.9 three-level fence 自动接 ack 流程 — WARNING+resolved=false+无 ack 拒签 / +acked 通过(沿 plan-9e1)。finding_hash 沿 9a `computeFindingHash` 8 字段 schema,**dimension 字段扩 enum 加 `process_evidence`**(v9 简化路径需 9g writing-plans 阶段扩 `src/core/schemas/severity.ts:53` FindingHashPayload.dimension enum + plan-9d 三维度 enum,沿 plan-9c/9d/9j superset additive 模式;Codex 五轮 B-2 修复)
+- **freeze-time WARNING(仅不变量 7 + 10)**:fence-ctx 阶段算,**转 VerifyFinding schema**(沿 plan-9d Task 3),freeze 时写入 marker.verify_findings 数组。archive 步骤 3.6 verify_findings fence + 步骤 3.9 three-level fence 自动接 ack 流程 — WARNING+resolved=false+无 ack 拒签 / +acked 通过(沿 plan-9e1)。finding_hash 沿 9a `computeFindingHash` 8 字段 schema,**dimension 字段扩 enum 加 `process_evidence`**(v10 修订,Codex 六轮 M-1:enum 扩展需覆盖 type + runtime validator 两层,9g writing-plans 阶段实施清单):
+- `src/core/schemas/severity.ts:53` `FindingHashPayload.dimension` union 扩(`completeness | correctness | coherence | process_evidence`)
+- `src/core/validate/marker-schema.ts:44 + :498` 运行时 validator dimension 校验扩 4 值
+- `src/cli/commands/finding.ts:68` finding hash CLI 接收 stdin JSON 时 dimension 校验扩 4 值
+- `docs/plans/2026-05-11-plan-9d-verify-three-dimensions.md:3612` plan-9d 三维度 enum 锁定段加 v1.0 修订注(superset additive,沿 plan-9c/9d/9j 同模式)
+- 对应 tests/cli/marker-schema.test.ts + tests/cli/finding.test.ts 加 process_evidence 用例
 - **rerun-time WARNING(仅不变量 13 在 sample/hash-only 模式)**:fence 在 archive 阶段算,**不写 marker**(避免破坏 freeze 不变性),**仅 stderr 输出告警 + 不阻断 archive**。ack-mode(沿不变量 12 用户必须先 ack)**隐含覆盖**该模式下 rerun-time WARNING。rerun.ts 实现约束:不得为 env drift / 抽样未命中 / reporter fallback 产生额外 rerun-time WARNING(沿 Codex 五轮 SUG-1) — 此类问题应在 freeze-time(不变量 10 env_hash)或 mode ack(不变量 12)处理
 
 ### 3.1 fence.ts 关键函数签名
@@ -620,6 +625,8 @@ archive 流程:
 | **重写整个 ack-log.jsonl 且每行 hash 自洽** | ✓ | ✓ | ✗ | ✓(伪造链) | ✗ | **行数 / tail 确定性 mismatch**(v9 修订,Codex 四轮 SUG-1:攻击者必须精准凑齐 marker 固化的 count + tail,tail 是 256-bit hash preimage 不可暴力;若伪造链的 evidence-helper 子集与原 staging 不同则 process_evidence 三数组 hash 一并失败)|
 | 旁支造 RED/GREEN + 主分支换实现 | ✓ | ✓ | ✓ | ✓ | ✓ | **不变量 14**:green ↞ HEAD ancestor check 失败 |
 | 五源全改 + 改 git 主分支 + 重凑 tail+count | ✗ | ✗ | ✗ | ✗ | ✗ | **不变量 5/6 worktree 重跑** — AI 改不动测试运行结果 |
+
+**剩余风险**(v10 修订,Codex 六轮 MIN-2 SUG-2 修复):worktree 重跑只能验证"提交里的测试结果",**不能证明测试覆盖有效**。若 AI 同时弱化测试和实现(`expect(true).toBe(false)` 假 RED + GREEN 注释掉 → exit_code 满足但测试无意义),9g 单层 fence 不挡此攻击。**必须 §2.2 verify 三维度(plan-9d Correctness / requirement-mapping)组合防御** — spec coverage 校验确保每个 spec requirement 在 codebase + tests 真实存在,空测试无法通过 §2.2 这层。**§2.7(9g)+ §2.2(9d)组合**才挡得住此攻击;沿 master spec §2.7.5 末行字面。
 
 ---
 
@@ -1043,7 +1050,7 @@ forge evidence freeze <changeId>     (v6 新增子命令)
 
 **finding_hash 算法**(v9 修订,Codex 四轮 BLOCKER-2 简化):
 
-freeze-time WARNING(仅不变量 7/10)写 marker.verify_findings 时**沿 plan-9a `computeFindingHash` 现有 schema**(8 字段:`validate_run_id / content_hash / git_head / dimension / check_type / severity / automated / evidence / recommendation`,沿 master spec §2.3.6 / plan-9d Task 6),不另起独立算法。process_evidence 不变量映射到 9d schema 字段:
+freeze-time WARNING(仅不变量 7/10)写 marker.verify_findings 时**沿 plan-9a `computeFindingHash` 现有 schema**(8 字段:`content_hash / git_head / dimension / check_type / severity / automated / evidence / recommendation`,沿 master spec §2.3.6 / plan-9d Task 6;v10 修订,Codex 六轮 M-2 修复:`validate_run_id` 是 ephemeral 字段已排除,沿 src/core/schemas/scope-entries.ts:161 注释)。process_evidence 不变量映射到 9d schema 字段:
 
 - `dimension`: `'process_evidence'`(沿 9d 三维度扩 1)
 - `check_type`: `'invariant-7-verify-count' | 'invariant-10-env-drift'`(每不变量一档)
@@ -1148,7 +1155,29 @@ function checkInvariant14(ctx: ProcessEvidenceFenceContext): ProcessEvidenceFind
 
 ---
 
-**Status: ready for sixth-round Codex review**
+**Status: ready for seventh-round Codex review**
+
+---
+
+## 17. Codex 六轮审查修复摘要(v10 修订,本节供七轮审查 cross-check 用)
+
+**关键里程碑:0 BLOCKER**(Codex 六轮报告确认五轮迭代后 BLOCKER 数 4 → 2 → 3 → 2 → 0)。
+
+**真 MAJOR 修复(4 项)**:
+
+- **M1 dimension enum 扩展操作指引完整化**:§3 WARNING 流转段列出完整文件清单 — `src/core/schemas/severity.ts:53` + `src/core/validate/marker-schema.ts:44+498` + `src/cli/commands/finding.ts:68` + `docs/plans/2026-05-11-plan-9d-verify-three-dimensions.md:3612` + 对应 tests;明确"type + runtime validator 两层"修订(v10 修复 v9 只说 type 层的遗漏)
+- **M2 FindingHashPayload 字段错写修正**:§9.12 finding_hash 字面从 9 字段错写改为 **8 字段实际**(去掉 `validate_run_id` ephemeral 字段,沿 src/core/schemas/scope-entries.ts:161 注释)
+- **M3 master spec §2.7.8 行 1314/1329/1340/1343 残留 13/7 修正**:本次直接改 master spec — `13 不变量` → `14 不变量`(行 1314/1329);`13 不变量 × 7 攻击场景` → `14 不变量 × 8 攻击场景`(行 1340);`forge-eval/scenarios/process-evidence/ 7 攻击` → `process-evidence.yaml 3 scenario AI 行为压力测试`(行 1343,沿 v9 forge-eval 修订)
+- **M4 §9.12 "待同步 master spec" 矛盾修正**:删 §9.12 末尾"待 9g writing-plans 阶段同步 master spec §2.7.6 行 1280 文字"段;改为列举 v10 已直接修订项(行 1280-1282 + 1286-1289 + 1316-1319);保留真正待同步项(§2.7.2 marker 字段 + §2.7.3 不变量 14 + §2.7.8 数字残留)
+
+**真 MINOR 修复(2 项)**:
+
+- **MIN-1 master plan 选项 C slice 同步**:`9g(7)` → `9g(8)`,slice 总和 39 → 40.5(与 §0 总计闭合)
+- **MIN-2 测试同步篡改剩余风险显式声明**:§5.1 反伪造矩阵末尾加段 — worktree 重跑不验证测试覆盖有效性;AI 同时弱化测试和实现(假 RED + 注释掉 GREEN)只能 §2.7 + §2.2 组合防御(沿 master spec §2.7.5 末行)
+
+**SUGGESTION 修复(1 项)**:
+
+- **SUG-1 B2 type vs runtime 区分**:M1 操作指引已涵盖(列出 type + runtime + CLI + tests + plan-9d 文档同步)
 
 ---
 
@@ -1222,11 +1251,15 @@ function checkInvariant14(ctx: ProcessEvidenceFenceContext): ProcessEvidenceFind
 **未修(留 writing-plans)**:
 - 沿 §13 v7 留项:SUG1 schema 测试断言、SUG2 rerun-time WARNING 临时 finding schema(已在 v8 B1 修复中走 ack-log 模式覆盖)
 
-**待 9g writing-plans 阶段同步的 master spec 修订项**(汇总):
-1. §2.7.2 字面加注 v1.0 helper "接收字段"语义(取代 §2.7.6 行 1280 "helper 自跑")
-2. §2.7.2 schema 加 marker 三新字段(staging_hash + ack_log_tail_hash + ack_log_entry_count)
-3. §2.7.3 字面加不变量 14(green↞HEAD)
-4. §2.7.6 行 1280 helper 实现描述同步(配 §2.7.2 修订)
+**v10 已直接修订 master spec 项目**(沿 Codex 五轮 M-3 + 六轮 M-4 修复):
+1. §2.7.6 行 1280-1282 helper 表格:接收完整字段,不自跑测试(已修)
+2. §2.7.6 行 1286-1289 "为什么 CLI helper" 段:helper 是 ground truth 写入路径 + worktree 重跑放 archive(已修)
+3. §2.7.8 行 1316-1319 实施清单:helper options 完整列 + freeze CLI 子命令(已修)
+
+**待 9g writing-plans 阶段同步的 master spec 修订项**:
+- §2.7.2 schema 加 marker 三新字段(staging_hash + ack_log_tail_hash + ack_log_entry_count)
+- §2.7.3 字面加不变量 14(green↞HEAD)
+- §2.7.8 行 1314 / 1329 / 1340 / 1343 数字残留 13→14 / 7→8 attack(v10 brainstorm 阶段未改 — 留 9g writing-plans 同步)
 
 ---
 

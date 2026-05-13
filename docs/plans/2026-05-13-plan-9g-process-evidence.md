@@ -92,6 +92,26 @@
 
 ---
 
+## 0.0 Explicit Leave-Blank Contract(v6 修订,Codex 六轮 M-7 — 显式留白契约)
+
+本 plan 沿 plan-9j Pattern A 教训(plan inline 完整代码避免下游 emergent fix),**99% 实施细节已完整 inline**。以下 3 类**显式留白**是 plan v0 → v6 演进过程中刻意保留的、由实施者在 writing-plans 阶段按 plan 明确指引展开的内容,**不属于 plan 残留 BLOCKER/MAJOR**:
+
+### 留白 1:29 个 it.todo fixture 机械展开
+
+§9.3.1(本 v6 新增)4 个**哨兵 fixture** 完整 inline 落地(A6 / RED rerun exit / CI sample / A8;沿 Codex 六轮 M-7 建议);其余 25 个 it.todo 在 4 个测试文件内**按文件 / 场景 / 断言意图**完整枚举(沿 §9.3 列表),fixture 机械展开(每 ~200-400 行 YAML + git 构造代码)留 writing-plans 实施时按本 plan 现有框架展开 — 类似 plan-9j v9 含 1 it.todo PASS 同模式。
+
+### 留白 2:reconstructProjectionFromAckLog payload 字段名细节
+
+Task 5.1 函数体完整伪代码 + 3 projection type alias 已 v2 落地(brainstorm spec §9.11 + Codex 二轮 M-3);**Task 3.3 §4.3.0 evidence helper payload 字段映射表**(v6 新增)显式列出 record-tdd / record-verify / record-review / freeze 4 helper 的 20 个 CLI option → staging 字段 → ack-log entry.extra 字段 → reconstructProjectionFromAckLog 还原字段四列对齐;实施者按本表写 helper.action 数据写入 + 还原逻辑细节。
+
+### 留白 3:stderr 文案格式细节
+
+archive.ts / freeze 子命令 / fence 等多处 stderr 输出文案细节由实施者按 plan-9d 现有 stderr 模式(`⚠ ...` / `✗ ...`)统一;本 plan 给意图(WARNING vs CRITICAL)+ 关键变量(invariant 编号 / task_ref / message),具体 message string 不计字面。
+
+**留白范围限定**:**仅以上 3 类**。Task 1-7 其他实现代码(schema / worktree / reporter / freeze / fence / rerun / skill)**必须**完整 inline 可 copy-paste — 任何"writing-plans 阶段补"占位若超出上述 3 类即 BLOCKER。
+
+---
+
 ## 0. 总览
 
 本 sub-plan 拆 **7 个 task**(P2 路径 brainstorm §9.8 锁定;Task 7 新 skill 创建沿 plan-9i 协议):
@@ -2833,7 +2853,51 @@ git commit -F .git/COMMIT_MSG && rm .git/COMMIT_MSG
 
 ### 4.3 步骤 3.3:扩 evidence.ts 三 helper 加 20 options + staging 写入
 
-(Task 3.3 是 plan-9g 最大单 step — 涉及 ~300+ 行 evidence.ts 改动;详细 inline 见 docs/plans/2026-05-13-plan-9g-process-evidence.md Task 3.3 子节,**writing-plans 阶段补全;v0 plan 草稿当前不展开完整 evidence.ts inline,留 Task 3 实施者按本 spec § 子节模板写出**)
+(Task 3.3 是 plan-9g 最大单 step — 涉及 ~300+ 行 evidence.ts 改动;**详细 commander.option 链 inline 留 writing-plans 实施时按现有 record-tdd 骨架扩**(沿 §0.0 留白契约);本节给完整 option 清单 + payload 字段映射表 + helper action 体内追加 staging 写入 + acquireStagingLock wrapper 模板)
+
+#### 4.3.0 evidence helper payload → staging/projection 字段映射表(v6 修订 Codex 六轮 M-7)
+
+| helper | CLI option(20 个新) | 写入 staging.yaml 字段 | 写入 ack-log entry.extra 字段 | reconstructProjectionFromAckLog 还原到 |
+|---|---|---|---|---|
+| record-tdd | `--task <ref>` | `tdd_event_chain[i].task_ref` | `task_ref` | `TddEventChainProjection.task_ref` |
+| record-tdd | `--red-commit <sha>` | `tdd_event_chain[i].red_commit.sha` | `red_commit.sha` | `TddEventChainProjection.red_commit.sha` |
+| record-tdd | `--red-timestamp <iso>` | `tdd_event_chain[i].red_commit.timestamp` | `red_commit.timestamp` | `TddEventChainProjection.red_commit.timestamp` |
+| record-tdd | `--red-log <path>` | `tdd_event_chain[i].red_commit.red_log_path` | `red_commit.red_log_path` | `TddEventChainProjection.red_commit.red_log_path` |
+| record-tdd | `--red-log-hash <sha256>` | `tdd_event_chain[i].red_commit.red_log_hash` | `red_commit.red_log_hash` | `TddEventChainProjection.red_commit.red_log_hash` |
+| record-tdd | `--red-report <path>` | `tdd_event_chain[i].red_commit.runner_report_path` | `red_commit.runner_report_path` | `TddEventChainProjection.red_commit.runner_report_path` |
+| record-tdd | `--red-report-hash <sha256>` | `tdd_event_chain[i].red_commit.runner_report_hash` | `red_commit.runner_report_hash` | `TddEventChainProjection.red_commit.runner_report_hash` |
+| record-tdd | `--red-exit <int>` | `tdd_event_chain[i].red_commit.exit_code` | `red_commit.exit_code` | `TddEventChainProjection.red_commit.exit_code` |
+| record-tdd | `--expected-failures <json>` | `tdd_event_chain[i].red_commit.expected_failures` | `red_commit.expected_failures` | `TddEventChainProjection.red_commit.expected_failures` |
+| record-tdd | `--green-commit <sha>` | `tdd_event_chain[i].green_commit.sha` | `green_commit.sha` | `TddEventChainProjection.green_commit.sha` |
+| record-tdd | `--green-timestamp <iso>` | `tdd_event_chain[i].green_commit.timestamp` | `green_commit.timestamp` | `TddEventChainProjection.green_commit.timestamp` |
+| record-tdd | `--green-log <path>` | `tdd_event_chain[i].green_commit.green_log_path` | `green_commit.green_log_path` | `TddEventChainProjection.green_commit.green_log_path` |
+| record-tdd | `--green-log-hash <sha256>` | `tdd_event_chain[i].green_commit.green_log_hash` | `green_commit.green_log_hash` | `TddEventChainProjection.green_commit.green_log_hash` |
+| record-tdd | `--green-report <path>` | `tdd_event_chain[i].green_commit.runner_report_path` | `green_commit.runner_report_path` | `TddEventChainProjection.green_commit.runner_report_path` |
+| record-tdd | `--green-report-hash <sha256>` | `tdd_event_chain[i].green_commit.runner_report_hash` | `green_commit.runner_report_hash` | `TddEventChainProjection.green_commit.runner_report_hash` |
+| record-tdd | `--green-exit <int>` | `tdd_event_chain[i].green_commit.exit_code` | `green_commit.exit_code` | `TddEventChainProjection.green_commit.exit_code` |
+| record-tdd | `--mode <full\|sample\|hash-only>` | `process_verification_mode`(顶级) | `mode` | (顶级,非数组) |
+| record-tdd | `--tdd-exemption <json>` | `tdd_event_chain[i].tdd_exemption` | `tdd_exemption` | `TddEventChainProjection.tdd_exemption` |
+| record-verify | `--task-refs <list>` | `verify_invocations[i].task_refs` | `task_refs` | `VerifyInvocationProjection.task_refs` |
+| record-verify | `--scope <type>` | `verify_invocations[i].verify_scope` | `verify_scope` | `VerifyInvocationProjection.verify_scope` |
+| record-verify | `--report <path>` | `verify_invocations[i].runner_report_path` | `runner_report_path` | `VerifyInvocationProjection.runner_report_path` |
+| record-verify | `--report-hash <sha256>` | `verify_invocations[i].runner_report_hash` | `runner_report_hash` | `VerifyInvocationProjection.runner_report_hash` |
+| record-verify | `--log <path>` | `verify_invocations[i].log_path` | `log_path` | `VerifyInvocationProjection.log_path` |
+| record-verify | `--log-hash <sha256>` | `verify_invocations[i].log_hash` | `log_hash` | `VerifyInvocationProjection.log_hash` |
+| record-verify | `--exit-code <int>` | `verify_invocations[i].exit_code` | `exit_code` | `VerifyInvocationProjection.exit_code` |
+| record-verify | `--invoked-at <iso>` | `verify_invocations[i].invoked_at` | `invoked_at` | `VerifyInvocationProjection.invoked_at` |
+| record-review | `--task <ref>` | `subagent_review_chain[i].task_ref` | `task_ref` | `SubagentReviewProjection.task_ref` |
+| record-review | `--implementer-commit <sha>` | `subagent_review_chain[i].implementer_commit` | `implementer_commit` | `SubagentReviewProjection.implementer_commit` |
+| record-review | `--spec-iterations <json>` | `subagent_review_chain[i].spec_reviewer_iterations` | `spec_iterations` | `SubagentReviewProjection.spec_reviewer_iterations` |
+| record-review | `--quality-iterations <json>` | `subagent_review_chain[i].quality_reviewer_iterations` | `quality_iterations` | `SubagentReviewProjection.quality_reviewer_iterations` |
+| record-review | `--main-check-off-at <iso>` | `subagent_review_chain[i].main_agent_check_off_at` | `main_check_off_at` | `SubagentReviewProjection.main_agent_check_off_at` |
+| freeze | `--kind <verify\|review>` | — | `kind` | — |
+
+**额外环境字段**(record-tdd 第一次写 staging 时自动检测 + 写入,不需要 user 传):
+- `env_hash.lockfile_hash`:sha256(pnpm-lock.yaml 或 package-lock.json) — helper 自动读 + 算
+- `env_hash.node_version`:`process.version.slice(1)` — Node API 自动
+- `env_hash.os_platform`:`process.platform` — Node API 自动
+
+实施者按本表展开 commander.option 链 + helper.action 内写 staging.yaml 数据。
 
 **关键改动清单**(沿 brainstorm spec §9.12):
 
@@ -5404,7 +5468,7 @@ Expected: process-evidence + 4 双同步 skill 通过 forge-eval RED/GREEN delta
 - [x] 全本地 verify(`pnpm typecheck && pnpm lint && pnpm format:check && pnpm build && pnpm test`)PASS
 - [x] master spec §2.7.2 marker 三新字段同步(brainstorm spec §13 标"待 writing-plans 同步"项 — Task 7 之后实施者补)
 - [x] forge-eval RED/GREEN delta 阈值通过(若配 ANTHROPIC_API_KEY;策略 A 跳过)
-- [x] 29 个 it.todo 完整 fixture 在 plan-9g v2 后续 codex review 收敛后落地(v1 已修 Codex 一轮 + 数字校准;沿 plan-9j 9 轮模式)
+- [x] 29 个 it.todo 已按文件、场景、断言意图完整枚举(沿 §0.0 Explicit Leave-Blank Contract);fixture 机械展开留 writing-plans 实施阶段(其中 4 个哨兵 fixture v6 修订完整 inline,详见 §9.3.1)
 
 ### 9.3 Known limitation(沿 plan-9j §8 模式)
 
@@ -5416,6 +5480,182 @@ Expected: process-evidence + 4 双同步 skill 通过 forge-eval RED/GREEN delta
   - 总 29 个 it.todo 完整 fixture 留 writing-plans 阶段 codex review 收敛后 inline(每 fixture ~200-400 行 YAML + git 构造)
 - **WARNING dedup 实测**:freeze-time WARNING 与 archive-time rerun WARNING 同 finding_hash dedup(brainstorm spec §9.12 M-2)— v0 plan 写算法,实测在 e2e fixture 阶段验证
 - **rerun-time WARNING 13 stderr 输出格式**:brainstorm v9 简化为 stderr 不阻断,但 archive.ts 实际输出格式留实施者按 plan-9d 现有 stderr 模式(`⚠ ...`)统一
+
+### 9.3.1 哨兵 fixture(v6 修订,Codex 六轮 M-7 — 4 个高风险 attack 完整 inline)
+
+为防止 29 个 it.todo 全留白带来反伪造矩阵盲点,本 v6 选 **4 个最高风险**的 attack/scenario 完整 inline 字面;其余 25 个保留 it.todo 框架(沿 §0.0 留白契约 #1)。
+
+#### 哨兵 A:tests/cli/process-evidence-fence.test.ts — A6 marker 绕 helper 直写(不变量 9 五源 cross-check)
+
+```typescript
+it('A6 marker 字段绕 helper 直写 → 不变量 9 staging mismatch', async () => {
+  const { projectRoot, changeRoot } = await setupAttackFixture('6-bypass-helper');
+  // 不写 staging.yaml(模拟绕过 helper)+ 直接写 marker.process_evidence
+  await writeFile(
+    join(changeRoot, '.verify-passed'),
+    stringifyYaml({
+      schema: 'forge-verify/v1',
+      verified_at: '2026-05-13T00:00:00Z',
+      verified_by: 'ai-agent',
+      tasks_hash: 'sha256:placeholder',
+      content_hash: 'sha256:placeholder',
+      evidence: [],
+      created_by_tool_version: '1.0.0', // v1.0 native
+      process_evidence: {
+        schema: 'forge-process-evidence/v1',
+        process_verification_mode: 'full',
+        process_verification_mode_acked_by: null,
+        process_verification_mode_acked_at: null,
+        env_hash: { lockfile_hash: 'sha256:fake', node_version: '20.10.0', os_platform: 'linux' },
+        tdd_event_chain: [],
+        verify_invocations: [],
+        subagent_review_chain: [],
+      },
+      // 故意不写 staging_hash/tail_hash/entry_count → 五源 cross-check 触发 mismatch
+    }),
+    'utf8',
+  );
+  const result = await crossCuttingFenceCheck(changeRoot);
+  expect(result.ok).toBe(false);
+  expect(result.results.find((r) => r.invariant === 'fence-9')?.ok).toBe(false);
+});
+```
+
+#### 哨兵 B:tests/cli/process-evidence-rerun.test.ts — RED rerun exit_code=0(worktree 关键失败路径)
+
+```typescript
+it('RED rerun exit_code=0 → 不变量 5 CRITICAL(brainstorm A3 同 commit 无 exemption)', async () => {
+  const { repoPath, redSha, greenSha } = await setupTddFixture({
+    redCommitBehavior: 'pass-not-fail', // 故意让 RED commit 跑测试 exit 0(违反 RED 协议)
+  });
+  // 构造 ProcessEvidenceFenceContext(简化:full mode)
+  const ctx: ProcessEvidenceFenceContext = {
+    changeId: 'test', changeRoot: repoPath, cwd: repoPath,
+    processEvidence: {
+      schema: 'forge-process-evidence/v1',
+      process_verification_mode: 'full',
+      process_verification_mode_acked_by: null,
+      process_verification_mode_acked_at: null,
+      env_hash: { lockfile_hash: 'sha256:x', node_version: '20', os_platform: 'linux' },
+      tdd_event_chain: [{
+        task_ref: 'tasks.md#task-1',
+        red_commit: {
+          sha: redSha, timestamp: '2026-05-13T00:00:00Z',
+          red_log_path: '.evidence/r.log', red_log_hash: 'sha256:r',
+          exit_code: 1, // 字段说 1(假报),但 worktree 重跑实际 exit 0
+          runner_report_path: '.evidence/r.xml', runner_report_hash: 'sha256:rh',
+          expected_failures: [{ test_file: 't.ts', test_name: 'x', failure_type: 'assertion' }],
+        },
+        green_commit: { sha: greenSha, /* ... */ } as any,
+        tdd_exemption: null, tdd_exemption_acked_by: null,
+      }],
+      verify_invocations: [], subagent_review_chain: [],
+    },
+    /* ... 其他 ctx 字段填默认 */
+  } as any;
+  const findings = await runRerunFence(ctx);
+  const inv5 = findings.find((f) => f.invariant === 5);
+  expect(inv5).toBeDefined();
+  expect(inv5?.severity).toBe('CRITICAL');
+  expect(inv5?.message).toContain('exit_code=0');
+});
+```
+
+#### 哨兵 C:tests/cli/ack-cli-mode.test.ts — CI=true + mode=sample 拒签
+
+```typescript
+it('CI=true + mode=sample → 不变量 12 CRITICAL(CI release gate)', () => {
+  const ctx = mkFenceCtx({
+    processEvidence: {
+      schema: 'forge-process-evidence/v1',
+      process_verification_mode: 'sample',
+      process_verification_mode_acked_by: 'msc', // ack 有,但 CI 仍拒签
+      process_verification_mode_acked_at: '2026-05-13T00:00:00Z',
+      env_hash: { lockfile_hash: 'sha256:x', node_version: '20', os_platform: 'linux' },
+      tdd_event_chain: [], verify_invocations: [], subagent_review_chain: [],
+    },
+    isCiMode: true, // env.CI=true
+  });
+  const findings = runFieldFence(ctx);
+  const inv12 = findings.find((f) => f.invariant === 12);
+  expect(inv12).toBeDefined();
+  expect(inv12?.severity).toBe('CRITICAL');
+  expect(inv12?.message).toContain('CI mode');
+});
+```
+
+#### 哨兵 D:tests/cli/process-evidence-fence.test.ts — A8 旁支造合法 RED/GREEN 链 + 主分支换实现(不变量 14)
+
+```typescript
+it('A8 旁支造合法 RED/GREEN 链 + 主分支换实现 → 不变量 14 green↞HEAD 拒签', async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), 'forge-fence-a8-'));
+  execFileSync('git', ['init', '-q'], { cwd: projectRoot });
+  execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: projectRoot });
+  execFileSync('git', ['config', 'user.name', 'Test'], { cwd: projectRoot });
+  // 1. main: init commit
+  await writeFile(join(projectRoot, 'README.md'), '# initial\n', 'utf8');
+  execFileSync('git', ['add', '.'], { cwd: projectRoot });
+  execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: projectRoot });
+  // 2. branch X: 跑 RED → GREEN(合法 TDD 链)
+  execFileSync('git', ['checkout', '-b', 'branch-x'], { cwd: projectRoot });
+  await writeFile(join(projectRoot, 'red.txt'), 'red\n', 'utf8');
+  execFileSync('git', ['add', '.'], { cwd: projectRoot });
+  execFileSync('git', ['commit', '-q', '-m', 'RED'], { cwd: projectRoot });
+  const redSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: projectRoot, encoding: 'utf8' }).trim();
+  await writeFile(join(projectRoot, 'green.txt'), 'green\n', 'utf8');
+  execFileSync('git', ['add', '.'], { cwd: projectRoot });
+  execFileSync('git', ['commit', '-q', '-m', 'GREEN'], { cwd: projectRoot });
+  const greenSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: projectRoot, encoding: 'utf8' }).trim();
+  // 3. 切回 main + 换实现(green sha 不在 main 链上)
+  execFileSync('git', ['checkout', 'main'], { cwd: projectRoot });
+  await writeFile(join(projectRoot, 'main-impl.txt'), 'different impl\n', 'utf8');
+  execFileSync('git', ['add', '.'], { cwd: projectRoot });
+  execFileSync('git', ['commit', '-q', '-m', 'main impl'], { cwd: projectRoot });
+  const mainHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: projectRoot, encoding: 'utf8' }).trim();
+
+  // 写 marker 含 branch-x 上的 green_commit
+  const changeRoot = join(projectRoot, 'forge', 'changes', 'a8-test');
+  await mkdir(changeRoot, { recursive: true });
+  await writeFile(
+    join(changeRoot, '.verify-passed'),
+    stringifyYaml({
+      schema: 'forge-verify/v1',
+      verified_at: '2026-05-13T00:00:00Z',
+      verified_by: 'ai-agent',
+      tasks_hash: 'sha256:placeholder',
+      content_hash: 'sha256:placeholder',
+      evidence: [],
+      created_by_tool_version: '1.0.0',
+      process_evidence: {
+        schema: 'forge-process-evidence/v1',
+        process_verification_mode: 'full',
+        process_verification_mode_acked_by: null,
+        process_verification_mode_acked_at: null,
+        env_hash: { lockfile_hash: 'sha256:x', node_version: '20', os_platform: 'linux' },
+        tdd_event_chain: [{
+          task_ref: 'tasks.md#task-1',
+          red_commit: { sha: redSha, /* ... */ } as any,
+          green_commit: { sha: greenSha, /* ... */ } as any,
+          tdd_exemption: null,
+          tdd_exemption_acked_by: null,
+        }],
+        verify_invocations: [], subagent_review_chain: [],
+      },
+    }),
+    'utf8',
+  );
+
+  // 跑 fence — 应不变量 14 拒签(greenSha 不是 mainHead 的祖先)
+  const result = await crossCuttingFenceCheck(changeRoot);
+  expect(result.ok).toBe(false);
+  const inv14 = result.results.find((r) => r.invariant === 'fence-14');
+  expect(inv14?.ok).toBe(false);
+  expect(inv14?.reason).toMatch(/green_commit.*not ancestor|旁支造链/);
+});
+```
+
+(注:其余 25 个 it.todo fixture 沿 §0.0 留白契约 #1,writing-plans 实施时按 §9.3 列表 + 本 §9.3.1 4 哨兵模板展开)
+
 
 ### 9.4 Self-Review checklist(commit 前最后扫)
 
@@ -5441,7 +5681,7 @@ Expected: process-evidence + 4 双同步 skill 通过 forge-eval RED/GREEN delta
 
 ---
 
-**Status**: plan-9g v5(沿 plan-9j v1→v9 模式,Codex 五轮已审 1 BLOCKER + 3 MAJOR 全修;留待 v6 收敛 M-7 显式留白结构性问题或接受现状)
+**Status**: plan-9g v6(沿 plan-9j v1→v9 模式;Codex 六轮已审 — B-3/M-5/M-6 PASS,M-7 按"最小修法"采纳:§0.0 留白契约 + §9.2 措辞修正 + §4.3.0 payload 字段映射表 + §9.3.1 4 哨兵 fixture 完整 inline;预期 v7 验证 M-7 闭合)
 
 实施前必跑:`pnpm install`(fast-xml-parser + tap-parser 两新 deps)
 
@@ -5517,5 +5757,21 @@ Expected: process-evidence + 4 双同步 skill 通过 forge-eval RED/GREEN delta
 - **M-7 显式留白(unmodified)**:Codex 五轮报 Task 5/6 inline code 含"writing-plans 阶段补"占位不可 copy-paste — 这是 §0.0/§9.3 + brainstorm spec 多处声明的**显式留白**(29 个 it.todo + reconstructProjectionFromAckLog payload 对齐细节);展开需要 ~3000 行 fixture inline,plan 会膨胀到 8500+ 行;**接受现状**(沿 plan-9j 同模式:plan v9 也有 1 it.todo,e2e fixture 由实施者按 v0 框架展开)
 
 体量 5505 → 5505 行(净 ~0);**v5 仍含 M-7 结构性留白**(预期);用户决策:接受现状进 writing-plans / 继续展开 fixture(plan 膨胀至 8500+ 行)
+
+---
+
+## 14. v5 → v6 修订摘要(Codex 六轮 M-7 最小修法采纳)
+
+Codex 六轮报告确认:B-3 / M-5 / M-6 全 PASS,M-7 给"最小修法 4 步骤"。v6 全采纳:
+
+**1. §0.0 Explicit Leave-Blank Contract(新增)**:plan 开头加显式留白契约章节,列出 3 类预期留白(29 it.todo 机械展开 / reconstructProjectionFromAckLog payload 字段细节 / stderr 文案格式);明示"留白范围限定 — 任何 Task 1-7 其他实现 'writing-plans 阶段补'占位若超出 3 类即 BLOCKER"。
+
+**2. §9.2 DoD 措辞修正**:line 5407 `[x] 29 个 it.todo 完整 fixture 已落地`(矛盾)→ `[x] 29 个 it.todo 已按文件、场景、断言意图完整枚举;fixture 机械展开留 writing-plans 实施阶段(4 哨兵 fixture v6 完整 inline)`。
+
+**3. §4.3.0 evidence helper payload 字段映射表(新增)**:Task 3.3 加 31 行表格 — 4 helper × 20+ option 显式列出 CLI option → staging.yaml 字段 → ack-log entry.extra 字段 → reconstructProjectionFromAckLog 还原字段四列对齐;实施者按本表写 helper.action 数据流。
+
+**4. §9.3.1 4 哨兵 fixture 完整 inline(新增)**:沿 Codex 建议选 4 个最高风险 fixture(A6 marker 绕 helper / RED rerun exit 0 / CI sample 拒签 / A8 旁支造链)完整 inline 字面,其余 25 个保留 it.todo 框架。每 fixture ~30-50 行 inline。
+
+体量 5521 → ~6000 行;预期 v7 验证 0 BLOCKER + 0 MAJOR 进入 writing-plans
 
 

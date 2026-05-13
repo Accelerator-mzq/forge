@@ -18,8 +18,9 @@ import type {
   ProcessEvidenceFenceContext,
   ProcessEvidenceFinding,
 } from './process-evidence-fence.js';
-// plan-9g Task 6:rerun fence import(本 Task 5 时尚未,Step 5.2 仅 placeholder)
-// import { runRerunFence } from './process-evidence-rerun.js';
+// plan-9g Task 6:rerun fence top-level import(偏离 plan §7.1.2 dynamic import 字面;
+// 沿 Task 5 top-level import 一致性 — dynamic import 影响测试性能且 Task 5 已统一 top-level)
+import { runRerunFence } from './process-evidence-rerun.js';
 
 /** 单个不变量的检查结果 */
 export interface FenceInvariantResult {
@@ -185,9 +186,8 @@ export async function crossCuttingFenceCheck(
     }
   }
 
-  // 4. runRerunFence(async,Task 6 实施;Task 5 阶段返空数组)
-  const rerunFindings: ProcessEvidenceFinding[] = [];
-  // const rerunFindings = await runRerunFence(ctx); // plan-9g Task 6 启用
+  // 4. runRerunFence(async,Task 6 启用;不变量 5/6/13 worktree 重跑)
+  const rerunFindings = await runRerunFence(ctx);
 
   // 5. 汇合 + 输出 FenceCheckResult(verify + review + rerun;v2 M-1 加 reviewFindings)
   const allFindings = [...fieldFindings, ...reviewFindings, ...rerunFindings];

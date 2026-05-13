@@ -128,4 +128,140 @@ describe('archive_summary schema validation', () => {
     });
     expect(result.valid).toBe(true);
   });
+
+  // ============================================================
+  // plan-9e2 Task 3:placeholder=false 路径严格校验扩 10 case
+  // ============================================================
+  describe('process_evidence_summary placeholder=false 路径严格校验 — plan-9e2 Task 3', () => {
+    const realSummaryBaseline = {
+      placeholder: false,
+      invariants_passed: 14,
+      invariants_with_warning: 0,
+      invariants_failed: 0,
+      legacy_exempt: 0,
+    };
+
+    function buildWithPeSummary(peSummary: Record<string, unknown>): Record<string, unknown> {
+      return { ...baseSummary, process_evidence_summary: peSummary };
+    }
+
+    it('placeholder=false 缺 invariants_passed → 拒签', () => {
+      const { invariants_passed, ...rest } = realSummaryBaseline;
+      const result = validateArchiveSummarySchema(buildWithPeSummary(rest));
+      expect(result.valid).toBe(false);
+      expect(
+        result.errors.some((e) => e.field === 'process_evidence_summary.invariants_passed'),
+      ).toBe(true);
+    });
+
+    it('placeholder=false 缺 invariants_with_warning → 拒签(v2 codex 一轮 MAJOR 修订新字段)', () => {
+      const { invariants_with_warning, ...rest } = realSummaryBaseline;
+      const result = validateArchiveSummarySchema(buildWithPeSummary(rest));
+      expect(result.valid).toBe(false);
+      expect(
+        result.errors.some((e) => e.field === 'process_evidence_summary.invariants_with_warning'),
+      ).toBe(true);
+    });
+
+    it('placeholder=false 缺 invariants_failed → 拒签', () => {
+      const { invariants_failed, ...rest } = realSummaryBaseline;
+      const result = validateArchiveSummarySchema(buildWithPeSummary(rest));
+      expect(result.valid).toBe(false);
+      expect(
+        result.errors.some((e) => e.field === 'process_evidence_summary.invariants_failed'),
+      ).toBe(true);
+    });
+
+    it('placeholder=false 缺 legacy_exempt → 拒签', () => {
+      const { legacy_exempt, ...rest } = realSummaryBaseline;
+      const result = validateArchiveSummarySchema(buildWithPeSummary(rest));
+      expect(result.valid).toBe(false);
+      expect(
+        result.errors.some((e) => e.field === 'process_evidence_summary.legacy_exempt'),
+      ).toBe(true);
+    });
+
+    it('placeholder=false invariants_with_warning = -1 → "must be in [0, 14]"', () => {
+      const result = validateArchiveSummarySchema(
+        buildWithPeSummary({ ...realSummaryBaseline, invariants_with_warning: -1, invariants_passed: 15 }),
+      );
+      // 注:passed=15 也越界,但本 case 主断 with_warning;sum 不变式由后续 case 单独测
+      expect(result.valid).toBe(false);
+      expect(
+        result.errors.some(
+          (e) =>
+            e.field === 'process_evidence_summary.invariants_with_warning' &&
+            /must be in \[0, 14\]/.test(e.message),
+        ),
+      ).toBe(true);
+    });
+
+    it('placeholder=false invariants_passed = 15 → "must be in [0, 14]"', () => {
+      const result = validateArchiveSummarySchema(
+        buildWithPeSummary({
+          ...realSummaryBaseline,
+          invariants_passed: 15,
+          invariants_with_warning: -1, // 拉低让 sum 仍 = 14 避免触发 sum 错混淆
+        }),
+      );
+      expect(result.valid).toBe(false);
+      expect(
+        result.errors.some(
+          (e) =>
+            e.field === 'process_evidence_summary.invariants_passed' &&
+            /must be in \[0, 14\]/.test(e.message),
+        ),
+      ).toBe(true);
+    });
+
+    it('placeholder=false sum 不变式破(passed=10 / warning=0 / failed=0 / exempt=5,sum=15)→ 拒签', () => {
+      const result = validateArchiveSummarySchema(
+        buildWithPeSummary({
+          placeholder: false,
+          invariants_passed: 10,
+          invariants_with_warning: 0,
+          invariants_failed: 0,
+          legacy_exempt: 5,
+        }),
+      );
+      expect(result.valid).toBe(false);
+      expect(
+        result.errors.some(
+          (e) =>
+            e.field === 'process_evidence_summary' && /sum invariant: 15 !== 14/.test(e.message),
+        ),
+      ).toBe(true);
+    });
+
+    it('placeholder=false sum 不变式破(passed=4 / warning=1 / failed=0 / exempt=10,sum=15)→ 拒签', () => {
+      const result = validateArchiveSummarySchema(
+        buildWithPeSummary({
+          placeholder: false,
+          invariants_passed: 4,
+          invariants_with_warning: 1,
+          invariants_failed: 0,
+          legacy_exempt: 10,
+        }),
+      );
+      expect(result.valid).toBe(false);
+      expect(
+        result.errors.some(
+          (e) =>
+            e.field === 'process_evidence_summary' && /sum invariant: 15 !== 14/.test(e.message),
+        ),
+      ).toBe(true);
+    });
+
+    it('placeholder=true 路径(plan-9e1 容忍)→ 通过(backward-compat)', () => {
+      const result = validateArchiveSummarySchema(
+        buildWithPeSummary({ placeholder: true, note: 'placeholder' }),
+      );
+      expect(result.valid).toBe(true);
+    });
+
+    it('placeholder=false sum 不变式成立 + 4 字段值域内 → 通过', () => {
+      const result = validateArchiveSummarySchema(buildWithPeSummary(realSummaryBaseline));
+      expect(result.valid).toBe(true);
+    });
+  });
 });

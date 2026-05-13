@@ -143,13 +143,18 @@ describe('marker-version e2e fence', () => {
     expect(r.code).toBe(0);
   });
 
-  // Case 2:new-v1.0 → 原生 v1.0 marker(created_by_tool_version: 1.0.0)直接 archive 通过
-  // 证明:9j legacy fence 不拦原生 v1.0(no legacy=true 字段 → ok())
-  it('new-v1.0 → 原生 v1.0 marker archive 直接通过', async () => {
+  // Case 2:new-v1.0 → 原生 v1.0 marker(created_by_tool_version: 1.0.0)
+  // plan-9g 后更新:v1.0 marker 无 process_evidence 且无 legacy 豁免 → 9g fence CRITICAL → exit 1
+  // 证明:9j legacy fence 不拦原生 v1.0(no legacy=true 字段 → ok()),但 9g process-evidence fence 拦截
+  //   9g 设计意图:v1.0 原生 marker 必须走 forge evidence record-tdd/verify/review + freeze 流程
+  //   若需豁免(迁移期),需在 marker 加 process_evidence_unavailable_legacy: true
+  it('new-v1.0 → 原生 v1.0 marker 无 process_evidence → 9g fence 拒签 exit 1', async () => {
     const { tmpRoot, changeId } = await setupFixture('new-v1.0');
     cleanupDirs.push(tmpRoot);
     const r = runArchive(tmpRoot, changeId);
-    expect(r.code).toBe(0);
+    // plan-9g 后:v1.0 marker 无 process_evidence → fence-9 CRITICAL → exit 1
+    expect(r.code).toBe(1);
+    expect(r.stderr).toMatch(/fence|process_evidence/i);
   });
 
   // Case 3:active-old-need-resign → resign-markers S/L 自动映射 → archive 通过

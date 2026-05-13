@@ -3961,9 +3961,9 @@ export function runFieldFence(ctx: ProcessEvidenceFenceContext): ProcessEvidence
     }
 
     // 子检 9.2:evidence-helper projection 还原三数组 hash 与 marker.process_evidence 一致
-    // 注:helper entries 含 record-tdd/record-verify/record-review/freeze;实际三数组重建逻辑
-    //     由实施者根据 record-tdd payload schema 还原 — 这里给 stub 框架(简化),
-    //     真实重建在 writing-plans 阶段补
+    // 注:helper entries 含 record-tdd/record-verify/record-review/freeze;
+    //     reconstructProjectionFromAckLog 已 v2 修订完整 inline 伪代码 + 3 projection type alias;
+    //     Task 3.3 evidence helper payload schema 落地后,实施者按 payload 字段对齐 entry.extra 解析细节
     const projectionFromAckLog = reconstructProjectionFromAckLog(ctx.helperEntries);
     const projectionHashFromAckLog = canonicalHash(projectionFromAckLog);
     const projectionFromMarker = {
@@ -4060,7 +4060,7 @@ export function runFieldFence(ctx: ProcessEvidenceFenceContext): ProcessEvidence
 
 /**
  * reconstructProjectionFromAckLog — 从 evidence-helper entries 还原三数组
- * (v2 修订 Codex 二轮 M-3:STUB → 完整伪代码,反伪造五源 cross-check 不变量 9 用)
+ * (v2 修订 Codex 二轮 M-3:完整伪代码,反伪造五源 cross-check 不变量 9 用)
  *
  * 工作原理:Task 3.3 evidence helper 写 ack-log 时,把完整 payload(record-tdd/verify/review
  *   的所有 commander options 数据)放在 entry.extra 字段;
@@ -4401,7 +4401,7 @@ Expected: PASS(若 9a 老测试 expect not_implemented,需更新到 9g 填实后
 
 - [ ] **Step 5.3.1:src/cli/commands/archive.ts:80-91 删 `--enable-cross-cutting-fence` + `--allow-stub-fence` 两 option**
 
-老字面:
+老字面(v0.4 archive.ts:80-91 — Codex 五轮 M-6 注:含 "full 13 invariants" 字样是 v0.4 时代字面,9g 实施时**整段删除**;改后 archive 默认开启 14 不变量 fence 无 opt-in flag):
 ```typescript
 .option(
   '--enable-cross-cutting-fence',
@@ -5441,7 +5441,7 @@ Expected: process-evidence + 4 双同步 skill 通过 forge-eval RED/GREEN delta
 
 ---
 
-**Status**: plan-9g v3(沿 plan-9j v1→v9 模式,Codex 三轮已审,等四轮收敛到 0 BLOCKER + 0 MAJOR)
+**Status**: plan-9g v5(沿 plan-9j v1→v9 模式,Codex 五轮已审 1 BLOCKER + 3 MAJOR 全修;留待 v6 收敛 M-7 显式留白结构性问题或接受现状)
 
 实施前必跑:`pnpm install`(fast-xml-parser + tap-parser 两新 deps)
 
@@ -5500,5 +5500,22 @@ Expected: process-evidence + 4 双同步 skill 通过 forge-eval RED/GREEN delta
 - **M-4 §9.5 Status 行 v1 → v3**:文档版本号同步本轮修订级别。
 
 体量 5448 → 5550+ 行;留 v4 codex 四轮收敛
+
+---
+
+## 13. v3 → v4 → v5 修订摘要(Codex 四轮 1 BLOCKER + 五轮 1 BLOCKER + 3 MAJOR 全修)
+
+**v4(Codex 四轮 B-3 STUB 残留)**:
+- 删 §9.3 行 5417 删除线 STUB 条
+- 改正文 reconstructProjectionFromAckLog 函数说明:`是 STUB` → `v2 已完整 inline`
+
+**v5(Codex 五轮 1 BLOCKER + 3 MAJOR)**:
+- **B-3 残留**:line 3965-3966 注释 "这里给 stub 框架 + 真实重建在 writing-plans 阶段补" → 改 "已 v2 完整 inline 伪代码;Task 3.3 payload schema 落地后按字段对齐解析细节"
+- **B-3 残留 line 4063 函数注释 "STUB → 完整伪代码"** → 删 "STUB →" 字样
+- **M-5 Status v3 → v5**:文档版本号同步本轮修订
+- **M-6 archive.ts 老字面 "13 invariants"(line 4408)**:这是要被删除的 v0.4 archive.ts opt-in flag 描述字面 — plan 内引用作"老字面比对"用,9g 实施时删 → 加注 "v0.4 老字面待 9g 删除"
+- **M-7 显式留白(unmodified)**:Codex 五轮报 Task 5/6 inline code 含"writing-plans 阶段补"占位不可 copy-paste — 这是 §0.0/§9.3 + brainstorm spec 多处声明的**显式留白**(29 个 it.todo + reconstructProjectionFromAckLog payload 对齐细节);展开需要 ~3000 行 fixture inline,plan 会膨胀到 8500+ 行;**接受现状**(沿 plan-9j 同模式:plan v9 也有 1 it.todo,e2e fixture 由实施者按 v0 框架展开)
+
+体量 5505 → 5505 行(净 ~0);**v5 仍含 M-7 结构性留白**(预期);用户决策:接受现状进 writing-plans / 继续展开 fixture(plan 膨胀至 8500+ 行)
 
 

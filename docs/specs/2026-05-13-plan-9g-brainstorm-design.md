@@ -42,7 +42,7 @@
 | 2 | 14 不变量 fence 代码拆分粒度 | **二分:fence.ts(字段类)+ rerun.ts(worktree 类)** | 沿 src/core/archive/ 现有模式(legacy-exemption / version-retrograde / verify-findings / pause-decisions / three-level fence 各成模块);IO/纯函数分离,test 时 rerun.ts 可整体 mock |
 | 3 | Worktree helper 接口抽象层 | **高阶 `runInWorktree(sha, fn, opts)`** | try/finally 强制 cleanup,丢 cleanup 不可能;test 时 mock 整个 helper 简单;sample 模式多 task 重跑可通过 `max_parallel_reruns` 并发 gate |
 | 4 | process_evidence helper append-only 写入路径 | **staging 文件 + archive 聚合(三源 cross-check)** | helper 调用不依赖 marker 存在;marker 字段是凝固快照;**marker == staging == ack-log 三源 cross-check 反伪造强度最高**;不动现有 marker reader 代码(archive/validate/recover) |
-| 5 | forge-eval RED scenario 组织 | **7 个独立 attack scenario + 1 GREEN(含三档 mode sub-fixture)** | 沿 v0.4 forge-eval/scenarios/ 模式,目录隔离;debug 时一眼看出当前测哪类攻击;改一个不连累别的 |
+| 5 | forge-eval RED scenario 组织 | v6/v9 修订后:**沿 forge-eval §5.5 现有单 yaml per skill + RED/GREEN 双跑 + judge 评分**(原 v5 锁的"8 个独立 attack scenario 目录"基于 forge-eval 认知错误,v6 已修正 — forge-eval 测 AI 行为压力非端到端 fence;8 attack 的 fence 拦截 100% 由 tests/cli/process-evidence-fence.test.ts fixture 单元测试覆盖) | 沿 v0.4 forge-eval/scenarios/ yaml 模式;§9.8 P2 路径新增 process-evidence skill + 独立 yaml(3 scenario AI 行为压力 + RED/GREEN delta) |
 | 6 | Staging → marker freeze 触发点 | **新 CLI 子命令 `forge evidence freeze`**(v6 修订,Codex BLOCKER #1) | 原 v5 锁"verify.ts/review CLI 内联"基于错误假设(verify.ts/review.ts 不存在);v6 改为新 CLI 子命令挂 evidence Command 下,主代理在 commands/verify.md 步骤 4.3 写完 .verify-passed 后显式调 |
 | 7 | Schema 校验工具 | **手写 TS interface + 沿 archive-summary.ts JSDoc 风格** | 现有 src/core/schemas/ 全用手写 interface(无 zod),沿同风格一致;运行时校验由 fence 函数显式做 |
 

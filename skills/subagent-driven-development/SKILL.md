@@ -312,3 +312,39 @@ subagent 在 task 实施完成报 DONE 时,**必须**提供以下字段给主代
 若 light mode trivial change 走 tdd_exemption:必须先调 `forge ack propose --action ack-tdd-exemption`,DONE_REPORT 含 ack_log entry 引用。
 
 详细 process_evidence 协议见 `skills/process-evidence/SKILL.md`。
+
+### plan-9h 新增:Main Agent STOP Triggers
+
+主代理在 apply 阶段必须停下问用户的 **5 类触发条件**(不允许自动绕过或重试,沿 design v3 §2.8.3 B):
+
+| 触发条件                                              | 主代理行为                                     | cross-ref                                                                                                |
+| ----------------------------------------------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Critical Plan Review 发现 critical gap                | 暂停 dispatch,走 AskUserQuestion 4 类 concerns | `commands/apply.md` 步骤 3.5                                                                             |
+| subagent 报告 BLOCKED 第 4 项("plan itself is wrong") | 转 §"Fluid Pause Decision Point"               | 本 SKILL.md §"Handling Implementer Status" BLOCKED 第 4 项(line 115)+ `commands/apply.md` §"Fluid Pause" |
+| **同一 task 被 subagent BLOCKED ≥ 2 次**              | STOP 问用户(可能任务过大需拆分,或 plan 本身错) | —                                                                                                        |
+| **verify 命令重试 ≥ 3 次仍失败**                      | STOP 问用户(可能 spec 错 / 测试本身错)         | —                                                                                                        |
+| 用户主动 interrupt                                    | STOP,等下一步指令                              | —                                                                                                        |
+
+#### 计数机制(plan-9h Q5 决策:接口零侵入)
+
+主代理必须在 **session memory 内追踪**同 task BLOCKED 计数 + verify 重试计数:
+
+- 每次接到 subagent BLOCKED 报告 → 该 task 计数 +1
+- 每次 verify 命令失败 → 该次重试计数 +1
+- **不依赖 marker / ack-log 持久化字段**(避免侵入 master plan §3.12.4 ack-log schema freeze + §3.12 marker schema freeze)
+- 跨 session wakeup 丢计数属 v0.4 known limitation;若用户手工告知"task X 已 BLOCKED N 次",主代理按用户告知值续计
+
+#### 禁止行为(主代理 dispatch 阶段红线)
+
+- ✗ 不允许"绕过失败 task 跑下一个"
+- ✗ 不允许"修改 task 描述让它能过"(改 task 描述需经 §"Fluid Pause Decision Point" 走选项 1/2)
+- ✗ 不允许"重试同一 task ≥ 3 次不停下"
+
+#### 与现有 BLOCKED 状态处理的关系(横切补强)
+
+本子段是 §"Handling Implementer Status" BLOCKED 4 项处理(line 110-115)的**横切补强**:
+
+- **BLOCKED 4 项处理**:**单次** BLOCKED 报告时主代理按 context / model / 拆分 / plan-wrong 4 选 1 处理
+- **本 STOP triggers**:**多次累积** BLOCKED / verify 重试 时强制 STOP 问用户(避免主代理无限循环)
+
+两者不冲突 — 现有 BLOCKED 第 4 项 "plan itself is wrong → Fluid Pause" 仍走 Fluid Pause(单次 critical gap 即触发);本 STOP triggers 表第 3-4 行(BLOCKED ≥ 2 次 / verify ≥ 3 次)是**累积失败**的反向加固,触发 STOP 后用户决策可能是"拆 task"/"重写 spec"/"走 explore"(沿 §2.8.4 与 §2.1/§2.5 桥接)。

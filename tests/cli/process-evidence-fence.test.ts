@@ -272,120 +272,133 @@ describe('process-evidence-fence A1-A8 attacks', () => {
  * 仅传 minimal required args(省略 optional)— 验证 fence-9.2 不误报。
  */
 describe('process-evidence-fence regression: fence-9.2 happy path no false positive', () => {
-  it('minimal record-tdd(仅 required args)+ freeze → fence-9.2 PASS(不误报)', async () => {
-    const { projectRoot, changeRoot } = await setupAttackFixture('regression-9-2');
-    const changeId = 'attack-regression-9-2';
+  // plan-9z polish P-3 fix(2026-05-14):timeout 5000 → 15000
+  // 复现:Windows CI 并发 git ops 偶发 timeout(本 regression 含 setupAttackFixture
+  // + record-tdd + freeze + crossCuttingFenceCheck 多步 git 调用,5000ms 在并发跑
+  // 资源竞争超时;沿 plan-9g `4e41064 chore(9g final fix): A8 timeout 15s buffer` 模式)
+  it(
+    'minimal record-tdd(仅 required args)+ freeze → fence-9.2 PASS(不误报)',
+    { timeout: 15000 },
+    async () => {
+      const { projectRoot, changeRoot } = await setupAttackFixture('regression-9-2');
+      const changeId = 'attack-regression-9-2';
 
-    // Step 1:创建 RED commit + GREEN commit(满足不变量 2 ancestor + 不变量 14 green↞HEAD)
-    // baseline 后再加两个 commit:red 含 RED 标识 + green 含 GREEN 修复
-    await writeFile(join(projectRoot, 'red.txt'), 'red commit\n', 'utf8');
-    execFileSync('git', ['add', '.'], { cwd: projectRoot });
-    execFileSync('git', ['commit', '-q', '-m', 'RED commit'], { cwd: projectRoot });
-    const redSha = execFileSync('git', ['rev-parse', 'HEAD'], {
-      cwd: projectRoot,
-      encoding: 'utf8',
-    }).trim();
+      // Step 1:创建 RED commit + GREEN commit(满足不变量 2 ancestor + 不变量 14 green↞HEAD)
+      // baseline 后再加两个 commit:red 含 RED 标识 + green 含 GREEN 修复
+      await writeFile(join(projectRoot, 'red.txt'), 'red commit\n', 'utf8');
+      execFileSync('git', ['add', '.'], { cwd: projectRoot });
+      execFileSync('git', ['commit', '-q', '-m', 'RED commit'], { cwd: projectRoot });
+      const redSha = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: projectRoot,
+        encoding: 'utf8',
+      }).trim();
 
-    await writeFile(join(projectRoot, 'green.txt'), 'green commit\n', 'utf8');
-    execFileSync('git', ['add', '.'], { cwd: projectRoot });
-    execFileSync('git', ['commit', '-q', '-m', 'GREEN commit'], { cwd: projectRoot });
-    const greenSha = execFileSync('git', ['rev-parse', 'HEAD'], {
-      cwd: projectRoot,
-      encoding: 'utf8',
-    }).trim();
+      await writeFile(join(projectRoot, 'green.txt'), 'green commit\n', 'utf8');
+      execFileSync('git', ['add', '.'], { cwd: projectRoot });
+      execFileSync('git', ['commit', '-q', '-m', 'GREEN commit'], { cwd: projectRoot });
+      const greenSha = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: projectRoot,
+        encoding: 'utf8',
+      }).trim();
 
-    // Step 2:minimal record-tdd(仅 required args + red-exit/green-exit + 显式 timestamp)
-    // 故意不传 --red-log / --red-log-hash / --red-report / --red-report-hash 等
-    //   optional args → 触发原 bug 场景(payload fallback `?? null` vs staging fallback `?? ''`)
-    // 必须传 --red-exit/--green-exit 满足不变量 3/4
-    // 必须传 --red-timestamp/--green-timestamp 避免 staging `?? new Date()` 双调用产生
-    //   相同/反序 timestamp 误触不变量 1(本 regression 测的是 fence-9.2,不应被 fence-1 干扰)
-    // 关键:验证 payload 与 staging 字段一致 → 无 fence-9.2 误报
-    const recordResult = runCli(
-      [
-        'evidence',
-        'record-tdd',
-        changeId,
-        '--task',
-        'tasks.md#task-1',
-        '--red-commit',
-        redSha,
-        '--green-commit',
-        greenSha,
-        '--red-exit',
-        '1',
-        '--green-exit',
-        '0',
-        '--red-timestamp',
-        '2026-05-13T10:00:00Z',
-        '--green-timestamp',
-        '2026-05-13T11:00:00Z',
-      ],
-      projectRoot,
-    );
-    expect(recordResult.exitCode).toBe(0);
+      // Step 2:minimal record-tdd(仅 required args + red-exit/green-exit + 显式 timestamp)
+      // 故意不传 --red-log / --red-log-hash / --red-report / --red-report-hash 等
+      //   optional args → 触发原 bug 场景(payload fallback `?? null` vs staging fallback `?? ''`)
+      // 必须传 --red-exit/--green-exit 满足不变量 3/4
+      // 必须传 --red-timestamp/--green-timestamp 避免 staging `?? new Date()` 双调用产生
+      //   相同/反序 timestamp 误触不变量 1(本 regression 测的是 fence-9.2,不应被 fence-1 干扰)
+      // 关键:验证 payload 与 staging 字段一致 → 无 fence-9.2 误报
+      const recordResult = runCli(
+        [
+          'evidence',
+          'record-tdd',
+          changeId,
+          '--task',
+          'tasks.md#task-1',
+          '--red-commit',
+          redSha,
+          '--green-commit',
+          greenSha,
+          '--red-exit',
+          '1',
+          '--green-exit',
+          '0',
+          '--red-timestamp',
+          '2026-05-13T10:00:00Z',
+          '--green-timestamp',
+          '2026-05-13T11:00:00Z',
+        ],
+        projectRoot,
+      );
+      expect(recordResult.exitCode).toBe(0);
 
-    // Step 2.5(plan-9g Task 6 fix):改 staging.yaml 走 hash-only mode 路径,
-    //   绕过 runRerunFence 真 git worktree 重跑(避免 5000ms vitest 默认 testTimeout 超时)。
-    //
-    // 回归测试意图不变:fence-9.2(projection hash match)校验 staging 的 tdd_event_chain
-    // 与 ack-log helper projection 字段对齐。hash-only mode 在 runRerunFence 直接返空数组
-    // (brainstorm spec §9.10),但 runFieldFence 不变量 9 仍跑完整 cross-source check,
-    // 因此 fence-9.2 false positive 检测覆盖保持。
-    //
-    // staging 改 hash-only 必须同时:
-    //   (a) 填 process_verification_mode_acked_by + acked_at(不变量 12 mode != full 要求)
-    //   (b) 剥离 staging_hash 信封字段后 canonicalHash 重算(freeze 会校验 staging_hash 防篡改)
-    const stagingPath = join(changeRoot, '.evidence', 'process-evidence.staging.yaml');
-    const stagingRaw = await readFile(stagingPath, 'utf8');
-    const stagingObj = parseYaml(stagingRaw) as Record<string, unknown> & { staging_hash?: string };
-    stagingObj.process_verification_mode = 'hash-only';
-    stagingObj.process_verification_mode_acked_by = 'msc';
-    stagingObj.process_verification_mode_acked_at = '2026-05-13T09:00:00Z';
-    // 剥离 staging_hash 后重算(沿 writeStagingYaml 公式:canonicalHash(data without staging_hash))
-    delete stagingObj.staging_hash;
-    const newStagingHash = canonicalHash(stagingObj);
-    const finalStaging = { ...stagingObj, staging_hash: newStagingHash };
-    await writeFile(stagingPath, stringifyYaml(finalStaging), 'utf8');
+      // Step 2.5(plan-9g Task 6 fix):改 staging.yaml 走 hash-only mode 路径,
+      //   绕过 runRerunFence 真 git worktree 重跑(避免 5000ms vitest 默认 testTimeout 超时)。
+      //
+      // 回归测试意图不变:fence-9.2(projection hash match)校验 staging 的 tdd_event_chain
+      // 与 ack-log helper projection 字段对齐。hash-only mode 在 runRerunFence 直接返空数组
+      // (brainstorm spec §9.10),但 runFieldFence 不变量 9 仍跑完整 cross-source check,
+      // 因此 fence-9.2 false positive 检测覆盖保持。
+      //
+      // staging 改 hash-only 必须同时:
+      //   (a) 填 process_verification_mode_acked_by + acked_at(不变量 12 mode != full 要求)
+      //   (b) 剥离 staging_hash 信封字段后 canonicalHash 重算(freeze 会校验 staging_hash 防篡改)
+      const stagingPath = join(changeRoot, '.evidence', 'process-evidence.staging.yaml');
+      const stagingRaw = await readFile(stagingPath, 'utf8');
+      const stagingObj = parseYaml(stagingRaw) as Record<string, unknown> & {
+        staging_hash?: string;
+      };
+      stagingObj.process_verification_mode = 'hash-only';
+      stagingObj.process_verification_mode_acked_by = 'msc';
+      stagingObj.process_verification_mode_acked_at = '2026-05-13T09:00:00Z';
+      // 剥离 staging_hash 后重算(沿 writeStagingYaml 公式:canonicalHash(data without staging_hash))
+      delete stagingObj.staging_hash;
+      const newStagingHash = canonicalHash(stagingObj);
+      const finalStaging = { ...stagingObj, staging_hash: newStagingHash };
+      await writeFile(stagingPath, stringifyYaml(finalStaging), 'utf8');
 
-    // Step 3:写 minimal .verify-passed marker(主代理写,等待 freeze 注入 process_evidence)
-    const verifyMarker = {
-      schema: 'forge-verify/v1',
-      verified_at: '2026-05-13T12:00:00Z',
-      verified_by: 'ai-agent',
-      tasks_hash: 'placeholder',
-      content_hash: 'placeholder',
-    };
-    await writeFile(join(changeRoot, '.verify-passed'), stringifyYaml(verifyMarker), 'utf8');
+      // Step 3:写 minimal .verify-passed marker(主代理写,等待 freeze 注入 process_evidence)
+      const verifyMarker = {
+        schema: 'forge-verify/v1',
+        verified_at: '2026-05-13T12:00:00Z',
+        verified_by: 'ai-agent',
+        tasks_hash: 'placeholder',
+        content_hash: 'placeholder',
+      };
+      await writeFile(join(changeRoot, '.verify-passed'), stringifyYaml(verifyMarker), 'utf8');
 
-    // Step 4:freeze verify marker(staging → marker.process_evidence + 三 hash 快照)
-    const freezeResult = runCli(['evidence', 'freeze', changeId, '--kind', 'verify'], projectRoot);
-    expect(freezeResult.exitCode).toBe(0);
+      // Step 4:freeze verify marker(staging → marker.process_evidence + 三 hash 快照)
+      const freezeResult = runCli(
+        ['evidence', 'freeze', changeId, '--kind', 'verify'],
+        projectRoot,
+      );
+      expect(freezeResult.exitCode).toBe(0);
 
-    // Step 5:crossCuttingFenceCheck — 验证 fence-9 不误报
-    //   特别是 fence-9.2(projection hash match):round 2 Critical fix 后必须 PASS
-    //
-    // mock process.env.CI=undefined 防 CI runner 环境触发不变量 12 CI mode 拒签
-    //   (CI=true + mode != full 直接拒签;本测试用 hash-only 故必须确保非 CI 模式)
-    const originalCI = process.env.CI;
-    delete process.env.CI;
-    let result;
-    try {
-      result = await crossCuttingFenceCheck(changeRoot);
-    } finally {
-      if (originalCI !== undefined) process.env.CI = originalCI;
-    }
+      // Step 5:crossCuttingFenceCheck — 验证 fence-9 不误报
+      //   特别是 fence-9.2(projection hash match):round 2 Critical fix 后必须 PASS
+      //
+      // mock process.env.CI=undefined 防 CI runner 环境触发不变量 12 CI mode 拒签
+      //   (CI=true + mode != full 直接拒签;本测试用 hash-only 故必须确保非 CI 模式)
+      const originalCI = process.env.CI;
+      delete process.env.CI;
+      let result;
+      try {
+        result = await crossCuttingFenceCheck(changeRoot);
+      } finally {
+        if (originalCI !== undefined) process.env.CI = originalCI;
+      }
 
-    // fence-9 必须 ok(若 9.2 仍误报,这里会 false)
-    const fence9 = result.results.find((r) => r.invariant === 'fence-9');
-    expect(fence9?.ok).toBe(true);
-    expect(fence9?.reason).toBe('pass');
+      // fence-9 必须 ok(若 9.2 仍误报,这里会 false)
+      const fence9 = result.results.find((r) => r.invariant === 'fence-9');
+      expect(fence9?.ok).toBe(true);
+      expect(fence9?.reason).toBe('pass');
 
-    // fence-1/2/3/4 也应 PASS(合法 RED → GREEN 链)
-    expect(result.results.find((r) => r.invariant === 'fence-1')?.ok).toBe(true);
-    expect(result.results.find((r) => r.invariant === 'fence-2')?.ok).toBe(true);
-    expect(result.results.find((r) => r.invariant === 'fence-3')?.ok).toBe(true);
-    expect(result.results.find((r) => r.invariant === 'fence-4')?.ok).toBe(true);
-    expect(result.results.find((r) => r.invariant === 'fence-14')?.ok).toBe(true);
-  });
+      // fence-1/2/3/4 也应 PASS(合法 RED → GREEN 链)
+      expect(result.results.find((r) => r.invariant === 'fence-1')?.ok).toBe(true);
+      expect(result.results.find((r) => r.invariant === 'fence-2')?.ok).toBe(true);
+      expect(result.results.find((r) => r.invariant === 'fence-3')?.ok).toBe(true);
+      expect(result.results.find((r) => r.invariant === 'fence-4')?.ok).toBe(true);
+      expect(result.results.find((r) => r.invariant === 'fence-14')?.ok).toBe(true);
+    },
+  );
 });

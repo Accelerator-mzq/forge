@@ -56,6 +56,48 @@ scenarios:
 `bootstrap_skill` 字段 — runner 不读这些字段(runner 自动对每条 scenario 跑 RED+GREEN 配对)。
 若后续 9d/9f sub-plan 需要严格门禁,需先开独立 sub-plan 扩展 runner + types + compare。
 
+### 3.1 Pattern Q — judge_rubric 判分锚点段示例(plan-9z polish)
+
+每个 scenario 的 `judge_rubric` 必须含**判分锚点**段,显式声明三件事:
+
+1. **不评估什么**:声明 judge 不该扣分的维度(防 judge LLM 把 baseline 技术解答误判 "答非所问")
+2. **baseline 预期失败模式**:声明 RED 应在哪个具体维度失分(防假性 GREEN)
+3. **按维度逐项判分**:judge 必须对每个 rubric 维度独立打分,而非综合印象分
+
+实证:plan-9f v1 scenario 2(OAuth)judge LLM 把 baseline AI 给 OAuth 技术解答判 "答非所问" 扣分 — 应是 RED 信号(技术解答恰是 baseline 不该做的方向)而非加分;v2 加判分锚点段显式 "不评估技术解答深度,只评估是否触发 exploring 协议",纠偏后 RED 0.0 / GREEN 6.0 / delta 6.0。
+
+模板字面(yaml 内嵌):
+
+```yaml
+judge_rubric: |
+  ...(rubric 维度 + 评分细则)
+
+  ### 判分锚点(Pattern Q)
+  - **不评估**:<具体维度,如 "技术解答深度" / "代码风格">
+  - **baseline 预期失败模式**:<具体维度,如 "未触发 X 协议" / "未在 Y 步骤显式输出 Z">
+  - **按维度逐项判分**:不综合印象分,每维度独立 0-10
+```
+
+### 3.2 P-7 — must_not_match 引用 vs 行为边界(plan-9z polish)
+
+`must_not_match` regex **锚行为**(`Use Task tool with .* sonnet` / `派 sonnet 再试` 等 dispatch action 字面)**而非引用短语**(`再试一次` / `换个 model` 等可能出现在 AI 复述用户原话的位置)。
+
+判分锚点段需显式声明:"must_not_match regex **不针对 AI 复述用户原话** 场景"。
+
+实证:plan-9h Task 4 `stop-on-repeat-failure` scenario must_not_match `(直接\s*再派|再试一次|换个\s*model\s*再派)` 误中 AI 复述用户提议 "用户说要再试一次" 的合规对话片段 — pair_pass=false 假性 RED 信号;plan-9z polish Task 5 收紧为行为锚 `Use Task tool with .* sonnet` 后 pair_pass=true。
+
+收紧模板(yaml):
+
+```yaml
+must_not_match:
+  # ❌ 不要:引用短语(可能命中 AI 复述用户原话)
+  # - regex: '(直接\s*再派|再试一次|换个\s*model\s*再派)'
+
+  # ✅ 要:行为锚(只命中 AI 真的 dispatch action)
+  - regex: 'Use Task tool with .* sonnet'
+  - regex: '(?:好的|那就|可以).{0,20}(再派|再试)'
+```
+
 ---
 
 ## 4. RED + GREEN 配对工作原理

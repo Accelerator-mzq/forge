@@ -50,9 +50,26 @@ TDD 到 skill 文档的映射:
 - `judge_rubric` 同时覆盖 RED 评判(baseline 没 skill 时该得多少分)+ GREEN 评判(有 skill 后该得多少分)— 一段 rubric 文字覆盖两侧
 - 用 `must_match` / `must_not_match` 锁结构性信号(RED + GREEN 共享断言)
 - **同步创建 `skills/<new-skill-name>/SKILL.md` 最小骨架**(~10-15 行,仅 frontmatter + 占位 body)— 让 runner GREEN leg 不抛 ENOENT(沿 `loadSkillBootstrap` `readFile` 路径)
+
+> **NOTE(Pattern O — plan-9z polish;plan-9f / plan-9i 实证)**:registry 扩展(`SKILL_NAMES` 数组扩 + hardcoded 断言改)+ scenarios yaml + 最小骨架 SKILL.md 必须**一起 commit**(同 commit 内含 vitest GREEN baseline),分开 commit 触发 `forge-eval` runner `it.each` ENOENT(因 runner 1:1 yaml→test 加载;沿 `runner.ts:106-131` + `registry.ts` `SKILL_NAMES` 数组)。实证:plan-9i Task 0 commit `92de387` + plan-9f Task 0+1 合并 commit `1d220ef`。
+
 - 跑 `pnpm build && pnpm eval:skill <name>` → 读 `eval-report.md` 总览表 `RED avg` 列 ≤ 5
+
+> **HARD TRIGGER(Pattern R — plan-9z polish;plan-9f v1 vague-idea RED 6.0 实证)**:若总览表**任一 scenario RED avg > 5** → **立即 REFACTOR scenarios(不是 SKILL.md)**:提升 forge-specific 维度权重 / 收紧 judge rubric / 加 must_not_match / 加判分锚点段;再跑 baseline 直到所有 RED ≤ 5。**不响应 RED > 5 → forge-eval 验证强度失效**(走形)。
+
 - **如果 RED 不失败 → skill 没必要**(沿 superpowers 上游 writing-skills line 16 不变量);要么收紧 must_match / judge_rubric,要么放弃此 skill
 - 此阶段 delta 接近 0 是预期(骨架不教协议,GREEN 也低)
+
+#### 步骤 1.1 Pattern P — rubric 维度权重设计原则(plan-9z polish)
+
+`judge_rubric` 各维度权重设计的核心问题:
+
+> "baseline AI(无本 skill)能否在此维度做对?"
+
+- **能做对** → 该维度**权重低**(否则即使 RED 也 PASS,假性 GREEN);
+- **做不对** → 该维度**权重高**(forge-specific 维度高权重 = baseline AI 必然失分锚点)。
+
+实证:plan-9f v1 scenarios 1/3 pair_pass 假性 GREEN(option-compare skeleton GREEN=8.0)— baseline AI 早能写 option-compare,该维度不应作为高权重锚点;sub-plan v2 修订把 forge-specific 维度(must_match SKILL.md 强制字面)权重提升后 RED 0.0 / GREEN 6.0 / delta 6.0 pair_pass=true。
 
 ### 步骤 2:写完整 SKILL.md(production code)
 

@@ -155,6 +155,30 @@ This skill uses **Claude Code tool names** (PascalCase: `Skill`, `Agent`, `Read`
 
 **Failure mode if skipped**:implementer 自由 design / hallucinate self-report / 漏 commit / commit 错 branch(see Pattern §3.1 worktree leak)/ stack-mismatch self-review 漏 lint/format 导致 CI fail(see §5 Case 01)/ 照搬 plan inline latent bug 不报 observation。
 
+#### §2.1.1 P-5 — external protocol assumption verify(plan-9z polish;plan-9h Task 4 实证)
+
+Dispatch implementer 第一步**不是开始实施**,而是 grep / read 实际项目代码验证 plan 字面陈述与外部系统约束是否一致:
+
+- **forge-eval runner 1:1 yaml 约束**(`forge-eval/runner/registry.ts` `SKILL_NAMES` 数组实际 union;runner 不接受 plan 字面虚构的 skill 名)
+- **build script**(`scripts/build.ts` / `scripts/copy-templates.mjs` 实际 stages + reverse-sync 行为)
+- **其他外部协议**(`commands/apply.md` step 顺序 / SKILL.md cross-ref / 现有 fence schema / ack-log action enum 字面)
+
+Plan 字面是设计**意图**,外部代码是实施**约束**;前者可能漏拷后者。
+
+**实证**(plan-9h Task 4):implementer 第一步 grep `forge-eval/runner/registry.ts` 发现 `SKILL_NAMES` 实际只接受 `subagent-driven-development` 不接受 `main-agent-stop` — plan v1 字面 "创建 main-agent-stop.yaml" 与 runner 1:1 约束冲突,implementer 报 BLOCKED 而非盲目实施;plan v1.2 修订选项 B(merge 进现有 yaml)消化。若 implementer 默认信 plan 字面跑 baseline,会盲目跑后失败,浪费成本 + 误导后续修订路径。
+
+**Prompt 必含元素**(沿 §2.1 prompt 模板补):
+```markdown
+## External Protocol Assumption Verify(MANDATORY first step,§2.1.1)
+
+Before implementing, grep / read these files and verify plan claims:
+- <file path 1>: verify <plan claim>
+- <file path 2>: verify <plan claim>
+- ...
+
+If any verify fails → report BLOCKED with specific verify command + actual vs expected output, DO NOT start implementation。
+```
+
 ### §2.2 Spec / Compliance Reviewer Haiku Reliability Playbook
 
 **Pre-condition**(若不满足 → 升级 Sonnet):
@@ -259,6 +283,31 @@ If `pwd` 不显示 expected path → **STOP report NEEDS_CONTEXT;不要在错误
 | Spec-violating 字符串缺 / Glue code 缺 | Controller inline edit(~free) |
 | Logic 错误(算法 / 数据流 / 控制流)| Round 2 SendMessage 同 implementer subagent(~$0.20-0.50)|
 | Architectural 错误(违 design decision) | 升级 user(controller-only) |
+
+### §3.3.1 P-6 — 区分 rubric 软度 vs 验证强度(plan-9z polish;plan-9h Task 4 实证)
+
+forge-eval 有两个**独立指标**,**不互替**:
+
+| 指标 | 含义 | 触发改 rubric 还是改 SKILL.md/bootstrap? |
+|---|---|---|
+| **rubric 软度**(Pattern R) | RED avg > 5 → rubric 没收紧到 baseline AI 必然失分 | **改 scenarios**(收紧 rubric / 提权重) |
+| **验证强度**(pair_pass) | delta ≥ 1.5 失败 → GREEN AI 与 RED AI 差距不显著 | **改 SKILL.md / bootstrap**(让 GREEN AI 看到更多字面) |
+
+**实证**(plan-9h Task 4):严格 RED 全 ≤ 5(Pattern R **不触发**)但 2/3 pair_pass=false → **不改 rubric 凑 pair_pass**(Goodhart's law 防御),改 SKILL.md / bootstrap 字面对齐(plan-9z polish P-1/P-2 消化)。把两指标混用会导致 rubric 不断收紧到不可达,GREEN AI 也通不过(假性 RED)。
+
+### §3.3.2 P-8 — Task BLOCKED 修订决策树(plan-9z polish;plan-9h Task 4 v1.2 实证)
+
+Task implementer 报 BLOCKED 时,plan author 决策两选项:
+
+- **选项 A — 改架构**:扩 forge-eval `SKILL_NAMES` + 新建独立 skill / 新建独立 yaml file,**侵入基础设施**
+- **选项 B — 复用现有架构**:merge 进现有 yaml,**保 plan-9 序列 atomic**
+
+**默认选 B**(沿 plan-9e2 v3 / plan-9h Task 4 v1.2 修订模式)。
+
+- 选 A 的代价:增加 release 时基础设施改动面积 + breaking 现有 scenarios 测试基线 + 跨 sub-plan 影响
+- 选 B 的代价:可能 forge-eval 验证粒度变粗(多个 plan 共用一个 yaml)— 但通过 scenario 分组可缓解
+
+**实证**(plan-9h Task 4 v1.2):把 "main-agent-stop" 改回沿用现有 `subagent-driven-development` `SKILL_NAMES` 并新建 `forge-eval/scenarios/main-agent-stop.yaml`(scenario-level 分组而非 skill-level),pair_pass 验证粒度保持 + 不动 `SKILL_NAMES` 数组。
 
 ### §3.4 Post-Phase Quality Retrospect Protocol(Opus-only judgment;skill 增长触发)
 

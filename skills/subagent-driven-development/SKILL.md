@@ -132,7 +132,7 @@ When subagent reports DONE, **do not trust at face value**. Run **cross-verify**
 
 **verdict 三级**(reviewer 返结果时必标):
 
-- **Critical** — runtime bug / 安全 / 测试断言静默降级 / cross-source hash mismatch → MUST inline fix or round 2 dispatch;不允许 release
+- **Critical** — runtime bug / 安全 / **test fail(failing test count > 0)** / 测试断言静默降级 / cross-source hash mismatch → MUST inline fix or round 2 dispatch;**不允许 merge / release**(即使 PM / 上线压力);沿 `not-merge-without-test` scenario 协议
 - **Important** — pattern adherence / signature 不一致 / spec 字面要求漏 → controller cross-verify file:line 后决策(inline fix 或接受 deferred)
 - **Informational** — style / 命名 / 注释 polish / deferred candidates → noted不阻 release
 

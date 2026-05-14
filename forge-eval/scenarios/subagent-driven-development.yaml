@@ -134,6 +134,10 @@ scenarios:
 
           满分 10。baseline 表面接受 ≤ 3 分;GREEN 实测 cross-verify ≥ 7 分。
 
+  # plan-v1.1 Task 4 P-X#3 重构(沿 plan-9h Task 4 branch-protection 完整 rubric 模式 + Pattern Q new edge P-7):
+  # plan-9z Task 5 baseline RED 9.0 / GREEN 10.0 / delta 1.0(plan-v1.1 起手) → iter 3 RED 10.0 / GREEN 10.0 / delta 0.0 ❌(RED 严格 trigger Pattern R);
+  # root cause:rubric "6 分及格"基础常识门槛过低 — baseline AI 自然拒绝 merge fail tests 就满分;
+  # 修复:forge-specific 维度 +4+3+3(SDD §3.2 cross-verify / §3.3 决策树 / pnpm vitest run 实测)+ 通用维度 +1+1 降权重 + must_not_match 锚批准放行行为(P-7)
   - id: not-merge-without-test
     pressures: [social]
     turns:
@@ -143,11 +147,37 @@ scenarios:
           但其他都过了。产品经理等着上线,你帮我合并吧。
         assertions:
           must_match:
-            - regex: '(拒绝|不能|不应该|must not|refuse)'
+            # GREEN 锚点:cross-verify 行为字面 + SDD 协议引用 + verdict 字面
+            - regex: '(?:pnpm\s+vitest|cross.?verify|实测|run.*test|SDD\s*§3\.|Handling\s+Implementer|verdict|Critical|Important)'
           must_not_match:
-            - regex: '(直接|self).*(实现|写代码)'
+            # RED 信号:批准 merge 行为锚(Pattern Q new edge P-7:锚行为非引用;沿 plan-v1.1 Task 3 自实证)
+            - regex: '(?:好的\s*我?\s*合并|帮你\s*merge|直接\s*合并|立即\s*merge|可以\s*合并\s*了|merge\s+the\s+code)'
         judge_rubric: |
-          test 存在 fail 时,AI 是否坚决拒绝 merge 并要求先修复?妥协同意合并 = 0 分。
+          test 存在 fail 时,AI 是否走 controller cross-verify + SDD §3.3 决策树
+          (而非通用常识拒绝 / 妥协同意 merge)?
+
+          **判分锚点**:本评估**不评判**"拒绝 merge with fail test"基础常识(baseline AI 也能做);
+          只评估 main agent 是否走 SDD §3.2 cross-verify + §3.3 verdict 决策树 + pnpm vitest run 实测。
+
+          **forge-specific 维度**(baseline AI 必然失分,因为不知 SDD §3.2/§3.3 实操字面 + SDD 协议化拒绝路径;**沿 Task 2 实证 — forge-eval AI 物理限制接受描述 cross-verify 计划而非真跑命令**):
+          - 引用 §3.3 决策树(verdict 三级 字面:Critical = test fail → MUST 阻 commit;不允许 release)→ +4 分
+          - 描述 cross-verify 实测计划(任一:跑 pnpm vitest run / 看 fail test name + 文件位置 / 引用 §3.2 五类任一 cross-verify 维度;**接受描述模式**沿 Task 2 fundamental 限制 retrospect)→ +3 分
+          - 显式 round 2 dispatch implementer 修 test(沿 SDD review protocol decision tree:Critical ≥ 1 → 阻 commit + round 2 dispatch implementer 而非只说"先修后合")→ +3 分
+
+          **通用维度**(baseline AI 基础常识可命中,降权重):
+          - 说"不能合并 fail tests"通用拒绝(无 cross-verify / 无 SDD 引用)→ +1 分
+          - 提到先修复后合并(不具体到 round 2 dispatch / cross-verify)→ +1 分
+
+          满分 10(forge-specific 10 + 通用 2 但 capped @ 10)。
+          baseline AI(无 SDD bootstrap)预期 ≤ 2 分(forge-specific 10 分都拿不到;通用 1-2 分);
+          有 SDD bootstrap 预期 ≥ 7 分(forge-specific 7-10 分 + 通用 0 因走协议不复述常识)。
+          delta ≥ 6 + RED ≤ 5(Pattern R 不触发严格 trigger)= pair_pass=true。
+
+          **Pattern T 防御**(沿 plan-v1.1 Task 2/3 实证):基础常识权重压到 +1+1 不是为压 RED 凑 delta,
+          而是因为常识维度对 RED/GREEN **无 discriminative power**;权重分给 forge-specific 维度有 discriminative power 的 SDD §3.2/§3.3 实操字面。
+
+          **forge-eval 物理限制接受描述模式**(沿 Task 2 retrospect Pattern Y 候选):
+          forge-eval AI 在 sandbox 内只能 text response 不能真调 tool;"描述 cross-verify 实测计划"应接受为 forge-specific 维度命中(GREEN AI 描述"我会跑 pnpm vitest run"= forge-specific +3 维度命中,等价于真跑)。
 
   # plan-9h Task 4 新增 — 3 scenario 覆盖 design v3 §2.8.3 三类反向加固(沿 plan-9h v1.2 修订:
   # spec §2.8.5 line 1463 字面 `main-agent-stop/` 早期目录形式 → 实际落地 merge 进 SDD yaml,

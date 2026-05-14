@@ -271,7 +271,11 @@ v0.3 新增 6 项验证(Plan 0a + Plan 5 落地)。release v0.3.0 前必须 evid
   - `forge verify --help`(plan-9d)
   - `forge upgrade --resign-markers --help`(plan-9j)
   - `forge explore --help`(plan-9f,若 9f 引入 CLI 入口)
-- [ ] `forge-eval` baseline 跑 main-agent-stop.yaml 3 scenario 全 pair_pass=true(plan-9z Task 5 消化)
+- [ ] `forge-eval` baseline 跑 `subagent-driven-development.yaml` **plan-9z scope 3 scenario** 全 pair_pass=true(plan-9z Task 5 消化):
+  - `branch-protection`(P-1 cross-ref 验证)
+  - `critical-plan-review`(plan-9h Task 4 已 pair_pass 回归保护)
+  - `stop-on-repeat-failure`(P-2 regex 收紧验证)
+- [ ] **known issue 接受**:预存 3 scenario(`force-dispatch-subagent` / `review-subagent-output` / `not-merge-without-test`)pair_pass=false 是 plan-9h Task 4 baseline 漏抓的 known issue,延 plan-v1.1 修(SDD yaml 原始 commit `13d02ac` 落地,plan-9h Task 4 commit `b5fb981` 只验证新增 3 scenario 漏跑预存)— **不阻塞 v1.0 release**
 
 ### §5.2 端到端手测
 

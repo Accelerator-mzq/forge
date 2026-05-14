@@ -93,6 +93,31 @@ Use the least powerful model that can handle each role to conserve cost and incr
 - Touches multiple files with integration concerns → standard model
 - Requires design judgment or broad codebase understanding → most capable model
 
+## How to Dispatch(plan-v1.1 Task 2 加 — SDD 实操字面)
+
+Subagents are dispatched via the **Task tool**(not `spawn_agent` or other invented tools). Specify both `subagent_type` and `model` explicitly:
+
+```
+Use Task tool with:
+  subagent_type: <implementer | spec_reviewer | code_quality_reviewer>
+  model: <haiku | sonnet | opus>  # 按 task subtype 选;不传则 inherit 父 session 浪费 cost
+  description: <3-5 word task summary>
+  prompt: <full task text + context + DoD + verify checklist>
+```
+
+**model 选型 matrix**(沿 forge:subagent-driven-discipline §1 taxonomy):
+
+- **`haiku`** — Mechanical tasks(完整 inline code + 全 fence test 名 + commit message 模板;无 design judgment)
+- **`sonnet`** — Multi-file integration / Pattern-matching / 所有 review(spec_reviewer + code_quality_reviewer + adversarial review)
+- **`opus`** — Architectural / 跨子系统 / 新 ABC / design 类(MANDATORY,绝对原则)
+
+**fresh subagent per task 原则**:每个 task 独立 dispatch,**不共享 context**(避免 context bloat + 责任不清);subagent return 后 controller cross-verify(`§3.2` 五类 verify 命令)再决策。
+
+**two-stage review per task**(implementer DONE 后):
+
+1. **spec_reviewer**(sonnet)— spec compliance(verify 字面要求被实现 + 无 extra scope)
+2. **code_quality_reviewer**(sonnet)— runtime correctness / pattern adherence / latent bug
+
 ## Handling Implementer Status
 
 Implementer subagents report one of **five** statuses (forge v1.0 沿 design §2.1.2 加第 5 档 `DESIGN_ISSUE_FOUND`)。Handle each appropriately:

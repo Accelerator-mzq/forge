@@ -439,3 +439,88 @@ cat forge/changes/archive/<date>-<id>/archive_summary.yaml | head -30
 - [`skills/finishing-a-development-branch/SKILL.md`](../skills/finishing-a-development-branch/SKILL.md)
 - [`commands/archive.md`](../commands/archive.md) — `/forge:archive` 完整流程
 - [`docs/specs/2026-05-10-v1.0-fusion-completion-design.md`](specs/2026-05-10-v1.0-fusion-completion-design.md) §archive-三级-fence + §handoff-to-backlog — v1.0 协议设计
+
+## 出问题怎么办
+
+### 1. bootstrap 没生效(AI 直接写代码,没走 brainstorm)
+
+**症状**:你发"我想做 X",AI 直接打开 editor 写 `.ts` 代码,没问澄清问题、没写 `forge/drafts/`。
+
+**排查**:
+
+```bash
+ls .claude/skills/         # 期望 16 个 forge-* 目录(plugin install 后)
+ls .claude/commands/forge/ # 期望 9 个 .md
+```
+
+若 0 个:
+- 重启 Claude Code 会话(SessionStart hook 必须重 fire 一次)
+- `/plugins` 看 forge 是否 enabled
+- 极端情况:`/plugin install forge@accelerator-mzq-forge --force` 重装
+
+### 2. `/forge:archive` 被拒(marker 已过期 / hash mismatch)
+
+**症状**:`forge archive` 报 `marker hash mismatch / git integrity failed`。
+
+**原因**:你或 AI 在 verify / review 之后改了 `tasks.md` 或 `specs/`,marker 锁的 content_hash 跟当前不符。
+
+**修法**:重跑 `/forge:verify` + `/forge:review`(顺序不变),让 marker 重新对齐 → 再 archive。
+
+### 3. `/forge:verify` 三维报 CRITICAL automated finding
+
+**症状**:`forge validate` exit 1,`.verify-failed` YAML 列 `automated=true` CRITICAL。
+
+**修法**:**修代码**(测试 fail → fix code → 测试 pass / coverage_gap → 实施 spec 未覆盖部分)→ 重跑 verify。**不能** `forge ack propose` 降级(CRITICAL 不可 ack,沿 §4 Review 表)。
+
+### 4. `forge evidence freeze` 报 staging not found
+
+**症状**:freeze exit 1 + "staging file not found ... 必须先调 `forge evidence record-tdd/verify/review`"。
+
+**原因**:freeze 必须前置 `record-*` helper 写 staging(`.evidence/process-evidence.staging.yaml`)。
+
+**修法**:**AI 应当自动调** record-* helper(沿 `commands/apply.md:179-182`)。若 AI 没调,提示 AI invoke 对应 helper(record-tdd 在 apply 完成时、record-verify 在 verify 后、record-review 在 review 后)。
+
+完整错误退出码清单见 [`docs/cli-reference.md`](cli-reference.md)(总览页;v1.1 新 CLI 段待下轮补)。
+
+## 与 superpowers plugin 共存
+
+forge 的 16 个 skill 是从 [superpowers](https://github.com/obra/superpowers) MIT 移植 + 命名空间改名(`superpowers:` → `forge:`,见 [`LICENSE-THIRD-PARTY.md`](../LICENSE-THIRD-PARTY.md))。
+
+**装了 superpowers plugin 的 Claude Code 会话同时跑 forge 项目时**,会看到两组同主题 skill 共存:
+
+| 维度 | 冲突? |
+|---|---|
+| 安装路径(项目级 `.claude/` vs 用户级 `~/.claude/plugins/`) | ❌ 不冲突 |
+| skill 名(`forge:brainstorming` vs `superpowers:brainstorming`) | ❌ 命名空间隔离 |
+| slash 命令(forge 9 个 `/forge:*` vs superpowers 不带命令) | ❌ 不冲突 |
+
+**但行为可能重叠**:你说"我想做个 todo list 应用"时,Claude 看到两个 brainstorming skill 都"1% 可能匹配",可能优先 invoke `superpowers:brainstorming`(plugin auto-load 抢先注册)→ 走完引导但**不写 `forge/drafts/<date>-<topic>.md`** → 下一步 `/forge:propose --from-draft <name>` 找不到 draft。
+
+### 两种解决方案
+
+**A. 显式用 `/forge:*` slash 命令触发(推荐)**
+
+`/forge:brainstorm` 等命令直接调 `forge:*` skill,优先级高于 skill auto-trigger,绕过 superpowers 抢跑:
+
+```
+# 在 Claude Code 会话里:
+/forge:brainstorm
+# AI 在 forge:brainstorming 引导下提问 + 写 forge/drafts/<date>-<topic>.md
+```
+
+**B. 跑 forge 项目时通过 `/plugins` 暂时关掉 superpowers**
+
+forge 16 个 skill 跟 superpowers 几乎相同(同源 MIT 移植),关 superpowers 不会损失能力。
+
+## 接下来
+
+- [`docs/cli-reference.md`](cli-reference.md) — 13 个 CLI 子命令完整参数 + 退出码(v1.1 新 6 CLI 段下轮补)
+- [`docs/installation.md`](installation.md) — 三 harness 安装总览
+- [`docs/claude-install.md`](claude-install.md) — Claude Code 专题安装
+- **Legacy 形态文档**(v0.2-v0.4 时期,**新用户不需要看**):
+  - [`docs/harness-setup.md`](harness-setup.md) — legacy v0.2-v0.4 形态
+  - [`docs/opencode-install.md`](opencode-install.md) — legacy v0.2-v0.4 形态
+  - [`docs/codex-install.md`](codex-install.md) — legacy v0.2-v0.4 形态
+- 协议设计深读:[`docs/specs/2026-05-10-v1.0-fusion-completion-design.md`](specs/2026-05-10-v1.0-fusion-completion-design.md) — v1.0 fusion completion 21 决策
+- Brownfield 项目接入:[`docs/legacy-bridge.md`](legacy-bridge.md)
+- 升级:v0.3 / v0.2 项目 → v1.1 见 `docs/migration/v0.3-to-v1.1.md`(下一轮单独文档)

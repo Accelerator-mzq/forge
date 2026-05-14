@@ -12,8 +12,8 @@ OpenCode + Codex 见 [`docs/installation.md`](docs/installation.md)。
 
 ## 它做什么
 
-1. **12 个行为塑造 skill 自动触发**:`brainstorming`(模糊需求时强制提问)、`test-driven-development`(red→green→refactor)、`subagent-driven-development`(派 fresh 子代理实施每个 task)、`verification-before-completion`(声称完成必附证据)、`writing-plans` 等。**v0.3 plugin 路径下 skill 真进 auto-trigger 池**(v0.2 P0 真根因解,Plan 0a + 0b.1 实测 PASS)。
-2. **6 个工作流 slash 命令**(Tier 1 Claude Code only):`/forge:brainstorm` → `/forge:propose` → `/forge:apply` → `/forge:review` → `/forge:verify` → `/forge:archive`。OpenCode + Codex 路径用 skill 内嵌 fenced bash 让 AI 主动跑 helper(Plan 0a 实测 Variant B/C PASS)。
+1. **16 个行为塑造 skill 自动触发**:`brainstorming`(模糊需求时强制提问)、`test-driven-development`(red→green→refactor)、`subagent-driven-development`(派 fresh 子代理实施每个 task)、`verification-before-completion`(声称完成必附证据)、`writing-plans` 等。**v0.3 plugin 路径下 skill 真进 auto-trigger 池**(v0.2 P0 真根因解,Plan 0a + 0b.1 实测 PASS)。
+2. **9 个工作流 slash 命令**(Tier 1 Claude Code only):`/forge:brainstorm` → `/forge:propose` → `/forge:explore` → `/forge:apply` → `/forge:review` → `/forge:verify` → `/forge:archive` → `/forge:upgrade` → `/forge:ack-confirm`。OpenCode + Codex 路径用 skill 内嵌 fenced bash 让 AI 主动跑 helper(Plan 0a 实测 Variant B/C PASS)。
 3. **CLI 严格门禁**:`forge validate / archive` 验证产物完整性、verify+review marker hash 不对就拒绝;**plugin 内通过 `scripts/run-forge.mjs` helper 调用,避开 v0.2 P1 全局 PATH 问题**。
 4. **三 harness 全 unblock**(Plan 0a 实测):
    - Tier 1 Claude Code:**ENABLE**(全功能)
@@ -26,6 +26,7 @@ OpenCode + Codex 见 [`docs/installation.md`](docs/installation.md)。
 # 1. 装 plugin(Tier 1 Claude Code)
 /plugin marketplace add Accelerator-mzq/forge
 /plugin install forge@accelerator-mzq-forge
+/reload-plugins
 
 # 2-7. v1.1 端到端工作流主线
 我想做个 todo list 应用    # → §1 Brainstorm

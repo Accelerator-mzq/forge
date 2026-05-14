@@ -1,6 +1,6 @@
 # Forge 安装(v1.1 plugin 路径)
 
-forge v0.3 全部走 **plugin** 形态(v0.2 `forge init` 已标记 deprecated,v0.4 移除)。三 harness 各自路径 + 状态(Plan 0a + Plan 0b.1 实测,2026-05-09):
+forge v1.1 全部走 **plugin** 形态(`forge init` 仍可用但 deprecated,v1.2 移除)。三 harness 各自路径 + 状态(Plan 0a + Plan 0b.1 实测,2026-05-09):
 
 | Tier | Harness     | Status                        | 安装文档                           |
 | ---- | ----------- | ----------------------------- | ---------------------------------- |

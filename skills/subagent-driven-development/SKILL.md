@@ -118,6 +118,32 @@ Use Task tool with:
 1. **spec_reviewer**(sonnet)— spec compliance(verify 字面要求被实现 + 无 extra scope)
 2. **code_quality_reviewer**(sonnet)— runtime correctness / pattern adherence / latent bug
 
+## Review Protocol(plan-v1.1 Task 3 加 — reviewer 实操字面)
+
+When subagent reports DONE, **do not trust at face value**. Run **cross-verify** + assign **verdict 三级** before continuing.
+
+**cross-verify 五类**(sonnet reviewer must run + report file:line evidence;沿 forge:subagent-driven-discipline §3.2):
+
+1. **test count**(`pnpm vitest run` 实测 / `git show <SHA>` 看 test diff;不只信 implementer self-report "X tests passed")
+2. **commit SHA**(`git show <SHA>`/`git log -1 --stat` 看 commit 真实改了什么文件)
+3. **branch**(`git rev-parse --abbrev-ref HEAD` 确认在正确 feature branch)
+4. **spec strings**(`grep -n "<key spec phrase>" <files>` 验 spec 字面要求被实现)
+5. **file:line**(`cat -n <file> | sed -n '<line>,<line+10>p'` 看具体改动 line range)
+
+**verdict 三级**(reviewer 返结果时必标):
+
+- **Critical** — runtime bug / 安全 / 测试断言静默降级 / cross-source hash mismatch → MUST inline fix or round 2 dispatch;不允许 release
+- **Important** — pattern adherence / signature 不一致 / spec 字面要求漏 → controller cross-verify file:line 后决策(inline fix 或接受 deferred)
+- **Informational** — style / 命名 / 注释 polish / deferred candidates → noted不阻 release
+
+**decision tree**(沿 forge:subagent-driven-discipline §3.3):
+
+- Critical = 0 + Important = 0 → 跳过修改 → 下一 task
+- Critical = 0 + Important ≥ 1 → controller cross-verify reviewer claim(file:line 实测)→ inline fix preferred
+- Critical ≥ 1 → 阻止 commit;controller inline fix(若小 scope)或 round 2 dispatch implementer
+
+**Never** accept subagent self-report "all tests pass / commit looks good" without running cross-verify 五类 first. Self-report ≠ evidence.
+
 ## Handling Implementer Status
 
 Implementer subagents report one of **five** statuses (forge v1.0 沿 design §2.1.2 加第 5 档 `DESIGN_ISSUE_FOUND`)。Handle each appropriately:

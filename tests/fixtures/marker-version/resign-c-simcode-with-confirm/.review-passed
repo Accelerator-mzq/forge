@@ -1,0 +1,12 @@
+schema: forge-review/v1
+reviewed_at: 2025-08-01T10:00:00Z
+reviewed_by: ai-agent
+tasks_hash: sha256:placeholder
+content_hash: sha256:placeholder
+git:
+  is_git_repo: false
+review_outcomes:
+  - severity: C
+    accepted: true
+    resolved: false
+    rationale: v0.4 clarification 需 user 判定 target severity

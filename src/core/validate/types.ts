@@ -1,5 +1,7 @@
 // 验证结果类型 — proposal/specs/tasks/marker 共用
 
+import type { Severity } from '../schemas/severity.js';
+
 export interface ValidationResult {
   valid: boolean;
   errors: ValidationError[];
@@ -7,7 +9,7 @@ export interface ValidationResult {
 }
 
 export interface ValidationError {
-  artifact: 'proposal' | 'specs' | 'design' | 'tasks' | 'marker' | 'change';
+  artifact: 'proposal' | 'specs' | 'design' | 'tasks' | 'marker' | 'change' | 'scope';
   /** 出错的字段或路径 */
   field?: string;
   /** 描述 */
@@ -16,6 +18,12 @@ export interface ValidationError {
   file?: string;
   /** 行号(可选) */
   line?: number;
+  /** 三级分级(沿 9a severity.ts);CRITICAL → CLI exit 1;
+   *  未指定 / WARNING / SUGGESTION → 走 exit 2(fs/config 类错)
+   *  v2 B2 修订:scope 类 finding 显式标 'CRITICAL',business-fail 同样标 'CRITICAL' */
+  severity?: Severity;
+  /** 9a finding_hash(JCS SHA256 of FindingHashPayload);仅 scope 类 finding 有 */
+  finding_hash?: string;
 }
 
 export interface ValidationWarning extends Omit<ValidationError, 'message'> {

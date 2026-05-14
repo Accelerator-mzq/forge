@@ -3,6 +3,7 @@
 //   forge archive <changeId>             — 正常归档(检查 marker + hash + lock)
 //   forge archive <changeId> --force     — 接受 human-override 标记 或 非 git 项目
 //   forge archive --recover              — 从半完成状态恢复
+//   forge archive --resume-summary <archiveId> — 恢复半完成 .tmp summary rename
 
 import { Command } from 'commander';
 import { readFile, rm, rename, readdir, copyFile, mkdir, writeFile } from 'node:fs/promises';
@@ -34,6 +35,25 @@ import {
 } from '../../core/legacy-bridge/diff-report.js';
 import { readAnchorFile } from '../../core/legacy-bridge/encoding.js';
 import type { ForgeConfig } from '../../core/schema/types.js';
+// Task 8 (plan-9a §9): cross-cutting fence framework — 9g 实施完整 13 不变量逻辑
+import { crossCuttingFenceCheck } from '../../core/archive/fence.js';
+// plan-9d Task 6:verify_findings fence + ack-log consistency
+import { validateVerifyFindingsFence } from '../../core/archive/verify-findings-fence.js';
+import { validateAckLogConsistency } from '../../core/archive/ack-log-consistency.js';
+// plan-9c Task 2:pause_decisions fence
+import { validatePauseDecisionsFence } from '../../core/archive/pause-decisions-fence.js';
+// plan-9e1 Task 4:三级 fence + summary builder + render + ScopeEntriesIntegrityError(v2 BLOCKER 4)
+import { validateThreeLevelFence } from '../../core/archive/three-level-fence.js';
+import {
+  buildArchiveSummary,
+  ScopeEntriesIntegrityError,
+} from '../../core/archive/summary-builder.js';
+import { renderArchiveSummaryOutput } from '../../core/archive/summary-render.js';
+// plan-9e1 Task 5:resume-summary 子模式
+import { resumeArchiveSummary } from '../../core/archive/resume-summary.js';
+// plan-9j Task 5:legacy-exemption + version-retrograde fence
+import { validateLegacyExemption } from '../../core/archive/legacy-exemption.js';
+import { validateVersionRetrograde } from '../../core/archive/version-retrograde-fence.js';
 
 /**
  * 检测当前目录是否真实处于 git 工作树中
@@ -60,306 +80,515 @@ export function buildArchiveCommand(): Command {
     .description('Archive a verified+reviewed change')
     .option('--force', 'accept human-override or non-git review markers')
     .option('--recover', 'recover from a half-completed archive transaction')
-    .action(async (changeId: string | undefined, opts: { force?: boolean; recover?: boolean }) => {
-      const forgeRoot = join(process.cwd(), 'forge');
+    .option(
+      '--resume-summary <archiveId>',
+      'resume rename archive_summary.tmp.yaml → archive_summary.yaml (rare half-completed state, plan-9e1)',
+    )
+    .action(
+      async (
+        changeId: string | undefined,
+        opts: {
+          force?: boolean;
+          recover?: boolean;
+          resumeSummary?: string; // plan-9e1 Task 5
+        },
+      ) => {
+        const forgeRoot = join(process.cwd(), 'forge');
 
-      // —— --recover 独立路径 ——
-      if (opts.recover) {
-        let release: (() => Promise<void>) | undefined;
-        try {
-          release = await acquireLock(forgeRoot, 'recover');
-          const r = await recover(forgeRoot);
-          console.log(r.message);
+        // —— --recover 独立路径 ——
+        if (opts.recover) {
+          let release: (() => Promise<void>) | undefined;
+          try {
+            release = await acquireLock(forgeRoot, 'recover');
+            const r = await recover(forgeRoot);
+            console.log(r.message);
 
-          // Plan 6:case C 处理 — 完整性 check + 交互二选一
-          if (r.case === 'C' && r.caseCData) {
-            const { backupIntegrity, archiveIntegrity } = r.caseCData;
-            // 任一不完整 → 退出码 4(spec §3.5 case C 末尾"任一不完整 → 输出诊断 + 退出码 4")
-            if (!backupIntegrity.ok || !archiveIntegrity.ok) {
-              console.error('✗ case C 完整性 check 失败,需人工介入:');
-              if (!backupIntegrity.ok) console.error(`  backup: ${backupIntegrity.reason}`);
-              if (!archiveIntegrity.ok) console.error(`  archive: ${archiveIntegrity.reason}`);
+            // Plan 6:case C 处理 — 完整性 check + 交互二选一
+            if (r.case === 'C' && r.caseCData) {
+              const { backupIntegrity, archiveIntegrity } = r.caseCData;
+              // 任一不完整 → 退出码 4(spec §3.5 case C 末尾"任一不完整 → 输出诊断 + 退出码 4")
+              if (!backupIntegrity.ok || !archiveIntegrity.ok) {
+                console.error('✗ case C 完整性 check 失败,需人工介入:');
+                if (!backupIntegrity.ok) console.error(`  backup: ${backupIntegrity.reason}`);
+                if (!archiveIntegrity.ok) console.error(`  archive: ${archiveIntegrity.reason}`);
+                const rel = release;
+                release = undefined;
+                if (rel) await rel();
+                process.exit(4);
+              }
+              // 两者都完整 → 交互式二选一
+              const choice = await promptRecoverChoice();
+              if (choice === 'complete-archive') {
+                // 完成归档:重跑 Sync(applyDeltas)+ 删 backup
+                await applyDeltas(r.caseCData.currentSpecsDir, r.caseCData.deltas);
+                await rm(r.caseCData.backupDir, { recursive: true, force: true });
+                console.log('✓ case C 选择 [1] 完成归档:Sync 重跑成功,backup 已清理');
+              } else {
+                // 撤销归档:从 backup 恢复 forge/specs/ + 反向 rename
+                await restoreSpecsFromBackup(r.caseCData.backupDir, r.caseCData.currentSpecsDir);
+                // rename 失败时 specs 已还原但 archive 仍在原位,整体可重入(再跑 --recover 仍可完成)
+                await rename(
+                  r.caseCData.archiveChangeDir,
+                  join(forgeRoot, 'changes', r.caseCData.changeOrigId),
+                );
+                await rm(r.caseCData.backupDir, { recursive: true, force: true });
+                console.log('✓ case C 选择 [2] 撤销归档:specs 已还原,archive 反向 rename 完成');
+              }
+              const rel = release;
+              release = undefined;
+              if (rel) await rel();
+              process.exit(0);
+            }
+
+            if (r.case === 'corrupt') {
+              // C2 修复:先 release lock 再 exit,避免 process.exit 跳过 finally
+              // 置 undefined 防止 finally 再次调用
               const rel = release;
               release = undefined;
               if (rel) await rel();
               process.exit(4);
             }
-            // 两者都完整 → 交互式二选一
-            const choice = await promptRecoverChoice();
-            if (choice === 'complete-archive') {
-              // 完成归档:重跑 Sync(applyDeltas)+ 删 backup
-              await applyDeltas(r.caseCData.currentSpecsDir, r.caseCData.deltas);
-              await rm(r.caseCData.backupDir, { recursive: true, force: true });
-              console.log('✓ case C 选择 [1] 完成归档:Sync 重跑成功,backup 已清理');
-            } else {
-              // 撤销归档:从 backup 恢复 forge/specs/ + 反向 rename
-              await restoreSpecsFromBackup(r.caseCData.backupDir, r.caseCData.currentSpecsDir);
-              // rename 失败时 specs 已还原但 archive 仍在原位,整体可重入(再跑 --recover 仍可完成)
-              await rename(
-                r.caseCData.archiveChangeDir,
-                join(forgeRoot, 'changes', r.caseCData.changeOrigId),
-              );
-              await rm(r.caseCData.backupDir, { recursive: true, force: true });
-              console.log('✓ case C 选择 [2] 撤销归档:specs 已还原,archive 反向 rename 完成');
-            }
+            // C2 修复:先 release lock 再 exit,置 undefined 防止 finally 重复调用
             const rel = release;
             release = undefined;
             if (rel) await rel();
             process.exit(0);
+          } catch (err) {
+            if (err instanceof LockHeldError) {
+              console.error(err.message);
+              // LockHeldError 时 release 未赋值,无需 release
+              process.exit(5);
+            }
+            throw err;
+          } finally {
+            if (release) await release();
           }
+        }
 
-          if (r.case === 'corrupt') {
-            // C2 修复:先 release lock 再 exit,避免 process.exit 跳过 finally
-            // 置 undefined 防止 finally 再次调用
+        // —— plan-9e1 Task 5:--resume-summary 独立路径(v2 BLOCKER 1 + 5 修订)——
+        if (opts.resumeSummary) {
+          let release: (() => Promise<void>) | undefined;
+          try {
+            release = await acquireLock(forgeRoot, 'resume-summary');
+            const r = await resumeArchiveSummary(forgeRoot, opts.resumeSummary);
+            if (r.kind === 'ok') {
+              console.log(r.message);
+              const rel = release;
+              release = undefined;
+              if (rel) await rel();
+              process.exit(0);
+            }
+            // v2 BLOCKER 5:corrupt → exit 3(沿 master §3.12.3 corrupt 档)
+            if (r.kind === 'corrupt') {
+              console.error(r.message);
+              const rel = release;
+              release = undefined;
+              if (rel) await rel();
+              process.exit(3);
+            }
+            // conflict / missing 都是 business-fail → exit 1
+            console.error(r.message);
             const rel = release;
             release = undefined;
             if (rel) await rel();
-            process.exit(4);
+            process.exit(1);
+          } catch (err) {
+            if (err instanceof LockHeldError) {
+              // v2 BLOCKER 1:lock-held → exit 2(对齐 master §3.12.3 freeze;v0.4 --recover exit 5 是遗留)
+              console.error(err.message);
+              process.exit(2);
+            }
+            throw err;
+          } finally {
+            if (release) await release();
           }
-          // C2 修复:先 release lock 再 exit,置 undefined 防止 finally 重复调用
-          const rel = release;
-          release = undefined;
-          if (rel) await rel();
-          process.exit(0);
-        } catch (err) {
-          if (err instanceof LockHeldError) {
-            console.error(err.message);
-            // LockHeldError 时 release 未赋值,无需 release
-            process.exit(5);
+        }
+
+        // —— 正常 archive 路径 ——
+        if (!changeId) {
+          console.error('✗ changeId required (unless using --recover)');
+          process.exit(1);
+        }
+
+        // C2 修复:改为 let,允许在 process.exit 前先 release
+        let archiveRelease: (() => Promise<void>) | undefined;
+        try {
+          archiveRelease = await acquireLock(forgeRoot, 'archive');
+
+          // Plan 7 PREFLIGHT(spec §2.5 line 183-204):acquireLock 之后、archive 严格门禁(marker check)之前。
+          // 设计意图:用户立即拿到 sync-state 报告,不被 marker 失败遮蔽。
+          // 决策 #23:复用 archive.lock,不再 acquire legacy-bridge.lock。
+          // preflight 不再 process.exit,改返 PreflightResult,caller 在 try 块内手动 release+exit
+          // 与 marker check 现有 inline-release convention 一致(避免 process.exit 跳过 finally 致锁残留)
+          const preflightResult = await runArchivePreflight(forgeRoot, changeId);
+          if (preflightResult.kind !== 'ok') {
+            console.error(preflightResult.message);
+            await archiveRelease();
+            process.exit(2);
           }
-          throw err;
-        } finally {
-          if (release) await release();
-        }
-      }
 
-      // —— 正常 archive 路径 ——
-      if (!changeId) {
-        console.error('✗ changeId required (unless using --recover)');
-        process.exit(1);
-      }
+          // plan-9g 默认开启 14 不变量 fence(brainstorm v6 删两 opt-in flag);所有 archive 调用都跑
+          const fenceResult = await crossCuttingFenceCheck(join(forgeRoot, 'changes', changeId));
+          if (!fenceResult.ok) {
+            console.error('✗ cross-cutting fence rejected archive:');
+            for (const r of fenceResult.results) {
+              if (!r.ok) console.error(`  - ${r.invariant}: ${r.reason}`);
+            }
+            const rel = archiveRelease;
+            archiveRelease = undefined;
+            if (rel) await rel();
+            process.exit(1);
+          }
 
-      // C2 修复:改为 let,允许在 process.exit 前先 release
-      let archiveRelease: (() => Promise<void>) | undefined;
-      try {
-        archiveRelease = await acquireLock(forgeRoot, 'archive');
+          const changeDir = join(forgeRoot, 'changes', changeId);
+          const verifyPath = join(changeDir, '.verify-passed');
+          const reviewPath = join(changeDir, '.review-passed');
 
-        // Plan 7 PREFLIGHT(spec §2.5 line 183-204):acquireLock 之后、archive 严格门禁(marker check)之前。
-        // 设计意图:用户立即拿到 sync-state 报告,不被 marker 失败遮蔽。
-        // 决策 #23:复用 archive.lock,不再 acquire legacy-bridge.lock。
-        // preflight 不再 process.exit,改返 PreflightResult,caller 在 try 块内手动 release+exit
-        // 与 marker check 现有 inline-release convention 一致(避免 process.exit 跳过 finally 致锁残留)
-        const preflightResult = await runArchivePreflight(forgeRoot, changeId);
-        if (preflightResult.kind !== 'ok') {
-          console.error(preflightResult.message);
-          await archiveRelease();
-          process.exit(2);
-        }
+          // 步骤 1:检查 .verify-passed 和 .review-passed 都存在
+          if (!existsSync(verifyPath)) {
+            console.error(`✗ archive 拒绝:缺 .verify-passed (in ${changeDir})`);
+            // C2 修复:先 release lock 再 exit
+            await archiveRelease();
+            process.exit(2);
+          }
+          if (!existsSync(reviewPath)) {
+            console.error(`✗ archive 拒绝:缺 .review-passed (in ${changeDir})`);
+            // C2 修复:先 release lock 再 exit
+            await archiveRelease();
+            process.exit(2);
+          }
 
-        const changeDir = join(forgeRoot, 'changes', changeId);
-        const verifyPath = join(changeDir, '.verify-passed');
-        const reviewPath = join(changeDir, '.review-passed');
+          // 步骤 2:解析 + schema 校验两个 marker
+          const verifyText = await readFile(verifyPath, 'utf8');
+          const reviewText = await readFile(reviewPath, 'utf8');
 
-        // 步骤 1:检查 .verify-passed 和 .review-passed 都存在
-        if (!existsSync(verifyPath)) {
-          console.error(`✗ archive 拒绝:缺 .verify-passed (in ${changeDir})`);
-          // C2 修复:先 release lock 再 exit
-          await archiveRelease();
-          process.exit(2);
-        }
-        if (!existsSync(reviewPath)) {
-          console.error(`✗ archive 拒绝:缺 .review-passed (in ${changeDir})`);
-          // C2 修复:先 release lock 再 exit
-          await archiveRelease();
-          process.exit(2);
-        }
+          const verifyMarker = parseMarker(verifyText);
+          const reviewMarker = parseMarker(reviewText);
 
-        // 步骤 2:解析 + schema 校验两个 marker
-        const verifyText = await readFile(verifyPath, 'utf8');
-        const reviewText = await readFile(reviewPath, 'utf8');
-
-        const verifyMarker = parseMarker(verifyText);
-        const reviewMarker = parseMarker(reviewText);
-
-        // 步骤 2a:schema 结构校验
-        const verifyResult = validateMarkerSchema(verifyMarker, verifyPath);
-        if (!verifyResult.valid) {
-          console.error(
-            `✗ .verify-passed marker schema 校验失败:${verifyResult.errors[0]?.message}`,
-          );
-          // C2 修复:先 release lock 再 exit
-          await archiveRelease();
-          process.exit(2);
-        }
-        const reviewResult = validateMarkerSchema(reviewMarker, reviewPath);
-        if (!reviewResult.valid) {
-          console.error(
-            `✗ .review-passed marker schema 校验失败:${reviewResult.errors[0]?.message}`,
-          );
-          // C2 修复:先 release lock 再 exit
-          await archiveRelease();
-          process.exit(2);
-        }
-
-        // 步骤 2b:P1.1 — schema 类型限定(.verify-passed 必须是 forge-verify/v1)
-        // 通过 unknown 中转以绕过 TS 的交叉类型检查
-        const verifyRec = verifyMarker as unknown as Record<string, unknown>;
-        const reviewRec = reviewMarker as unknown as Record<string, unknown>;
-
-        if (verifyRec['schema'] !== 'forge-verify/v1') {
-          console.error(
-            `✗ .verify-passed 必须是 forge-verify/v1,实际:${String(verifyRec['schema'])}`,
-          );
-          await archiveRelease();
-          process.exit(2);
-        }
-        if (reviewRec['schema'] !== 'forge-review/v1') {
-          console.error(
-            `✗ .review-passed 必须是 forge-review/v1,实际:${String(reviewRec['schema'])}`,
-          );
-          await archiveRelease();
-          process.exit(2);
-        }
-
-        // 步骤 3:重算 tasks_hash 和 content_hash + 比对
-        const tasksContent = await readFile(join(changeDir, 'tasks.md'), 'utf8');
-        const tasksHashNow = computeTasksHash(tasksContent);
-        const contentHashNow = await computeContentHash(changeDir);
-
-        // 将 marker 转为 Record 以便访问字段
-        const vRec = verifyRec as unknown as Record<string, string>;
-        const rRec = reviewRec as unknown as Record<string, string>;
-
-        // 比对 verify marker 里的 hash
-        if (tasksHashNow !== vRec['tasks_hash'] || contentHashNow !== vRec['content_hash']) {
-          console.error('✗ .verify-passed marker 已过期(tasks/content hash 不匹配),请重跑 verify');
-          // C2 修复:先 release lock 再 exit
-          await archiveRelease();
-          process.exit(2);
-        }
-
-        // 比对 review marker 里的 hash
-        if (tasksHashNow !== rRec['tasks_hash'] || contentHashNow !== rRec['content_hash']) {
-          console.error('✗ .review-passed marker 已过期(tasks/content hash 不匹配),请重跑 review');
-          // C2 修复:先 release lock 再 exit
-          await archiveRelease();
-          process.exit(2);
-        }
-
-        // 步骤 3.5:P1.2 — 验证 evidence 完整性
-        const evResult = await validateEvidence(verifyRec, verifyPath);
-        if (!evResult.valid) {
-          console.error('✗ verify evidence 校验失败:');
-          for (const e of evResult.errors) console.error(`  - ${e.field}: ${e.message}`);
-          await archiveRelease();
-          process.exit(2);
-        }
-
-        // 步骤 4:human-override + 真实 git 状态校验 + outcomes 校验
-        const verifyBy = vRec['verified_by'];
-        const reviewBy = rRec['reviewed_by'];
-        const reviewGit = reviewRec['git'] as Record<string, unknown> | undefined;
-        const markerSaysGit = reviewGit?.['is_git_repo'] === true;
-        // P1 修复:用真实 git 状态决定,不信 marker 字段
-        const projectIsGit = isProjectActuallyGit(process.cwd());
-
-        // 4a. human-override 必须 --force
-        if (verifyBy === 'human-override' || reviewBy === 'human-override') {
-          if (!opts.force) {
+          // 步骤 2a:schema 结构校验
+          const verifyResult = validateMarkerSchema(verifyMarker, verifyPath);
+          if (!verifyResult.valid) {
             console.error(
-              '✗ human-override 标记需要 --force 接受\n' +
-                '  verified_by=' +
-                verifyBy +
-                '  reviewed_by=' +
-                reviewBy,
+              `✗ .verify-passed marker schema 校验失败:${verifyResult.errors[0]?.message}`,
             );
             // C2 修复:先 release lock 再 exit
             await archiveRelease();
             process.exit(2);
           }
-        }
-
-        // 4b. marker 与真实 git 状态不一致 → 可疑伪造,拒绝(--force 也不能覆盖)
-        if (projectIsGit && !markerSaysGit) {
-          console.error(
-            '✗ review marker 标记 is_git_repo=false,但项目实际是 git。可能为伪造,拒绝(即使 --force)',
-          );
-          await archiveRelease();
-          process.exit(2);
-        }
-        if (!projectIsGit && markerSaysGit) {
-          console.error(
-            '✗ review marker 标记 is_git_repo=true,但项目实际不是 git。可能为伪造,拒绝',
-          );
-          await archiveRelease();
-          process.exit(2);
-        }
-
-        // 4c. 真非 git → 必须 --force(spec §3.4 要求)
-        if (!projectIsGit && !opts.force) {
-          console.error(`✗ 非 git 项目下 review 标记不绑定代码 diff,archive 必须 --force 才接受`);
-          await archiveRelease();
-          process.exit(2);
-        }
-
-        // 4d. 真 git → 跑 git integrity(重算 head + diff_hash)
-        if (projectIsGit) {
-          const gitResult = await validateReviewGitIntegrity(reviewRec, process.cwd(), reviewPath);
-          if (!gitResult.valid) {
-            console.error('✗ review git 完整性校验失败:');
-            for (const e of gitResult.errors) console.error(`  - ${e.field}: ${e.message}`);
+          const reviewResult = validateMarkerSchema(reviewMarker, reviewPath);
+          if (!reviewResult.valid) {
+            console.error(
+              `✗ .review-passed marker schema 校验失败:${reviewResult.errors[0]?.message}`,
+            );
+            // C2 修复:先 release lock 再 exit
             await archiveRelease();
             process.exit(2);
           }
-        }
 
-        // 4e. review_outcomes:accepted=true 必须 resolved=true(已实现,不变)
-        const outResult = validateReviewOutcomes(reviewRec, reviewPath);
-        if (!outResult.valid) {
-          console.error('✗ review_outcomes 校验失败:');
-          for (const e of outResult.errors) console.error(`  - ${e.field}: ${e.message}`);
-          await archiveRelease();
-          process.exit(2);
-        }
+          // 步骤 2b:P1.1 — schema 类型限定(.verify-passed 必须是 forge-verify/v1)
+          // 通过 unknown 中转以绕过 TS 的交叉类型检查
+          const verifyRec = verifyMarker as unknown as Record<string, unknown>;
+          const reviewRec = reviewMarker as unknown as Record<string, unknown>;
 
-        // 步骤 5:调 archiveTransaction(Move→Sync)
-        const archiveDate = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-        await archiveTransaction({ forgeRoot, changeId, archiveDate });
+          if (verifyRec['schema'] !== 'forge-verify/v1') {
+            console.error(
+              `✗ .verify-passed 必须是 forge-verify/v1,实际:${String(verifyRec['schema'])}`,
+            );
+            await archiveRelease();
+            process.exit(2);
+          }
+          if (reviewRec['schema'] !== 'forge-review/v1') {
+            console.error(
+              `✗ .review-passed 必须是 forge-review/v1,实际:${String(reviewRec['schema'])}`,
+            );
+            await archiveRelease();
+            process.exit(2);
+          }
 
-        // 步骤 5.5:Plan 7 post-archive hook(enforce_sync=false 时不阻塞,只产报告)
-        await runArchivePostHook(forgeRoot, changeId);
+          // 步骤 3:重算 tasks_hash 和 content_hash + 比对
+          const tasksContent = await readFile(join(changeDir, 'tasks.md'), 'utf8');
+          const tasksHashNow = computeTasksHash(tasksContent);
+          const contentHashNow = await computeContentHash(changeDir);
 
-        console.log(`✓ archived ${changeId} → changes/archive/${archiveDate}-${changeId}`);
-      } catch (err) {
-        // exit code 映射 — spec §3.5
-        if (err instanceof LockHeldError) {
-          // lock 被占用 → exit 5
-          console.error(err.message);
-          if (archiveRelease) await archiveRelease();
-          process.exit(5);
-        }
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg.includes('AND rollback failed')) {
-          // 同步失败且回滚也失败 → 需人工介入 → exit 3
+          // 将 marker 转为 Record 以便访问字段
+          const vRec = verifyRec as unknown as Record<string, string>;
+          const rRec = reviewRec as unknown as Record<string, string>;
+
+          // 比对 verify marker 里的 hash
+          if (tasksHashNow !== vRec['tasks_hash'] || contentHashNow !== vRec['content_hash']) {
+            console.error(
+              '✗ .verify-passed marker 已过期(tasks/content hash 不匹配),请重跑 verify',
+            );
+            // C2 修复:先 release lock 再 exit
+            // plan-9d Task 6 v2 M-1 修订:hash mismatch = fence business-fail,exit 1(沿 master §3.12.3)
+            await archiveRelease();
+            process.exit(1);
+          }
+
+          // 比对 review marker 里的 hash
+          if (tasksHashNow !== rRec['tasks_hash'] || contentHashNow !== rRec['content_hash']) {
+            console.error(
+              '✗ .review-passed marker 已过期(tasks/content hash 不匹配),请重跑 review',
+            );
+            // C2 修复:先 release lock 再 exit
+            // plan-9d Task 6 v2 M-1 修订:hash mismatch = fence business-fail,exit 1
+            await archiveRelease();
+            process.exit(1);
+          }
+
+          // 步骤 3.4(plan-9j Task 5):legacy-exemption + version-retrograde fence
+          // 沿 design §3.4.4.1 + §3.4.4.3 — 在 evidence 校验之前拦截 legacy marker 异常
+          const legacyVerifyResult = validateLegacyExemption(verifyRec, verifyPath);
+          if (!legacyVerifyResult.valid) {
+            console.error('✗ legacy-exemption fence 拒签(verify-passed):');
+            for (const e of legacyVerifyResult.errors)
+              console.error(`  - ${e.field}: ${e.message}`);
+            await archiveRelease();
+            process.exit(1);
+          }
+          const legacyReviewResult = validateLegacyExemption(reviewRec, reviewPath);
+          if (!legacyReviewResult.valid) {
+            console.error('✗ legacy-exemption fence 拒签(review-passed):');
+            for (const e of legacyReviewResult.errors)
+              console.error(`  - ${e.field}: ${e.message}`);
+            await archiveRelease();
+            process.exit(1);
+          }
+          const retrogradeVerifyResult = await validateVersionRetrograde(
+            verifyPath,
+            verifyRec,
+            process.cwd(),
+          );
+          if (!retrogradeVerifyResult.valid) {
+            console.error('✗ version-retrograde fence 拒签(verify-passed):');
+            for (const e of retrogradeVerifyResult.errors)
+              console.error(`  - ${e.field}: ${e.message}`);
+            await archiveRelease();
+            process.exit(1);
+          }
+          const retrogradeReviewResult = await validateVersionRetrograde(
+            reviewPath,
+            reviewRec,
+            process.cwd(),
+          );
+          if (!retrogradeReviewResult.valid) {
+            console.error('✗ version-retrograde fence 拒签(review-passed):');
+            for (const e of retrogradeReviewResult.errors)
+              console.error(`  - ${e.field}: ${e.message}`);
+            await archiveRelease();
+            process.exit(1);
+          }
+
+          // 步骤 3.5:P1.2 — 验证 evidence 完整性
+          const evResult = await validateEvidence(verifyRec, verifyPath);
+          if (!evResult.valid) {
+            console.error('✗ verify evidence 校验失败:');
+            for (const e of evResult.errors) console.error(`  - ${e.field}: ${e.message}`);
+            // plan-9d Task 6 v2 M-1 修订:evidence 校验失败 = fence business-fail,exit 1
+            await archiveRelease();
+            process.exit(1);
+          }
+
+          // 步骤 3.6:plan-9d Task 6 — verify_findings fence 三级 × resolved × ack 矩阵 + finding_hash 篡改拒签
+          const vfResult = validateVerifyFindingsFence(verifyRec, verifyPath);
+          if (!vfResult.valid) {
+            console.error('✗ verify_findings fence 拒签:');
+            for (const e of vfResult.errors) console.error(`  - ${e.field}: ${e.message}`);
+            await archiveRelease();
+            process.exit(1);
+          }
+
+          // 步骤 3.7:plan-9c Task 2 — pause_decisions fence(option 1-4 五类业务校验 + CRITICAL 重定向)
+          // v2 codex MAJOR 4 修订:对 verifyRec + reviewRec 都跑 fence
+          // v4 codex NEW-MAJOR A6 + B4 联动:fence 不再需要 ctx 参数(B4 改用 parseMarkdown 局部段校验,
+          //   不再调 validateScopeEntries → ctx unused → 沿 YAGNI 移除)
+          const pdVerifyResult = await validatePauseDecisionsFence(
+            verifyRec,
+            changeDir,
+            verifyPath,
+          );
+          if (!pdVerifyResult.valid) {
+            console.error('✗ pause_decisions fence 拒签(verify-passed):');
+            for (const e of pdVerifyResult.errors) console.error(`  - ${e.field}: ${e.message}`);
+            await archiveRelease();
+            process.exit(1);
+          }
+          const pdReviewResult = await validatePauseDecisionsFence(
+            reviewRec,
+            changeDir,
+            reviewPath,
+          );
+          if (!pdReviewResult.valid) {
+            console.error('✗ pause_decisions fence 拒签(review-passed):');
+            for (const e of pdReviewResult.errors) console.error(`  - ${e.field}: ${e.message}`);
+            await archiveRelease();
+            process.exit(1);
+          }
+
+          // 步骤 3.8:plan-9d Task 6 v2 B-4 — ack-log 一致性 cross-check
+          // v3 codex BLOCKER 2 修订:对 verifyRec + reviewRec 都跑 cross-check
+          // (review marker 同样可承载 pause_decisions superset additive,沿 9c Task 1 schema)
+          const ackVerifyResult = await validateAckLogConsistency(changeDir, verifyRec, changeId);
+          if (!ackVerifyResult.valid) {
+            console.error('✗ ack-log 一致性校验失败(verify-passed):');
+            for (const e of ackVerifyResult.errors) console.error(`  - ${e.field}: ${e.message}`);
+            await archiveRelease();
+            process.exit(1);
+          }
+          const ackReviewResult = await validateAckLogConsistency(changeDir, reviewRec, changeId);
+          if (!ackReviewResult.valid) {
+            console.error('✗ ack-log 一致性校验失败(review-passed):');
+            for (const e of ackReviewResult.errors) console.error(`  - ${e.field}: ${e.message}`);
+            await archiveRelease();
+            process.exit(1);
+          }
+
+          // 步骤 3.9:plan-9e1 Task 4 — 三级业务行为 fence(沿 design §2.4.2)
+          // CRITICAL+resolved=false 拒签(sanity 双重保险)/ WARNING+resolved=false+无 ack 拒签 /
+          // WARNING+resolved=false+acked 通过 / SUGGESTION+resolved=false 通过(handoff to backlog)
+          const tlfResult = validateThreeLevelFence(verifyRec, reviewRec, verifyPath, reviewPath);
+          if (!tlfResult.valid) {
+            console.error('✗ 三级业务行为 fence 拒签:');
+            for (const e of tlfResult.errors) console.error(`  - ${e.field}: ${e.message}`);
+            await archiveRelease();
+            process.exit(1);
+          }
+
+          // 步骤 4:human-override + 真实 git 状态校验 + outcomes 校验
+          const verifyBy = vRec['verified_by'];
+          const reviewBy = rRec['reviewed_by'];
+          const reviewGit = reviewRec['git'] as Record<string, unknown> | undefined;
+          const markerSaysGit = reviewGit?.['is_git_repo'] === true;
+          // P1 修复:用真实 git 状态决定,不信 marker 字段
+          const projectIsGit = isProjectActuallyGit(process.cwd());
+
+          // 4a. human-override 必须 --force
+          if (verifyBy === 'human-override' || reviewBy === 'human-override') {
+            if (!opts.force) {
+              console.error(
+                '✗ human-override 标记需要 --force 接受\n' +
+                  '  verified_by=' +
+                  verifyBy +
+                  '  reviewed_by=' +
+                  reviewBy,
+              );
+              // C2 修复:先 release lock 再 exit
+              await archiveRelease();
+              process.exit(2);
+            }
+          }
+
+          // 4b. marker 与真实 git 状态不一致 → 可疑伪造,拒绝(--force 也不能覆盖)
+          if (projectIsGit && !markerSaysGit) {
+            console.error(
+              '✗ review marker 标记 is_git_repo=false,但项目实际是 git。可能为伪造,拒绝(即使 --force)',
+            );
+            await archiveRelease();
+            process.exit(2);
+          }
+          if (!projectIsGit && markerSaysGit) {
+            console.error(
+              '✗ review marker 标记 is_git_repo=true,但项目实际不是 git。可能为伪造,拒绝',
+            );
+            await archiveRelease();
+            process.exit(2);
+          }
+
+          // 4c. 真非 git → 必须 --force(spec §3.4 要求)
+          if (!projectIsGit && !opts.force) {
+            console.error(`✗ 非 git 项目下 review 标记不绑定代码 diff,archive 必须 --force 才接受`);
+            await archiveRelease();
+            process.exit(2);
+          }
+
+          // 4d. 真 git → 跑 git integrity(重算 head + diff_hash)
+          if (projectIsGit) {
+            const gitResult = await validateReviewGitIntegrity(
+              reviewRec,
+              process.cwd(),
+              reviewPath,
+            );
+            if (!gitResult.valid) {
+              console.error('✗ review git 完整性校验失败:');
+              for (const e of gitResult.errors) console.error(`  - ${e.field}: ${e.message}`);
+              await archiveRelease();
+              process.exit(2);
+            }
+          }
+
+          // 4e. review_outcomes:accepted=true 必须 resolved=true(已实现,不变)
+          const outResult = validateReviewOutcomes(reviewRec, reviewPath);
+          if (!outResult.valid) {
+            console.error('✗ review_outcomes 校验失败:');
+            for (const e of outResult.errors) console.error(`  - ${e.field}: ${e.message}`);
+            await archiveRelease();
+            process.exit(2);
+          }
+
+          // 步骤 4.5:plan-9e1 Task 4 — 构造 archive_summary(传给 transaction 落 .tmp)
+          // v2 BLOCKER 4 修订:try/catch ScopeEntriesIntegrityError → fence business-fail exit 1
+          const archiveDate = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+          let archiveSummary;
+          try {
+            // plan-9e2 Task 2 同步改:加 fenceResult 入参(沿 archive.ts:231 现有 crossCuttingFenceCheck 输出)— Task 4 进一步整理调用顺序
+            archiveSummary = await buildArchiveSummary(
+              verifyRec,
+              reviewRec,
+              changeDir, // 沿用 line 213 已定义的 changeDir
+              changeId,
+              fenceResult,
+            );
+          } catch (err) {
+            if (err instanceof ScopeEntriesIntegrityError) {
+              console.error(
+                `✗ scope-entries 完整性 fence 拒签(${err.artifactName} section ${err.anchorId}):${err.message}`,
+              );
+              await archiveRelease();
+              process.exit(1);
+            }
+            throw err;
+          }
+
+          // 步骤 5:调 archiveTransaction(Move→Sync,含 .tmp 写 / rename / 回滚)
+          await archiveTransaction({ forgeRoot, changeId, archiveDate, archiveSummary });
+
+          // 步骤 5.5:Plan 7 post-archive hook(enforce_sync=false 时不阻塞,只产报告)
+          await runArchivePostHook(forgeRoot, changeId);
+
+          // 步骤 6:plan-9e1 Task 4 — 渲染 archive_summary 输出(沿 design §2.4.4)
+          const archiveDirName = `${archiveDate}-${changeId}`;
+          console.log(renderArchiveSummaryOutput(archiveSummary, archiveDirName));
+        } catch (err) {
+          // exit code 映射 — spec §3.5
+          if (err instanceof LockHeldError) {
+            // lock 被占用 → exit 5
+            console.error(err.message);
+            if (archiveRelease) await archiveRelease();
+            process.exit(5);
+          }
+          const msg = err instanceof Error ? err.message : String(err);
+          if (msg.includes('AND rollback failed')) {
+            // 同步失败且回滚也失败 → 需人工介入 → exit 3
+            console.error(`✗ ${msg}`);
+            if (archiveRelease) await archiveRelease();
+            process.exit(3);
+          }
+          if (msg.includes('rolled back')) {
+            // 同步失败但回滚成功 → 可重试 → exit 2
+            console.error(`✗ ${msg}`);
+            if (archiveRelease) await archiveRelease();
+            process.exit(2);
+          }
+          // 兜底:未知错误 → exit 1
           console.error(`✗ ${msg}`);
           if (archiveRelease) await archiveRelease();
-          process.exit(3);
-        }
-        if (msg.includes('rolled back')) {
-          // 同步失败但回滚成功 → 可重试 → exit 2
-          console.error(`✗ ${msg}`);
+          process.exit(1);
+        } finally {
+          // finally 作为最终兜底(catch 内 process.exit 会跳过 finally,release 函数幂等)
           if (archiveRelease) await archiveRelease();
-          process.exit(2);
         }
-        // 兜底:未知错误 → exit 1
-        console.error(`✗ ${msg}`);
-        if (archiveRelease) await archiveRelease();
-        process.exit(1);
-      } finally {
-        // finally 作为最终兜底(catch 内 process.exit 会跳过 finally,release 函数幂等)
-        if (archiveRelease) await archiveRelease();
-      }
-    });
+      },
+    );
 }
 
 /**

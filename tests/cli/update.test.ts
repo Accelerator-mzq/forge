@@ -1,11 +1,16 @@
 // forge update 子命令集成测试
 // 验证:已 init 后重铺 skills、未 init 报错、--harness 参数
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, existsSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { mkdtemp, mkdir, writeFile, rm, readFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { runCli } from './helpers.js';
+
+// CLI 入口路径(与 helpers.ts 保持一致)
+const CLI = resolve(__dirname, '../../dist/cli/index.js');
 
 describe('forge update', () => {
   // Test 1: 已 init 项目 → forge update 默认不覆盖被改文件,--force 才覆盖
@@ -82,5 +87,46 @@ describe('forge update', () => {
     } finally {
       rmSync(d, { recursive: true, force: true });
     }
+  });
+});
+
+describe('forge update — sharedDocs 部署(v2 plan-9b Task 7b smoke)', () => {
+  let projectRoot: string;
+  beforeEach(async () => {
+    projectRoot = await mkdtemp(join(tmpdir(), 'forge-update-shared-'));
+    await mkdir(join(projectRoot, '.claude'), { recursive: true });
+    // v4 codex 三轮 BLOCKER 2 修订:写 forge/config.yaml 必须含 harness 列表
+    // v5 codex 四轮 MAJOR 1 修订:config schema 字面量是 forge-spec-driven/v1(沿 types.ts:8)
+    await mkdir(join(projectRoot, 'forge'), { recursive: true });
+    await writeFile(
+      join(projectRoot, 'forge', 'config.yaml'),
+      'schema: forge-spec-driven/v1\nharness:\n  - claude\n',
+    );
+  });
+  afterEach(async () => {
+    await rm(projectRoot, { recursive: true, force: true });
+  });
+
+  it('forge update 把 scope-category-guidance.md 铺到 .claude/skills/forge-_shared/', () => {
+    execFileSync('node', [CLI, 'update'], { cwd: projectRoot, encoding: 'utf8' });
+    const expected = join(
+      projectRoot,
+      '.claude',
+      'skills',
+      'forge-_shared',
+      'scope-category-guidance.md',
+    );
+    expect(existsSync(expected)).toBe(true);
+  });
+
+  it('forge update 部署的 scope-category-guidance.md 内容含 design §2.6.6 表', async () => {
+    execFileSync('node', [CLI, 'update'], { cwd: projectRoot, encoding: 'utf8' });
+    const content = await readFile(
+      join(projectRoot, '.claude', 'skills', 'forge-_shared', 'scope-category-guidance.md'),
+      'utf8',
+    );
+    expect(content).toMatch(/Scope Category Guidance/);
+    expect(content).toMatch(/Future Work/);
+    expect(content).toMatch(/forge-oos/);
   });
 });

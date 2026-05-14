@@ -381,6 +381,17 @@ When adding mocks or test utilities, avoid common pitfalls:
 
 <!-- testing-anti-patterns 支持文件在 forge v0.1 不提供 -->
 
+## plan-9g 新增:RED commit 不可省略硬约束
+
+✗ **禁止**同 commit 写测试 + 实现(违反 process_evidence 不变量 3 + 5)
+✓ **必须**:
+
+- 先建 RED commit(测试 fail + 实现未写 / 不通过)
+- 后建 GREEN commit(实现写 + 测试 pass)
+- writing-plans light mode trivial change(< writing_plans.light_threshold 行)允许走 `tdd_exemption: light-mode-trivial`,但**必须**先调 `forge ack propose --action ack-tdd-exemption`(沿 process_evidence 不变量 11)
+
+详细 process_evidence 协议见 `skills/process-evidence/SKILL.md`。
+
 ## Final Rule
 
 ```

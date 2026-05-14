@@ -5,6 +5,7 @@ export {
   SKILL_NAMES,
   loadSkill,
   loadAllSkills,
+  loadAllSharedDocs,
   type SkillName,
   type LoadedSkill,
 } from './skills/index.js';

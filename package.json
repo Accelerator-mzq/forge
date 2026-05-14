@@ -1,6 +1,6 @@
 {
   "name": "@accelerator-mzq/forge",
-  "version": "0.4.0",
+  "version": "1.0.0",
   "description": "OpenSpec × superpowers fusion: spec-driven workflow + behavior-shaping skills, packaged as multi-harness CLI",
   "type": "module",
   "engines": {
@@ -18,7 +18,9 @@
   ],
   "scripts": {
     "build": "node scripts/copy-templates.mjs && tsc -p tsconfig.json",
-    "test": "vitest run",
+    "test": "vitest run && pnpm test:gate",
+    "test:gate": "node scripts/check-release-gate.mjs",
+    "test:gate:release": "node scripts/check-release-gate.mjs --release",
     "test:watch": "vitest",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -33,9 +35,12 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.93.0",
+    "canonicalize": "^3.0.0",
     "commander": "^12.1.0",
     "exceljs": "^4.4.0",
+    "fast-xml-parser": "^4.5.6",
     "gray-matter": "^4.0.3",
+    "tap-parser": "^15.3.2",
     "yaml": "^2.8.4"
   },
   "devDependencies": {

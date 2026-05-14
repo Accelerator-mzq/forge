@@ -14,7 +14,7 @@ import {
   filterByHash,
 } from '../../core/harness-adapters/index.js';
 import type { HarnessAdapter, DeployInput } from '../../core/harness-adapters/index.js';
-import { loadAllSkills, loadAllCommands } from '../../core/templates/index.js';
+import { loadAllSkills, loadAllCommands, loadAllSharedDocs } from '../../core/templates/index.js';
 
 export function buildUpdateCommand(): Command {
   return new Command('update')
@@ -81,13 +81,15 @@ export function buildUpdateCommand(): Command {
         process.exit(1);
       }
 
-      // 5. 加载真实 templates(Plan 4)
+      // 5. 加载真实 templates(Plan 4)+ plan-9b sharedDocs
       const skills = await loadAllSkills();
       const commands = await loadAllCommands();
+      const sharedDocs = await loadAllSharedDocs(); // v2 plan-9b Task 7b:加载 _shared/*.md
       const input: DeployInput = {
         projectRoot: cwd,
         skills, // LoadedSkill[] 兼容 SkillSpec[]
         commands, // LoadedCommand[] 兼容 CommandSpec[]
+        sharedDocs, // 共用 reference docs 铺到 _shared 子目录
       };
       const plans = await Promise.all(adapters.map((a) => a.plan(input)));
 

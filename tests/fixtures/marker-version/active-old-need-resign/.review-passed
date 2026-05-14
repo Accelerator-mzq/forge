@@ -1,0 +1,18 @@
+schema: forge-review/v1
+reviewed_at: 2025-08-01T10:00:00Z
+reviewed_by: ai-agent
+tasks_hash: sha256:placeholder
+content_hash: sha256:placeholder
+git:
+  is_git_repo: false
+review_outcomes:
+  - severity: S
+    accepted: true
+    resolved: true
+    rationale: critical issue resolved
+    task_ref: t1
+  - severity: L
+    accepted: true
+    resolved: true
+    rationale: low priority suggestion resolved
+    task_ref: t1

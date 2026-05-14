@@ -137,7 +137,8 @@ describe('forge archive', () => {
       // is_git_repo: false → 需要 --force
       const r = runCli(['archive', 'add-login', '--force'], join(projectRoot));
       expect(r.exitCode).toBe(0);
-      expect(r.stdout).toContain('archived');
+      // plan-9e1 Task 4:渲染输出改为 renderArchiveSummaryOutput(含 ## Archive Complete)
+      expect(r.stdout).toMatch(/Archive Complete|archived/);
       expect(r.stdout).toContain('add-login');
 
       // change 已从 changes/ 移走
@@ -205,7 +206,8 @@ describe('forge archive', () => {
       writeFileSync(tasksPath, '# Tasks\n\n- [ ] t1: extra task added\n- [ ] t2: more\n', 'utf8');
 
       const r = runCli(['archive', 'add-login'], projectRoot);
-      expect(r.exitCode).toBe(2);
+      // plan-9d Task 6 v2 M-1 修订:hash mismatch 从 exit 2 改 exit 1(fence business-fail,沿 master §3.12.3)
+      expect(r.exitCode).toBe(1);
       // 错误信息包含"已过期"或"不匹配"
       expect(r.stderr).toMatch(/已过期|不匹配/);
     } finally {
@@ -240,7 +242,8 @@ describe('forge archive', () => {
 
       const r = runCli(['archive', 'add-login', '--force'], projectRoot);
       expect(r.exitCode).toBe(0);
-      expect(r.stdout).toContain('archived');
+      // plan-9e1 Task 4:渲染输出改为 renderArchiveSummaryOutput(含 ## Archive Complete)
+      expect(r.stdout).toMatch(/Archive Complete|archived/);
 
       // change 已从 changes/ 移走
       expect(existsSync(join(changesDir, 'add-login'))).toBe(false);
@@ -396,7 +399,8 @@ describe('forge archive', () => {
       writeFileSync(reviewPath, stringifyYAML(reviewMarker), 'utf8');
 
       const r = runCli(['archive', 'add-login', '--force'], projectRoot);
-      expect(r.exitCode).toBe(2);
+      // plan-9d Task 6 v2 M-1 修订:evidence 校验失败从 exit 2 改 exit 1(fence business-fail,沿 master §3.12.3)
+      expect(r.exitCode).toBe(1);
       expect(r.stderr).toMatch(/pass|evidence/);
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
@@ -450,7 +454,8 @@ describe('forge archive', () => {
       writeFileSync(reviewPath, stringifyYAML(reviewMarker), 'utf8');
 
       const r = runCli(['archive', 'add-login', '--force'], projectRoot);
-      expect(r.exitCode).toBe(2);
+      // plan-9d Task 6 v2 M-1 修订:evidence log_path 不存在从 exit 2 改 exit 1(fence business-fail,沿 master §3.12.3)
+      expect(r.exitCode).toBe(1);
       expect(r.stderr).toMatch(/log_path|evidence|不存在/);
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
@@ -484,7 +489,8 @@ describe('forge archive', () => {
 
       const r = runCli(['archive', 'add-login', '--force'], projectRoot);
       expect(r.exitCode).toBe(0);
-      expect(r.stdout).toContain('archived');
+      // plan-9e1 Task 4:渲染输出改为 renderArchiveSummaryOutput(含 ## Archive Complete)
+      expect(r.stdout).toMatch(/Archive Complete|archived/);
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
     }
@@ -528,7 +534,8 @@ describe('forge archive', () => {
 
       const r = runCli(['archive', 'add-login', '--force'], projectRoot);
       expect(r.exitCode).toBe(0);
-      expect(r.stdout).toContain('archived');
+      // plan-9e1 Task 4:渲染输出改为 renderArchiveSummaryOutput(含 ## Archive Complete)
+      expect(r.stdout).toMatch(/Archive Complete|archived/);
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
     }
@@ -568,7 +575,8 @@ describe('forge archive', () => {
       writeFileSync(reviewPath, stringifyYAML(badReviewMarker), 'utf8');
 
       const r = runCli(['archive', 'add-login', '--force'], projectRoot);
-      expect(r.exitCode).toBe(2);
+      // plan-9e1 Task 4:S + resolved=false 被三级 fence step 3.9 拦截(exit 1),早于原 step 4e(exit 2)
+      expect(r.exitCode).toBe(1);
       expect(r.stderr).toMatch(/review_outcomes|resolved/);
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });

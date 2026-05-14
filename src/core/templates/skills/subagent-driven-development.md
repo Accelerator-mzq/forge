@@ -95,11 +95,15 @@ Use the least powerful model that can handle each role to conserve cost and incr
 
 ## Handling Implementer Status
 
-Implementer subagents report one of four statuses. Handle each appropriately:
+Implementer subagents report one of **five** statuses (forge v1.0 沿 design §2.1.2 加第 5 档 `DESIGN_ISSUE_FOUND`)。Handle each appropriately:
 
 **DONE:** Proceed to spec compliance review.
 
-**DONE_WITH_CONCERNS:** The implementer completed the work but flagged doubts. Read the concerns before proceeding. If the concerns are about correctness or scope, address them before review. If they're observations (e.g., "this file is getting large"), note them and proceed to review.
+**DONE_WITH_CONCERNS:** The implementer completed the work but flagged doubts. Read the concerns before proceeding:
+
+- **CRITICAL concerns**(测试 fail / hash mismatch / evidence 丢)→ 走 forge 强 fence 拒签路径(原 v0.4 行为不变)
+- **WARNING / SUGGESTION concerns about correctness or scope**(非 CRITICAL)→ **invoke Fluid Pause Decision Point**(沿 `commands/apply.md` §"Fluid Pause Decision Point" 段;主代理调 AskUserQuestion 四选项)
+- **Observations**(e.g., "this file is getting large")→ note them and proceed to review
 
 **NEEDS_CONTEXT:** The implementer needs information that wasn't provided. Provide the missing context and re-dispatch.
 
@@ -108,9 +112,11 @@ Implementer subagents report one of four statuses. Handle each appropriately:
 1. If it's a context problem, provide more context and re-dispatch with the same model
 2. If the task requires more reasoning, re-dispatch with a more capable model
 3. If the task is too large, break it into smaller pieces
-4. If the plan itself is wrong, escalate to the human
+4. If the **plan itself is wrong** → **invoke Fluid Pause Decision Point**(沿 forge v1.0;原 "escalate to human" 现有合规通道,沿 `commands/apply.md` §"Fluid Pause Decision Point" 段)
 
-**Never** ignore an escalation or force the same model to retry without changes. If the implementer said it's stuck, something needs to change.
+**`DESIGN_ISSUE_FOUND`**(v1.0 新增第 5 档,沿 forge design §2.1.2):The implementer is reporting that the current task requires functionality that's part of the change but **not covered by the spec**(spec 未覆盖但本 change 应做的需求)。This is **not BLOCKED**(还能干活)和 **not DONE_WITH_CONCERNS**(主体功能没完工就发现 spec 缺口)。Handle by **invoking Fluid Pause Decision Point**(沿 `commands/apply.md` §"Fluid Pause Decision Point" 段;典型走 option=1 扩 scope 或 option=3 转 out-of-scope)。
+
+**Never** ignore an escalation or force the same model to retry without changes. If the implementer said it's stuck or surfaced a design issue, something needs to change.
 
 ## Example Workflow
 
@@ -266,3 +272,80 @@ Done!
 **Subagents should use:**
 
 - **forge:test-driven-development** - Subagents follow TDD for each task
+
+## forge-specific 反向加固(v1.0)
+
+forge v1.0 在本 skill 基础上加以下反向加固协议(与上游 superpowers 兼容、不冲突):
+
+### Fluid Pause 不可绕过的不变量
+
+主代理在调 AskUserQuestion 并写入 `pause_decisions` marker 字段时**不可**:
+
+1. **伪造 `severity_acked_by`** — WARNING pause_decision 的 `severity_acked_by` 必须是真实用户响应,且 `.evidence/ack-log.jsonl` 必须有对应 `kind=ack` + `action=ack-pause-warning` + `finding_id=pause_decisions:<id>` + `user=<同 marker>` 条目。若 marker 直填 `severity_acked_by: msc` 但 ack-log.jsonl 无该条目 → `validateAckLogConsistency`(v2 codex BLOCKER 1 扩展)拒签;若 ack-log `user` 与 marker `severity_acked_by` 不一致(如 marker 写 `msc`,ack-log 写 `ai-agent`)→ 拒签。**SUGGESTION 例外**:fence 不要求 ack 一致性(沿 design §2.1.5 SUGGESTION 允许空 ack)
+
+2. **CRITICAL 走 pause 路径** — 主代理判定 severity=CRITICAL 时**禁止**调 AskUserQuestion 让用户在 1-4 间选;CRITICAL 必须走 forge 强 fence 拒签(沿 design §2.1.2)。`forge archive` 步骤 3.7 任一 `pause_decisions[].severity === 'CRITICAL'` → exit 1
+
+3. **option=3 没 `non_blocking_rationale`** — `option=3` 转 out-of-scope 必须配 `non_blocking_rationale` 论证"为什么 subagent 能跳过该 issue 完成主体 task"。fence 拒签缺失
+
+4. **option=2 不勾选新 task** — `option=2` 加 task 时,主代理 append 新 task 到 tasks.md 后 subagent 重派实施;实施完成后**必须**改 `[ ]` → `[x]`。fence 校验 `tasks.md` 中 `task_ref` 末段对应行已勾选
+
+### 红旗清单(借口模式)
+
+| AI 借口                                                  | 反向加固                                                                                         |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| "用户在对话中确认过,我直接写 ack 就好"                   | `forge archive` ack-log 一致性 cross-check 会发现 marker ack ↔ ack-log 不一致(沿 plan-9d v2 B-4) |
+| "CRITICAL 太严了,我降级为 WARNING 让用户 ack"            | fence 在 `severity` 字段重算 finding_hash(沿 plan-9d Task 6),篡改任一 hash payload 字段 → 拒签   |
+| "option=3 转 out-of-scope 时 rationale 写"用户决定即可"" | rationale 必须论证"为什么 subagent 能跳过"— 不是"用户决定"是答案                                 |
+
+### plan-9g 新增:DONE_REPORT 必须含 process_evidence 字段
+
+subagent 在 task 实施完成报 DONE 时,**必须**提供以下字段给主代理(供 `forge evidence record-tdd` helper 用):
+
+- `red_commit`:RED 阶段 commit sha + ISO timestamp
+- `red_log_path` + `red_log_hash`(sha256)
+- `red_report_path` + `red_report_hash`(JUnit XML / TAP / Vitest JSON)
+- `red_exit_code`(必 != 0)
+- `green_commit`:同上(GREEN)
+- `green_exit_code`(必 == 0)
+- `expected_failures`:RED 阶段绑定具体失败的 test(test_file + test_name + failure_type)
+
+若 light mode trivial change 走 tdd_exemption:必须先调 `forge ack propose --action ack-tdd-exemption`,DONE_REPORT 含 ack_log entry 引用。
+
+详细 process_evidence 协议见 `skills/process-evidence/SKILL.md`。
+
+### plan-9h 新增:Main Agent STOP Triggers
+
+主代理在 apply 阶段必须停下问用户的 **6 类触发条件**(不允许自动绕过或重试,沿 design v3 §2.8.3 B + §2.8.3 C):
+
+| 触发条件                                                                                                                   | 主代理行为                                                                                                            | cross-ref                                                                                                |
+| -------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Critical Plan Review 发现 critical gap                                                                                     | 暂停 dispatch,走 AskUserQuestion 4 类 concerns                                                                        | `commands/apply.md` 步骤 3.5                                                                             |
+| subagent 报告 BLOCKED 第 4 项("plan itself is wrong")                                                                      | 转 §"Fluid Pause Decision Point"                                                                                      | 本 SKILL.md §"Handling Implementer Status" BLOCKED 第 4 项(line 115)+ `commands/apply.md` §"Fluid Pause" |
+| **同一 task 被 subagent BLOCKED ≥ 2 次**                                                                                   | STOP 问用户(可能任务过大需拆分,或 plan 本身错)                                                                        | —                                                                                                        |
+| **verify 命令重试 ≥ 3 次仍失败**                                                                                           | STOP 问用户(可能 spec 错 / 测试本身错)                                                                                | —                                                                                                        |
+| 用户主动 interrupt                                                                                                         | STOP,等下一步指令                                                                                                     | —                                                                                                        |
+| **保护分支拒签**(`forge preflight branch-check` 报 exit 2,在 `main`/`master`/`develop`/`trunk` 等保护分支跑 `forge apply`) | CLI 已 fail-closed,主代理转告用户切换 `feature/<change-id>` 分支并重跑;**不允许** `--allow-protected-branch` 自动绕过 | `commands/apply.md` 步骤 0 + `forge preflight branch-check`(plan-9h Task 1 + plan-9z polish P-1)         |
+
+#### 计数机制(plan-9h Q5 决策:接口零侵入)
+
+主代理必须在 **session memory 内追踪**同 task BLOCKED 计数 + verify 重试计数:
+
+- 每次接到 subagent BLOCKED 报告 → 该 task 计数 +1
+- 每次 verify 命令失败 → 该次重试计数 +1
+- **不依赖 marker / ack-log 持久化字段**(避免侵入 master plan §3.12.4 ack-log schema freeze + §3.12 marker schema freeze)
+- 跨 session wakeup 丢计数属 v0.4 known limitation;若用户手工告知"task X 已 BLOCKED N 次",主代理按用户告知值续计
+
+#### 禁止行为(主代理 dispatch 阶段红线)
+
+- ✗ 不允许"绕过失败 task 跑下一个"
+- ✗ 不允许"修改 task 描述让它能过"(改 task 描述需经 §"Fluid Pause Decision Point" 走选项 1/2)
+- ✗ 不允许"重试同一 task ≥ 3 次不停下"
+
+#### 与现有 BLOCKED 状态处理的关系(横切补强)
+
+本子段是 §"Handling Implementer Status" BLOCKED 4 项处理(line 110-115)的**横切补强**:
+
+- **BLOCKED 4 项处理**:**单次** BLOCKED 报告时主代理按 context / model / 拆分 / plan-wrong 4 选 1 处理
+- **本 STOP triggers**:**多次累积** BLOCKED / verify 重试 时强制 STOP 问用户(避免主代理无限循环)
+
+两者不冲突 — 现有 BLOCKED 第 4 项 "plan itself is wrong → Fluid Pause" 仍走 Fluid Pause(单次 critical gap 即触发);本 STOP triggers 表第 3-4 行(BLOCKED ≥ 2 次 / verify ≥ 3 次)是**累积失败**的反向加固,触发 STOP 后用户决策可能是"拆 task"/"重写 spec"/"走 explore"(沿 §2.8.4 与 §2.1/§2.5 桥接)。

@@ -35,7 +35,7 @@ The plugin-based path is the new way:
 
 Existing v0.2 projects: run 'forge upgrade' to clean legacy adapter artifacts.
 
-'forge init' will be removed in v0.4. Continuing for legacy support...
+'forge init' will be removed in v1.2. Continuing for legacy support...
 `);
 
       // 步骤 1:检测项目里有哪些 harness

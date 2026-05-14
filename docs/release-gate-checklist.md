@@ -253,3 +253,83 @@ v0.3 新增 6 项验证(Plan 0a + Plan 5 落地)。release v0.3.0 前必须 evid
 
 - [ ] commands/migrate.md 已加(若决定 plugin 中也提供 `/forge:migrate`;本 plan 不强制)
 - [ ] bundled plugin tarball(若发):dist/cli/commands/migrate.js 含
+
+## §5 v1.0 fusion completion 发布门(2026-05-14)
+
+本段沿 §4 v0.4 模板,验 plan-9z release(plan-9a 到 plan-9j 9 sub-plan 累积 + plan-9z polish 9 工作单消化)。
+
+### §5.1 代码 + 测验证
+
+- [ ] `pnpm format:check` 0 error
+- [ ] `pnpm lint` 0 error
+- [ ] `pnpm typecheck` 0 error
+- [ ] `pnpm test` 全 PASS;含 9a 横切 + 9b out-of-scope + 9c fluid-pause + 9d verify-three-dimensions + 9e archive-soft-warning + 9f explore + 9g process_evidence + 9h SDD + 9i writing-skills + 9j marker-deprecation 全部 test 模块
+- [ ] `pnpm build` 0 error;`dist/cli/index.js` 可调起:
+  - `forge --help` 列出所有 9 sub-plan 引入的子命令
+  - `forge preflight branch-check --help`(plan-9h)
+  - `forge ack --help`(plan-9a)
+  - `forge verify --help`(plan-9d)
+  - `forge upgrade --resign-markers --help`(plan-9j)
+  - `forge explore --help`(plan-9f,若 9f 引入 CLI 入口)
+- [ ] `forge-eval` baseline 跑 `subagent-driven-development.yaml` **plan-9z scope 3 scenario** 全 pair_pass=true(plan-9z Task 5 消化):
+  - `branch-protection`(P-1 cross-ref 验证)
+  - `critical-plan-review`(plan-9h Task 4 已 pair_pass 回归保护)
+  - `stop-on-repeat-failure`(P-2 regex 收紧验证)
+- [ ] **known issue 接受**:预存 3 scenario(`force-dispatch-subagent` / `review-subagent-output` / `not-merge-without-test`)pair_pass=false 是 plan-9h Task 4 baseline 漏抓的 known issue,延 plan-v1.1 修(SDD yaml 原始 commit `13d02ac` 落地,plan-9h Task 4 commit `b5fb981` 只验证新增 3 scenario 漏跑预存)— **不阻塞 v1.0 release**
+
+### §5.2 端到端手测
+
+- [ ] `forge init` 在新目录创建 forge 工作树(verify init.ts:38 warning 文本含 "v1.2" 字样)
+- [ ] `forge migrate openspec/superpowers` 仍可用(plan-8/v0.4 兼容性)
+- [ ] `forge ack propose/confirm/reject` 三子命令协议跑通(plan-9a)
+- [ ] `forge upgrade --resign-markers <changeId>` 在 v0.4 marker 上跑通(plan-9j)
+- [ ] `forge verify` LLM-judge 路径跑通(plan-9d;可选,需 ANTHROPIC_API_KEY)
+- [ ] `forge archive <changeId>` 全 14 不变量校验 + handoff_to_backlog(plan-9e + plan-9g v6 brainstorm Codex BLOCKER #2 修订加不变量 #14 green↞HEAD ancestor)
+
+### §5.3 兼容性
+
+- [ ] v0.4 native marker(无 `created_by_tool_version` / 无 `legacy=true`)走 strict path 不被 9j legacy-exemption 拦
+- [ ] v0.2 fixture(brownfield 路径)仍跑通(spec §5.1 v3 兼容性约束)
+- [ ] `forge upgrade`(v0.2 → v0.3 → v0.4 → v1.0)仍跑通
+
+### §5.4 文档完整
+
+- [ ] README 主页含 v1.0 fusion completion 主题描述(若需要)+ 链接 design v3
+- [ ] `docs/specs/2026-05-10-v1.0-fusion-completion-design.md` v3 commit 在 docs/specs/(已 commit)
+- [ ] 9 sub-plan 文件(plan-9a 到 plan-9j)+ master plan + plan-9z 全在 `docs/plans/`
+- [ ] `CHANGELOG.md` `[1.0.0]` 段写完(plan-9z Task 2)
+- [ ] `skills/writing-skills/SKILL.md` + `skills/writing-skills/forge-eval-integration.md` + `.claude/skills/subagent-driven-discipline/SKILL.md` + `skills/subagent-driven-development/SKILL.md` 含 plan-9z polish 协议升级(plan-9z Task 4 / Task 5)
+
+### §5.5 npm 包
+
+- [ ] `package.json` `version` = `1.0.0`;`bin` 字段保 `forge`
+- [ ] `pnpm pack` 产 tarball;解压检查:
+  - `dist/cli/index.js` 在
+  - `dist/cli/commands/preflight.js`(plan-9h)+ `dist/cli/commands/ack.js`(plan-9a)+ `dist/cli/commands/verify.js`(plan-9d)+ `dist/cli/commands/upgrade.js` 含 `--resign-markers`(plan-9j)
+  - bundled `src/core/templates/` 含 9c/9g/9h apply.md + 9h SDD SKILL.md + 9i writing-skills/SKILL.md 反向同步内容
+- [ ] `pnpm publish --dry-run` 验包内文件清单(forge-repo files 字段)
+
+### §5.6 plugin 形态(若同步发 plugin)
+
+- [ ] bundled plugin tarball(若发):dist/cli/commands/ 含全部 9 sub-plan 子命令
+- [ ] `commands/preflight.md` / `commands/ack.md` / `commands/verify.md` / `commands/upgrade.md` / `commands/archive.md` / `commands/explore.md`(若 9f 引入)plugin slash 命令对齐 CLI 子命令
+- [ ] `.claude/skills/writing-skills/` + `.claude/skills/subagent-driven-discipline/` 全 skill bundled(plan-9z polish 协议升级后内容)
+
+### §5.7 plan-9z polish 9 工作单消化 verify
+
+- [ ] **P-1**(plan-9h Task 4 concern α):`skills/subagent-driven-development/SKILL.md` §"Main Agent STOP Triggers" 5 → 6 行,第 6 行 cross-ref `forge preflight branch-check` + `commands/apply.md` 步骤 0 字面在(plan-9h Task 3 落地点,本 plan-9z polish 字面更新)
+- [ ] **P-2**(plan-9h Task 4 concern β):`forge-eval/scenarios/subagent-driven-development.yaml` `stop-on-repeat-failure` must_not_match regex 收紧锚行为(`Use Task tool with .*sonnet`)+ 判分锚点段补 `must_not_match 不针对 AI 复述用户原话`(plan-9h Task 4 v1.2 选项 B merge 进 SDD yaml 而非独立 main-agent-stop.yaml)
+- [ ] **Pattern O**:`.claude/skills/writing-skills/SKILL.md` 步骤 1 含 "registry + scenarios + 骨架一起 commit" 警示
+- [ ] **Pattern P**:`.claude/skills/writing-skills/SKILL.md` 步骤 1 含 "rubric 设计原则" 段
+- [ ] **Pattern Q**:`.claude/skills/writing-skills/forge-eval-integration.md` 含 "判分锚点段示例"
+- [ ] **Pattern R**:`.claude/skills/writing-skills/SKILL.md` 步骤 1 含 "RED avg > 5 立即 REFACTOR" 硬 trigger
+- [ ] **P-5**:`.claude/skills/subagent-driven-discipline/SKILL.md` §2.1 含 "external protocol assumption verify"
+- [ ] **P-6**:`.claude/skills/subagent-driven-discipline/SKILL.md` §3.X 含 "rubric 软度 vs 验证强度"
+- [ ] **P-7**:`.claude/skills/writing-skills/forge-eval-integration.md` 含 "must_not_match 引用 vs 行为边界" 子段
+- [ ] **P-8**:`.claude/skills/subagent-driven-discipline/SKILL.md` §3.X 含 "Task BLOCKED 修订决策树"
+- [ ] **P-3**(scope-out 延 v1.1):若 §5.1 verify 跑复现 fence-9.2 timeout 顺手修;未复现延 v1.1
+- [ ] **P-9**(scope-out 延 v1.1):`src/core/git/utils.ts` 抽出留 v1.1
+
+### v1.0 release 阻塞门禁
+
+以上 §5.1-§5.7 全勾 + 跨 OS CI 全绿 → 阻塞解除,maintainer 可触发 `pnpm publish`。

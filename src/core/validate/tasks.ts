@@ -7,29 +7,40 @@ export function validateTasks(t: ParsedTasks, file?: string): ValidationResult {
   const results: ValidationResult[] = [];
   if (t.items.length === 0) {
     results.push(
-      failed({ artifact: 'tasks', field: 'items', message: 'no checkbox items found', file }),
+      // v3 B2 修订:business-fail 标 CRITICAL → exit 1
+      failed({
+        artifact: 'tasks',
+        field: 'items',
+        message: 'no checkbox items found',
+        file,
+        severity: 'CRITICAL',
+      }),
     );
   }
   const seen = new Set<string>();
   for (const item of t.items) {
     if (!item.id) {
       results.push(
+        // v3 B2 修订:business-fail 标 CRITICAL → exit 1
         failed({
           artifact: 'tasks',
           field: 'item.id',
           message: `task at line ${item.lineNumber} has empty id`,
           file,
           line: item.lineNumber,
+          severity: 'CRITICAL',
         }),
       );
     } else if (seen.has(item.id)) {
       results.push(
+        // v3 B2 修订:business-fail 标 CRITICAL → exit 1
         failed({
           artifact: 'tasks',
           field: 'item.id',
           message: `duplicate task id "${item.id}" (violates append-only invariant)`,
           file,
           line: item.lineNumber,
+          severity: 'CRITICAL',
         }),
       );
     } else {

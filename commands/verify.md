@@ -114,7 +114,7 @@ You are about to handle `/forge:verify $ARGUMENTS`.
 
      这一步把 verify 事件(测试 pass/fail + 三维 findings 总览)写入 `.evidence/process-evidence.staging.yaml`,**freeze 必须前置 staging 才有 source 可以凝固**(沿 `src/cli/commands/evidence.ts:348/639`;helper list 权威 `commands/apply.md:179-182`)。
 
-     若漏调 record-verify 直接 freeze → exit 1 + 提示 "staging file not found ... 必须先调 forge evidence record-*"(代码事实 `evidence.ts:639`)。
+     若漏调 record-verify 直接 freeze → exit 1 + 提示 "staging file not found ... 必须先调 forge evidence record-\*"(代码事实 `evidence.ts:639`)。
 
      4.4 **(plan-9g 新增):调 forge evidence freeze 凝固 process_evidence**
 

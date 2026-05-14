@@ -257,3 +257,75 @@ tail -10 forge/changes/add-todo/tasks.md  # 期望:末尾有 applied_commits YAM
 - [`skills/subagent-driven-development/SKILL.md`](../skills/subagent-driven-development/SKILL.md) — SDD 完整协议
 - [`skills/test-driven-development/SKILL.md`](../skills/test-driven-development/SKILL.md) — TDD red/green/refactor
 - [`commands/apply.md`](../commands/apply.md) — `/forge:apply` 完整流程 + Fluid Pause 触发条件
+
+## 第 4 步 — Review
+
+### 你要做的
+
+派 review 子代理审 4 件套 + git diff,主代理对每条 finding 判 accept/reject,通过后写 `.review-passed` marker。
+
+### 准确操作
+
+在 Claude Code 会话里发:
+
+```
+/forge:review
+```
+
+### 期望发生(✅ 表示 forge 工作正常)
+
+- ✅ AI invoke `forge:requesting-code-review` + `forge:receiving-code-review` skills
+- ✅ AI 派 fresh review 子代理审 [proposal + specs + design + git diff]
+- ✅ 主代理对子代理产的每条 finding **逐条判 accept / reject**(accept = 用证据反驳 + 实施 / reject = 用证据反驳但不实施)
+- ✅ AI 调 `forge evidence record-review` helper(写 staging,**用户不需手敲**)
+- ✅ 接受意见 append 到 `tasks.md` 末尾作新 task(本轮**不算通过**,需下一轮 review)
+- ✅ 三条件全满足时写 `forge/changes/<id>/.review-passed`:
+  1. 无悬挂"已用证据反驳但未存档"的拒绝意见
+  2. 接受意见已全部实现 + 测试通过
+  3. 本轮无新增 task
+
+> ❌ 如果 finding 你既不 accept 也不 reject → review 拒签,marker 不写
+
+### 嵌入 deep-dive
+
+> 💡 **深入:Review 报 finding,走哪一级处理**
+>
+> forge 把 review finding 分三级,**只有 WARNING 可走 ack 流程**(沿 `skills/receiving-code-review/SKILL.md:230 + 263`):
+>
+> | Severity | 判定来源 | 你的动作 |
+> |---|---|---|
+> | **CRITICAL** | 工具客观判定(测试 fail / hash mismatch / evidence 缺失) | **必修**。修代码 → 重跑 verify。**不能 ack 降级**(forge 协议硬约束) |
+> | **WARNING** | AI 主判(事实可能有问题但需人类裁决) | 优先 fix;若有合理理由不 fix(scope 太大 / 决策被推翻)→ 走 **ack 两步协议**(见下) |
+> | **SUGGESTION** | AI 主判,无需 ack | 顺手 fix 或留 backlog,archive 不阻塞 |
+>
+> **ack 两步协议(只对 WARNING)**:
+>
+> ```bash
+> # 第一步:AI 调 propose(用户不直接敲)
+> forge ack propose --action ack-warning --finding-id <id> --rationale "<为啥可以不修>"
+> # → 写 forge/changes/<id>/.ack-log.jsonl 一条 status=proposed
+> ```
+>
+> 然后在 Claude Code 会话里:
+>
+> ```
+> /forge:ack-confirm
+> ```
+>
+> - AI 列出待 confirm 的 propose 项
+> - 你回答 `accept` / `reject`
+> - accept → `.ack-log.jsonl` append `status=confirmed` + `acked_by` + `ack_at`
+> - reject → `.ack-log.jsonl` append `status=rejected`,你回头修代码
+
+### 确认
+
+```bash
+cat forge/changes/<id>/.review-passed   # 期望:schema_version / log_hash / reviewed_at / findings_acked
+cat forge/changes/<id>/.ack-log.jsonl   # 若有 WARNING:每行 1 个 ack 事件(proposed / confirmed / rejected)
+```
+
+### 深读
+
+- [`skills/receiving-code-review/SKILL.md`](../skills/receiving-code-review/SKILL.md) §三级 severity 段
+- [`commands/review.md`](../commands/review.md) + [`commands/ack-confirm.md`](../commands/ack-confirm.md)
+- [`src/cli/commands/ack.ts`](../src/cli/commands/ack.ts) — `forge ack` 三子命令实现

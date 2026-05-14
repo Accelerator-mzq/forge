@@ -1,7 +1,7 @@
 # Forge
 
 [![CI](https://github.com/Accelerator-mzq/forge/actions/workflows/ci.yml/badge.svg)](https://github.com/Accelerator-mzq/forge/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/@accelerator-mzq/forge.svg)](https://www.npmjs.com/package/@accelerator-mzq/forge)
+[![version](https://img.shields.io/github/package-json/v/Accelerator-mzq/forge)](https://github.com/Accelerator-mzq/forge/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 > **v1.1** 三 harness AI 工作流 plugin。融合 [OpenSpec](https://github.com/Fission-AI/OpenSpec) 产物驱动工作流 + [superpowers](https://github.com/obra/superpowers) 行为塑造 skill,**外加 v1.0 反向加固协议(三级 severity / 三维 verify / 三级 fence / ack 两步)防 AI 在 spec 阶段偷懒**。

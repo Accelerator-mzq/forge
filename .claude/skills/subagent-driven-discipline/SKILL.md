@@ -7,7 +7,7 @@ metadata:
   author: forgeue project (extracted to generic)
   version: "1.0-generic"
   scenario_subtype_count: 28
-  case_study_count: 8
+  case_study_count: 9
   retrospect_protocol: trigger-type-matrix(5 types × per-type intensity)
 ---
 
@@ -1229,6 +1229,84 @@ git update-ref refs/heads/<wrong-branch> <prior-base-sha>
 - plan-9i `forge-eval-integration.md` Pattern Q 段加 must_not_match 引用 vs 行为边界子段(Lesson 4 协议升级)
 - `subagent-driven-discipline` SKILL.md §3.X plan writing playbook 加 "Task BLOCKED 修订决策树:选项 A vs B"(Pattern U 协议升级)
 - plan-9h Task 4 留下的 2 concerns(branch-protection SDD SKILL.md 缺 `forge preflight branch-check` cross-ref + stop-on-repeat-failure must_not_match regex 收紧)由 plan-9z polish 消化(沿 memory `project-plan9i-protocol-upgrade-followup` 模式,plan-9h 不修协议本身)
+
+---
+
+### Case 09: forge-repo / Plan 9z / v1.0 release(中间路线 B 模式 + Codex 外部 review + plan-9z polish 9 工作单消化)
+
+**Date**:2026-05-14
+**Trigger Type**:**Type 7 — release sub-plan(中间路线 B 模式)**;非 SDD(沿 Case 07/08 同 non-SDD trigger type);controller(opus 4.7)单线程 inline 实施 + Codex(gpt-5.4-codex)外部 review + forge-eval automated judge(sonnet-4-6)baseline 重跑
+**Project context**:forge-repo / plan-9z v1.0 fusion completion release(plan-9a~9j 10 sub-plan 收尾 + plan-9z polish 9 工作单消化:Pattern O/P/Q/R + P-1/P-2 + P-5/P-6/P-7/P-8;P-3 fence-9.2 flaky + P-9 git utils 抽出延 plan-v1.1)。**8 commit chain** 直接到 dev(Task 0 sub-plan doc / Task 1 release-gate § v1.0 / Task 2 CHANGELOG [1.0.0] / Task 4 polish A 组 / Task 5 字面 / Task 5 baseline / Task 6 version bump + master DONE / Task 6 codex review fix);**git tag v1.0.0** pushed origin;**npm publish** 用户授权 manual trigger(本 session 不自动);plan-9h Task 4 DONE_WITH_CONCERNS 2 concerns(P-1/P-2)经 plan-9z baseline 重跑 pair_pass=true 完整消化;累计 cost ~$2.0(controller opus 4.7 + Codex review + forge-eval baseline)
+
+**Subagent dispatch**:全 inline,无 implementer dispatch(中间路线 B 决策);仅 Codex 外部 review + forge-eval automated judge:
+
+| Phase / Task | Scenario subtype 类比(§1.X.Y)| Model | $cost | Verdict |
+|---|---|---|---|---|
+| brainstorm Q1-Q7 决策(中间路线 B / 选项 A v1.0.0 / P-3+P-9 延 v1.1 / publish 用户授权)| §1.4 plan writing inline | controller(opus 4.7)| ~$0.10 | DONE — 7 决策点用户授权一次性确定 |
+| Task 0 sub-plan v1 起草(883 行)| §1.4 plan writing | controller(opus 4.7)inline | ~$0.20 | DONE — self-review 修 2 处不一致 |
+| Task 1 release-gate § v1.0 段(7 子段 +76 行) | §1.5.1 doc sync inline | controller(opus 4.7)inline | ~$0.10 | DONE — 沿 §4 v0.4 模板 |
+| Task 2 CHANGELOG [1.0.0] 段(+92 行,10 sub-plan 概要)| §1.5.1 doc sync inline | controller(opus 4.7)inline | ~$0.15 | DONE — 续 v0.4 编号 37-46 |
+| Task 3 init.ts:38 文本(B-7)| §1.1.1 mechanical | (无 commit;plan-9g commit `7d36c2b` 顺手做)| $0 | DONE — Pattern Y 实证 cross-cutting 状态未回写 master §3.11 |
+| Task 4 polish A 组(7 子段 +125 行 / 4 files)| §1.5.1 doc sync inline | controller(opus 4.7)inline | ~$0.20 | DONE — 全 5 verify 通过 |
+| Task 5 字面 P-1 + P-2(3 files +32 行)| §1.5.1 doc sync + §1.1.1 mechanical | controller(opus 4.7)inline | ~$0.15 | DONE — prettier 自动 reformat table |
+| Task 5 baseline 重跑(forge-eval pnpm eval:skill)| forge-eval baseline 验证 | forge-eval judge(sonnet-4-6) | ~$0.47 | DONE — plan-9z scope 3 scenario pair_pass=true;预存 3 scenario pair_pass=false(Pattern Z 实证 baseline cover 漏抓) |
+| Task 6 全 5 verify + version bump + master plan DONE | §1.5.1 doc sync + §1.1.1 mechanical | controller(opus 4.7)inline | ~$0.20 | DONE — typecheck/lint/format:check 0 error + vitest 1018 pass / 25.62s + P-3 fence-9.2 三次未复现 |
+| Task 6 Codex review release docs(CHANGELOG / release-gate-checklist / master §3.11+§6)| §1.2.X external review(Codex CLI subprocess)| Codex gpt-5.4-codex | ~$0.30 | DONE — 8 finding(4 字面错 + 3 不一致 + 1 漏项);7 采纳 + 1 留 plan-v2(Pattern V 实证 + Pattern S REINFORCE) |
+| Task 6 Codex review fix(7 finding 全采纳)| §1.5.1 doc sync inline | controller(opus 4.7)inline | ~$0.10 | DONE — 3 files +9/-9 行 |
+| Task 6 git tag v1.0.0 + push origin | §1.1.1 mechanical | controller(opus 4.7)inline | $0 | DONE — annotated tag with v1.0 release notes |
+
+**Real issues caught / failed**:
+
+| Issue | Severity | Caught by | Scenario subtype 验证 |
+|---|---|---|---|
+| Codex review 8 finding(4 字面错 + 3 不一致 + 1 漏项)— plan v1 起草时就 stale 的路径错 / 文件名 stale / 不变量计数 stale / 修订记录漏 commit SHA | Important | Codex review release docs(plan v1 起草 + 8 commit 实施期同源 self-review 均未抓)| **NEW Pattern V** — 中间路线 B 模式必须配 Codex 外部 review 兜底字面错(REINFORCE Pattern S 实证)|
+| 预存 3 scenario(force-dispatch-subagent / review-subagent-output / not-merge-without-test)pair_pass=false(RED 7.5/9.0 > 5;Pattern R 严格 trigger 应 REFACTOR rubric)| Important | Task 5 baseline 重跑总览表(plan-9h Task 4 commit `b5fb981` 漏抓 — 只验证新增 3 scenario)| **REINFORCE Pattern T**(Goodhart's law)+ **REINFORCE Pattern Q new edge**(forge-eval baseline 应 cover 全 yaml scenarios 而非仅新增 — 与 Pattern Q rubric 设计盲点同源)|
+| plan-9z sub-plan v1 字面错 4 项 cross-file 路径(`.claude/skills/writing-skills/`实际无 prefix / `main-agent-stop.yaml` 实际 merge 进 SDD yaml / `subagent-driven-discipline/SKILL.md` §"STOP Triggers" 实际段在 `subagent-driven-development/SKILL.md`)| Important | 实施期 grep 真实路径时发现(Task 4 / Task 5 第一步 read 真实文件位置) | **REINFORCE Pattern S** — plan v1 起草时同源审查盲点;Codex review 也兜底找到这些 |
+| master plan §3.11 line 410 描述 stale("init.ts:38 v0.4 → v1.2 改动")— 实际已 plan-9g commit `7d36c2b` Step 5.5 顺手完成(2026-05-13),master plan 起草于 2026-05-10 未回写 | Informational | Task 3 实施第一步 grep init.ts:38 字面发现已是 "v1.2" | **REINFORCE Pattern S/T 同源** — cross-cutting 改动状态未回写 master plan(plan-v2 reorganize 时机)|
+| plan-9z §2 字面"6 子段(代码/测验证/端测/兼容/文档/npm/plugin)" vs release-gate §5 实际 7 子段(plan-9z Task 1 起草时扩 §5.7 polish verify) | Minor | Codex review B2 finding(B2 留 plan-v2,plan v1 字面 stale 但产物准确)| Informational — plan-9z 决策 B2 不修(不阻塞 release;留 plan-v2 sub-plan)|
+
+**Lesson**(reinforce / new pattern / 协议缺口 refinement):
+
+1. **NEW Pattern V — 中间路线 B 模式(sub-plan doc + inline + 跳 implementer dispatch)适用 docs-heavy + 已知路径 + 风险低 sub-plan**(plan-9z release 实证)
+   - 实证:plan-9z 8 commit 全 inline 实施(brainstorm + sub-plan doc + 5 Task + Task 6 verify+publish 准备),无 implementer dispatch,无 spec/quality reviewer round。实际 P50 1.3d / cost $2.0;完整 SDD 模式估时 P50 2-2.5d / cost $5-7。**节省 35-47% 工日 + cost**。
+   - **Tradeoff 验证**:docs-heavy + 已知路径 + 风险低 ✅ inline 完全可行;但 Codex review 暴露 8 finding(7 项 plan v1 起草时就 stale,1 项 A1 真实 release 阻断 occurrence 占位符)— **dispatching 5-7 implementer 也不能挡这些**,因为同源审查盲点(implementer 复用 plan 字面假定);**Codex 外部 review 才能挡** — Pattern S REINFORCE 实证。
+   - **fix 模式**:中间路线 B 模式的**强制配置**:(1)sub-plan doc 留 audit trail(brainstorm Q1-Q7 决策固化)/(2)Codex 外部 review **必跑**(release docs / 关键协议 sub-plan)而非可选 — 否则同源审查盲点 +ε accumulation 会让 release 字面错积累;(3)实施第一步 grep 真实路径 verify plan 字面假定(Pattern S §2.1.1 external protocol assumption verify 协议落地后 controller 也要跟);(4)task 切分纪律保留(本 plan 7 Task + 1 follow-up,清晰分阶段);(5)只用于 docs-heavy + 已知路径 + 风险低 sub-plan,**不用于代码 heavy / 设计探索 / 跨子系统集成** sub-plan。
+   - **协议升级建议**:`subagent-driven-discipline` SKILL.md §3.X 加 "Trigger Type 7 — Release sub-plan / Polish sub-plan 中间路线 B 模式" 子段;留 plan-v2 reorganize 阶段(本 case 09 已记录 pattern,后续 plan 引用即可)。
+
+2. **NEW Pattern W — release docs codex review 累计修订记录整合**(plan-9z CHANGELOG [1.0.0] §"Fixed — codex 累计 5+ 轮 review 修订" 段实证)
+   - 实证:plan-9z CHANGELOG [1.0.0] 段统一汇总 10 sub-plan(plan-9a~9j)累计 5+ 轮 codex review 200+ 条 finding 修订记录(每 sub-plan vN→vN+1 一行,沿 plan-9j v9 / plan-9g v8 等格式)。避免每 sub-plan 单独 release 时各自的修订历史散落在 10 个 CHANGELOG entry,reader 需翻 10 个段才能 reconstruct fusion completion 完整修订链。
+   - **fix 模式**:Master-level release(本例 v1.0 fusion completion;类比 v0.5 / v2.0 等"主题 release")的 CHANGELOG 段应:(1)主题概要(本例 "v1.0 标志 forge fusion 真正达成产品定位")/(2)逐 sub-plan 概要(本例 10 sub-plan 编号 37-46)/(3)`### Fixed — codex 累计 N 轮 review 修订` 段汇总各 sub-plan 修订链(plan-9a v1→v4 / plan-9j v1→v9 等)/(4)`### Acknowledgments` 段链接完整 spec + master plan + sub-plan 链。
+   - **协议升级建议**:无 protocol 修订(本 pattern 是 release docs 写作习惯,落在 plan-9z Task 2 CHANGELOG 实施时一并应用);案例参考。
+
+3. **REINFORCE Pattern S(Case 08)— 中间路线 B 模式 + Codex review 兜底强化**(plan-9z 8 commit + Codex review 7 finding 实证)
+   - 实证:plan-9z 全程 inline 实施(无 spec reviewer / quality reviewer dispatch),controller 自己 self-review 跑 verify;但 Codex review 找到 7 finding 全采纳(其中 A1 占位符未填是真实 release 阻断;A2-A4 + B3 是 plan v1 起草时就 stale 的路径错;B1 是 plan-9g v6 修订 13→14 不变量回写漏;C1 是修订记录漏 commit SHA)。**8 commit 实施期同源 self-review 一项都没抓**(每个 Task 我跑 verify 都过,format:check 也过,但路径错 prettier 不报)。
+   - **Root cause 同 Case 08 Pattern S**:同源认知盲点 — 我写 sub-plan v1 时假定 `.claude/skills/writing-skills/` 路径(写 sub-plan 时没 grep verify),后续 Task 4 实施时第一步 grep 才发现 prefix 错(但已经在 sub-plan v1 字面错了 — 不去回头改 sub-plan,改 commit 时用真实路径)。Codex 不复用我的假定,从外部视角看 plan v1 字面 vs Task 4 commit 字面不一致 → 直接抓 Pattern X 4 项。
+   - **fix 模式**:**中间路线 B 模式 + Codex review 必跑** = 同源审查盲点的兜底保险;否则 release 会带着 plan v1 字面错入 npm registry。Codex review cost ~$0.30 比修复 release 后字面错的 reputational cost 低 100x。
+   - **协议升级建议**:`subagent-driven-discipline` SKILL.md §2.1 implementer prompt 加 "**external protocol assumption verify**" 子段(已在 plan-9z Task 4 P-5 落地);中间路线 B 模式 sub-plan 加 mandatory "Step 6.7 Codex review release docs"(plan-9z 已实证,留 plan-v2 模板化)。
+
+4. **REINFORCE Pattern T(Case 08)+ NEW edge — forge-eval baseline 全 scenarios cover 漏抓 + 预存 scenario pair_pass=false 不阻塞 release**(plan-9z Task 5 baseline 实证)
+   - 实证:plan-9z Task 5 baseline 重跑暴露预存 3 scenario(force-dispatch-subagent RED 0.0/GREEN 0.5 delta 0.5 / review-subagent-output RED 7.5/GREEN 6.0 delta -1.5 / not-merge-without-test RED 9.0/GREEN 10.0 delta 1.0)pair_pass=false。其中 RED 7.5 + RED 9.0 严格 trigger Pattern R(任一 RED > 5 立即 REFACTOR rubric)但 plan-9z **不改 rubric 凑 pair_pass**(沿 Pattern T Goodhart's law 防御)— 决策延 plan-v1.1 独立 sub-plan 修(改 SKILL.md / 改 rubric / 加 scenarios 行为锚)。
+   - **Root cause**:plan-9h Task 4 commit `b5fb981` 实施时 implementer 只跑新增 3 scenario(branch-protection / critical-plan-review / stop-on-repeat-failure)baseline,**没跑预存 3 scenario**;预存 scenarios 在 SDD yaml 初始 commit `13d02ac` 落地时也没跑过 pair_pass 验证(commit message 没提验证结果)。**forge-eval baseline 默认全 yaml 跑,但 plan implementer 只看自己新增 scenario 的输出**。
+   - **fix 模式**:forge-eval baseline 实施时,**全 scenario 状态都看**(总览表 + 失败详情段都读),不只看自己新增 scenario;若预存 scenario 失败,决策(a)修预存 scenario(若与本 sub-plan scope 相关)/(b)延后续 sub-plan(若与本 sub-plan scope 无关 — plan-9z 决策路径)+ release-gate 加 known-issue 段不阻塞 release。
+   - **协议升级建议**:plan-9i `forge-eval-integration.md` 加 "baseline cover 全 scenarios" 段(implementer 跑 baseline 后必须扫总览表所有 row,不只 focus 自己新增);留 plan-v1.1 协议升级 sub-plan。
+
+5. **REINFORCE Pattern Q new edge(Case 07/08)— must_not_match 边界协议落地实证**(plan-9z Task 5 P-2 实证 + 协议 P-7 落地)
+   - 实证:plan-9z Task 5 P-2 落地把 `stop-on-repeat-failure` scenario must_not_match 从引用短语锚 `(直接\s*再派|再试一次|换个\s*model\s*再派)` 收紧为行为锚 `Use Task tool with .*sonnet` + `(?:好的|那就|可以).{0,20}(再派|再试)`;judge_rubric 判分锚点段补显式声明 "**must_not_match 不针对 AI 复述用户原话场景**"。baseline 重跑 delta 5.0 → 6.0 + pair_pass=true(plan-9h Task 4 delta=5.0 但 must_not_match 误中假性 RED → plan-9z P-2 消化后 delta=6.0 真 pair_pass)。
+   - **协议落地**:plan-9z Task 4 同步在 `skills/writing-skills/forge-eval-integration.md` Pattern Q 段下加 "### 3.2 P-7 — must_not_match 引用 vs 行为边界" 子段(含 yaml 收紧模板),Pattern Q new edge 协议化完成。
+   - **fix 模式**:**已落 plan-9z polish A 组 Task 4 + B 组 Task 5,本 case 09 仅记录实证**;后续 sub-plan 设计 must_not_match 时直接读 `forge-eval-integration.md` §3.2 模板。
+
+**Cost vs SDD baseline**:
+
+- 实际:8 commit chain controller(opus 4.7)~$1.20 + Codex review(gpt-5.4-codex)~$0.30 + forge-eval Task 5 baseline ~$0.47 + plan-9z 起草 brainstorm + writing-plans inline ~$0.10 ≈ **$2.0**
+- SDD baseline 假设(若按 SDD 流程做 7 Task,每 Task 含 implementer + spec_reviewer + code_quality_reviewer):~$5-7
+- 节省 ratio:~50-70%(per-Task 跳过 implementer dispatch + 跳过 spec/quality reviewer,仅保留 Codex 外部 review;docs-heavy 任务 SDD 的 spec/quality reviewer 价值低,Codex 外部 review 高价值)
+- **质量**:8 commit + dev-direct push + v1.0.0 git tag + npm publish 待用户授权 + Codex review 7 finding 全采纳 + forge-eval Task 5 baseline 3/3 plan-9z scope pair_pass=true(plan-9h Task 4 2 concerns 完整消化)+ verify 全 PASS(typecheck/lint/format:check/vitest 1018 tests / 25.62s)+ 2 new patterns 沉淀(V/W)+ 3 reinforce(S new edge / T new edge / Q new edge 落地)
+
+**Followup 建议**(由 plan-v1.1 或 plan-v2 消化;**本次 retrospect 仅沉淀 lesson + 标 release v1.0.0 完成**):
+
+- plan-v1.1 scope:P-3 fence-9.2 flaky timeout fix(性质本征 flaky,需 timing buffer 或 hash-only fast path)+ P-9 git utils 抽出(若 2+ 复用点)+ 预存 3 forge-eval scenario refactor(force-dispatch-subagent SKILL.md 改 / review-subagent-output rubric 收紧 / not-merge-without-test scenario 行为锚 + judge_rubric 判分锚点段)
+- plan-v2 协议升级(若 forge fusion 进入 v2.0 reorganize 阶段):`subagent-driven-discipline` SKILL.md §3.X 加 "Trigger Type 7 — Release sub-plan / Polish sub-plan 中间路线 B 模式" 子段(Pattern V 协议化)+ plan-9i `forge-eval-integration.md` 加 "baseline cover 全 scenarios" 段(Pattern Q new edge 协议化)+ `skills/writing-skills/SKILL.md` Pattern X 候选 5 项消化(path stale / cross-cutting 状态回写 / file structure 一致性)
+- npm publish 用户授权 manual trigger(本 session 完成 git tag + dry-run 准备;实际 publish 由用户 `pnpm publish --publish-branch dev` 或切 master 分支后跑)
 
 ---
 

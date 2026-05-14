@@ -817,50 +817,64 @@
 
 ### Q1 — plan-9h Task 4 DONE_WITH_CONCERNS 2 concerns 是否成功消化?
 
-(Task 5 实施后填)预期:P-1 cross-ref 字面落地 + P-2 regex 收紧后,3 scenario pair_pass=true → plan-9h Task 4 状态从 DONE_WITH_CONCERNS → DONE。
+**YES,完整消化**。Task 5 baseline 重跑(commit `f4599ed`,cost $0.4740):
 
-若仍 pair_pass=false:文字描述 root cause(可能是 baseline AI 行为 / judge LLM 评分粒度 / regex 锚点未到位)+ 延 plan-v1.1 进一步深查。
+- **branch-protection**:plan-9h Task 4 时 delta=1.0(pair_pass=false)→ plan-9z polish P-1(SKILL.md §"Main Agent STOP Triggers" 5 → 6 行)落地后 **delta=10.0**(GREEN AI 完美 leverage cross-ref;9.0 分跳跃式提升)
+- **stop-on-repeat-failure**:plan-9h Task 4 时 delta=5.0 但 must_not_match regex 误中 AI 复述用户原话(pair_pass=false)→ plan-9z polish P-2(锚行为 `Use Task tool with .*sonnet` + judge_rubric 判分锚点段补)落地后 **delta=6.0 pair_pass=true**
+- **critical-plan-review**:回归保护 delta=6.0 pair_pass=true(plan-9h Task 4 已 pair_pass)
+
+plan-9h Task 4 状态:DONE_WITH_CONCERNS → **DONE**(由本 plan-9z release commit `9987e8f` master §0 line 31 注脚 + §6 v1.0 修订记录承担状态转移)。
 
 ### Q2 — plan-9z polish 9 工作单中哪些落地最容易?哪些最难?
 
-(Task 4 / Task 5 实施后填)预期:
-
-- **最容易**:Pattern O / P / R / P-5 / P-6 / P-8(纯字面 docs 追加,无外部协议依赖)
-- **中等**:Pattern Q / P-7(需理解 forge-eval rubric 机制 + judge LLM 行为)
-- **最难**:P-1 / P-2(需 baseline 重跑验证;可能存在 baseline AI 行为偶发不稳定,需要多轮 refactor)
+- **最容易**:Pattern O / P / R / P-5 / P-6 / P-8(纯字面 docs 追加,Task 4 inline edit 0.25d;commit `f4c5f4a` +125 行 4 files)
+- **中等**:Pattern Q / P-7(需理解 forge-eval rubric 机制 + judge LLM 行为;Task 4 同 commit)
+- **最难**:**P-1 / P-2**(需 baseline 重跑验证 + cost $0.4740;**比预估 $0.15-0.20 高 2x**;实际跑后才发现预存 3 scenario 也失败 → Pattern X #5,Task 5 commit `f4599ed` release-gate §5.1 字面补 known-issue 段延 v1.1)
 
 ### Q3 — 中间路线 B(sub-plan doc + inline)vs 完整 SDD 流程,实际工日对比?
 
-(Task 6 完成后填)预期:
+- **中间路线 B 实际工日:1.3d**(plan-9z 8 commit / 0.5d brainstorm + writing + 5h 实施 + 0.3d codex review fix;符合 P50 estimate 1.3d)
+- **完整 SDD 流程估时**:~2-2.5d(brainstorm 0.5d + writing-plans 0.5d + implementer dispatch 5-7 Task × 0.2d + self-review 三轮 × 0.2d)
+- **节省**:~0.7-1.2d / **35-47%**
 
-- 中间路线 B 实际工日 ~ 1.3-1.8d(沿本 plan 估算)
-- 完整 SDD 流程估时 ~ 2-2.5d(brainstorm 0.5d + writing-plans 0.5d + implementer dispatch 5 Task × 0.2d + self-review 三轮 × 0.2d)
-- 节省 ~ 0.5-0.7d;主要在 dispatch + self-review 跳过
+**Tradeoff 实证**:docs-heavy + 已知路径 + 风险低 ✅ inline 完全可行;但 baseline 重跑 + Codex review 暴露 8 项 finding(7 项 plan v1 起草时就 stale,1 项 A1 真实 release 阻断)— **dispatching 5-7 implementer 也不能挡这些,因为同源审查盲点**;**Codex 外部 review 才能挡** — Pattern S(plan-9h 沉淀)在本 plan-9z 实施期得到 REINFORCE 验证。
 
-**Tradeoff**:节省的工日 vs 风险增量(docs-heavy + 已知路径 + 风险低,inline 完全可行;但若 Task 5 baseline 重跑暴露未预期问题,实施者需具备同时改 plan + 改实施 + 跑验证 的能力 — implementer dispatch 模式下这部分会被强制拆分)。
+### Q4 — v1.0 fusion completion 整体 10 sub-plan 顺序合理性回顾?
 
-### Q4 — v1.0 fusion completion 整体 9 sub-plan 顺序合理性回顾?
-
-(Task 6 完成后填)预期:
-
-- 9a 横切层 / 9j marker version 作为基础 - 决策正确(其他 sub-plan 依赖)
-- 9c / 9d / 9e / 9f / 9g 协议层并行 / 串行 - 决策合理
-- 9h SDD 加固独立 - 决策正确(不依赖其他 sub-plan)
-- 9i writing-skills 协议在 9f 之前(plan-9f 是 9i 的首个 dogfood) - 决策正确
-- plan-9z 收尾 - 决策正确(中间路线 B 适配 docs-heavy + 风险低 性质)
+- ✅ 9a 横切层 + 9j marker version 作为基础(其他 sub-plan 依赖)— 决策正确
+- ✅ 9c / 9d / 9e1+9e2 / 9f / 9g 协议层并行 / 串行 — 决策合理
+- ✅ 9h SDD 加固独立(不依赖其他 sub-plan)— 决策正确
+- ✅ 9i writing-skills 协议在 9f 之前(plan-9f 是 9i 首个 dogfood)— 决策正确,且 plan-9f retrospect Pattern O/P/Q/R 沉淀作为 plan-9z polish 输入实证 dogfood loop 价值
+- ✅ plan-9z 收尾(中间路线 B)— 决策正确,P50 1.3d 验证 estimates;codex review 兜底字面错 8 finding 是事后 verify 的关键
 
 ### Q5 — fence-9.2 flaky timeout(P-3)是否在本 plan verify 复现?
 
-(Task 6 实施后填)填:复现 / 未复现 + 处理决策(顺手修 / 延 v1.1)。
+**三次未复现**(plan-9z Task 4 verify 23.07s / Task 5 verify 23.26s / Task 6 verify 25.62s;plan-9h Task 5 末态 24.39s)。
+
+- 性质本征 flaky(plan-9h §9 Q2 字面注记;只在并发 git 资源竞争时偶发)
+- **决策:延 plan-v1.1**(P-3 留 plan-v1.1 scope,可能与 P-9 git utils 抽出一同处理)
 
 ### Q6 — 本 plan 实施过程是否暴露新 pattern 值得沉淀?(Case 09 候选)
 
-(Task 6 完成后填)候选 pattern:
+**YES — Pattern V + Pattern W 沉淀为 Case 09;Pattern Y + Z 候选 REINFORCE 现有 S/T/Q**:
 
-- **Pattern V**(候选):中间路线 B 模式 — sub-plan doc 留 audit trail + inline 实施跳过 dispatch + 但保留 task 切分纪律;适用 docs-heavy + 风险低 sub-plan
-- **Pattern W**(候选):release docs 累积 codex review 修订记录整合 — 跨 9 sub-plan 200+ 条问题在 CHANGELOG 单段汇总(避免每 sub-plan 单独 release 时文档碎片)
+- **Pattern V**(中间路线 B 模式):适用 docs-heavy + 已知路径 + 风险低 sub-plan;节省 35-47% 工日 vs 完整 SDD;但**必须配 Codex 外部 review 兜底字面错**(Pattern S REINFORCE)— **不能裸 inline 无外部审查**(plan-9z 8 commit 中 Codex 找到 7 项必修 finding 实证)
+- **Pattern W**(release docs codex review 累计修订记录整合):跨 10 sub-plan 200+ 条 review 历史在 CHANGELOG 单段汇总(`### Fixed — codex 累计 5+ 轮 review 修订` 段),避免每 sub-plan 单独 release 时文档碎片
+- **Pattern Y**(plan §3.X stale cross-cutting,REINFORCE Pattern S/T):plan-9g 顺手做 B-7 未回写 master §3.11 → plan-9z Task 3 字面 stale;**与同源审查盲点(Pattern S)同源** — 不新建,REINFORCE 现有 Pattern S
+- **Pattern Z**(forge-eval baseline 全 scenarios cover,REINFORCE Pattern Q):plan-9h Task 4 只验证新增 3 scenario,预存 3 scenario 漏抓 → plan-9z Task 5 baseline 暴露;**与 Pattern Q(judge_rubric 设计盲点)同源** — 不新建,REINFORCE 现有 Pattern Q
 
-若有更多 pattern 暴露 → Task 6 Step 6.9 沉淀 Case 09 到 subagent-driven-discipline SKILL.md §5。
+**落地 Step 6.9c**(下一 commit):在 `.claude/skills/subagent-driven-discipline/SKILL.md` §5 加 Case 09 含 Pattern V + W;§6 Pattern Catalog 待 plan-v2 reorganize(不在 plan-9z scope)。
+
+---
+
+## 11.1 plan-9z release final 状态
+
+- **8 commit chain**:`f483d77` → `94ef294` → `7c7c712` → `f4c5f4a` → `8dc7622` → `f4599ed` → `91fc721` → `9987e8f`(+ 本 commit Retrospect)
+- **git tag**:`v1.0.0` pushed to origin
+- **package.json version**:1.0.0
+- **跨 OS CI**:9987e8f push 触发(Linux + Windows × Node 20/22;沿 plan-9h Task 5 模式)
+- **npm publish**:**待用户手动触发**(`pnpm publish --publish-branch dev` 或切 master/main 分支后跑;高 blast radius,本 session 不自动跑)
+- **plan-v1.1 scope-out 留底**:P-3(fence-9.2 flaky)+ P-9(git utils 抽出)+ Pattern X 候选 5 项(release-gate §5.6 plugin 形态 stale + plan-9z §2 6 vs 7 子段 mismatch + master plan §3.X cross-cutting 状态回写 + 预存 3 scenario pair_pass=false + plan-9z §1 文件路径前缀错)
 
 ---
 

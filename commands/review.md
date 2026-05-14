@@ -43,7 +43,7 @@ You are about to handle `/forge:review $ARGUMENTS`.
 
         若漏调 record-review 直接 freeze → exit 1 + 提示 "staging file not found"(代码事实 `evidence.ts:639`)。若漏调 freeze → archive fence 拒签 "[review] v1.0 marker missing process_evidence"(代码事实 `src/core/archive/fence.ts:185`)。
 
-8.  `.review-passed` YAML schema(spec §3.4):
+8.  `.review-passed` YAML schema(spec §3.4)— 含 `pause_decisions` 数组(本 fix 补 lifecycle 注):
     ```yaml
     schema: forge-review/v1
     tasks_hash: <sha256(tasks.md 已勾段)>
@@ -59,6 +59,9 @@ You are about to handle `/forge:review $ARGUMENTS`.
         accepted: true
         resolved: true
         resolution_commit: <hash>
+    pause_decisions: # apply 阶段累积的 pause 决策在写本 marker 时一并迁移(沿 commands/apply.md "Marker 持久化" 段 lifecycle 说明)
+      - id: 1
+        # ... 完整 schema 见 commands/apply.md "Marker 持久化" 段
     ```
 
 ## 禁止行为

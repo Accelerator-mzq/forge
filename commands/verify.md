@@ -102,6 +102,9 @@ You are about to handle `/forge:verify $ARGUMENTS`.
          severity_acked_by: null # WARNING 必须 ack 才能 archive(在 archive 阶段走 ack)
          severity_acked_at: null
        # ... 其他 finding
+     pause_decisions: # apply 阶段累积的 pause 决策在写本 marker 时一并迁移(本 fix 补 lifecycle 注;沿 commands/apply.md "Marker 持久化" 段)
+       - id: 1
+         # ... 完整 schema 见 commands/apply.md "Marker 持久化" 段
      ```
 
      4.3a **(本 fix 补缺):调 forge evidence record-verify 记录 verify 事件证据到 staging**

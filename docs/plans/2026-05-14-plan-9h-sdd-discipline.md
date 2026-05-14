@@ -1225,5 +1225,51 @@ git push origin dev
 
 ---
 
-(本 plan 收尾后追加 §9 Retrospect Q1-Q6 + Case 08 / Followup;由 Task 5 implementer 在收尾时填写)
+## 9. 综合 Retrospect Q1-Q6(Task 5 implementer 在收尾时真实填写)
+
+**Q1: 本 plan 实施过程中,是否有 brainstorm 阶段未识别的设计问题?**(**Yes** + 详)
+
+- **Task 4 BLOCKED → v1.2 修订暴露 2 处 brainstorm 漏识别**:
+  1. **forge-eval runner 1:1 yaml 架构约束**(brainstorm 阶段假定独立 `main-agent-stop.yaml` 可与 SDD `subagent-driven-development.yaml` 并存,实际 runner `pnpm eval:skill <name>` 期望 1 个 skill = 1 个 yaml;Task 4 baseline 尝试跑独立 yaml 失败 → v1.2 修订决策 B:merge 3 scenario 到现有 SDD yaml)
+  2. **branch-protection scenario 跨文件协议加固缺口**(brainstorm 假定 Task 3 SDD SKILL.md §"Main Agent STOP Triggers" 子段 + Task 2 apply.md 步骤 0/3.5 双改足以 GREEN baseline,实际 baseline 暴露 SDD SKILL.md 字面缺 `forge preflight branch-check` cross-ref → 子段只字面引用 "BLOCKED 协议 + apply.md §Fluid Pause" 不引 `forge preflight`,baseline AI 未触发 `forge preflight` 提示;delta=1.0 远低于目标 ≥ 1.5)
+- 影响:Task 4 状态 DONE_WITH_CONCERNS,2 concerns 留 plan-9z polish
+
+**Q2: 本 plan 测试矩阵是否覆盖完整?是否有未捕获的边界?**(**Yes** + 详)
+
+- **未捕获边界 1:forge-eval GREEN bootstrap 不 inject apply.md**(GREEN scenarios 只 inject 目标 skill SKILL.md 不 inject 整个 `commands/apply.md`)→ 跨文件协议加固(SDD SKILL.md 子段 + apply.md 步骤 0/3.5 联动)的验证强度只覆盖 SDD SKILL.md 单文件,未覆盖跨文件组合;branch-protection delta=1.0 即此边界暴露
+- **未捕获边界 2:stop-on-repeat-failure `must_not_match` regex 太宽**(`(直接\s*再派|再试一次|换个\s*model\s*再派)` 误中 baseline AI 复述场景描述时引用"再试一次"的引用文本而非"再试一次"的决策意图);scenario regex 设计未考虑"引用 vs 行为"语义边界 → delta=5.0 失败(理想 ≥ 6.0)
+- 两处边界共同特征:Pattern P "baseline 必失" 维度设计 + Pattern R "RED > 5 立即 REFACTOR" 应用到 RED ≤ 5 时反向加固成本超出 plan-9h 工时预算 → 诚实留 plan-9z polish
+
+**Q3: 本 plan codex review 是否 1-2 轮收敛?是否有 BLOCKER 涌现?**(**No** + 详)
+
+- **codex 路径不可用**(本 session codex CLI auth 失效;沿 `feedback_codex_auth_fallback` memory)→ fallback self-review 流(plan v1 → v1.1 → v1.2 两轮 self-review)
+- self-review 收敛结果:0 BLOCKER + 0 MAJOR + 1 MINOR(NIT-1 关 v1.1 → v1.2 MINOR-1 关 Task 4 BLOCKED 决策 B 选项,均已闭环)
+- **Important caveat**:同源 self-review(implementer = reviewer = controller)的盲点性质 — Task 4 BLOCKED 暴露的两个 concerns(branch-check cross-ref + regex 收紧)在 v1/v1.1/v1.2 三轮 self-review 中均未识别;真实 codex 外部 review 可能会抓到但本次未跑;**沉淀点**:同源 self-review 是 last-resort 不是 first-choice,Case 08 Pattern S 沉淀此教训
+
+**Q4: 本 plan 是否暴露 plan-9i 协议 / 9a 接口冻结的新缺口?**(**Yes 9i + No 9a** + 详)
+
+- **9a 接口零侵入 verify PASS**:plan-9h **不动** marker/ack-log/process_evidence/archive schema(沿 DoD §"接口零侵入 verify" 6 条全 PASS)— 9a 冻结无新缺口
+- **9i 协议新缺口 = 在 memory `project-plan9i-protocol-upgrade-followup` 4 patterns(O/P/Q/R)基础上 +2 新 concerns**:
+  - **Concern α(branch-check cross-ref)**:跨文件协议加固类 skill(如 SDD SKILL.md + commands/apply.md 双锚)在 forge-eval 验证时若 GREEN bootstrap 只 inject 单文件,验证强度不能完整覆盖跨文件组合 → plan-9i `forge-eval-integration.md` 应加 "cross-file protocol GREEN injection" 段
+  - **Concern β(must_not_match regex 引用 vs 行为边界)**:scenario `must_not_match` 应区分"复述引用文本"和"决策意图行为"两类信号 → plan-9i SKILL.md "rubric 设计原则" 段应加 "must_not_match 应锚行为短语而非引用短语,避免误中复述"
+- 均留 plan-9z polish / plan-v1.1(沿 memory followup 模式),plan-9h 本次只沉淀不修协议
+
+**Q5: 本 plan forge-eval baseline 是否一次 GREEN delta ≥ 1.5?是否触发 Pattern R 重跑?**(**No 全 pass + No Pattern R** + 详)
+
+- 3 scenario baseline 结果(Task 4):
+  - **critical-plan-review delta=+6.0** ✅(RED=2.0 / GREEN=8.0,pair_pass)
+  - **stop-on-repeat-failure delta=+5.0** ❌(RED=1.0 / GREEN=6.0,delta < 6 但 GREEN ≥ 6;**root cause = must_not_match regex 太宽误中复述**,见 Q2 边界 2)
+  - **branch-protection delta=+1.0** ❌(RED=4.0 / GREEN=5.0,delta < 1.5;**root cause = SDD SKILL.md 字面缺 `forge preflight` cross-ref + GREEN bootstrap 不 inject apply.md**,见 Q1 漏识别 2 + Q2 边界 1)
+- **Pattern R 严格 RED > 5 触发未达成**(RED 全 ≤ 5:critical-plan-review=2.0 / stop-on-repeat-failure=1.0 / branch-protection=4.0)→ Pattern R 不触发 REFACTOR
+- **诚实留 plan-9z 而非降低验证强度**:不为了凑 GREEN 把 rubric 改宽(那样会变成"Goodhart's law" — 优化指标但不优化目标);沿 Pattern P "baseline 必失"原则保持 forge-specific 高权重,接受 plan-9h 本次 1/3 pass + 2 concerns 留 plan-9z
+
+**Q6: 是否有沉淀为 Case 08 的反思值得写入 `.claude/skills/subagent-driven-discipline/SKILL.md` §5?**(**Yes** + 详)
+
+- 至少 3 patterns 值得沉淀为 Case 08(plan-9h 沉淀,沿 Case 07 plan-9f 模板):
+  - **Pattern S — 同源 self-review 漏 BLOCKER 的盲点性质**(plan-9h v1 → v1.1 → v1.2 三轮 self-review 均未识别 Task 4 暴露的 forge-eval 架构兼容 + 跨文件协议加固字面对齐两个真实 BLOCKER 性质问题;codex 外部 review 应是 first-choice 不是 last-resort)
+  - **Pattern T — Pattern R 严格遵守 vs pair_pass 失败的张力**(plan-9h 3 scenario 只 1/3 pair_pass + Pattern R 严格不触发 REFACTOR;诚实留 concerns 而非改 rubric 取巧;Goodhart's law 反面教训)
+  - **Pattern U — Task BLOCKED 修订选项 B 经验**(plan-9h Task 4 forge-eval runner 1:1 yaml 架构约束 → 选项 A 改 runner / 选项 B merge 进现有 yaml,选项 B 工时小 + 不破坏现有架构 — merge 进 SDD yaml 是 plan-v1.1 模式;沿 plan-9e2 v3 修订模式)
+- → 触发 Step 5.6 落地 Case 08 + frontmatter `case_study_count` 7 → 8
+
+---
 

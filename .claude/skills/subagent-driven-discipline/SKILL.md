@@ -7,7 +7,7 @@ metadata:
   author: forgeue project (extracted to generic)
   version: "1.0-generic"
   scenario_subtype_count: 28
-  case_study_count: 7
+  case_study_count: 8
   retrospect_protocol: trigger-type-matrix(5 types × per-type intensity)
 ---
 
@@ -1101,6 +1101,85 @@ git update-ref refs/heads/<wrong-branch> <prior-base-sha>
 - plan-9i forge:writing-skills SKILL.md 步骤 1 升级:加 Pattern R 硬 trigger("任一 RED > 5 立即 REFACTOR scenarios")+ Pattern P "rubric 设计原则"段
 - plan-9i `forge-eval-integration.md` 加 Pattern Q "rubric 判分锚点段"模板示例
 - plan-9i SKILL.md 步骤 1 line 47 字面加 Pattern O 警示("registry 扩展 + scenarios + 最小骨架一起 commit;单独 commit registry 触发 `it.each` ENOENT")
+
+---
+
+### Case 08: forge-repo / Plan 9h / SDD discipline preflight + apply.md 双改 + SDD SKILL.md 子段 + forge-eval baseline
+
+**Date**:2026-05-14
+**Trigger Type**:**Type 6 — forge:writing-skills 协议(docs-heavy + forge-eval RED-GREEN automated judge 验证)**;非 SDD(沿 Case 07 同 trigger type);controller(opus 4.7)单线程执行 + per-Task sonnet implementer subagent + forge-eval automated judge(sonnet-4-6)
+**Project context**:forge-repo / plan-9h SDD discipline(preflight CLI + ForgeConfig `protected_branches` schema / `commands/apply.md` 步骤 0/3.5/§"禁止行为(9h)" 三处净增 ~48 行 / `skills/subagent-driven-development/SKILL.md` §"Main Agent STOP Triggers" 子段 ~60 行 + 反向同步 + 跨文件协议加固 / `forge-eval/scenarios/subagent-driven-development.yaml` merge 进 3 新 scenario 双轨 RED+GREEN);**4 commits** 直接到 dev(Task 1-4 各 1 commit + Task 5 收尾 1 commit);plan v1 → v1.1 → v1.2 两轮 self-review 修订(codex auth 失效 fallback);forge-eval Task 4 1/3 pair_pass(critical-plan-review delta=+6.0 ✅ / stop-on-repeat-failure delta=+5.0 ❌ / branch-protection delta=+1.0 ❌)+ 2 concerns 留 plan-9z polish;累计 cost ~$3.5
+
+**Subagent dispatch**:per-Task 1 implementer(sonnet)dispatch + controller(opus 4.7)integrate + retrospect:
+
+| Phase / Task | Scenario subtype 类比(§1.X.Y)| Model | $cost | Verdict |
+|---|---|---|---|---|
+| plan v1 起草(sub-plan 5 Task)| §1.4 plan writing | controller(opus 4.7)| ~$0.40 | DONE |
+| plan v1 → v1.1 self-review(NIT-1 + MINOR-1)| §1.2.3 cross-phase reviewer | controller(opus 4.7,fallback codex)| ~$0.20 | DONE — fallback 模式,2 finding 修闭环 |
+| Task 1 implementer(preflight CLI + ForgeConfig schema + 6 case test) | §1.1.2 Schema + §1.1.3 Multi-file integration | sonnet implementer | ~$0.40 | DONE |
+| Task 2 implementer(apply.md 双改 + md5 sync guard 测试)| §1.1.1 Mechanical + §1.5.1 doc sync | sonnet implementer | ~$0.30 | DONE — 双改字面 transcribe spec 1378-1392 |
+| Task 3 implementer(SDD SKILL.md 子段 + 反向同步)| §1.5.1 doc sync + 反向加固 | sonnet implementer | ~$0.30 | DONE — cross-ref BLOCKED 第 4 项 + Fluid Pause |
+| Task 4 implementer v1(独立 main-agent-stop.yaml)| forge-eval scenario 设计 | sonnet implementer | ~$0.30 | **BLOCKED** — forge-eval runner 1:1 yaml 架构不容独立 yaml |
+| plan v1.1 → v1.2 修订(Task 4 BLOCKED 选项 B merge)| §1.4 plan writing | controller(opus 4.7)| ~$0.20 | DONE — 选项 A 改 runner / 选项 B merge yaml,选 B 工时小 |
+| Task 4 implementer v2(merge 3 scenario 进 SDD yaml + baseline)| forge-eval scenario 实施 | sonnet implementer + forge-eval judge | ~$0.50 | **DONE_WITH_CONCERNS** — 1/3 pair_pass + 2 concerns 留 plan-9z |
+| Task 5 verify + retrospect + Case 08 + master plan 链接 | §1.5.1 + retrospect | controller(opus 4.7)+ sonnet implementer | ~$0.50 | DONE |
+| forge-eval Task 4 baseline(3 scenario × RED+GREEN × judge sonnet-4-6)| forge-eval baseline 验证 | forge-eval judge | ~$0.40 | 1/3 pair_pass ❌(2 concerns 暴露) |
+
+**Real issues caught / failed**:
+
+| Issue | Severity | Caught by | Scenario subtype 验证 |
+|---|---|---|---|
+| Task 4 v1 forge-eval runner 1:1 yaml 架构约束(独立 main-agent-stop.yaml 跑不起来)| Important | Task 4 v1 implementer baseline 跑 `pnpm eval:skill subagent-driven-development` 时 yaml 找不到独立文件,fallback grep runner 源码确认 1:1 期望 | **NEW Pattern U** — Task BLOCKED 修订选项 B 经验(详 Lesson 3)|
+| plan v1/v1.1/v1.2 三轮 self-review 均未抓 Task 4 BLOCKER 性质问题(forge-eval 架构兼容 + 跨文件协议加固字面对齐)| Important | Task 4 真跑 baseline 后 fallback grep runner 源码 + branch-protection delta=1.0 暴露 SDD SKILL.md 字面缺 `forge preflight` cross-ref;前 3 轮 self-review 无 codex 外部视角 | **NEW Pattern S** — 同源 self-review 漏 BLOCKER 的盲点性质(详 Lesson 1)|
+| branch-protection scenario delta=1.0(SDD SKILL.md 子段字面缺 `forge preflight branch-check` cross-ref + GREEN bootstrap 只 inject SDD skill 不 inject apply.md)| Important | Task 4 baseline 总览表 + judge reasoning("AI 提到 Fluid Pause 但未提 forge preflight 命令") | **NEW Pattern T** — Pattern R 严格遵守 vs pair_pass 失败的张力(详 Lesson 2)|
+| stop-on-repeat-failure scenario delta=5.0(must_not_match regex `(直接\s*再派\|再试一次\|换个\s*model\s*再派)` 太宽误中 baseline AI 复述场景描述时引用"再试一次"的引用文本)| Important | Task 4 baseline judge reasoning("AI 复述场景说'你想再试一次'命中 must_not_match 但实际是引用而非决策意图")| **NEW Pattern T** 同上(must_not_match 引用 vs 行为边界)|
+| forge-eval RED 全 ≤ 5(critical-plan-review=2.0 / stop-on-repeat-failure=1.0 / branch-protection=4.0)→ Pattern R(任一 RED > 5 立即 REFACTOR)不触发 | Informational | Task 4 baseline 总览表 RED 列 | **NEW Pattern T** — RED ≤ 5 不触发 Pattern R 但 pair_pass 失败 = Pattern R 严格遵守 vs pair_pass 目标的张力(详 Lesson 2)|
+
+**Lesson**(reinforce / new pattern / 协议缺口 refinement):
+
+1. **NEW Pattern S — 同源 self-review 漏 BLOCKER 的盲点性质**(plan-9h v1 → v1.1 → v1.2 三轮 self-review 实证)
+   - 实证:plan-9h 因 codex CLI auth 失效本次 session 无外部 codex review,fallback self-review 流(implementer = reviewer = controller 均为同一 opus 4.7 session)。三轮 self-review(v1 / v1.1 / v1.2)结果 0 BLOCKER + 0 MAJOR + 1 MINOR + 1 NIT,但 Task 4 真跑 baseline 暴露 2 个 BLOCKER 性质问题(forge-eval runner 1:1 yaml 架构兼容 + 跨文件协议加固字面对齐 branch-check cross-ref)前 3 轮均未识别。
+   - **Root cause**:同源 self-review 的认知盲点 — implementer 写代码时假定 A,reviewer 复审时复用同样的假定 A 不去 challenge;codex 外部 review 因为是不同 session / 不同认知路径会 challenge 假定。**self-review 的 finding 数与 review 轮数线性增长但收敛慢**(每轮新增 1-2 个 NIT/MINOR,但 BLOCKER 性质问题需要"换视角"才能识别)。
+   - **fix 模式**:**codex 外部 review 是 first-choice 不是 last-resort**;codex auth 失效时应优先修复 auth(沿 `feedback_codex_auth_fallback` memory 流程)而非接受 self-review fallback。若必须 fallback self-review → 至少跑 forge-eval baseline 真测试**前**对照 forge-eval runner 源码假定(typical: `1 skill = 1 yaml` / `GREEN bootstrap 只 inject 目标 skill` 等)。
+   - **§3.2 cross-verify 加 / §2.X reviewer playbook 加**:plan implementer self-review 必含 "**外部协议假定 verify**" 段 — 列出 plan 依赖的 forge-eval / git / build system 架构假定,实施第一步 grep 源码实测确认假定成立。若假定不成立 → 立即 BLOCKED + 修订 plan(沿 Pattern U 选项 B 模式)。
+   - **协议升级建议**:`subagent-driven-discipline` SKILL.md §2.1 implementer prompt 加 "external protocol assumption verify" 子段(列项目实际的 forge-eval / build / vitest 1:1 约束 + dispatch 时强制 implementer 第一步 grep 实测);留 plan-9z polish 或 plan-v1.1。
+
+2. **NEW Pattern T — Pattern R 严格遵守 vs pair_pass 失败的张力**(plan-9h Task 4 baseline 实证:RED 全 ≤ 5 但 1/3 pair_pass)
+   - 实证:plan-9h Task 4 baseline 3 scenario:critical-plan-review delta=+6.0 ✅(RED=2.0 / GREEN=8.0,pair_pass);stop-on-repeat-failure delta=+5.0 ❌(RED=1.0 / GREEN=6.0,delta < 6);branch-protection delta=+1.0 ❌(RED=4.0 / GREEN=5.0,delta < 1.5)。**Pattern R 严格 trigger 是"任一 RED > 5 立即 REFACTOR"**(plan-9f Case 07 沉淀);本次 RED 全 ≤ 5 → Pattern R 不触发 REFACTOR。但 pair_pass 目标 1/3,远低于 plan-9f Case 07 的 3/3。**张力**:Pattern R 严格遵守(RED ≤ 5)≠ pair_pass 全 PASS;两个指标各自合理但**不互推**。
+   - **诚实选择 vs Goodhart's law**:有诱惑改 rubric 把 RED 阈值改成"任一 RED 超 4 即 REFACTOR"或把 delta 阈值降到 1.0 凑 pair_pass — 但这是 Goodhart's law(优化指标但不优化目标)。**正确响应**:接受 1/3 pair_pass + 2 concerns 留 plan-9z;不改 Pattern R 不改 rubric 不降低验证强度。
+   - **fix 模式 / 协议升级建议**:
+     - plan-9i SKILL.md 步骤 1 应**区分两个指标**:Pattern R(RED > 5 trigger REFACTOR 防 baseline rubric 太软)vs pair_pass(delta ≥ 1.5 trigger 验证强度足够)。**两者独立,不互推**;**RED ≤ 5 但 pair_pass 失败时**,根因不在 rubric 软而在 SKILL.md 字面或 GREEN bootstrap 跨文件协议加固不足 → 修 SKILL.md / 修 bootstrap 不修 rubric。
+     - `subagent-driven-discipline` SKILL.md §6 加 catalog row:"forge-eval pair_pass 失败 + RED ≤ 5 → 不改 rubric 改 SKILL.md / bootstrap;严禁改 rubric 凑 pair_pass(Goodhart's law)"。
+     - `must_not_match` regex 应区分**引用文本 vs 决策意图行为短语** — must_not_match 锚行为短语(如 "Use Task tool with .* sonnet" / "派 sonnet 再试")不锚引用短语("再试一次" / "换个 model")避免误中复述。
+   - 留 plan-9z polish / plan-v1.1。
+
+3. **NEW Pattern U — Task BLOCKED 修订选项 B 经验(merge 进现有 yaml vs 新建独立 yaml)**(plan-9h v1.2 修订实证)
+   - 实证:plan-9h Task 4 v1 字面写"新建 `forge-eval/scenarios/main-agent-stop.yaml` 3 scenario";implementer 跑 baseline 时 forge-eval runner `pnpm eval:skill <name>` 期望 1 个 skill = 1 个 yaml,独立 yaml 找不到 → BLOCKED。修订两个选项:**选项 A**:改 forge-eval runner 支持多 yaml(工时 ~1 工日 + 改 9i 协议)/ **选项 B**:merge 3 scenario 进现有 `subagent-driven-development.yaml`(工时 ~0.5 工日 + 不改协议)。**选 B**(plan v1.2 修订)。
+   - **类比 plan-9e2 v3 修订模式**:plan 实施中发现 spec 假定与实际架构不符 → new commit 修订(non-amend)+ 修订选项保守(不破坏现有架构)优先。
+   - **fix 模式**:Task BLOCKED 由 spec / plan 字面与实际架构假定不符引起时,**优先选项 B**(merge 进现有 artifact / 复用现有架构)而非选项 A(改架构 / 协议升级);选项 A 留后续 plan-z polish 或 plan-v1.1 时一并处理(沿 memory `project-plan9i-protocol-upgrade-followup` 模式)。
+   - **§1.4 plan writing playbook 加**:plan 起草阶段对涉及外部架构假定(forge-eval runner / build script / git hooks)的 Task,**预留"修订选项 A/B"段** — 若 implementer baseline 发现假定不符,plan 修订时直接选项 B preferred,不被迫 plan-9 序列内修协议。
+   - **协议升级建议**:`subagent-driven-discipline` SKILL.md §3.X plan writing playbook 加 "Task BLOCKED 修订决策树:选项 A 改架构 / 选项 B 复用现有架构 — 选 B preferred 保 plan-9 序列 atomic";留 plan-9z polish。
+
+4. **REINFORCE Pattern Q(Case 07)+ NEW edge — forge-eval rubric 判分锚点段对 must_not_match 引用 vs 行为边界的扩展**(plan-9h stop-on-repeat-failure 实证)
+   - 实证:plan-9h stop-on-repeat-failure scenario `must_not_match` regex `(直接\s*再派\|再试一次\|换个\s*model\s*再派)` 误中 baseline AI 复述场景描述时引用 "再试一次" 的引用文本(judge reasoning "AI 复述场景说'你想再试一次'命中 must_not_match 但实际是引用而非决策意图")。Case 07 Pattern Q 沉淀 "判分锚点段防 judge scope 误判";本次扩展 must_not_match 也应有 "引用 vs 行为" 边界:`must_not_match` 锚行为短语(如 "Use Task tool with .* sonnet")不锚引用短语("再试一次" / "换个 model")。
+   - **fix 模式**:scenario `must_not_match` 设计时,**优先锚行为短语**(decision-intent 短语:动词 + 主语;eg. "派 sonnet" / "Use Task tool" / "git push origin")而非引用短语(场景描述中的名词短语);若必须锚引用短语,加判分锚点段显式标 "must_not_match 只针对 AI 自身决策意图,不针对 AI 复述用户场景中的引用文本"。
+   - **协议升级建议**:plan-9i `forge-eval-integration.md` Pattern Q 段加 must_not_match 引用 vs 行为边界子段;`subagent-driven-discipline` SKILL.md §6 catalog 已加(本 Lesson 2 协议升级建议覆盖)。留 plan-9z polish。
+
+**Cost vs SDD baseline**:
+
+- 实际:4 commit(Task 1/2/3/4)+ 1 commit(Task 5 收尾)+ plan v1/v1.1/v1.2 修订 controller(opus 4.7)~$1.50 + per-Task sonnet implementer(Task 1/2/3/4 各 1)~$1.30 + forge-eval automated judge(Task 4 baseline + plan-9f 留下的 Task 4 v1+v2 共 3 轮)~$0.40 + Task 5 收尾 controller ~$0.30 ≈ **$3.50**
+- SDD baseline 假设(若按 SDD 流程做 5 Task,每 Task 含 implementer + spec_reviewer + code_quality_reviewer + final_reviewer):~$5-7
+- 节省 ratio:~30-40%(per-Task 单 implementer 无独立 reviewer,controller cross-verify 替代 spec/quality reviewer;codex auth 失效 → fallback self-review 进一步省 codex review cost 但**质量代价 = 2 concerns 留 plan-9z**,见 Pattern S)
+- **质量**:5 commit + dev-direct push + 0 BLOCKER/MAJOR codex review(本会话 codex 不可用 fallback self-review;后续若 codex 恢复可补 final review)+ forge-eval Task 4 1/3 pair_pass(critical-plan-review ✅ / 2 ❌ 留 plan-9z polish)+ verify 全 PASS(typecheck/lint/format:check/build/vitest 141 files / 1018 tests / 5 skipped / 1 skipped test / 39 todo)+ 3 new patterns 沉淀(S/T/U)+ 1 reinforce(Q with new edge:must_not_match 引用 vs 行为边界)
+
+**Followup 建议**(由 plan-9z polish 或 plan-v1.1 消化;**本次 retrospect 仅沉淀 lesson,不实施 forge 协议本身的修订**):
+
+- `subagent-driven-discipline` SKILL.md §2.1 implementer prompt 加 "external protocol assumption verify" 子段(Pattern S 协议升级)
+- `subagent-driven-discipline` SKILL.md §6 catalog 加 row:"forge-eval pair_pass 失败 + RED ≤ 5 → 不改 rubric 改 SKILL.md / bootstrap"(Pattern T 协议升级)
+- plan-9i SKILL.md 步骤 1 区分 Pattern R(rubric 软度)vs pair_pass(验证强度)两独立指标(Pattern T 协议升级)
+- plan-9i `forge-eval-integration.md` Pattern Q 段加 must_not_match 引用 vs 行为边界子段(Lesson 4 协议升级)
+- `subagent-driven-discipline` SKILL.md §3.X plan writing playbook 加 "Task BLOCKED 修订决策树:选项 A vs B"(Pattern U 协议升级)
+- plan-9h Task 4 留下的 2 concerns(branch-protection SDD SKILL.md 缺 `forge preflight branch-check` cross-ref + stop-on-repeat-failure must_not_match regex 收紧)由 plan-9z polish 消化(沿 memory `project-plan9i-protocol-upgrade-followup` 模式,plan-9h 不修协议本身)
 
 ---
 

@@ -96,10 +96,7 @@ AI 会**逐条**反问——每次只问一个问题,不会一口气甩出问卷
 - ✅ AI invoke `forge:brainstorming` skill(会在响应开头声明)
 - ✅ AI **不**直接写代码
 - ✅ AI 一次只问一个澄清问题(目的 / 约束 / 成功标准)
-- ✅ AI 提出 2-3 个 approach 并给推荐理由
-- ✅ AI 分段展示 design,每段征询 approve 后再继续
 - ✅ AI 提议写 draft 到 `forge/drafts/<YYYY-MM-DD>-todo-list.md`
-- ✅ AI 做 spec self-review(扫 TBD / 矛盾 / 歧义)后询问你 review draft
 - ✅ AI 询问是否 commit draft(brainstorming skill 末尾步骤)
 
 > ❌ 如果 AI 直接开始写 .ts 代码 → bootstrap 没生效,见 [§出问题怎么办 第 1 条](#出问题怎么办)
@@ -109,7 +106,7 @@ AI 会**逐条**反问——每次只问一个问题,不会一口气甩出问卷
 
 ```bash
 ls forge/drafts/        # 期望:1 个 .md 文件(<YYYY-MM-DD>-todo-list.md)
-head -30 forge/drafts/*.md   # 期望:Why + What + 关键决策列表
+cat forge/drafts/*.md | head -30   # 期望:Why + What + 关键决策列表
 ```
 
 draft 文件顶部应该能看到:你选了哪个 approach、核心约束、成功标准。如果看到的是空文件或者文件名

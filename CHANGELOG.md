@@ -8,6 +8,98 @@ All notable changes to this project will be documented in this file.
 
 (暂无)
 
+## [1.0.0] - 2026-05-XX(plan-9z release 时填具体发布日期)
+
+### Major changes — v1.0 fusion completion(9 sub-plan 累积 + plan-9z polish)
+
+v1.0 标志 forge fusion 真正达成产品定位 — OpenSpec UX 哲学全恢复 + superpowers process discipline 反向覆盖修复。10 sub-plan(9a-9j)单议题深做 + plan-9z polish 9 工作单消化收尾:
+
+37. **三级 severity 分级 + critical_candidate 协议 + JCS finding_hash + ack 两步协议**(plan-9a):横切层基础,CLI helper 框架,Severity / Finding 类型,`forge ack propose/confirm/reject` 三子命令
+38. **out-of-scope 协议 + scope-entries fence**(plan-9b):3 类 out-of-scope/non-goal/future-work,三 skill(exploring/receiving-code-review/verifying-three-dimensions)区分指引
+39. **Fluid Pause Decision Point**(plan-9c):`commands/apply.md` 加 §"Fluid Pause" 段,pause_decisions marker schema + 三类 pause 模式
+40. **verify 三维(syntax / semantic / process)+ LLM-judge 集成**(plan-9d):`forge verify` CLI + LLM-judge 路径,verify-findings marker schema
+41. **archive 三级 fence + handoff_to_backlog**(plan-9e1/9e2):archive_summary marker schema 9 业务字段,三级 fence(critical-硬墙 / warning-ack / suggestion-soft),handoff_to_backlog 三类 input 聚合
+42. **forge:exploring skill + /forge:explore 命令**(plan-9f):新 skill + slash 命令 + forge-eval scenario 双轨 baseline 验证
+43. **process_evidence 14 不变量 + worktree 重跑 + reporter parsing**(plan-9g):process_evidence marker schema + git ancestor 不变量 + reporter parser
+44. **SDD 实施前置纪律加固**(plan-9h):`forge preflight branch-check` CLI + `commands/apply.md` Critical Plan Review 4 维 + §"Main Agent STOP Triggers" 5 触发表
+45. **forge:writing-skills 协议 + forge-eval-integration 协议**(plan-9i):新 skill 开发前提,baseline AI 评估 + scenario 双轨 + pair_pass 验证
+46. **marker version + deprecation 完整协议**(plan-9j):`created_by_tool_version` + `resigned_by_tool_version` semver 字段,`forge upgrade --resign-markers` option,legacy 精确豁免表(13 不变量)+ version retrograde fence
+
+**plan-9z polish 9 工作单消化**(plan-9f / plan-9h 累积 retrospect 沉淀的协议升级):
+
+- **Pattern O/P/Q/R**(plan-9f 4 缺口):`.claude/skills/writing-skills/SKILL.md` + `forge-eval-integration.md` 加 registry+scenarios 一起 commit 警示 + rubric 设计原则 + 判分锚点段示例 + RED > 5 硬 trigger
+- **P-1/P-2**(plan-9h Task 4 2 concerns):SDD SKILL.md §"Main Agent STOP Triggers" 加 forge preflight branch-check cross-ref + forge-eval stop-on-repeat-failure regex 收紧 + 判分锚点段补
+- **P-5/P-6/P-7/P-8**:subagent-driven-discipline SKILL.md + forge-eval-integration.md 加 external verify / rubric 软度 vs 验证强度 / must_not_match 边界 / Task BLOCKED 修订决策树
+- **P-3/P-9 延 v1.1**:fence-9.2 flaky timeout(性质本征,plan-9z verify 跑未复现)+ git utils 抽出(YAGNI)
+
+### Added — CLI(plan-9a/9d/9h/9j)
+
+- `forge ack` 三子命令(propose/confirm/reject)+ ack-log.jsonl schema(plan-9a)
+- `forge verify` LLM-judge 路径 + verify-findings marker(plan-9d)
+- `forge preflight branch-check [<change-id>] [--allow-protected-branch]`(plan-9h)
+- `forge upgrade --resign-markers <changeId>` option(plan-9j)
+- `forge explore` slash 命令 + skill 入口(plan-9f)
+
+### Added — Core(plan-9a/9b/9c/9d/9e/9f/9g/9h/9i/9j)
+
+- `src/core/schemas/severity.ts`(9a Severity / Finding 接口 + JCS hash)
+- `src/core/archive/three-level-fence.ts`(9e critical-硬墙 / warning-ack / suggestion-soft)
+- `src/core/archive/handoff-to-backlog.ts`(9e 三类 input 聚合)
+- `src/core/archive/legacy-exemption.ts`(9j 13 不变量精确豁免表)
+- `src/core/archive/version-retrograde-fence.ts`(9j git history 检查)
+- `src/core/process-evidence/*`(9g 14 不变量 + worktree 重跑 + reporter parsing)
+- `src/core/markers/types.ts` 扩 4 marker(verify-findings / review-passed / pause-decisions / archive-summary)+ 加 `created_by_tool_version?` + `resigned_by_tool_version?` 字段(9j)
+- `src/core/schema/types.ts` `ForgeConfig` 加 `protected_branches?: string[]` 字段(9h)
+
+### Added — Skills + Templates(plan-9f/9h/9i)
+
+- `.claude/skills/exploring/SKILL.md`(9f 新 skill)
+- `.claude/skills/writing-skills/SKILL.md` + `forge-eval-integration.md`(9i 新 skill + 配套文件)
+- `.claude/skills/subagent-driven-discipline/SKILL.md` §"Main Agent STOP Triggers" 5 触发表(9h)
+- `.claude/skills/subagent-driven-development/SKILL.md` § "plan-9h 新增" 子段(9h 反向同步)
+- `forge-eval/scenarios/main-agent-stop.yaml`(9h 3 scenario)+ `exploring.yaml`(9f)+ 其他 9i 落地 scenarios
+
+### Added — Tests + Docs(plan-9a 到 plan-9j 累积)
+
+- `tests/cli/preflight.test.ts`(9h)+ `tests/cli/ack.test.ts`(9a)+ `tests/cli/verify.test.ts`(9d)+ `tests/cli/upgrade.test.ts`(9j)
+- `tests/integration/apply-md-sync.test.ts`(9h)+ archive-md-sync / explore-md-sync(9e/9f)
+- 各 sub-plan 实施 + 测覆盖 ~100+ 新 vitest case 累积
+- 10 sub-plan 文件(`docs/plans/2026-05-10-plan-9*.md` 到 `2026-05-14-plan-9h-sdd-discipline.md`)+ master plan + plan-9z
+- design v3 `docs/specs/2026-05-10-v1.0-fusion-completion-design.md` 1892 行 5+ 轮 codex 审查修订
+
+### Changed
+
+- `src/cli/commands/init.ts:38` warning 文本 "v0.4" → "v1.2"(B-7 修订;实际 init removal 留 v1.2)
+- `commands/apply.md` 加步骤 0(preflight 调用,9h)+ 步骤 3.5(Critical Plan Review 4 维,9h)+ §"Fluid Pause"(9c)+ §"禁止行为(9g)"(9g)+ §"禁止行为(9h)"(9h)
+- `src/core/archive/archive.ts` 加 3.4 步(9j legacy + retrograde fence)+ 3.5 步(9e 三级 fence)
+- `package.json` `version` "0.4.0" → "1.0.0"
+
+### Fixed — codex 累计 5+ 轮 review 修订(跨 10 sub-plan 共 200+ 条问题全采纳)
+
+- plan-9a v1→v4:横切层 BLOCKER + MAJOR 全修
+- plan-9b v1→v2:三 skill 区分指引接口 + adapter 部署链
+- plan-9c v1→v3:Fluid Pause Decision Point + pause_decisions marker schema
+- plan-9d v1→v5:LLM-judge 集成 + verify-findings fence
+- plan-9e1 v1→v12:archive 三级 fence + 选项 C cross-plan reflection(C 简码硬墙 → 9j --resign-markers 唯一合规出口)
+- plan-9e2 v1→v3:process_evidence 集成 + 9g 依赖
+- plan-9f v1→v3:exploring skill + forge-eval scenarios 双轨(沉淀 Pattern O/P/Q/R)
+- plan-9g v1→v8:process_evidence 14 不变量(v6 brainstorm Codex BLOCKER #2 加 #14 green↞HEAD ancestor)
+- plan-9h v1→v5:SDD 实施前置纪律(沉淀 Pattern S/T/U + Case 08)+ Task 4 DONE_WITH_CONCERNS(P-1/P-2 plan-9z polish 消化)
+- plan-9i v1→v2:forge:writing-skills 协议 + bootstrap inject SKILL.md
+- plan-9j v1→v9:marker version + deprecation(v9 codex 8 轮 review 0 BLOCKER + 2 MAJOR 部分采纳)
+
+### Acknowledgments
+
+设计经 codex 对抗性审查累计 5+ 轮(跨 10 sub-plan)+ Opus subagent 自检 multi-round + plan-9z 收尾 inline 实施(中间路线 B),共修 200+ 条问题。完整修订链:
+
+- master plan v1 → v9(`docs/plans/2026-05-10-plan-9-v1.0-fusion-completion-master.md` §6 修订记录)
+- design v3 commit `b823f6e`(`docs/specs/2026-05-10-v1.0-fusion-completion-design.md`)
+- 各 sub-plan 文件含独立 vN → vN+1 修订段
+- plan-9z polish(`docs/plans/2026-05-14-plan-9z-release.md`)消化 plan-9f / plan-9h 累积 retrospect 9 工作单
+
+完整 spec:[`docs/specs/2026-05-10-v1.0-fusion-completion-design.md`](docs/specs/2026-05-10-v1.0-fusion-completion-design.md)。
+完整 plan 链:[`docs/plans/2026-05-10-plan-9-v1.0-fusion-completion-master.md`](docs/plans/2026-05-10-plan-9-v1.0-fusion-completion-master.md) + plan-9a..9j + plan-9z。
+
 ## [0.4.0] - 2026-05-10
 
 ### Major changes — forge migrate(openspec / superpowers 项目搬运)

@@ -169,3 +169,91 @@ ls forge/drafts/.consumed/         # 期望:原 draft 文件已移到这里
 - [`skills/writing-plans/SKILL.md`](../skills/writing-plans/SKILL.md) — writing-plans skill scale-aware mode 协议
 - [`skills/exploring/SKILL.md`](../skills/exploring/SKILL.md) — exploring skill 调研协议
 - [`commands/propose.md`](../commands/propose.md) — /forge:propose 命令完整参数 + 错误退出码
+
+## 第 3 步 — Apply 实施
+
+### 你要做的
+
+让 AI 派 fresh 子代理对每个 task 跑 TDD(red → green → refactor),主代理回写 `tasks.md`。
+
+### 准确操作
+
+**先 preflight**(在 shell 里跑,不在 Claude Code 会话):
+
+```bash
+cd /path/to/my-todo-app
+forge preflight branch-check
+```
+
+期望输出:`✓ Currently on '<branch>' (protected: false)`,exit 0。
+如果你在 main / master 分支,exit 2,要么 `git checkout -b feature/add-todo`,要么加 `--allow-protected-branch` 显式绕过(沿 `src/cli/commands/preflight.ts`)。
+
+**再 apply**(在 Claude Code 会话里发):
+
+```
+/forge:apply
+```
+
+无参数时走默认未归档 change。多 change 并存时报错让你 `--change-id` 显式指定。
+
+### 期望发生(✅ 表示 forge 工作正常)
+
+- ✅ AI invoke `forge:subagent-driven-development` + `forge:test-driven-development` skills
+- ✅ AI 派 fresh 子代理(Task tool subagent_type=general-purpose)拿 [task + 相关 spec + design] 启动
+- ✅ 子代理跑 red → green → refactor + git commit(每个子代理 1 commit)
+- ✅ 主代理 review 子代理 commit + test 日志,通过 → 主工作区 `tasks.md` 把 `[ ]` 改 `[x]`
+- ✅ 每个 task 完成,AI 调 `forge evidence record-tdd <changeId>` helper(写 staging 证据,**用户不需手敲**)
+- ✅ 全部完成后 `tasks.md` 末尾追加 `applied_commits` YAML 块列每个 task 对应 commit hash
+
+> ❌ 如果子代理 commit 后主代理 review 失败 → 不要手动改 tasks.md;让 AI 派 fix 子代理 + 重 review
+
+### 嵌入 deep-dive 1
+
+> 💡 **深入:开干前 `forge preflight branch-check`**
+>
+> v1.1 加的小工具,防止你在 main/master 分支误改代码:
+>
+> ```bash
+> forge preflight branch-check                       # 默认检查
+> forge preflight branch-check --allow-protected-branch  # 显式绕过保护
+> ```
+>
+> 退出码:
+> - 0 = 当前分支非 main/master,安全
+> - 2 = 在保护分支 + 未加 `--allow-protected-branch`(沿 `src/cli/commands/preflight.ts`)
+
+### 嵌入 deep-dive 2
+
+> 💡 **深入:Apply 中段子代理遇到 issue,AI 进 Fluid Pause**
+>
+> 子代理可能在跑到一半时报告:
+>
+> - "plan itself is wrong"(plan 本身错了)
+> - 或发现 spec 未覆盖但属于本 change 的需求(`DESIGN_ISSUE_FOUND`)
+>
+> 主代理**不直接处理**,而是 invoke `AskUserQuestion` 弹四选项给你:
+>
+> | 选项 | 行为 | 必填字段 |
+> |---|---|---|
+> | **1 = 扩本 change scope** | 更新 `proposal.md` `## What Changes` + subagent 重派 | 无 |
+> | **2 = 加 task 进本轮** | 主代理 append 新 task 到 `tasks.md` + subagent 重派 | 无 |
+> | **3 = 转 out-of-scope** | subagent 跳过 issue 继续 | `non_blocking_rationale`(为啥不在本轮做) |
+> | **4 = Other** | 自由文本 | `other_rationale` + `other_acked_by` |
+>
+> 后续:**AI 会记录该 pause decision**(内部 marker 写入时机存在已知 forge doc bug,**用户不操作 marker**)。
+>
+> 注:**CRITICAL 级问题(测试 fail / hash mismatch / evidence 丢)不会触发 Fluid Pause**,走 forge 强 fence 拒签(沿 `skills/receiving-code-review/SKILL.md:230`)。
+
+### 确认
+
+```bash
+ls forge/changes/add-todo/.evidence/  # 期望:process-evidence.staging.yaml(AI 自动调 record-tdd 产)
+grep "\[x\]" forge/changes/add-todo/tasks.md | wc -l  # 期望:跟 tasks.md 总 task 数一致
+tail -10 forge/changes/add-todo/tasks.md  # 期望:末尾有 applied_commits YAML
+```
+
+### 深读
+
+- [`skills/subagent-driven-development/SKILL.md`](../skills/subagent-driven-development/SKILL.md) — SDD 完整协议
+- [`skills/test-driven-development/SKILL.md`](../skills/test-driven-development/SKILL.md) — TDD red/green/refactor
+- [`commands/apply.md`](../commands/apply.md) — `/forge:apply` 完整流程 + Fluid Pause 触发条件

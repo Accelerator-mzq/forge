@@ -52,10 +52,13 @@ session 内输入:
 /forge:brainstorm <topic>     # 调 brainstorming skill
 /forge:propose <change-id> [--from-draft <name>] [--light]
                               # 调 writing-plans skill(P3 scale-aware:< 200 行 → light mode)
+/forge:explore --change <id>  # 不确定方案时探路(调 code 分析 skill)
 /forge:apply [--parallel]      # 调 subagent-driven-development + test-driven-development
 /forge:review                 # 调 requesting/receiving-code-review
 /forge:verify                 # 调 verification-before-completion + helper validate
 /forge:archive                # 调 helper archive(严格门禁 marker hash 校验)
+/forge:upgrade                # v0.x → v1.x 升级 legacy 项目
+/forge:ack-confirm            # confirm 待 ack 的 WARNING finding
 ```
 
 每个 command 内部调 `node "${CLAUDE_PLUGIN_ROOT}/scripts/run-forge.mjs"` helper,helper 内 spawn `npx -y --package @accelerator-mzq/forge@^0.3 -- forge ...` 拉 forge CLI(避开 v0.2 P1 全局 PATH 问题)。

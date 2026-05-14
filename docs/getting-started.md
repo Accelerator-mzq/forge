@@ -65,3 +65,56 @@ claude                          # 启动 Claude Code 会话
 # 在 my-todo-app 目录(此时 forge plugin 还没创建 forge/ 骨架 — 等 §1 brainstorm 触发)
 ls -la  # 期望:.git/ + .gitignore 之外没别的
 ```
+
+## 第 1 步 — Brainstorm 出 draft
+
+### 你要做的
+
+把"我想做 X"模糊想法,通过 AI 反问 2-3 轮后,落成 `forge/drafts/<date>-<topic>.md`。
+
+### 准确操作
+
+在 Claude Code 会话里发(字面 prompt):
+
+```
+我想做个 todo list 应用
+```
+
+AI 会**逐条**反问——每次只问一个问题,不会一口气甩出问卷。你回答之后,它可能再追问一轮。
+典型问题集中在三类:
+
+- **目的**:给自己用还是给团队用?Web / CLI / 其他?
+- **约束**:技术栈偏好、需不需要持久化、有无部署限制?
+- **成功标准**:什么情况下算"做完"?
+
+2-3 轮问答后,AI 提出 2-3 个 approach 对比(含推荐),确认后分段展示 design,每段都等你 approve 再继续。
+
+> 或者显式调 `/forge:brainstorm` 走专用入口,会绕开 `superpowers:brainstorming` 抢跑,见 [§与 superpowers plugin 共存](#与-superpowers-plugin-共存)。
+
+### 期望发生(✅ 表示 forge 工作正常)
+
+- ✅ AI invoke `forge:brainstorming` skill(会在响应开头声明)
+- ✅ AI **不**直接写代码
+- ✅ AI 一次只问一个澄清问题(目的 / 约束 / 成功标准)
+- ✅ AI 提出 2-3 个 approach 并给推荐理由
+- ✅ AI 分段展示 design,每段征询 approve 后再继续
+- ✅ AI 提议写 draft 到 `forge/drafts/<YYYY-MM-DD>-todo-list.md`
+- ✅ AI 做 spec self-review(扫 TBD / 矛盾 / 歧义)后询问你 review draft
+- ✅ AI 询问是否 commit draft(brainstorming skill 末尾步骤)
+
+> ❌ 如果 AI 直接开始写 .ts 代码 → bootstrap 没生效,见 [§出问题怎么办 第 1 条](#出问题怎么办)
+> ❌ 如果 AI 调的是 `superpowers:brainstorming` 而非 `forge:brainstorming`(没写 forge/drafts/)→ 见 [§与 superpowers plugin 共存](#与-superpowers-plugin-共存)
+
+### 确认
+
+```bash
+ls forge/drafts/        # 期望:1 个 .md 文件(<YYYY-MM-DD>-todo-list.md)
+head -30 forge/drafts/*.md   # 期望:Why + What + 关键决策列表
+```
+
+draft 文件顶部应该能看到:你选了哪个 approach、核心约束、成功标准。如果看到的是空文件或者文件名
+不符合 `<YYYY-MM-DD>-todo-list.md` 格式,说明 brainstorming skill 末尾步骤没有正常执行。
+
+### 深读
+
+- [`skills/brainstorming/SKILL.md`](../skills/brainstorming/SKILL.md) — brainstorming skill 完整协议(问题质量、approach 对比、design section 分段确认、spec self-review 4 项检查)

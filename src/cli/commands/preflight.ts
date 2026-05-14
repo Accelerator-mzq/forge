@@ -1,39 +1,15 @@
-// src/cli/commands/preflight.ts — plan-9h Task 1
+// src/cli/commands/preflight.ts — plan-9h Task 1 / plan-v1.1 P-9 refactor
 // 实施前置 check 子命令组(首个 preflight 命令组,commander 嵌套 addCommand)
 // 沿 spec §2.8.3 C 实施码 + spec §2.8.5 第 3 项 CLI helper 设计
+// plan-v1.1 P-9:git 探测 helper(isGitRepo / getCurrentBranch)抽出到 src/core/git/utils.ts
+// (plan-9h Q8 YAGNI 因 2+ 复用点解锁 — preflight.ts + migrate/index.ts:65-72)
 
 import { Command } from 'commander';
-import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseConfig } from '../../core/parse/yaml.js';
 import { DEFAULT_PROTECTED_BRANCHES } from '../../core/schema/types.js';
-
-/**
- * 内联私有 helper(plan-9h Q8 决策:不抽共享模块 src/core/git/utils.ts)
- * 探测当前目录是否在 git work tree 内。
- * 沿 src/core/migrate/index.ts:65-72 同模式(execFileSync + try/catch)。
- */
-function isGitRepo(cwd: string): boolean {
-  try {
-    execFileSync('git', ['rev-parse', '--git-dir'], { cwd, stdio: 'pipe' });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * 内联私有 helper(plan-9h Q8 决策)
- * 拿当前分支名(`git rev-parse --abbrev-ref HEAD`)。
- * 调用前应已 `isGitRepo(cwd) === true` 守卫,否则 throw。
- */
-function getCurrentBranch(cwd: string): string {
-  return execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
-    cwd,
-    encoding: 'utf-8',
-  }).trim();
-}
+import { isGitRepo, getCurrentBranch } from '../../core/git/utils.js';
 
 /**
  * 构建 `forge preflight` 子命令组(沿 spec §2.8.5 第 3 项)。

@@ -39,7 +39,7 @@ You are about to handle `/forge:verify $ARGUMENTS`.
 
 4. **若 validate 通过(exit 0)**:
 
-   4.1 **跑用户项目测试** — 读 `forge/config.yaml` 的 `context.test_command`,缺省 `pnpm test`,把 stdout 写到 `forge/changes/<id>/.evidence/test-output.log`,计算 `log_hash = sha256(test-output.log)`。**测试 pass 是 Completeness/task-completion 子项**(plan-9d 三维度协议)。
+   4.1 **跑用户项目测试** — 读 `forge/config.yaml` 的 `test.test_command`,缺省 `pnpm test`,把 stdout 写到 `forge/changes/<id>/.evidence/test-output.log`,计算 `log_hash = sha256(test-output.log)`。**测试 pass 是 Completeness/task-completion 子项**(plan-9d 三维度协议)。字段路径以代码事实为准(`src/core/schema/types.ts:83` + `src/core/archive/fence.ts:146`)。
 
    4.2 **三维度分析 — 必须调用 `forge:verifying-three-dimensions` skill**(plan-9d 落地):
    - **Completeness**:对 spec 每个 Requirement,grep codebase 找实施证据;完全无证据 → 产 CRITICAL `coverage_gap` finding(automated=true,工具可独立验证;沿 §11.1bis — `evidence_missing` 仅指 evidence.log_path 文件缺失,语义不同)

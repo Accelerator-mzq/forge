@@ -48,7 +48,7 @@ session 内输入:
 ## Workflow(完整 happy path)
 
 ```
-# Tier 1 全功能:6 个 /forge:* slash commands 都可用
+# Tier 1 全功能:9 个 /forge:* slash commands 都可用(brainstorm / propose / explore / apply / review / verify / archive / upgrade / ack-confirm)
 /forge:brainstorm <topic>     # 调 brainstorming skill
 /forge:propose <change-id> [--from-draft <name>] [--light]
                               # 调 writing-plans skill(P3 scale-aware:< 200 行 → light mode)
@@ -59,14 +59,6 @@ session 内输入:
 ```
 
 每个 command 内部调 `node "${CLAUDE_PLUGIN_ROOT}/scripts/run-forge.mjs"` helper,helper 内 spawn `npx -y --package @accelerator-mzq/forge@^0.3 -- forge ...` 拉 forge CLI(避开 v0.2 P1 全局 PATH 问题)。
-
-## bundled plugin(air-gapped 离线,仅 Claude Code)
-
-```
-/plugin install --from-tarball /path/to/forge-bundled-v0.3.0.tgz
-```
-
-bundled tarball 来源:GitHub Release artifact(maintainer 跑 `node scripts/build-bundled-plugin.mjs` 产)。
 
 ## Troubleshooting
 
@@ -96,20 +88,5 @@ CLAUDE_PLUGIN_ROOT="$(pwd)" bash hooks/run-hook.cmd session-start
 
 - 想用 forge 路径:在项目 `.claude/settings.local.json` disable superpowers
 - 想用 superpowers 路径:disable forge
-- 都启用:由 description differentiator 决定,Plan 0a.1 known-issue 推 v0.4 spike 稳定性
+- 都启用:由 description differentiator 决定,Plan 0a.1 known-issue 推 v1.2 spike 稳定性
 
-## 升级(v0.2 → v0.3)
-
-```bash
-# 1. 升 npm CLI
-npm i -g @accelerator-mzq/forge@0.3.0
-
-# 2. 项目内跑 upgrade
-cd <your v0.2 project>
-forge upgrade
-# y → STASH .claude/skills/forge-* + .claude/commands/forge/*
-
-# 3. 装 plugin(本文档 Installation 段)
-```
-
-详见 [migration/v0.2-to-v0.3.md](migration/v0.2-to-v0.3.md)。

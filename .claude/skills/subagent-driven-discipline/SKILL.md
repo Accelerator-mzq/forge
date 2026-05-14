@@ -1108,7 +1108,7 @@ git update-ref refs/heads/<wrong-branch> <prior-base-sha>
 
 **Date**:2026-05-14
 **Trigger Type**:**Type 6 — forge:writing-skills 协议(docs-heavy + forge-eval RED-GREEN automated judge 验证)**;非 SDD(沿 Case 07 同 trigger type);controller(opus 4.7)单线程执行 + per-Task sonnet implementer subagent + forge-eval automated judge(sonnet-4-6)
-**Project context**:forge-repo / plan-9h SDD discipline(preflight CLI + ForgeConfig `protected_branches` schema / `commands/apply.md` 步骤 0/3.5/§"禁止行为(9h)" 三处净增 ~48 行 / `skills/subagent-driven-development/SKILL.md` §"Main Agent STOP Triggers" 子段 ~60 行 + 反向同步 + 跨文件协议加固 / `forge-eval/scenarios/subagent-driven-development.yaml` merge 进 3 新 scenario 双轨 RED+GREEN);**4 commits** 直接到 dev(Task 1-4 各 1 commit + Task 5 收尾 1 commit);plan v1 → v1.1 → v1.2 两轮 self-review 修订(codex auth 失效 fallback);forge-eval Task 4 1/3 pair_pass(critical-plan-review delta=+6.0 ✅ / stop-on-repeat-failure delta=+5.0 ❌ / branch-protection delta=+1.0 ❌)+ 2 concerns 留 plan-9z polish;累计 cost ~$3.5
+**Project context**:forge-repo / plan-9h SDD discipline(preflight CLI + ForgeConfig `protected_branches` schema / `commands/apply.md` 步骤 0/3.5/§"禁止行为(9h)" 三处净增 ~48 行 / `skills/subagent-driven-development/SKILL.md` §"Main Agent STOP Triggers" 子段 ~60 行 + 反向同步 + 跨文件协议加固 / `forge-eval/scenarios/subagent-driven-development.yaml` merge 进 3 新 scenario 双轨 RED+GREEN);**5 commits** 直接到 dev(Task 1-4 各 1 commit + Task 5 收尾 1 commit);plan v1 → v1.1 → v1.2 两轮 self-review 修订(codex auth 失效 fallback);forge-eval Task 4 1/3 pair_pass(critical-plan-review delta=+6.0 ✅ / stop-on-repeat-failure delta=+5.0 ❌ / branch-protection delta=+1.0 ❌)+ 2 concerns 留 plan-9z polish;累计 cost ~$3.5
 
 **Subagent dispatch**:per-Task 1 implementer(sonnet)dispatch + controller(opus 4.7)integrate + retrospect:
 
@@ -1170,7 +1170,7 @@ git update-ref refs/heads/<wrong-branch> <prior-base-sha>
 - 实际:4 commit(Task 1/2/3/4)+ 1 commit(Task 5 收尾)+ plan v1/v1.1/v1.2 修订 controller(opus 4.7)~$1.50 + per-Task sonnet implementer(Task 1/2/3/4 各 1)~$1.30 + forge-eval automated judge(Task 4 baseline + plan-9f 留下的 Task 4 v1+v2 共 3 轮)~$0.40 + Task 5 收尾 controller ~$0.30 ≈ **$3.50**
 - SDD baseline 假设(若按 SDD 流程做 5 Task,每 Task 含 implementer + spec_reviewer + code_quality_reviewer + final_reviewer):~$5-7
 - 节省 ratio:~30-40%(per-Task 单 implementer 无独立 reviewer,controller cross-verify 替代 spec/quality reviewer;codex auth 失效 → fallback self-review 进一步省 codex review cost 但**质量代价 = 2 concerns 留 plan-9z**,见 Pattern S)
-- **质量**:5 commit + dev-direct push + 0 BLOCKER/MAJOR codex review(本会话 codex 不可用 fallback self-review;后续若 codex 恢复可补 final review)+ forge-eval Task 4 1/3 pair_pass(critical-plan-review ✅ / 2 ❌ 留 plan-9z polish)+ verify 全 PASS(typecheck/lint/format:check/build/vitest 141 files / 1018 tests / 5 skipped / 1 skipped test / 39 todo)+ 3 new patterns 沉淀(S/T/U)+ 1 reinforce(Q with new edge:must_not_match 引用 vs 行为边界)
+- **质量**:5 commit + dev-direct push + 0 BLOCKER/MAJOR codex review(本会话 codex 不可用 fallback self-review;后续若 codex 恢复可补 final review)+ forge-eval Task 4 1/3 pair_pass(critical-plan-review ✅ / 2 ❌ 留 plan-9z polish)+ verify 通过(1 flaky timeout 非 plan-9h 回归 — plan-9g 历史 fence test `tests/cli/process-evidence-fence.test.ts > fence-9.2 minimal record-tdd`,timeout 5000ms 在并发跑时偶发 → 单独跑该 file PASS 1439ms;留 plan-9z polish)+ 3 new patterns 沉淀(S/T/U)+ 1 reinforce(Q with new edge:must_not_match 引用 vs 行为边界)
 
 **Followup 建议**(由 plan-9z polish 或 plan-v1.1 消化;**本次 retrospect 仅沉淀 lesson,不实施 forge 协议本身的修订**):
 

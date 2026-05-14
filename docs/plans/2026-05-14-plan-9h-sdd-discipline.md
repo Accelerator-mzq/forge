@@ -1051,13 +1051,16 @@ git push origin dev
 
 **Pattern O 检验**:scenarios + 最小骨架是否**一起 commit**(避免 vitest `it.each` ENOENT)。
 
-本 plan Task 4 字面已经 Pattern O 落地:`forge-eval/scenarios/main-agent-stop.yaml` 在 Task 4 一次 commit,**无前置 commit"先注册 scenario 后写"的拆分**。Step 5.3 只需 grep 确认:
+本 plan Task 4 字面已经 Pattern O 落地:Task 4 一次 commit 加 3 scenario,**无前置 commit"先注册 scenario 后写"的拆分**。Step 5.3 只需 grep 确认:
 
 ```bash
-git log --oneline --follow forge-eval/scenarios/main-agent-stop.yaml
+# v1.2 修订:main-agent-stop.yaml 已 merge 进 SDD yaml,Pattern O 验证改用 SDD yaml 查 b5fb981
+git log --oneline b5fb981 -- forge-eval/scenarios/subagent-driven-development.yaml
 ```
 
-**预期**:单条 commit(Task 4 commit),无中间 broken state commit。
+**预期**:`b5fb981` 是 Task 4 单条 commit 加 3 scenario(无中间 broken state commit)。
+
+> **v1.2 修订注脚**:原字面 `git log --oneline --follow forge-eval/scenarios/main-agent-stop.yaml` 在 v1.2 修订(Task 4 BLOCKED 选项 B merge 进 SDD yaml)下 stale — `main-agent-stop.yaml` 已不存在;Pattern O 验证目标不变(单 commit 加 3 scenario)只是文件路径从独立 yaml 改为 SDD yaml + 锚定 commit `b5fb981`。
 
 ### Step 5.4: 改 master plan §3.1 sub-plan table 链接日期
 
@@ -1239,6 +1242,8 @@ git push origin dev
 - **未捕获边界 1:forge-eval GREEN bootstrap 不 inject apply.md**(GREEN scenarios 只 inject 目标 skill SKILL.md 不 inject 整个 `commands/apply.md`)→ 跨文件协议加固(SDD SKILL.md 子段 + apply.md 步骤 0/3.5 联动)的验证强度只覆盖 SDD SKILL.md 单文件,未覆盖跨文件组合;branch-protection delta=1.0 即此边界暴露
 - **未捕获边界 2:stop-on-repeat-failure `must_not_match` regex 太宽**(`(直接\s*再派|再试一次|换个\s*model\s*再派)` 误中 baseline AI 复述场景描述时引用"再试一次"的引用文本而非"再试一次"的决策意图);scenario regex 设计未考虑"引用 vs 行为"语义边界 → delta=5.0 失败(理想 ≥ 6.0)
 - 两处边界共同特征:Pattern P "baseline 必失" 维度设计 + Pattern R "RED > 5 立即 REFACTOR" 应用到 RED ≤ 5 时反向加固成本超出 plan-9h 工时预算 → 诚实留 plan-9z polish
+
+**Caveat**(Task 5 quality review 发现):本次跑 `pnpm vitest run` 实测 1 flaky timeout(`tests/cli/process-evidence-fence.test.ts > fence-9.2 minimal record-tdd`,timeout 5000ms 并发跑时偶发,单跑 file PASS 1439ms)— **不是 plan-9h 回归**(plan-9g 历史 fence test,commit 4e41064 / 08fdbd2 已有调整);Task 5 implementer 初次 self-review 报"全 PASS"漏抓此 flaky,留 plan-9z polish 消化(fence test stability fix)。
 
 **Q3: 本 plan codex review 是否 1-2 轮收敛?是否有 BLOCKER 涌现?**(**No** + 详)
 

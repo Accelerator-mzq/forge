@@ -8,8 +8,8 @@ import { acquireLockByPath, LockHeldError } from '../archive/lock.js';
 import { existsSync } from 'node:fs';
 import { mkdir, rename, readFile, writeFile, unlink, stat } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
-import { execSync } from 'node:child_process';
 import Anthropic from '@anthropic-ai/sdk';
+import { isGitRepo } from '../git/utils.js';
 import { getSource } from './sources/index.js';
 import { resolveConflicts, ConflictExhausted } from './conflict.js';
 import { Journal, finalizeAndRename, writeReportMd } from './report.js';
@@ -62,14 +62,8 @@ export async function runMigrate(opts: MigrateOptions): Promise<number> {
   try {
     release = await acquireLockByPath(join(cwd, 'forge'), 'migrate', 'migrate.lock');
 
-    // git repo 探测:用 git rev-parse --git-dir 试探,失败即非 git
-    let inGitRepo = false;
-    try {
-      execSync('git rev-parse --git-dir', { cwd, stdio: 'pipe' });
-      inGitRepo = true;
-    } catch {
-      // 非 git 仓库 / git 不可用,信号 2 自然失效
-    }
+    // git repo 探测(plan-v1.1 P-9:统一用 src/core/git/utils.ts isGitRepo;非 git 仓库 / git 不可用,信号 2 自然失效)
+    const inGitRepo = isGitRepo(cwd);
 
     const ctx: ClassifyCtx = {
       cwd,

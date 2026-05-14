@@ -8,6 +8,43 @@ All notable changes to this project will be documented in this file.
 
 (暂无)
 
+## [1.1.0] - 2026-05-14
+
+**plan-v1.1 polish leftover**:plan-9z release 留底 3 类 polish 消化(协议升级 + 内部技术债 + 同源审查盲点修补)。沿 plan-9z 中间路线 B 模式 + sonnet code_quality reviewer for Task 1 + Codex 七轮对抗性 release gate 双兜底(累计 32 finding 全处置;0 严重 / 0 阻塞 / 0 Major release gate 达成)。
+
+### Refactored
+
+- **P-9 src/core/git/utils.ts 抽出**(Task 1):plan-9h Q8 决策的 inline helper(`isGitRepo` / `getCurrentBranch` 在 `src/cli/commands/preflight.ts`)抽出共享模块;`src/core/migrate/index.ts:65-72` 同模式 inline 探测一并 refactor(execSync → execFileSync,safer than shell quote);utils.ts JSDoc 含 caveat(--git-dir vs work tree / detached HEAD 'HEAD' sentinel)。1018 tests 透明 pass(全 e2e spawn 真 CLI 不 mock)。
+
+### Fixed
+
+- **预存 3 forge-eval scenarios pair_pass 修复**(plan-9z Task 5 baseline 暴露,plan-9h Task 4 commit `b5fb981` 漏抓 root cause):
+  - **Task 2 force-dispatch-subagent**:yaml rubric forge-specific +3+3+2 / 通用 +1+1 + 判分锚点段 + must_match 行为锚(Use Task tool / subagent_type);`skills/subagent-driven-development/SKILL.md` 加 "How to Dispatch" 段(Use Task tool 实操字面 + model 选型 matrix + fresh subagent per task)— **scope-out scenario 重设计留 plan-v2**(forge-eval 物理限制 — AI 无真 Task tool;但 Task 4 改动间接拉升 force-dispatch iter 2 delta 6.5 ✅ 实证 reverse)
+  - **Task 3 review-subagent-output**:yaml rubric forge-specific +3+3+2 + 判分锚点 + must_match SDD §3.2/§3.3 cross-ref;SKILL.md 加 "Review Protocol" 段(cross-verify 五类 + verdict 三级 + decision tree);**Pattern Q new edge P-7 自实证**(iter 2 `(完全信任\|trust)` 误命中否定 phrase → iter 3 修锚行为)→ pair_pass ✅ + RED ≤ 5 + delta 3.0(Pattern T 防御边界)
+  - **Task 4 not-merge-without-test**:yaml rubric forge-specific +4+3+3 + 接受描述模式注解(Pattern Y 候选);SKILL.md verdict 三级加 "test fail (failing test count > 0) = Critical → MUST 阻 commit" 字面 → pair_pass ✅ + RED 2.0 + delta 5.0
+
+### Documentation
+
+- **Pattern X #1 cross-cutting 状态回写 hook 协议**(Task 5):`.claude/skills/subagent-driven-discipline/SKILL.md` §2.1.2 新子段 — implementer 改 cross-cutting 字段(file:line / 不变量 / DoD / version / release gate)时必 grep 全 plan list verify + 同 commit 回写;§6 Pattern Catalog 加 row。**self-evident 协议必要性证成** — plan-v1.1 自身连续两次 self-aware 实证(v3.1/v3.2 release gate "0 Major" cross-cutting sync 不完整 → Codex 五/六审 catch)。
+- **Pattern X #2/#3/#4 path verify 协议**(Task 6):`skills/writing-plans/SKILL.md` 新加 `## Path Pre-flight Verify` 段 — plan writer 起草前必跑 grep verify file path / yaml / skill / section,不假定 prefix;`## Self-Review` 段加 "Path verify" 项(原 3 项顺位下移);REINFORCE Pattern S 实证 plan-9z plan v1 字面错 4 处 + plan-v1.1 v1 同款 `.claude/skills/writing-plans/` prefix 错。
+- Case ref:`.claude/skills/subagent-driven-discipline/SKILL.md` §5 Case 09 §1264 / §1273 / §1287。
+
+### Carry-out to plan-v2
+
+- **fence-9.2 flaky timeout**(P-3 闭环说明 — Codex Task 7 review M-03):plan-9z `4a24ef8` 已修(`tests/cli/process-evidence-fence.test.ts` line 274 fence-9.2 it 加 `{ timeout: 15000 }`沿 plan-9g `4e41064` A8 case 模式);plan-v1.1 全 5 verify 跑 vitest 1018 pass / 26.71s 三次本地未复现(P50 ≤ 1.4s vs 5000ms bound 余裕 3.5s+);**plan-v2 评估是否需进一步降 timing 抖动或迁移 hash-only 路径**(本征 flaky 在 Windows CI runner 并发资源竞争时偶发触发,本地复现率低)
+- **Pattern V/W 协议化**(SDD SKILL.md §3.X Trigger Type 7 子段 + §6 catalog row 中间路线 B 模式 / release docs CHANGELOG 累计修订记录整合)— 触及 SDD Trigger Type 表大修,适合 plan-v2 reorganize 统一处理
+- **Pattern X #B2**(plan-9z §2 "6 子段" vs 7 子段 + release-gate §5.6 plugin 形态字面)— plan-9z 决策不修
+- **Pattern Y 候选**(plan-v1.1 Task 2/4 双实证):forge-eval scenario 设计原则 — action vs description 区分 + 接受描述模式;plan-v2 forge-eval-integration.md 加协议 + scenario 设计 checklist
+- **Pattern Q new edge P-7 REINFORCE**(plan-v1.1 Task 3 自实证):must_not_match 不锚否定 phrase;writing-skills SKILL.md / forge-eval-integration.md 加 "must_not_match 不锚否定 phrase" 显式 checklist
+- **LLM non-determinism observation**(branch-protection iter 2 variance):forge-eval 多次采样 + 中位数候选
+
+### Acknowledgments
+
+- 沿 plan-9z release `f483d77`...`4a24ef8` 8 commit chain 累积模式
+- forge-eval baseline 重跑判分(sonnet-4-6 automated judge)— Task 2/3/4 累计 9 iter ~$2.55 cost 探索 Pattern Y
+- Codex CLI(gpt-5.4-codex)七轮 plan v1 → v3.4 对抗性 review 累计 32 finding 全处置(28 修 + 3 拒+注释 + 1 拒)— release gate 0 严重 / 0 阻塞 / 0 Major 达成
+- self-aware retrospect 沉淀:plan-v1.1 起草自身连续两次踩 Pattern X #1 同源盲点(v3.1/v3.2)— self-evident 协议必要性证成(本 release 顺手落地)
+
 ## [1.0.0] - 2026-05-14
 
 ### Major changes — v1.0 fusion completion(9 sub-plan 累积 + plan-9z polish)

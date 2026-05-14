@@ -93,6 +93,57 @@ Use the least powerful model that can handle each role to conserve cost and incr
 - Touches multiple files with integration concerns → standard model
 - Requires design judgment or broad codebase understanding → most capable model
 
+## How to Dispatch(plan-v1.1 Task 2 加 — SDD 实操字面)
+
+Subagents are dispatched via the **Task tool**(not `spawn_agent` or other invented tools). Specify both `subagent_type` and `model` explicitly:
+
+```
+Use Task tool with:
+  subagent_type: <implementer | spec_reviewer | code_quality_reviewer>
+  model: <haiku | sonnet | opus>  # 按 task subtype 选;不传则 inherit 父 session 浪费 cost
+  description: <3-5 word task summary>
+  prompt: <full task text + context + DoD + verify checklist>
+```
+
+**model 选型 matrix**(沿 forge:subagent-driven-discipline §1 taxonomy):
+
+- **`haiku`** — Mechanical tasks(完整 inline code + 全 fence test 名 + commit message 模板;无 design judgment)
+- **`sonnet`** — Multi-file integration / Pattern-matching / 所有 review(spec_reviewer + code_quality_reviewer + adversarial review)
+- **`opus`** — Architectural / 跨子系统 / 新 ABC / design 类(MANDATORY,绝对原则)
+
+**fresh subagent per task 原则**:每个 task 独立 dispatch,**不共享 context**(避免 context bloat + 责任不清);subagent return 后 controller cross-verify(`§3.2` 五类 verify 命令)再决策。
+
+**two-stage review per task**(implementer DONE 后):
+
+1. **spec_reviewer**(sonnet)— spec compliance(verify 字面要求被实现 + 无 extra scope)
+2. **code_quality_reviewer**(sonnet)— runtime correctness / pattern adherence / latent bug
+
+## Review Protocol(plan-v1.1 Task 3 加 — reviewer 实操字面)
+
+When subagent reports DONE, **do not trust at face value**. Run **cross-verify** + assign **verdict 三级** before continuing.
+
+**cross-verify 五类**(sonnet reviewer must run + report file:line evidence;沿 forge:subagent-driven-discipline §3.2):
+
+1. **test count**(`pnpm vitest run` 实测 / `git show <SHA>` 看 test diff;不只信 implementer self-report "X tests passed")
+2. **commit SHA**(`git show <SHA>`/`git log -1 --stat` 看 commit 真实改了什么文件)
+3. **branch**(`git rev-parse --abbrev-ref HEAD` 确认在正确 feature branch)
+4. **spec strings**(`grep -n "<key spec phrase>" <files>` 验 spec 字面要求被实现)
+5. **file:line**(`cat -n <file> | sed -n '<line>,<line+10>p'` 看具体改动 line range)
+
+**verdict 三级**(reviewer 返结果时必标):
+
+- **Critical** — runtime bug / 安全 / **test fail(failing test count > 0)** / 测试断言静默降级 / cross-source hash mismatch → MUST inline fix or round 2 dispatch;**不允许 merge / release**(即使 PM / 上线压力);沿 `not-merge-without-test` scenario 协议
+- **Important** — pattern adherence / signature 不一致 / spec 字面要求漏 → controller cross-verify file:line 后决策(inline fix 或接受 deferred)
+- **Informational** — style / 命名 / 注释 polish / deferred candidates → noted不阻 release
+
+**decision tree**(沿 forge:subagent-driven-discipline §3.3):
+
+- Critical = 0 + Important = 0 → 跳过修改 → 下一 task
+- Critical = 0 + Important ≥ 1 → controller cross-verify reviewer claim(file:line 实测)→ inline fix preferred
+- Critical ≥ 1 → 阻止 commit;controller inline fix(若小 scope)或 round 2 dispatch implementer
+
+**Never** accept subagent self-report "all tests pass / commit looks good" without running cross-verify 五类 first. Self-report ≠ evidence.
+
 ## Handling Implementer Status
 
 Implementer subagents report one of **five** statuses (forge v1.0 沿 design §2.1.2 加第 5 档 `DESIGN_ISSUE_FOUND`)。Handle each appropriately:

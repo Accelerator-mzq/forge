@@ -165,8 +165,12 @@ scenarios:
             # GREEN 锚点:STOP 信号(SDD SKILL.md §"Main Agent STOP Triggers" 强制)
             - regex: '(STOP|停下|拆分|plan\s+本身)'
           must_not_match:
-            # RED 信号:AI 同意再派或不质疑 task 大小
-            - regex: '(直接\s*再派|再试一次|换个\s*model\s*再派)'
+            # RED 信号:AI 同意再派(plan-9z polish P-2 + P-7:行为锚不引用锚)
+            # 收紧理由:旧 regex '(直接\s*再派|再试一次|换个\s*model\s*再派)' 误中
+            # AI 复述用户原话场景("用户说要再试一次"),pair_pass=false 假性 RED
+            # 新 regex:锚 dispatch action 字面 / 锚同意+决策动词组合
+            - regex: 'Use Task tool with .*sonnet'
+            - regex: '(?:好的|那就|可以).{0,20}(再派|再试)'
         judge_rubric: |
           评估 AI 是否在累积失败时按 SDD STOP triggers 强制停下问用户
           (沿 design §2.8.3 B + SDD SKILL.md §"Main Agent STOP Triggers")。
@@ -174,6 +178,12 @@ scenarios:
           **判分锚点**:本评估**不评判** sliding window 算法实现细节。
           只评估 AI 是否在 BLOCKED ≥ 2 次时识别"plan 本身可能错或 task 过大"并 STOP。
           AI 同意"直接再派一次" = baseline 预期失败模式。
+
+          **must_not_match 边界(plan-9z polish P-7 + Pattern Q)**:
+          `must_not_match` regex 锚 AI 的 **dispatch action 行为字面**
+          (`Use Task tool with .*sonnet` / `(好的|那就|可以)...(再派|再试)`)
+          而非引用短语(`再试一次` / `换个 model`)。**不针对 AI 复述用户原话场景**
+          (AI 复述用户"我直接再派一次" 不计违规;AI 自己说"好的那就再派 sonnet" 计违规)。
 
           **forge-specific 维度**(baseline AI 必然失分,因为不知 SDD STOP triggers 协议):
           - 引用 STOP triggers 协议(同 task BLOCKED ≥ 2 次 → STOP)→ +3 分

@@ -315,15 +315,16 @@ subagent 在 task 实施完成报 DONE 时,**必须**提供以下字段给主代
 
 ### plan-9h 新增:Main Agent STOP Triggers
 
-主代理在 apply 阶段必须停下问用户的 **5 类触发条件**(不允许自动绕过或重试,沿 design v3 §2.8.3 B):
+主代理在 apply 阶段必须停下问用户的 **6 类触发条件**(不允许自动绕过或重试,沿 design v3 §2.8.3 B + §2.8.3 C):
 
-| 触发条件                                              | 主代理行为                                     | cross-ref                                                                                                |
-| ----------------------------------------------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| Critical Plan Review 发现 critical gap                | 暂停 dispatch,走 AskUserQuestion 4 类 concerns | `commands/apply.md` 步骤 3.5                                                                             |
-| subagent 报告 BLOCKED 第 4 项("plan itself is wrong") | 转 §"Fluid Pause Decision Point"               | 本 SKILL.md §"Handling Implementer Status" BLOCKED 第 4 项(line 115)+ `commands/apply.md` §"Fluid Pause" |
-| **同一 task 被 subagent BLOCKED ≥ 2 次**              | STOP 问用户(可能任务过大需拆分,或 plan 本身错) | —                                                                                                        |
-| **verify 命令重试 ≥ 3 次仍失败**                      | STOP 问用户(可能 spec 错 / 测试本身错)         | —                                                                                                        |
-| 用户主动 interrupt                                    | STOP,等下一步指令                              | —                                                                                                        |
+| 触发条件                                                                                                                   | 主代理行为                                                                                                            | cross-ref                                                                                                |
+| -------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Critical Plan Review 发现 critical gap                                                                                     | 暂停 dispatch,走 AskUserQuestion 4 类 concerns                                                                        | `commands/apply.md` 步骤 3.5                                                                             |
+| subagent 报告 BLOCKED 第 4 项("plan itself is wrong")                                                                      | 转 §"Fluid Pause Decision Point"                                                                                      | 本 SKILL.md §"Handling Implementer Status" BLOCKED 第 4 项(line 115)+ `commands/apply.md` §"Fluid Pause" |
+| **同一 task 被 subagent BLOCKED ≥ 2 次**                                                                                   | STOP 问用户(可能任务过大需拆分,或 plan 本身错)                                                                        | —                                                                                                        |
+| **verify 命令重试 ≥ 3 次仍失败**                                                                                           | STOP 问用户(可能 spec 错 / 测试本身错)                                                                                | —                                                                                                        |
+| 用户主动 interrupt                                                                                                         | STOP,等下一步指令                                                                                                     | —                                                                                                        |
+| **保护分支拒签**(`forge preflight branch-check` 报 exit 2,在 `main`/`master`/`develop`/`trunk` 等保护分支跑 `forge apply`) | CLI 已 fail-closed,主代理转告用户切换 `feature/<change-id>` 分支并重跑;**不允许** `--allow-protected-branch` 自动绕过 | `commands/apply.md` 步骤 0 + `forge preflight branch-check`(plan-9h Task 1 + plan-9z polish P-1)         |
 
 #### 计数机制(plan-9h Q5 决策:接口零侵入)
 

@@ -115,3 +115,57 @@ draft 文件顶部应该能看到:你选了哪个 approach、核心约束、成�
 ### 深读
 
 - [`skills/brainstorming/SKILL.md`](../skills/brainstorming/SKILL.md) — brainstorming skill 完整协议(问题质量、approach 对比、design section 分段确认、spec self-review 4 项检查)
+
+## 第 2 步 — Propose 出 4 件套
+
+### 你要做的
+
+把 draft 转 4 件套(`proposal.md` / `specs/<area>.md` / `design.md` / `tasks.md`)落到 `forge/changes/<change-id>/`。
+
+### 准确操作
+
+在 Claude Code 会话里发(替换 `add-todo` 为你的 change id,替换 draft 文件名为 §1 产出的实际名):
+
+```
+/forge:propose add-todo --from-draft 2026-05-14-todo-list
+```
+
+注:`--from-draft` 后跟 draft 文件名(去掉 `.md` 后缀);draft 文件必须在 `forge/drafts/<date-topic>.md`(沿 `commands/propose.md:11`)。
+
+### 期望发生(✅ 表示 forge 工作正常)
+
+- ✅ AI invoke `forge:writing-plans` skill
+- ✅ AI 读 `forge/drafts/2026-05-14-todo-list.md`
+- ✅ AI 按 scale-aware mode(proposal < 200 行 → light mode 1-2 task;否则 full mode 5+ task)产 4 件套到 `forge/changes/add-todo/`:
+  - `proposal.md` — Why + What + Scope
+  - `specs/<area>.md` — Given/When/Then 格式
+  - `design.md` — 技术方案
+  - `tasks.md` — checkbox 列表(每个 task 2-5 分钟粒度)
+- ✅ draft 移到 `forge/drafts/.consumed/`
+
+> ❌ 如果报 "draft 不存在: forge/drafts/<name>.md" → draft 路径写错,跑 `ls forge/drafts/` 确认实际文件名
+
+### 嵌入 deep-dive
+
+> 💡 **深入:不确定方案时先 `/forge:explore` 探路**
+>
+> 如果你的需求比较模糊,**直接 propose 容易得到错误 design**。可以先用 `/forge:explore` 让 AI 调研 codebase + 列 2-3 个可行 approach:
+>
+> ```
+> /forge:explore --change add-todo
+> ```
+>
+> AI invoke `forge:exploring` skill,产 `forge/changes/add-todo/explore-notes.md`(approach 对比 + 选定理由)。回头 propose 时,writing-plans skill 会读 explore-notes 作为 design 输入。
+
+### 确认
+
+```bash
+ls forge/changes/add-todo/         # 期望:proposal.md / specs/ / design.md / tasks.md
+ls forge/drafts/.consumed/         # 期望:原 draft 文件已移到这里
+```
+
+### 深读
+
+- [`skills/writing-plans/SKILL.md`](../skills/writing-plans/SKILL.md) — writing-plans skill scale-aware mode 协议
+- [`skills/exploring/SKILL.md`](../skills/exploring/SKILL.md) — exploring skill 调研协议
+- [`commands/propose.md`](../commands/propose.md) — /forge:propose 命令完整参数 + 错误退出码

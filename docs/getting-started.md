@@ -329,3 +329,69 @@ cat forge/changes/<id>/.ack-log.jsonl   # 若有 WARNING:每行 1 个 ack 事件
 - [`skills/receiving-code-review/SKILL.md`](../skills/receiving-code-review/SKILL.md) §三级 severity 段
 - [`commands/review.md`](../commands/review.md) + [`commands/ack-confirm.md`](../commands/ack-confirm.md)
 - [`src/cli/commands/ack.ts`](../src/cli/commands/ack.ts) — `forge ack` 三子命令实现
+
+## 第 5 步 — Verify 三维
+
+### 你要做的
+
+跑 syntax / semantic / process 三维度验证 + 凝固 evidence 到 marker。
+
+### 准确操作
+
+**先确保 `forge/config.yaml` 含**(没有就建):
+
+```yaml
+test:
+  test_command: pnpm test    # 用 test.test_command 字段(代码事实)
+```
+
+> ⚠️ **不要写 `context.test_command`** — 这是 `commands/verify.md:42` 的 stale doc bug;真实 schema 在 `test.` 下(`src/core/schema/types.ts:83` + `src/core/archive/fence.ts:146`)。
+
+**在 Claude Code 会话里发**:
+
+```
+/forge:verify
+```
+
+### 期望发生(✅ 表示 forge 工作正常)
+
+- ✅ AI invoke `forge:verification-before-completion` skill(证据先于声称)
+- ✅ AI 跑 `forge validate <change-id>`(CRITICAL automated finding 工具产)
+- ✅ AI 跑用户测试套(读 `test.test_command`,缺省 `pnpm test`,stdout 写 `.evidence/test-output.log`)
+- ✅ AI invoke `forge:verifying-three-dimensions` skill 产**三维 findings**(见下嵌入)
+- ✅ AI 写 `forge/changes/<id>/.verify-passed` 含 evidence log_hash + verify_findings YAML 字段
+- ✅ AI 调 `forge evidence record-verify` helper 记录测试/验证证据到 staging(权威 `commands/apply.md:179-182`,verify.md 未引用是 doc bug)
+- ✅ AI 调 `forge evidence freeze <id> --kind verify` 把 staging 凝固到 marker.process_evidence
+
+> ❌ 如果 freeze 报 "staging file not found ... 必须先调 forge evidence record-*" → AI 漏调 record-verify,提示 AI invoke 该 helper 再 freeze(代码事实 `src/cli/commands/evidence.ts:639`)
+
+### 嵌入 deep-dive
+
+> 💡 **深入:Verify 三维(Completeness / Correctness / Coherence)**
+>
+> verify 不只是跑测试 — `forge:verifying-three-dimensions` skill 从三个独立维度扫:
+>
+> | 维度 | 检查什么 | finding 严重度 |
+> |---|---|---|
+> | **Completeness** | 每个 spec Requirement 必有实施证据(grep codebase 找)| CRITICAL `coverage_gap`(automated=true) |
+> | **Correctness** | 每个 spec Requirement 定位 `file:line`,WHEN/THEN scenario 覆盖 | WARNING / SUGGESTION(automated=false) |
+> | **Coherence** | `design.md ## Decision:` 段与 codebase 比对,命名 / pattern 跟项目惯例对齐 | WARNING / SUGGESTION(automated=false) |
+>
+> 三维 findings 处理同 §4 Review:
+> - **CRITICAL**(automated=true)→ 必修,不能 ack 降级
+> - **WARNING / SUGGESTION** → 走 §4 ack 两步协议
+
+### 确认
+
+```bash
+cat forge/changes/<id>/.verify-passed | head -30   # 期望:schema + log_hash + verify_findings 数组
+ls forge/changes/<id>/.evidence/                    # 期望:test-output.log + process-evidence.staging.yaml
+cat forge/changes/<id>/.verify-passed | grep process_evidence  # 期望:freeze 后凝固字段
+```
+
+### 深读
+
+- [`skills/verifying-three-dimensions/SKILL.md`](../skills/verifying-three-dimensions/SKILL.md) — 三维 finding 协议
+- [`skills/process-evidence/SKILL.md`](../skills/process-evidence/SKILL.md) — 14 不变量 + worktree 重跑
+- [`commands/verify.md`](../commands/verify.md) — `/forge:verify` 完整流程
+- [`docs/specs/2026-05-10-v1.0-fusion-completion-design.md`](specs/2026-05-10-v1.0-fusion-completion-design.md) — v1.0 verify 三维设计

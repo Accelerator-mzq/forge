@@ -39,7 +39,7 @@ You are about to handle `/forge:verify $ARGUMENTS`.
 
 4. **若 validate 通过(exit 0)**:
 
-   4.1 **跑用户项目测试** — 读 `forge/config.yaml` 的 `context.test_command`,缺省 `pnpm test`,把 stdout 写到 `forge/changes/<id>/.evidence/test-output.log`,计算 `log_hash = sha256(test-output.log)`。**测试 pass 是 Completeness/task-completion 子项**(plan-9d 三维度协议)。
+   4.1 **跑用户项目测试** — 读 `forge/config.yaml` 的 `test.test_command`,缺省 `pnpm test`,把 stdout 写到 `forge/changes/<id>/.evidence/test-output.log`,计算 `log_hash = sha256(test-output.log)`。**测试 pass 是 Completeness/task-completion 子项**(plan-9d 三维度协议)。字段路径以代码事实为准(`src/core/schema/types.ts:83` + `src/core/archive/fence.ts:146`)。
 
    4.2 **三维度分析 — 必须调用 `forge:verifying-three-dimensions` skill**(plan-9d 落地):
    - **Completeness**:对 spec 每个 Requirement,grep codebase 找实施证据;完全无证据 → 产 CRITICAL `coverage_gap` finding(automated=true,工具可独立验证;沿 §11.1bis — `evidence_missing` 仅指 evidence.log_path 文件缺失,语义不同)
@@ -102,11 +102,26 @@ You are about to handle `/forge:verify $ARGUMENTS`.
          severity_acked_by: null # WARNING 必须 ack 才能 archive(在 archive 阶段走 ack)
          severity_acked_at: null
        # ... 其他 finding
+     pause_decisions: # apply 阶段累积的 pause 决策在写本 marker 时一并迁移(本 fix 补 lifecycle 注;沿 commands/apply.md "Marker 持久化" 段)
+       - id: 1
+         # ... 完整 schema 见 commands/apply.md "Marker 持久化" 段
      ```
+
+     4.3a **(本 fix 补缺):调 forge evidence record-verify 记录 verify 事件证据到 staging**
+
+     主代理在写完 .verify-passed YAML 后、freeze 之前,**必须**先调 record-verify 写 staging:
+
+     ```bash
+     forge evidence record-verify <changeId> --task-refs <list> --scope <type> --report <path>
+     ```
+
+     这一步把 verify 事件(测试 pass/fail + 三维 findings 总览)写入 `.evidence/process-evidence.staging.yaml`,**freeze 必须前置 staging 才有 source 可以凝固**(沿 `src/cli/commands/evidence.ts:348/639`;helper list 权威 `commands/apply.md:179-182`)。
+
+     若漏调 record-verify 直接 freeze → exit 1 + 提示 "staging file not found ... 必须先调 forge evidence record-\*"(代码事实 `evidence.ts:639`)。
 
      4.4 **(plan-9g 新增):调 forge evidence freeze 凝固 process_evidence**
 
-     主代理在写完 .verify-passed YAML 后,**必须**调:
+     主代理在 4.3a record-verify 后,**必须**调:
 
      ```bash
      forge evidence freeze <changeId> --kind verify

@@ -1,6 +1,6 @@
 # Forge
 
-> **v0.3** Multi-harness **plugin** 把 OpenSpec 的产物驱动工作流和 superpowers 的行为塑造 skill 体系融合到一起。AI 在 Claude Code / OpenCode / Codex 三 harness 里按统一规范工作 — **skill auto-trigger** + **commands** + **forge CLI 严格门禁**。
+> **v1.1** Multi-harness **plugin** 把 OpenSpec 的产物驱动工作流和 superpowers 的行为塑造 skill 体系融合到一起。AI 在 Claude Code / OpenCode / Codex 三 harness 里按统一规范工作 — **skill auto-trigger** + **commands** + **forge CLI 严格门禁**。
 
 ```bash
 # Tier 1 — Claude Code(全功能,推荐)
@@ -20,41 +20,23 @@ OpenCode + Codex 见 [`docs/installation.md`](docs/installation.md)。
    - Tier 2 OpenCode:**PARTIAL_SHIP**(skills + skill-driven CLI;commands 推 v0.4)
    - Tier 3 Codex:**PARTIAL_SHIP**(同上)
 
-## 5 分钟跑通
-
-详见 [`docs/getting-started.md`](docs/getting-started.md)。
+## 5 分钟跑通(快速 reference)
 
 ```bash
-# 1. 装 plugin(Tier 1 Claude Code 路径)
-mkdir my-project && cd my-project
-git init && touch .gitignore   # P2 修复:brainstorming skill 会 preflight 检查 git base
-claude
-```
-
-```
-# 2. session 内
+# 1. 装 plugin(Tier 1 Claude Code)
 /plugin marketplace add Accelerator-mzq/forge
 /plugin install forge@accelerator-mzq-forge
-/reload-plugins
 
-# 3. /exit + 重启 session,第一句:
-我想做个 todo list 应用
-
-# AI 自动 invoke Skill(forge:brainstorming),走完整流程:
-#  - preflight 检查 git base(P2)
-#  - 问问题 → 设计 → 写 forge/drafts/<date>-todo-list.md
-#  - 询问后 commit
-
-# 4. /forge:propose add-todo --from-draft <date>-todo-list
-#    AI 自动 invoke writing-plans skill(P3 scale-aware mode:
-#    proposal < 200 行 → light mode 1-2 task / 否则 full mode 5+ task)
-#    产 forge/changes/add-todo/{proposal,specs,design,tasks}.md
-
-# 5. /forge:apply,AI 派子代理跑 TDD 实施每个 task
-# 6. /forge:review,派 review 子代理 + 主代理处理反馈
-# 7. /forge:verify,跑 forge validate + 写 .verify-passed
-# 8. /forge:archive,严格校验 marker hash → mv 到 forge/changes/archive/
+# 2-7. v1.1 端到端工作流主线
+我想做个 todo list 应用    # → §1 Brainstorm
+/forge:propose ...          # → §2 Propose
+/forge:apply                # → §3 Apply
+/forge:review               # → §4 Review
+/forge:verify               # → §5 Verify 三维
+/forge:archive              # → §6 Archive 三级 fence
 ```
+
+完整端到端工作流详解见 [`docs/getting-started.md`](docs/getting-started.md)。
 
 ## 安装(三 harness)
 
@@ -115,7 +97,7 @@ forge upgrade
 
 ## 状态
 
-**当前状态**:v0.3.0 release 候选(Plan 0a + 0b.1 + 1-5 完成,实测 + 单测全绿)。
+**当前状态**:v1.1.0 released(2026-05-14 tag),v1.0 fusion completion + v1.1 polish 累计 10 sub-plan + plan-9z polish 工作单全消化。
 
 - 本地 5 命令(typecheck / lint / format:check / build / test)全 0
 - 测试 490 PASS + 16 schema/upgrade 单测,1 skipped

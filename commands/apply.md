@@ -114,7 +114,9 @@ What would you like to do?
 
 ### Marker 持久化(沿 design §2.1.5)
 
-主代理在用户作出决策后,**必须**在 `.verify-passed` / `.review-passed` marker 的 `pause_decisions` 数组追加一项:
+**Lifecycle 说明**(本 fix 补缺):pause 决策**实际写入** `.verify-passed` / `.review-passed` marker 是在 **verify / review 阶段**(那时 marker 才真正打;沿 `commands/verify.md` step 4.3 + `commands/review.md` step 7);apply **中段** marker 尚不存在,AI 主代理把每次 pause 决策**累积记录在本 change session context** 中,等到 verify / review 时一并迁移到对应 marker 的 `pause_decisions` 数组(沿 `src/cli/commands/archive.ts:411/422` archive fence 同时校验 verify-passed + review-passed 两个 marker 的 pause_decisions,确认这是 additive 模式)。
+
+主代理在 verify / review 写 marker 时,**必须**把本 change apply 阶段累积的所有 pause 决策按下面 schema 写入 `pause_decisions` 数组:
 
 ```yaml
 pause_decisions:

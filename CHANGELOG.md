@@ -54,7 +54,7 @@ v1.0 标志 forge fusion 真正达成产品定位 — OpenSpec UX 哲学全恢�
 37. **三级 severity 分级 + critical_candidate 协议 + JCS finding_hash + ack 两步协议**(plan-9a):横切层基础,CLI helper 框架,Severity / Finding 类型,`forge ack propose/confirm/reject` 三子命令
 38. **out-of-scope 协议 + scope-entries fence**(plan-9b):3 类 out-of-scope/non-goal/future-work,三 skill(exploring/receiving-code-review/verifying-three-dimensions)区分指引
 39. **Fluid Pause Decision Point**(plan-9c):`commands/apply.md` 加 §"Fluid Pause" 段,pause_decisions marker schema + 三类 pause 模式
-40. **verify 三维(syntax / semantic / process)+ LLM-judge 集成**(plan-9d):`forge verify` CLI + LLM-judge 路径,verify-findings marker schema
+40. **verify 三维(syntax / semantic / process)+ LLM-judge 集成**(plan-9d):`/forge:verify` slash command(经 `forge validate` + skill 组合实现,无独立 verify CLI)+ LLM-judge 路径,verify-findings marker schema
 41. **archive 三级 fence + handoff_to_backlog**(plan-9e1/9e2):archive_summary marker schema 9 业务字段,三级 fence(critical-硬墙 / warning-ack / suggestion-soft),handoff_to_backlog 三类 input 聚合
 42. **forge:exploring skill + /forge:explore 命令**(plan-9f):新 skill + slash 命令 + forge-eval scenario 双轨 baseline 验证
 43. **process_evidence 14 不变量 + worktree 重跑 + reporter parsing**(plan-9g):process_evidence marker schema + git ancestor 不变量 + reporter parser
@@ -72,7 +72,7 @@ v1.0 标志 forge fusion 真正达成产品定位 — OpenSpec UX 哲学全恢�
 ### Added — CLI(plan-9a/9d/9h/9j)
 
 - `forge ack` 三子命令(propose/confirm/reject)+ ack-log.jsonl schema(plan-9a)
-- `forge verify` LLM-judge 路径 + verify-findings marker(plan-9d)
+- `/forge:verify` slash command + LLM-judge 路径 + verify-findings marker(plan-9d;经 `forge validate` + skill 组合实现,无独立 verify CLI)
 - `forge preflight branch-check [<change-id>] [--allow-protected-branch]`(plan-9h)
 - `forge upgrade --resign-markers <changeId>` option(plan-9j)
 - `forge explore` slash 命令 + skill 入口(plan-9f)

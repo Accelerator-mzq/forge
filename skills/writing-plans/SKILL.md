@@ -164,15 +164,64 @@ Every step must contain the actual content an engineer needs. These are **plan f
 - Exact commands with expected output
 - DRY, YAGNI, TDD, frequent commits
 
+## Path Pre-flight Verify(plan-v1.1 Task 6 加 — Pattern X #2/#3/#4 实证)
+
+**Trigger**:plan writer 起草 plan 时引用 file path / yaml 名 / skill 名 / SKILL.md §X.Y 字面位置。
+
+**Required action**:**plan writer 起草 plan 前必跑 grep verify** path / yaml / skill / section 真实存在;**不假定 prefix 或路径**(忌"我以为在 .claude/skills/")。
+
+**Why**(Pattern X #2/#3/#4 累计实证 — REINFORCE Pattern S):
+
+- **plan-9z plan v1 起草字面错 4 处**(`.claude/skills/subagent-driven-discipline/SKILL.md` §5 Case 09 §1264 沉淀):
+  - 假定 `.claude/skills/writing-skills/` prefix(**实际** `skills/writing-skills/` 无 prefix — 顶层 skills/)
+  - 假定 `main-agent-stop.yaml` 名(**实际** merge 进 SDD yaml `subagent-driven-development.yaml`)
+  - 假定 `subagent-driven-discipline/SKILL.md` §"STOP Triggers"(**实际** 段在 `subagent-driven-development/SKILL.md`)
+  - plan-9z Task 4/5 实施第一步 grep 真实路径才发现(implementer commit 字面用真实路径,但 plan v1 字面错保留)
+- **plan-v1.1 Task 0 起草自身同款实证**:
+  - v1 假定 `.claude/skills/writing-plans/` prefix(**实际** `skills/writing-plans/SKILL.md` 顶层 skills/ 无 prefix)
+  - v3 起草时 plan writer 自身 grep verify 才 catch + 修(plan-v1.1 §14 v3 起草过程 self-aware retrospect)
+- **root cause** 是 plan writer 同源审查盲点(Pattern S),不是 implementer 错;Codex external review 也兜底找到字面错(Case 09 §1264 Pattern S REINFORCE)
+
+**Plan writer checklist(起草 plan 前 — 不眼测,跑 grep)**:
+
+```bash
+# 1. 引用的每个 file path 都跑 ls verify
+ls .claude/skills/<scope-skill>/SKILL.md  # 路径是否存在(对 .claude/ 下 skill)
+ls skills/<scope-skill>/SKILL.md  # 路径是否存在(对顶层 skills/ 下 skill — 无 .claude/ prefix)
+
+# 2. 引用的 section §X.Y 字面是否存在
+grep -n "<section-title>" <skill-path>  # section 字面是否在 SKILL.md 内
+
+# 3. 引用的 yaml 文件名是否存在
+grep -rn "<yaml-name>" forge-eval/scenarios/  # yaml 文件名是否存在
+ls forge-eval/scenarios/<yaml-name>.yaml  # yaml 路径是否存在
+
+# 4. 引用的 file:line 字面是否在 file 内
+sed -n '<line>,<line+5>p' <file-path>  # 实际看 line range 内容是否符 plan claim
+```
+
+若 verify 失败 → **改 plan 字面用真实路径 / yaml / section**;不假定 prefix。
+
+**Implementer 兜底**(双层防护):
+
+若 plan 字面与实际路径不符,implementer 第一步 grep 真实路径 verify(沿 `.claude/skills/subagent-driven-discipline/SKILL.md` §2.1.1 external protocol assumption verify P-5 协议)— 但 implementer commit 字面用真实路径,plan v1 字面错保留 → **plan writer 仍是 root cause 防线**;implementer 兜底不能 substitute plan writer verify。
+
+**参考 case**:`.claude/skills/subagent-driven-discipline/SKILL.md` §5 Case 09 §1264 Pattern S REINFORCE — 4 处字面错;
+plan-v1.1 Task 0 `docs/plans/2026-05-14-plan-v1.1-polish-leftover.md` §14 v3 起草过程 self-aware retrospect(`.claude/skills/writing-plans/` 假定 prefix 错 → grep verify catch + 修)。
+
 ## Self-Review
 
 After writing the complete plan, look at the spec with fresh eyes and check the plan against it. This is a checklist you run yourself — not a subagent dispatch.
 
-**1. Spec coverage:** Skim each section/requirement in the spec. Can you point to a task that implements it? List any gaps.
+**1. Path verify(plan-v1.1 Task 6 加 — Pattern S REINFORCE)**:
 
-**2. Placeholder scan:** Search your plan for red flags — any of the patterns from the "No Placeholders" section above. Fix them.
+引用的每个 file path / yaml 名 / skill 名 / SKILL.md §X.Y 是否真实存在?跑 `ls <path>` / `grep -n "<section>" <file>` / `sed -n '<line>p' <file>` verify;若 verify 失败 → 改 plan 字面;**不假定 prefix**(沿 Case 09 §1264 + plan-v1.1 §14 v3 自身实证)。
 
-**3. Type consistency:** Do the types, method signatures, and property names you used in later tasks match what you defined in earlier tasks? A function called `clearLayers()` in Task 3 but `clearFullLayers()` in Task 7 is a bug.
+**2. Spec coverage:** Skim each section/requirement in the spec. Can you point to a task that implements it? List any gaps.
+
+**3. Placeholder scan:** Search your plan for red flags — any of the patterns from the "No Placeholders" section above. Fix them.
+
+**4. Type consistency:** Do the types, method signatures, and property names you used in later tasks match what you defined in earlier tasks? A function called `clearLayers()` in Task 3 but `clearFullLayers()` in Task 7 is a bug.
 
 If you find issues, fix them inline. No need to re-review — just fix and move on. If you find a spec requirement with no task, add the task.
 

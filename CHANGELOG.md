@@ -8,7 +8,7 @@ All notable changes to this project will be documented in this file.
 
 (暂无)
 
-## [1.0.0] - 2026-05-XX(plan-9z release 时填具体发布日期)
+## [1.0.0] - 2026-05-14
 
 ### Major changes — v1.0 fusion completion(9 sub-plan 累积 + plan-9z polish)
 
@@ -27,7 +27,7 @@ v1.0 标志 forge fusion 真正达成产品定位 — OpenSpec UX 哲学全恢�
 
 **plan-9z polish 9 工作单消化**(plan-9f / plan-9h 累积 retrospect 沉淀的协议升级):
 
-- **Pattern O/P/Q/R**(plan-9f 4 缺口):`.claude/skills/writing-skills/SKILL.md` + `forge-eval-integration.md` 加 registry+scenarios 一起 commit 警示 + rubric 设计原则 + 判分锚点段示例 + RED > 5 硬 trigger
+- **Pattern O/P/Q/R**(plan-9f 4 缺口):`skills/writing-skills/SKILL.md` + `forge-eval-integration.md` 加 registry+scenarios 一起 commit 警示 + rubric 设计原则 + 判分锚点段示例 + RED > 5 硬 trigger
 - **P-1/P-2**(plan-9h Task 4 2 concerns):SDD SKILL.md §"Main Agent STOP Triggers" 加 forge preflight branch-check cross-ref + forge-eval stop-on-repeat-failure regex 收紧 + 判分锚点段补
 - **P-5/P-6/P-7/P-8**:subagent-driven-discipline SKILL.md + forge-eval-integration.md 加 external verify / rubric 软度 vs 验证强度 / must_not_match 边界 / Task BLOCKED 修订决策树
 - **P-3/P-9 延 v1.1**:fence-9.2 flaky timeout(性质本征,plan-9z verify 跑未复现)+ git utils 抽出(YAGNI)
@@ -54,10 +54,10 @@ v1.0 标志 forge fusion 真正达成产品定位 — OpenSpec UX 哲学全恢�
 ### Added — Skills + Templates(plan-9f/9h/9i)
 
 - `.claude/skills/exploring/SKILL.md`(9f 新 skill)
-- `.claude/skills/writing-skills/SKILL.md` + `forge-eval-integration.md`(9i 新 skill + 配套文件)
+- `skills/writing-skills/SKILL.md` + `forge-eval-integration.md`(9i 新 skill + 配套文件)
 - `.claude/skills/subagent-driven-discipline/SKILL.md` §"Main Agent STOP Triggers" 5 触发表(9h)
 - `.claude/skills/subagent-driven-development/SKILL.md` § "plan-9h 新增" 子段(9h 反向同步)
-- `forge-eval/scenarios/main-agent-stop.yaml`(9h 3 scenario)+ `exploring.yaml`(9f)+ 其他 9i 落地 scenarios
+- `forge-eval/scenarios/subagent-driven-development.yaml`(9h Task 4 v1.2 选项 B merge 3 scenario 进现有 SDD yaml:branch-protection / critical-plan-review / stop-on-repeat-failure;plan-9z polish 修 P-1/P-2)+ `exploring.yaml`(9f)+ 其他 9i 落地 scenarios
 
 ### Added — Tests + Docs(plan-9a 到 plan-9j 累积)
 

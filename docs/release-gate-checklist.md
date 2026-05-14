@@ -284,7 +284,7 @@ v0.3 新增 6 项验证(Plan 0a + Plan 5 落地)。release v0.3.0 前必须 evid
 - [ ] `forge ack propose/confirm/reject` 三子命令协议跑通(plan-9a)
 - [ ] `forge upgrade --resign-markers <changeId>` 在 v0.4 marker 上跑通(plan-9j)
 - [ ] `forge verify` LLM-judge 路径跑通(plan-9d;可选,需 ANTHROPIC_API_KEY)
-- [ ] `forge archive <changeId>` 全 13 不变量校验 + handoff_to_backlog(plan-9e)
+- [ ] `forge archive <changeId>` 全 14 不变量校验 + handoff_to_backlog(plan-9e + plan-9g v6 brainstorm Codex BLOCKER #2 修订加不变量 #14 green↞HEAD ancestor)
 
 ### §5.3 兼容性
 
@@ -298,7 +298,7 @@ v0.3 新增 6 项验证(Plan 0a + Plan 5 落地)。release v0.3.0 前必须 evid
 - [ ] `docs/specs/2026-05-10-v1.0-fusion-completion-design.md` v3 commit 在 docs/specs/(已 commit)
 - [ ] 9 sub-plan 文件(plan-9a 到 plan-9j)+ master plan + plan-9z 全在 `docs/plans/`
 - [ ] `CHANGELOG.md` `[1.0.0]` 段写完(plan-9z Task 2)
-- [ ] `.claude/skills/writing-skills/SKILL.md` + `forge-eval-integration.md` + `subagent-driven-discipline/SKILL.md` 含 plan-9z polish 协议升级(plan-9z Task 4 / Task 5)
+- [ ] `skills/writing-skills/SKILL.md` + `skills/writing-skills/forge-eval-integration.md` + `.claude/skills/subagent-driven-discipline/SKILL.md` + `skills/subagent-driven-development/SKILL.md` 含 plan-9z polish 协议升级(plan-9z Task 4 / Task 5)
 
 ### §5.5 npm 包
 
@@ -317,8 +317,8 @@ v0.3 新增 6 项验证(Plan 0a + Plan 5 落地)。release v0.3.0 前必须 evid
 
 ### §5.7 plan-9z polish 9 工作单消化 verify
 
-- [ ] **P-1**(plan-9h Task 4 concern α):`.claude/skills/subagent-driven-discipline/SKILL.md` §"Main Agent STOP Triggers" 第 6 行 cross-ref `forge preflight branch-check` 字面在
-- [ ] **P-2**(plan-9h Task 4 concern β):`forge-eval/scenarios/main-agent-stop.yaml` `stop-on-repeat-failure` must_not_match regex 收紧 + 判分锚点段补
+- [ ] **P-1**(plan-9h Task 4 concern α):`skills/subagent-driven-development/SKILL.md` §"Main Agent STOP Triggers" 5 → 6 行,第 6 行 cross-ref `forge preflight branch-check` + `commands/apply.md` 步骤 0 字面在(plan-9h Task 3 落地点,本 plan-9z polish 字面更新)
+- [ ] **P-2**(plan-9h Task 4 concern β):`forge-eval/scenarios/subagent-driven-development.yaml` `stop-on-repeat-failure` must_not_match regex 收紧锚行为(`Use Task tool with .*sonnet`)+ 判分锚点段补 `must_not_match 不针对 AI 复述用户原话`(plan-9h Task 4 v1.2 选项 B merge 进 SDD yaml 而非独立 main-agent-stop.yaml)
 - [ ] **Pattern O**:`.claude/skills/writing-skills/SKILL.md` 步骤 1 含 "registry + scenarios + 骨架一起 commit" 警示
 - [ ] **Pattern P**:`.claude/skills/writing-skills/SKILL.md` 步骤 1 含 "rubric 设计原则" 段
 - [ ] **Pattern Q**:`.claude/skills/writing-skills/forge-eval-integration.md` 含 "判分锚点段示例"

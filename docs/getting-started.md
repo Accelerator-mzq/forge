@@ -395,3 +395,47 @@ cat forge/changes/<id>/.verify-passed | grep process_evidence  # 期望:freeze �
 - [`skills/process-evidence/SKILL.md`](../skills/process-evidence/SKILL.md) — 14 不变量 + worktree 重跑
 - [`commands/verify.md`](../commands/verify.md) — `/forge:verify` 完整流程
 - [`docs/specs/2026-05-10-v1.0-fusion-completion-design.md`](specs/2026-05-10-v1.0-fusion-completion-design.md) — v1.0 verify 三维设计
+
+## 第 6 步 — Archive 三级 fence
+
+### 你要做的
+
+严格校验所有 marker + git integrity,通过后归档 change 到 `forge/changes/archive/`,同步 spec deltas 到 `forge/specs/`。
+
+### 准确操作
+
+在 Claude Code 会话里发:
+
+```
+/forge:archive
+```
+
+### 期望发生(✅ 表示 forge 工作正常)
+
+- ✅ AI 校验 `.verify-passed` + `.review-passed` marker schema + log_hash + git integrity
+- ✅ AI 跑**三级 fence**(沿 `src/core/archive/three-level-fence.ts`):
+  - **CRITICAL 硬墙**:有未解 CRITICAL → exit + 提示修代码重跑 verify(不能 archive)
+  - **WARNING ack**:有 WARNING + 未 confirm → 提示用户走 `/forge:ack-confirm`(沿 §4)
+  - **SUGGESTION soft**:不阻塞,聚合到 `archive_summary.yaml` 的 `handoff_to_backlog`
+- ✅ 通过后 AI **Move** `forge/changes/<id>/` → `forge/changes/archive/<date>-<id>/`
+- ✅ AI **Sync** specs deltas 到 `forge/specs/<area>.md`
+- ✅ AI 写 `forge/changes/archive/<date>-<id>/archive_summary.yaml`(含 9 业务字段 + `handoff_to_backlog` 三类聚合)
+- ✅ AI invoke `forge:finishing-a-development-branch` skill 提示 git 后续(merge / PR / cleanup 决策)
+
+> ❌ 如果 archive 报 "marker hash mismatch" → marker 跟当前 tasks.md / specs/ 不符,见 §出问题 第 2 条
+> ❌ **`forge backlog list` 在 v1.1 不存在**(`commands/archive.md:86` 是 forward-looking 提示)— 只能 `cat archive_summary.yaml` 看 backlog,沿 spec §9.0
+
+### 确认
+
+```bash
+ls forge/changes/archive/                           # 期望:<date>-<id> 目录
+ls forge/specs/                                     # 期望:本 change 留下的 spec 文件
+cat forge/changes/archive/<date>-<id>/archive_summary.yaml | head -30
+# 期望:schema=forge-archive-summary/v1 + handoff_to_backlog 三类(critical/warning/suggestion)
+```
+
+### 深读
+
+- [`skills/finishing-a-development-branch/SKILL.md`](../skills/finishing-a-development-branch/SKILL.md)
+- [`commands/archive.md`](../commands/archive.md) — `/forge:archive` 完整流程
+- [`docs/specs/2026-05-10-v1.0-fusion-completion-design.md`](specs/2026-05-10-v1.0-fusion-completion-design.md) §archive-三级-fence + §handoff-to-backlog — v1.0 协议设计

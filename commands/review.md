@@ -23,6 +23,24 @@ You are about to handle `/forge:review $ARGUMENTS`.
    a. 无"已用证据反驳但未存档"的拒绝意见
    b. 接受的意见已**全部实现 + 测试通过**(本轮新接受的意见**不算本轮通过**,需下一轮 review)
    c. 满足 a+b 时,本轮 review 无新增 task
+7a. **(本 fix 补缺)调 forge evidence record-review 记录 review 事件证据到 staging**
+
+    主代理在写完 .review-passed YAML 后、freeze 之前,**必须**先调 record-review:
+
+    ```bash
+    forge evidence record-review <changeId> --task <ref> --implementer-commit <sha>
+    ```
+
+    这一步把 review 事件(子代理调用 + 主代理 accept/reject outcomes)写入 `.evidence/process-evidence.staging.yaml`(沿 `src/cli/commands/evidence.ts:474`;helper list 权威 `commands/apply.md:179-182`)。
+7b. **(本 fix 补缺)调 forge evidence freeze 凝固 process_evidence**
+
+    7a record-review 后,**必须**调:
+
+    ```bash
+    forge evidence freeze <changeId> --kind review
+    ```
+
+    若漏调 record-review 直接 freeze → exit 1 + 提示 "staging file not found"(代码事实 `evidence.ts:639`)。若漏调 freeze → archive fence 拒签 "[review] v1.0 marker missing process_evidence"(代码事实 `src/core/archive/fence.ts:185`)。
 8. `.review-passed` YAML schema(spec §3.4):
    ```yaml
    schema: forge-review/v1

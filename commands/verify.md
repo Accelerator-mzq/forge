@@ -104,9 +104,21 @@ You are about to handle `/forge:verify $ARGUMENTS`.
        # ... 其他 finding
      ```
 
+     4.3a **(本 fix 补缺):调 forge evidence record-verify 记录 verify 事件证据到 staging**
+
+     主代理在写完 .verify-passed YAML 后、freeze 之前,**必须**先调 record-verify 写 staging:
+
+     ```bash
+     forge evidence record-verify <changeId> --task-refs <list> --scope <type> --report <path>
+     ```
+
+     这一步把 verify 事件(测试 pass/fail + 三维 findings 总览)写入 `.evidence/process-evidence.staging.yaml`,**freeze 必须前置 staging 才有 source 可以凝固**(沿 `src/cli/commands/evidence.ts:348/639`;helper list 权威 `commands/apply.md:179-182`)。
+
+     若漏调 record-verify 直接 freeze → exit 1 + 提示 "staging file not found ... 必须先调 forge evidence record-*"(代码事实 `evidence.ts:639`)。
+
      4.4 **(plan-9g 新增):调 forge evidence freeze 凝固 process_evidence**
 
-     主代理在写完 .verify-passed YAML 后,**必须**调:
+     主代理在 4.3a record-verify 后,**必须**调:
 
      ```bash
      forge evidence freeze <changeId> --kind verify

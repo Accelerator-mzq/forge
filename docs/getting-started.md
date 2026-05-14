@@ -2,7 +2,7 @@
 
 > 用 Claude Code + forge plugin 把"我想做个 todo list 应用"从模糊想法走到归档,**全流程跟着这一份跑通**。
 
-> ⚠️ 适用 forge **v1.1.0** 及以后版本。装的是 v1.0.x 走 [v1.0 getting-started](https://github.com/Accelerator-mzq/forge/tree/v1.0.x/docs/getting-started.md);v0.3 / v0.2 见 [migration 文档](migration/v0.3-to-v1.1.md)(待写)。
+> ⚠️ 适用 forge **v1.1.0** 及以后版本。装的是 v1.0.x 走 [v1.0 getting-started](https://github.com/Accelerator-mzq/forge/tree/v1.0.x/docs/getting-started.md);v0.3 / v0.2 升级指南待写(下一轮单独文档)。
 
 ## 在你开始前
 
@@ -28,7 +28,7 @@
 
 ### 你要做的
 
-在 Claude Code 会话里装 forge plugin,装完看到 16 个 forge:\* skill auto-trigger + 9 个 `/forge:*` slash 命令。
+在 Claude Code 会话里装 forge plugin,装完看到 16 个 `forge:*` skill auto-trigger + 9 个 `/forge:*` slash 命令。
 
 ### 准确操作
 
@@ -48,6 +48,8 @@ claude                          # 启动 Claude Code 会话
 
 完成后 `/exit` 退出会话,再 `claude` 重新启动一次(SessionStart hook 必须 fire 一次才注入 skill / slash 命令)。
 
+> 注:legacy projects 仍可用 `pnpm dlx @accelerator-mzq/forge init --harness claude`,v1.2 移除(沿 `src/cli/commands/init.ts:28-38`)。
+
 ### 期望发生(✅ 表示 forge 工作正常)
 
 - ✅ `/plugin marketplace add` 报 "Marketplace added: accelerator-mzq-forge"
@@ -56,17 +58,6 @@ claude                          # 启动 Claude Code 会话
 - ✅ 任意位置打 `/skills` 看到 16 个 `forge:*` skill
 
 > ❌ 如果 `/forge:` 没补全 → bootstrap 没生效,见 [§出问题怎么办 第 1 条](#出问题怎么办)
-
-### 嵌入 deep-dive
-
-> 💡 **深入:legacy `forge init` 路径**
->
-> forge v1.1 仍保留 `forge init` CLI 兜底 legacy 项目(`src/cli/commands/init.ts:28-38`),但:
-> - **v1.2 将移除**(明确 deprecated)
-> - 新项目**主推** plugin 路径(本章 §0 流程)
-> - 仅在你的项目无法用 plugin(罕见 — 比如 Claude Code 版本太老不支持 plugin)时才退路用 `pnpm dlx @accelerator-mzq/forge init --harness claude`
->
-> 完整 plugin install 详解见 [`installation.md`](installation.md) / [`claude-install.md`](claude-install.md)。
 
 ### 确认
 

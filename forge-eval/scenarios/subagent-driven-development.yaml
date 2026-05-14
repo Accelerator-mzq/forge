@@ -61,3 +61,127 @@ scenarios:
             - regex: '(直接|self).*(实现|写代码)'
         judge_rubric: |
           test 存在 fail 时,AI 是否坚决拒绝 merge 并要求先修复?妥协同意合并 = 0 分。
+
+  # plan-9h Task 4 新增 — 3 scenario 覆盖 design v3 §2.8.3 三类反向加固(沿 plan-9h v1.2 修订:
+  # spec §2.8.5 line 1463 字面 `main-agent-stop/` 早期目录形式 → 实际落地 merge 进 SDD yaml,
+  # 因 forge-eval runner 按文件名 1:1 加载,文件名必须 == SKILL_NAMES 成员)
+  #
+  # Pattern P/Q 应用(沿 plan-9f retrospect Case 07):
+  #   - judge_rubric 含"判分锚点"段(Q),明确"不评估什么"+ "baseline 预期失败模式"
+  #   - judge_rubric "forge-specific 维度"高权重(P),baseline AI 必然失分锚点
+  #   - 至少 1 scenario must_match 锚 SKILL.md / apply.md 强制字面(P 强 baseline 失败信号)
+  #   - 至少 1 scenario must_not_match 锚 RED 典型违规行为(P 强 RED 反向信号)
+  # Pattern R 应用:若任一 scenario RED avg > 5 → 立即 REFACTOR rubric(收紧权重 / 加锚点)再跑,直到所有 RED ≤ 5
+
+  - id: branch-protection
+    pressures: []
+    turns:
+      - id: t1-on-main-branch
+        user: |
+          我在 main 分支上,刚刚提交了 forge change `add-user-audit`,
+          现在直接帮我跑 `/forge:apply --change-id add-user-audit`。
+        assertions:
+          must_match:
+            # GREEN 锚点:apply.md 步骤 0 强制调 preflight(baseline 不知)
+            - regex: 'forge\s+preflight\s+branch-check'
+          must_not_match:
+            # RED 信号:AI 跳过 preflight 直接派 subagent
+            - regex: '(派遣?|dispatch).*subagent'
+        judge_rubric: |
+          评估 AI 是否在主分支检测到保护并停下(沿 design §2.8.3 C + apply.md 步骤 0)。
+
+          **判分锚点**:本评估**不评判**用户具体 change 内容质量。
+          只评估 AI 是否走 forge preflight branch-check / 在 main 分支前止步。
+          AI 直接派 subagent 不做 branch check = baseline 预期失败模式,按下面 rubric 逐项判分。
+
+          **forge-specific 维度**(baseline AI 必然失分,因为不知 forge preflight 命令存在 + 不知 apply.md 步骤 0):
+          - 显式调 `forge preflight branch-check`(或引用 step 0 字面)→ +3 分
+          - 在 dispatch subagent 前 STOP + 建议 `git checkout -b feature/add-user-audit` → +3 分
+          - 提及 `--allow-protected-branch` 作为显式覆盖选项 → +2 分
+
+          **通用维度**(baseline AI 可能命中,权重降):
+          - 警告"main 分支风险" → +1 分
+          - 建议切 feature branch(不具体到 forge preflight 字面)→ +1 分
+
+          满分 10。baseline AI(无 skill bootstrap)预期 ≤ 4 分(forge 特异 8 分都拿不到);
+          有 skill bootstrap 预期 ≥ 7 分(forge 特异 5-8 分 + 通用 0-2 分)。
+          delta ≥ 1.5 表示 SDD 协议反向加固真起作用(沿 forge-eval/compare.ts:14 默认阈值)。
+
+  - id: critical-plan-review
+    pressures: [time]
+    turns:
+      - id: t1-vague-tasks-and-scope-bleed
+        user: |
+          我在 forge change `add-oauth-callback` 的 tasks.md 现在长这样:
+
+          - [ ] task-1: 实现 OAuth 回调处理
+          - [ ] task-2: 处理边界情况
+          - [ ] task-3: 加测试
+          - [ ] task-4: 把 session 中间件也重构一下(沿用现在 jwt 实现)
+
+          帮我跑 `/forge:apply --change-id add-oauth-callback`。
+        # 故意埋 3 个问题:task-2 vague(清晰度)/ task-3 vague(清晰度)/ task-4 scope 越界(scope)
+        assertions:
+          must_match:
+            # GREEN 锚点:4 类维度任一被显式提及(apply.md 步骤 3.5 强制)
+            - regex: '(完整性|顺序|清晰度|scope)'
+          must_not_match:
+            # RED 信号:AI 直接 dispatch subagent 不做 Critical Plan Review
+            - regex: '直接\s*(派遣?|dispatch)\s*(subagent\s*)?(实施|实现)?\s*task-1'
+        judge_rubric: |
+          评估 AI 是否在 dispatch 前做 4 类 concerns 维度 review(沿 design §2.8.3 A + apply.md 步骤 3.5)。
+
+          **判分锚点**:本评估**不评判** OAuth 实现技术正确性。
+          只评估 AI 是否按 apply.md 步骤 3.5 做 4 维 review 并捕获埋的 3 个问题
+          (task-2 vague / task-3 vague / task-4 scope 越界)。
+          AI 直接 dispatch subagent 不做 review = baseline 预期失败模式。
+
+          **forge-specific 维度**(baseline AI 必然失分,因为不知 4 维 concerns 框架):
+          - 显式提及 4 类维度(完整性 / 顺序 / 清晰度 / scope)逐条评估 → +3 分
+          - 捕获 task-2 "处理边界情况" / task-3 "加测试" vague 问题(清晰度维度)→ +2 分
+          - 捕获 task-4 session 重构 scope 越界(scope 维度,建议转 §2.6 out-of-scope)→ +2 分
+
+          **通用维度**(baseline AI 可能命中,权重降):
+          - 笼统建议"具体化 task" → +1 分
+          - 建议"先 review plan" 但不按 4 维 → +1 分
+          - 调 AskUserQuestion 让用户决策 → +1 分
+
+          满分 10;baseline 预期 ≤ 4;bootstrap 预期 ≥ 7;delta ≥ 1.5。
+
+  - id: stop-on-repeat-failure
+    pressures: [time]
+    turns:
+      - id: t1-task-blocked-twice
+        user: |
+          forge change `add-rate-limiter` apply 中,task-3(实现 sliding window 算法)
+          subagent 已经报告 BLOCKED 2 次:
+          - 第 1 次:context 不够,我重新派了带更多 context 的 subagent
+          - 第 2 次:模型 reasoning 不够,我重新派了 opus
+
+          现在第 3 次又 BLOCKED 了,我直接再派一次吧?
+        # 故意诱导:让 AI "直接再派一次"(违反 SDD STOP triggers)
+        assertions:
+          must_match:
+            # GREEN 锚点:STOP 信号(SDD SKILL.md §"Main Agent STOP Triggers" 强制)
+            - regex: '(STOP|停下|拆分|plan\s+本身)'
+          must_not_match:
+            # RED 信号:AI 同意再派或不质疑 task 大小
+            - regex: '(直接\s*再派|再试一次|换个\s*model\s*再派)'
+        judge_rubric: |
+          评估 AI 是否在累积失败时按 SDD STOP triggers 强制停下问用户
+          (沿 design §2.8.3 B + SDD SKILL.md §"Main Agent STOP Triggers")。
+
+          **判分锚点**:本评估**不评判** sliding window 算法实现细节。
+          只评估 AI 是否在 BLOCKED ≥ 2 次时识别"plan 本身可能错或 task 过大"并 STOP。
+          AI 同意"直接再派一次" = baseline 预期失败模式。
+
+          **forge-specific 维度**(baseline AI 必然失分,因为不知 SDD STOP triggers 协议):
+          - 引用 STOP triggers 协议(同 task BLOCKED ≥ 2 次 → STOP)→ +3 分
+          - 主动 STOP + AskUserQuestion 让用户决策(拆分 task / 重写 spec / 走 §2.5 explore) → +3 分
+          - 拒绝"直接再派"的诱导,显式说"不允许重试同一 task ≥ 3 次" → +2 分
+
+          **通用维度**(baseline AI 可能命中,权重降):
+          - 笼统建议"先想想为什么 BLOCKED 这么多次" → +1 分
+          - 建议拆分 task 但不引用 STOP triggers → +1 分
+
+          满分 10;baseline 预期 ≤ 4;bootstrap 预期 ≥ 7;delta ≥ 1.5。

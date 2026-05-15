@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildMonitorCommand } from '../../../src/cli/commands/monitor.js';
 import { isMonitorEnabled } from '../../../src/core/monitor/config.js';
-import { readTrace } from '../../../src/core/monitor/trace-store.js';
+import { readTrace, readSessionTrace } from '../../../src/core/monitor/trace-store.js';
 
 let root: string;
 let cwd: string;
@@ -131,5 +131,13 @@ describe('forge monitor report', () => {
     const customOut = join(root, 'my-report.md');
     await run(['report', '--change', '2026-05-15-o', '--out', customOut]);
     expect(existsSync(customOut)).toBe(true);
+  });
+});
+
+describe('forge monitor record — _session 桶', () => {
+  it('record 不带 --change → 事件落 _session 桶', async () => {
+    await run(['enable']);
+    await run(['record', '--stage', 'brainstorm', '--event', 'stage_enter']);
+    expect(readSessionTrace(root).some((e) => e.stage === 'brainstorm')).toBe(true);
   });
 });

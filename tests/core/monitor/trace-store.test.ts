@@ -10,6 +10,8 @@ import {
   readCliExits,
   traceFilePath,
   cliExitsPath,
+  sessionChangeId,
+  readSessionTrace,
 } from '../../../src/core/monitor/trace-store.js';
 import type { TraceEvent } from '../../../src/core/monitor/types.js';
 
@@ -85,5 +87,19 @@ describe('readCliExits', () => {
       exit_code: 1,
     });
     expect(readCliExits(root)).toHaveLength(2);
+  });
+});
+
+describe('sessionChangeId / readSessionTrace', () => {
+  it('sessionChangeId 稳定返回同一 _session-<uuid>', () => {
+    const a = sessionChangeId(root);
+    const b = sessionChangeId(root);
+    expect(a).toBe(b);
+    expect(a).toMatch(/^_session-/);
+  });
+  it('readSessionTrace 合并 _session-* 桶事件', () => {
+    const sid = sessionChangeId(root);
+    appendTraceEvent(root, ev({ change_id: sid, event: 'stage_enter' }));
+    expect(readSessionTrace(root).some((e) => e.event === 'stage_enter')).toBe(true);
   });
 });

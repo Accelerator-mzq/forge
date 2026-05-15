@@ -8,6 +8,8 @@ import {
   appendTraceEvent,
   readCliExits,
   monitorDir,
+  sessionChangeId,
+  readSessionTrace,
 } from '../../core/monitor/trace-store.js';
 import { MONITOR_STAGES, type TraceEvent, type MonitorStage } from '../../core/monitor/types.js';
 import { observeArtifacts } from '../../core/monitor/artifact-observer.js';
@@ -55,13 +57,15 @@ export function buildMonitorCommand(): Command {
     .description('记录一条 AI 层 trace 事件(由 workflow-monitor 注入内容指示 AI 调用)')
     .requiredOption('--stage <stage>', '工作阶段')
     .requiredOption('--event <event>', '事件类型(stage_enter|decision|hardening_step|stage_exit)')
-    .option('--change <id>', 'change-id', '_session')
+    .option('--change <id>', 'change-id')
     .option('--json <payload>', 'data 负载(JSON)', '{}')
-    .action((opts: { stage: string; event: string; change: string; json: string }) => {
+    .action((opts: { stage: string; event: string; change?: string; json: string }) => {
       // 硬约束(spec §7):永远 exit 0;关闭时静默 no-op。
       try {
         const root = process.cwd();
         if (!isMonitorEnabled(root)) return; // 静默 no-op
+        // 未传 --change 时自动落 _session-<uuid> 桶(spec §2.4:pre-change brainstorm/explore 事件)
+        const changeId = opts.change ?? sessionChangeId(root);
         let data: Record<string, unknown>;
         let event = opts.event; // JSON 解析失败或 stage 非法时降级为 'record_error'
         try {
@@ -82,7 +86,7 @@ export function buildMonitorCommand(): Command {
         const traceEvent: TraceEvent = {
           ts: new Date().toISOString(),
           schema: 'forge-monitor-trace/v1',
-          change_id: opts.change,
+          change_id: changeId,
           stage: opts.stage as MonitorStage,
           layer: 'ai',
           event,
@@ -102,10 +106,13 @@ export function buildMonitorCommand(): Command {
     .action((opts: { change: string; out?: string }) => {
       // query 命令 —— 出错允许 non-zero exit(spec §7:与 record 不同,report 不强制 exit 0,故不包 try/catch)
       const root = process.cwd();
-      // AI trace 事件 + CLI 产物回扫事件合并(spec §2.4:产物层可回溯全程)
+      // AI trace 事件 + CLI 产物回扫事件 + _session 桶 pre-change 事件合并(spec §2.4/§3.2)
       const aiEvents = readTrace(root, opts.change).events;
+      const sessionEvents = readSessionTrace(root); // spec §2.4/§3.2:并入 pre-change _session 桶事件
       const cliEvents = observeArtifacts(root, opts.change);
-      const all = [...cliEvents, ...aiEvents].sort((a, b) => a.ts.localeCompare(b.ts));
+      const all = [...cliEvents, ...aiEvents, ...sessionEvents].sort((a, b) =>
+        a.ts.localeCompare(b.ts),
+      );
       const cliExits = readCliExits(root);
       const md = renderReport(opts.change, all, cliExits);
       const outPath = opts.out ?? join(monitorDir(root), opts.change, 'report.md');

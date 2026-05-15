@@ -20,6 +20,8 @@
 4. **离开阶段** —— 调:
    `... monitor record --stage <阶段> --event stage_exit --change <id> --json '{"outcome":"<结果>"}'`
 
+> **brainstorm/explore 阶段还没有 change-id 时,`record` 省略 `--change`(自动落 `_session` 桶,propose 创建 change 后报告会并入)**。
+
 ## fork 点 scenario_id 速查
 
 - verify 阶段「测试 pass 后是否做三维 verify」→ `scenario_id: verify-tests-green`

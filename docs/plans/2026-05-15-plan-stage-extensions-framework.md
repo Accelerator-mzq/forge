@@ -1168,8 +1168,8 @@ git push origin v1.2.0
 - [ ] **git tag v1.2.0 指向 main HEAD**(v3 修订,F4-v2 fix — 真 shell 断言,`^{}` 解 annotated tag):`test "$(git rev-parse 'v1.2.0^{}')" = "$(git rev-parse main)"`(tag 必须在 PR 合并后创建,不能合并前推)
 - [ ] **README badge v1.2.0**:`grep -oE '"version":\s*"[^"]+' package.json | grep -q "1.2.0"`(GitHub package-json badge 自动读)
 - [ ] **forge 协议 SKILL.md 0 改动**(`skills/` 协议层 + 其 `src/core/templates/skills/` 同步副本;`.claude/skills/` 过程 skill 如 subagent-driven-discipline 的 retrospect 增长不计 — 协议纯净指 forge 协议层):`test "$(git diff main^..HEAD --name-only | grep -cE '^(skills|src/core/templates/skills)/.+/SKILL\.md$')" -eq 0`
-- [ ] **5 commands/*.md 末尾段一致**:`test "$(grep -l 'stage-extensions run' commands/*.md | wc -l)" -eq 5`
-- [ ] **commands sync 一致**:`test "$(grep -l 'stage-extensions run' src/core/templates/commands/*.md | wc -l)" -eq 5`
+- [ ] **5 commands/*.md 末尾段一致**:`test "$(grep -l '(可选)Stage extensions hook' commands/*.md | wc -l)" -eq 5`(用末尾段唯一标题匹配 —— `stage-extensions run` 字面也出现在 `codex-adversarial.md` 正文,会误中)
+- [ ] **commands sync 一致**:`test "$(grep -l '(可选)Stage extensions hook' src/core/templates/commands/*.md | wc -l)" -eq 5`
 - [ ] **helper harness-agnostic**:`test "$(grep -cE 'process\.env\.(CLAUDE_PLUGIN_ROOT|FORGE_PLUGIN_ROOT)' scripts/codex-review-helper.mjs)" -eq 0`(沿 B-full Task 0 harness-compat test 同协议)
 - [ ] **runner 21 scenario 跑过**:`pnpm vitest run tests/cli/stage-extensions.test.ts 2>&1 | grep -E "21 passed"`
 - [ ] **docs 文档存在 + 含 quick start**:`for f in docs/stage-extensions.md docs/codex-review.md; do grep -qi "quick start" "$f" || { echo "MISSING quick start in $f"; exit 1; }; done`

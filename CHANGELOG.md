@@ -27,6 +27,20 @@ All notable changes to this project will be documented in this file.
 - **forge 协议层 SKILL.md 0 改动**:stage-extensions framework 不触碰 forge 协议层 skills(`skills/*/SKILL.md`)—— 多轮收敛 / askUser / fix dispatch 落在 commands/\*.md 末尾段(v7 CLI/AI 职责分层),协议层纯净。
 - **loose 语义**:codex 集成任何失败(spawn 失败 / retry 耗尽 / config 非法 / markdown 解析失败)都不阻塞 forge 主流程 fence;runner 永远 exit 0。
 
+### Codex Review 收敛
+
+plan 经 9 轮 Codex 对抗性 review 收敛,首轮(v2)7 个 finding 全 accept 修订:
+
+- **F1**(BLOCKER):runner 变量作用域 + 控制流隐患 → §7 重写为显式 RoundOutcome 状态机。
+- **F2**(MAJOR):多轮 continue 消耗 retry 配额 → 拆 attempt 与 round budget 两个独立计数器(v7 后 round budget 移 §8 AI 协议)。
+- **F3**(MAJOR):background 异步模式决策与实施矛盾 → v1 锁定 sync,`--background` 留 v2。
+- **F4**(MAJOR):generic 抽象泄漏 → v1 收窄 codex-specific scope,generic ExtensionContract 留 v2/v3。
+- **F5**(MAJOR):`verdict=approve` 短路掩盖 BLOCKER → judgeConvergence 短路条件改为 approve **且** block 桶空。
+- **F6**(MAJOR):测试 inventory 跨段不一致 → §2 单一来源表。
+- **F7**(MINOR):DoD 不可机器验证 → §14 验收 checklist 全改真 shell 断言。
+
+后续 v3-v9 再 7 轮收敛(F1-v2 BLOCKER normalized config 深合并 / F3-v2 timeout 状态分支 / F2-v3 thread_id 缺失保留旧值 / F1-v8 roundLimit 数据源修正 等),累计 21 finding 全独立核实为真问题(0 误报)。
+
 ### Acknowledgments
 
 - Codex 对抗性 review 9 轮收敛(block 桶 r1→r9:6→4→3→2→1→0→2→1→0,v7 CLI/AI 架构重写在 r7 引入 2 再收敛至 0);累计 21 finding(3 BLOCKER + 16 MAJOR + 2 MINOR)全独立核实为真问题(0 误报)全 accept 修订。

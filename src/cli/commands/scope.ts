@@ -18,7 +18,14 @@ export function buildScopeCommand(): Command {
       try {
         const forgeRoot = join(process.cwd(), 'forge');
         const result = await scanArchivedFollowups(forgeRoot);
+        // stdout 输出完整 JSON(供下游解析)
         process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+        // 坏块逐条写 stderr,格式含 "skipping yaml block" 供测试/日志搜索
+        for (const s of result.skipped) {
+          process.stderr.write(
+            `⚠ scope-aggregator: skipping yaml block in ${s.change}/${s.file} (${s.reason})\n`,
+          );
+        }
         process.exit(0);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

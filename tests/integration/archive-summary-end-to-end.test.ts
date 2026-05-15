@@ -4,7 +4,15 @@
 
 import { describe, it, expect, afterAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, cpSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  rmSync,
+  cpSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
@@ -193,5 +201,40 @@ describe('archive_summary e2e', () => {
     expect(r.stderr).toMatch(
       /scope-entries 完整性 fence|scope-entries YAML parse|ScopeEntriesIntegrityError/,
     );
+  });
+
+  // plan-backlog-registry Task 7 — archive 成功后自动生成 forge/backlog/
+  it('archive 成功后生成 forge/backlog/{active,archived,README}.md', async () => {
+    const ctx = await setupFixture('mixed-all-three');
+    cleanupDirs.push(ctx.tmpRoot);
+    const r = runArchive(ctx.tmpRoot, ctx.changeId);
+    expect(r.code).toBe(0);
+    const backlogDir = join(ctx.tmpRoot, 'forge', 'backlog');
+    expect(existsSync(join(backlogDir, 'active.md'))).toBe(true);
+    expect(existsSync(join(backlogDir, 'archived.md'))).toBe(true);
+    expect(existsSync(join(backlogDir, 'README.md'))).toBe(true);
+    expect(readFileSync(join(backlogDir, 'active.md'), 'utf8')).toContain('# Active Backlog');
+    expect(r.stdout).toMatch(/Backlog: forge\/backlog\/active\.md/);
+  });
+
+  // plan-backlog-registry Task 7 — backlog 写入失败不回滚 archive(spec §3.1)
+  it('backlog 写入失败 → archive 仍 exit 0 + stderr warning + archive 不回滚', async () => {
+    const ctx = await setupFixture('mixed-all-three');
+    cleanupDirs.push(ctx.tmpRoot);
+    // 把 active.md 预建成「目录」,使 backlog 的 writeFile 落 EISDIR 失败
+    mkdirSync(join(ctx.tmpRoot, 'forge', 'backlog', 'active.md'), { recursive: true });
+    const r = runArchive(ctx.tmpRoot, ctx.changeId);
+    expect(r.code).toBe(0); // archive 主流程仍成功
+    expect(r.stderr).toMatch(/backlog 重生成失败/);
+    // archive 未回滚 + 主流程产物完整:change 已移进 archive/ 且 archive_summary.yaml 存在
+    const archDir = join(
+      ctx.tmpRoot,
+      'forge',
+      'changes',
+      'archive',
+      `${ctx.archiveDate}-${ctx.changeId}`,
+    );
+    expect(existsSync(archDir)).toBe(true);
+    expect(existsSync(join(archDir, 'archive_summary.yaml'))).toBe(true);
   });
 });

@@ -49,6 +49,8 @@ import {
   ScopeEntriesIntegrityError,
 } from '../../core/archive/summary-builder.js';
 import { renderArchiveSummaryOutput } from '../../core/archive/summary-render.js';
+// plan-backlog-registry Task 7:archive 成功后自动重生成 forge/backlog/
+import { generateBacklog } from '../../core/backlog/index.js';
 // plan-9e1 Task 5:resume-summary 子模式
 import { resumeArchiveSummary } from '../../core/archive/resume-summary.js';
 // plan-9j Task 5:legacy-exemption + version-retrograde fence
@@ -558,6 +560,20 @@ export function buildArchiveCommand(): Command {
           // 步骤 6:plan-9e1 Task 4 — 渲染 archive_summary 输出(沿 design §2.4.4)
           const archiveDirName = `${archiveDate}-${changeId}`;
           console.log(renderArchiveSummaryOutput(archiveSummary, archiveDirName));
+
+          // 步骤 6.5:plan-backlog-registry — 重生成 forge/backlog/ 注册表
+          // 失败不回滚 archive(archive 主流程已成功,backlog 是衍生产物)
+          try {
+            const bl = await generateBacklog(forgeRoot);
+            console.log(
+              `Backlog: forge/backlog/active.md (${bl.openCount} open, ${bl.warningCount} warnings)`,
+            );
+          } catch (blErr) {
+            const m = blErr instanceof Error ? blErr.message : String(blErr);
+            console.error(
+              `⚠ backlog 重生成失败(不影响 archive):${m} —— 可手动跑 \`forge backlog\``,
+            );
+          }
         } catch (err) {
           // exit code 映射 — spec §3.5
           if (err instanceof LockHeldError) {

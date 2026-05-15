@@ -76,6 +76,18 @@ export interface ScopeEntry {
   related_change: string | null;
 }
 
+/**
+ * 合法的 superseding new_status —— 仅这 4 个值参与扣减(spec §9c 守卫)。
+ * aggregator(扣减守卫)与 backlog/render(invalid-new-status 判定)共用此集合,
+ * 避免两处各自维护副本漂移。
+ */
+export const VALID_SUPERSEDING_NEW_STATUS = new Set([
+  'superseded',
+  'obsolete',
+  'completed',
+  'inherited',
+]);
+
 /** SupersedingRef 4 字段(沿 design §2.6.4 forward-reference) */
 export interface SupersedingRef {
   /** 历史 entry 所在 archived change id */

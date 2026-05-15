@@ -21,8 +21,10 @@ You are about to handle `/forge:propose $ARGUMENTS`.
    - 按 `category` 分组(future-work / out-of-scope / non-goal),沿 §2.6.5 优先级排序
    - 标题:"## Pending follow-ups from archived changes (N active)"
    - 每个 entry 显示:`[source_change] id — description`
-   - 每项 4 选项:`inherit`(本 change 做)/ `acknowledge but defer`(留 active)/ `mark obsolete` / `mark superseded by some other change`
-4. 用户决策聚合,**`inherit` 项写到本 change 自己的 `## Out of Scope/Future Work` YAML 块**(本 change 实施时它就是新 entry,加 `triggered_by: {source: "from-archived", id: "<source_change>::<entry_id>"}` 跟踪来源);**`mark superseded` / `mark obsolete` 项写到 `superseding_entries` 数组**(每项含 source_change / entry_id / new_status / rationale)
+   - 每项 5 选项:`inherit`(本 change 做)/ `acknowledge but defer`(留 active)/ `mark obsolete` / `mark superseded by some other change` / `mark completed`(本 change 已实际完成该 backlog 项)
+4. 用户决策聚合并写入:
+   - **`inherit`**:写到本 change 自己的 `## Out of Scope/Future Work` YAML 块成为新 entry,archived 来源用 **`related_change: "<source_change>"`** 字段记录(change 粒度;entry 级精确来源由配套那条 superseding ref 的 `entry_id` 承载)(**勿**写 `triggered_by: {source: "from-archived", ...}` —— `from-archived` 不在 `TriggeredByRef.source` 枚举内,会被严格 validator 拒签);**并且**在 `superseding_entries` 数组写一条 `{source_change, entry_id, new_status: inherited, rationale}` —— 否则被继承的老 entry 不会从 backlog 注册表扣除,造成 double-count(plan-backlog-registry §9a/§9b)。此处 `rationale` 填「从 `<source_change>` 继承至本 change 实施」一类说明,勿留空
+   - **`mark obsolete` / `mark superseded` / `mark completed`**:各写一条 `superseding_entries` 项(`{source_change, entry_id, new_status, rationale}`,`new_status` 取 `obsolete` / `superseded` / `completed`)
 5. `acknowledge but defer` 不写(留原 archived entry 仍 active,下次再问)
 
 **不强制** — 用户可全跳过 / 部分处理。但**必须**显式提示,不能静默忽略。
@@ -38,7 +40,7 @@ You are about to handle `/forge:propose $ARGUMENTS`.
    - `proposal.md` — H1 标题 + Why + What + Scope
      - **必须**含 `## Out of Scope {#forge-oos}` 段(沿 plan-9b §2.6.3);若本 change 没有 out-of-scope 项,该段仅占位 anchor 无 YAML 块(合法)
      - **必须**含 `## Non-Goals {#forge-non-goals}` 段(同上)
-     - 若上面 §"前置"步骤 4 收集到 `inherit` / `superseding_entries` 决策 → 写入对应段的 `forge-scope-entries/v1` YAML 块
+     - 若上面 §"前置"步骤 4 收集到 `inherit` / `superseding_entries` 决策 → 写入对应段的 `forge-scope-entries/v1` YAML 块(inherit 项带 `related_change`,且必配一条 `new_status: inherited` 的 superseding_entries 项 —— plan-backlog-registry §9a/§9b)
    - `specs/<sub-area>.md` — 每个改动域一个文件,Given/When/Then 三段格式(spec deltas)
    - `design.md` — H1 标题 + 技术方案 + 数据模型 + 接口设计;**必须**含 `## Future Work {#forge-future-work}` 段(同上,可仅占位)
    - `tasks.md` — checkbox 任务列表,粒度 2-5 分钟一步,采用 forge:writing-plans skill 的 task 结构

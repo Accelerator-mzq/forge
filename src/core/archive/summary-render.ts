@@ -43,7 +43,7 @@ export function renderArchiveSummaryOutput(
   // Pending Suggestions 段
   if (summary.pending_suggestions.length > 0) {
     lines.push(
-      `### Pending Suggestions (${summary.pending_suggestions.length}) — handed off to backlog`,
+      `### Pending Suggestions (${summary.pending_suggestions.length}) — recorded in archive_summary`,
     );
     for (const s of summary.pending_suggestions) {
       lines.push(renderPendingSuggestion(s));
@@ -55,7 +55,7 @@ export function renderArchiveSummaryOutput(
   lines.push(
     `Review handoff details: cat forge/changes/archive/${archiveDirName}/archive_summary.yaml`,
   );
-  lines.push(`v1.1+: run \`forge backlog list\` to query across changes`);
+  lines.push(`Cross-change backlog: run \`forge backlog list\` (see forge/backlog/)`);
   return lines.join('\n');
 }
 

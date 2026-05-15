@@ -14,7 +14,10 @@ beforeEach(() => {
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 function enable(): void {
-  writeFileSync(join(root, 'forge', 'config.yaml'), 'schema: forge-spec-driven/v1\nmonitor:\n  enabled: true\n');
+  writeFileSync(
+    join(root, 'forge', 'config.yaml'),
+    'schema: forge-spec-driven/v1\nmonitor:\n  enabled: true\n',
+  );
 }
 
 describe('maybeRecordCliExit', () => {

@@ -71,9 +71,19 @@ describe('readCliExits', () => {
     expect(readCliExits(root)).toEqual([]);
   });
   it('cli-exits 坏行被跳过', () => {
-    recordCliExit(root, { ts: '2026-05-15T00:00:00.000Z', command: ['verify'], cwd: root, exit_code: 0 });
+    recordCliExit(root, {
+      ts: '2026-05-15T00:00:00.000Z',
+      command: ['verify'],
+      cwd: root,
+      exit_code: 0,
+    });
     appendFileSync(cliExitsPath(root), '坏行不是 json\n', 'utf8');
-    recordCliExit(root, { ts: '2026-05-15T00:00:01.000Z', command: ['archive'], cwd: root, exit_code: 1 });
+    recordCliExit(root, {
+      ts: '2026-05-15T00:00:01.000Z',
+      command: ['archive'],
+      cwd: root,
+      exit_code: 1,
+    });
     expect(readCliExits(root)).toHaveLength(2);
   });
 });

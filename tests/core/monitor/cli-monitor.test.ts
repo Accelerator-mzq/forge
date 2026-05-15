@@ -1,6 +1,6 @@
 // tests/core/monitor/cli-monitor.test.ts
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildMonitorCommand } from '../../../src/cli/commands/monitor.js';
@@ -97,5 +97,24 @@ describe('forge monitor record', () => {
     ]);
     const { events } = readTrace(root, '2026-05-15-s');
     expect(events.some((e) => e.event === 'record_error')).toBe(true);
+  });
+});
+
+describe('forge monitor report', () => {
+  it('渲染报告并写 report.md', async () => {
+    await run(['enable']);
+    await run([
+      'record',
+      '--stage',
+      'verify',
+      '--event',
+      'stage_enter',
+      '--change',
+      '2026-05-15-r',
+    ]);
+    await run(['report', '--change', '2026-05-15-r']);
+    const reportPath = join(root, 'forge', '.monitor', '2026-05-15-r', 'report.md');
+    expect(existsSync(reportPath)).toBe(true);
+    expect(readFileSync(reportPath, 'utf8')).toMatch(/# Forge 工作流监控报告 — 2026-05-15-r/);
   });
 });

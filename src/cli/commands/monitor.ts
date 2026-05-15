@@ -1,8 +1,17 @@
 // src/cli/commands/monitor.ts — forge monitor 子命令组(spec §7)
 import { Command } from 'commander';
+import { writeFileSync, mkdirSync } from 'node:fs';
+import { join, dirname } from 'node:path';
 import { isMonitorEnabled, setMonitorEnabled } from '../../core/monitor/config.js';
-import { readTrace, appendTraceEvent } from '../../core/monitor/trace-store.js';
+import {
+  readTrace,
+  appendTraceEvent,
+  readCliExits,
+  monitorDir,
+} from '../../core/monitor/trace-store.js';
 import { MONITOR_STAGES, type TraceEvent, type MonitorStage } from '../../core/monitor/types.js';
+import { observeArtifacts } from '../../core/monitor/artifact-observer.js';
+import { renderReport } from '../../core/monitor/report-renderer.js';
 
 // 构建 monitor 子命令
 export function buildMonitorCommand(): Command {
@@ -83,6 +92,26 @@ export function buildMonitorCommand(): Command {
       } catch {
         // 永不破坏工作流 —— 吞掉一切异常
       }
+    });
+
+  cmd
+    .command('report')
+    .description('渲染某 change 的监控报告(markdown)')
+    .requiredOption('--change <id>', 'change-id')
+    .option('--out <path>', '报告输出路径(默认 forge/.monitor/<change>/report.md)')
+    .action((opts: { change: string; out?: string }) => {
+      const root = process.cwd();
+      // AI trace 事件 + CLI 产物回扫事件合并(spec §2.4:产物层可回溯全程)
+      const aiEvents = readTrace(root, opts.change).events;
+      const cliEvents = observeArtifacts(root, opts.change);
+      const all = [...cliEvents, ...aiEvents].sort((a, b) => a.ts.localeCompare(b.ts));
+      const cliExits = readCliExits(root);
+      const md = renderReport(opts.change, all, cliExits);
+      const outPath = opts.out ?? join(monitorDir(root), opts.change, 'report.md');
+      mkdirSync(dirname(outPath), { recursive: true });
+      writeFileSync(outPath, md, 'utf8');
+      console.log(md);
+      console.error(`\n报告已写入 ${outPath}`);
     });
 
   return cmd;

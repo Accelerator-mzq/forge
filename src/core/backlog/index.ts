@@ -10,6 +10,7 @@ import {
   deriveWarningsAndTombstones,
   renderActiveMarkdown,
   renderArchivedMarkdown,
+  countOpenBacklog,
 } from './render.js';
 
 export * from './render.js';
@@ -34,9 +35,8 @@ export async function buildBacklog(forgeRoot: string): Promise<GenerateBacklogRe
   const { warnings, tombstones } = deriveWarningsAndTombstones(agg.superseding, agg.skipped);
   const activeMd = renderActiveMarkdown(agg.entries, warnings);
   const archivedMd = renderArchivedMarkdown(tombstones);
-  const openCount = agg.entries.filter(
-    (e) => e.category === 'future-work' || e.category === 'out-of-scope',
-  ).length;
+  // 待办计数口径由 render.ts 的 countOpenBacklog 统一(避免与 renderActiveMarkdown 各写一份)
+  const openCount = countOpenBacklog(agg.entries);
   return { openCount, warningCount: warnings.length, activeMd, archivedMd };
 }
 

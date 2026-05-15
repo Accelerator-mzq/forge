@@ -136,10 +136,11 @@ async function syncBacklogAssets() {
   if (!existsSync(srcDir)) return;
   const distDir = join(REPO_ROOT, 'dist', 'core', 'backlog', 'assets');
   await mkdir(distDir, { recursive: true });
-  for (const name of (await readdir(srcDir)).filter((n) => n.endsWith('.md'))) {
+  const mdFiles = (await readdir(srcDir)).filter((n) => n.endsWith('.md'));
+  for (const name of mdFiles) {
     await writeFile(join(distDir, name), await readFile(join(srcDir, name), 'utf8'), 'utf8');
   }
-  console.log('✓ synced backlog assets');
+  console.log(`✓ synced ${mdFiles.length} backlog assets`);
 }
 
 await syncSkills();

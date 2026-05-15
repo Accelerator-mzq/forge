@@ -139,6 +139,15 @@ export function renderWarningLine(w: BacklogWarning): string {
   }
 }
 
+/**
+ * 待办计数口径(spec §4):仅 future-work + out-of-scope 计入待办;non-goal 不计入。
+ * 由 renderActiveMarkdown 与 buildBacklog 共用,避免计数口径在两处各写一份导致漂移。
+ */
+export function countOpenBacklog(entries: AggregatedScopeEntry[]): number {
+  return entries.filter((e) => e.category === 'future-work' || e.category === 'out-of-scope')
+    .length;
+}
+
 /** 单条 active entry → markdown 块 */
 function renderEntry(e: AggregatedScopeEntry): string {
   // triggered_by 格式化:有则 source#id,无则 (无)
@@ -166,8 +175,8 @@ export function renderActiveMarkdown(
   const fw = byCat('future-work');
   const oos = byCat('out-of-scope');
   const ng = byCat('non-goal');
-  // 待办计数:Future Work + Out of Scope;Non-Goals 不计入
-  const openCount = fw.length + oos.length;
+  // 待办计数:Future Work + Out of Scope;Non-Goals 不计入(口径见 countOpenBacklog)
+  const openCount = countOpenBacklog(entries);
 
   const lines: string[] = [];
   lines.push('# Active Backlog');

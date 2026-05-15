@@ -91,4 +91,31 @@ describe('observeArtifacts', () => {
     expect(f?.stage).toBe('archive');
     expect(f?.data.ok).toBe(true);
   });
+
+  it('review-passed marker → marker_observed,stage=review、ts=reviewed_at', () => {
+    const dir = join(root, 'forge', 'changes', '2026-05-15-rv');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, '.review-passed'),
+      'schema: forge-review/v1\nreviewed_at: 2026-05-15T03:00:00Z\n',
+      'utf8',
+    );
+    const events = observeArtifacts(root, '2026-05-15-rv');
+    const m = events.find((e) => e.event === 'marker_observed');
+    expect(m?.stage).toBe('review');
+    expect(m?.ts).toBe('2026-05-15T03:00:00Z');
+  });
+
+  it('verify-failed marker → marker_observed,ts=failed_at', () => {
+    const dir = join(root, 'forge', 'changes', '2026-05-15-fl');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, '.verify-failed'),
+      'schema: forge-verify-failed/v1\nfailed_at: 2026-05-15T04:00:00Z\n',
+      'utf8',
+    );
+    const events = observeArtifacts(root, '2026-05-15-fl');
+    const m = events.find((e) => e.event === 'marker_observed');
+    expect(m?.ts).toBe('2026-05-15T04:00:00Z');
+  });
 });

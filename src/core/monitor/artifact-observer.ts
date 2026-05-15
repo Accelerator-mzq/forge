@@ -102,50 +102,54 @@ export function observeArtifacts(projectRoot: string, changeId: string): TraceEv
   //     Codex 计划审查第 2 轮 F-2 / 新-1 / 新-3)
   const archiveRoot = join(projectRoot, 'forge', 'changes', 'archive');
   if (existsSync(archiveRoot)) {
-    for (const entry of readdirSync(archiveRoot, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      // 目录名 = <YYYY-MM-DD>-<changeId>;剥一层日期前缀,余下须严格等于 changeId
-      const m = /^\d{4}-\d{2}-\d{2}-(.+)$/.exec(entry.name);
-      if (!m || m[1] !== changeId) continue;
+    try {
+      for (const entry of readdirSync(archiveRoot, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        // 目录名 = <YYYY-MM-DD>-<changeId>;剥一层日期前缀,余下须严格等于 changeId
+        const m = /^\d{4}-\d{2}-\d{2}-(.+)$/.exec(entry.name);
+        if (!m || m[1] !== changeId) continue;
 
-      const archiveDir = join(archiveRoot, entry.name);
-      const archiveRel = join('forge', 'changes', 'archive', entry.name);
-      events.push(...observeMarkers(archiveDir, archiveRel, changeId));
+        const archiveDir = join(archiveRoot, entry.name);
+        const archiveRel = join('forge', 'changes', 'archive', entry.name);
+        events.push(...observeMarkers(archiveDir, archiveRel, changeId));
 
-      // archive_summary.yaml —— 三级 fence 的 archive 侧裁决产物(spec §3.2)
-      const summaryPath = join(archiveDir, 'archive_summary.yaml');
-      if (!existsSync(summaryPath)) continue;
-      const summaryRel = join(archiveRel, 'archive_summary.yaml');
-      try {
-        const summary = parseYAML(readFileSync(summaryPath, 'utf8')) as unknown;
-        // Codex 计划审查第 2 轮 新-2:用完整 schema 校验定 ok,而非浅守卫 looksLikeArchiveSummary
-        const validation = validateArchiveSummarySchema(summary, summaryPath);
-        const s = (summary ?? {}) as Record<string, unknown>;
-        events.push(
-          mkEvent(
-            changeId,
-            'archive',
-            'fence_observed',
-            {
-              level: 'archive',
-              ok: validation.valid,
+        // archive_summary.yaml —— 三级 fence 的 archive 侧裁决产物(spec §3.2)
+        const summaryPath = join(archiveDir, 'archive_summary.yaml');
+        if (!existsSync(summaryPath)) continue;
+        const summaryRel = join(archiveRel, 'archive_summary.yaml');
+        try {
+          const summary = parseYAML(readFileSync(summaryPath, 'utf8')) as unknown;
+          // Codex 计划审查第 2 轮 新-2:用完整 schema 校验定 ok,而非浅守卫 looksLikeArchiveSummary
+          const validation = validateArchiveSummarySchema(summary, summaryPath);
+          const s = (summary ?? {}) as Record<string, unknown>;
+          events.push(
+            mkEvent(
+              changeId,
+              'archive',
+              'fence_observed',
+              {
+                level: 'archive',
+                ok: validation.valid,
+                path: summaryRel,
+                verify_passed: s.verify_passed,
+                review_passed: s.review_passed,
+                process_evidence_summary: s.process_evidence_summary,
+                observed_at: new Date().toISOString(),
+              },
+              typeof s.archived_at === 'string' ? s.archived_at : undefined, // ts 取 archived_at,typeof guard(第 5 轮 Finding 1)
+            ),
+          );
+        } catch (err) {
+          events.push(
+            mkEvent(changeId, 'archive', 'record_error', {
               path: summaryRel,
-              verify_passed: s.verify_passed,
-              review_passed: s.review_passed,
-              process_evidence_summary: s.process_evidence_summary,
-              observed_at: new Date().toISOString(),
-            },
-            typeof s.archived_at === 'string' ? s.archived_at : undefined, // ts 取 archived_at,typeof guard(第 5 轮 Finding 1)
-          ),
-        );
-      } catch (err) {
-        events.push(
-          mkEvent(changeId, 'archive', 'record_error', {
-            path: summaryRel,
-            error: (err as Error).message,
-          }),
-        );
+              error: (err as Error).message,
+            }),
+          );
+        }
       }
+    } catch {
+      // archive 目录读取失败(并发删除/权限)→ 跳过 archive 扫描,不破坏 active 事件契约
     }
   }
 

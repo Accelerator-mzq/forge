@@ -186,3 +186,30 @@ export function renderActiveMarkdown(
   }
   return lines.join('\n').trimEnd() + '\n';
 }
+
+/** 渲染 archived.md tombstone(spec §5);入参为 deriveWarningsAndTombstones 选出的 winner 列表 */
+export function renderArchivedMarkdown(tombstones: SupersedingDetail[]): string {
+  const lines: string[] = [];
+  lines.push('# Archived Backlog (Tombstones)');
+  lines.push('');
+  lines.push('> 生成产物 —— 由 `/forge:archive` 自动重生成。每条记录一个 backlog 项的退役。Schema 见 README.md。');
+  lines.push('> 异常(悬空认领 / 非法 new_status / 重复认领 / 跳过坏块 / 目录名异常)见 active.md `## Warnings`。');
+  lines.push('');
+  if (tombstones.length === 0) {
+    lines.push('(无)');
+    return lines.join('\n') + '\n';
+  }
+  for (const t of tombstones) {
+    // registry_entry_snapshot 一定非 null(deriveWarningsAndTombstones 已剔 dangling)
+    const snapshot = JSON.stringify(t.registry_entry_snapshot);
+    lines.push(`### \`${t.source_change}::${t.entry_id}\``);
+    lines.push('');
+    lines.push(`- **superseded_in_change**: ${t.superseded_in_change}`);
+    lines.push(`- **superseded_at**: ${t.superseded_at}`);
+    lines.push(`- **new_status**: ${t.new_status}`);
+    lines.push(`- **cancellation_reason**: ${t.rationale}`);
+    lines.push(`- **registry_entry_snapshot**: ${snapshot}`);
+    lines.push('');
+  }
+  return lines.join('\n').trimEnd() + '\n';
+}

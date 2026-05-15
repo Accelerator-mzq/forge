@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { deriveWarningsAndTombstones, renderActiveMarkdown } from '../../../src/core/backlog/render.js';
+import {
+  deriveWarningsAndTombstones,
+  renderActiveMarkdown,
+  renderArchivedMarkdown,
+} from '../../../src/core/backlog/render.js';
 import type { SupersedingDetail, SkippedBlock, AggregatedScopeEntry } from '../../../src/core/scope/aggregator.js';
 import type { ScopeEntry } from '../../../src/core/schemas/scope-entries.js';
 
@@ -155,5 +159,23 @@ describe('renderActiveMarkdown (plan-backlog-registry Task 3)', () => {
     ]);
     expect(md).toContain('## Warnings (1)');
     expect(md).toContain('[dangling] 2026-05-09-b 认领的 2026-05-01-a::foo 不存在');
+  });
+});
+
+describe('renderArchivedMarkdown (plan-backlog-registry Task 4)', () => {
+  it('无 tombstone:渲染标题 + (无)', () => {
+    const md = renderArchivedMarkdown([]);
+    expect(md).toContain('# Archived Backlog (Tombstones)');
+    expect(md).toContain('(无)');
+  });
+
+  it('单 tombstone:复合键标题 + 5 字段', () => {
+    const md = renderArchivedMarkdown([sup({ new_status: 'completed' })]);
+    expect(md).toContain('### `2026-05-01-a::foo`');
+    expect(md).toContain('- **superseded_in_change**: 2026-05-09-b');
+    expect(md).toContain('- **superseded_at**: 2026-05-09');
+    expect(md).toContain('- **new_status**: completed');
+    expect(md).toContain('- **cancellation_reason**: done');
+    expect(md).toContain('"id":"foo"');
   });
 });

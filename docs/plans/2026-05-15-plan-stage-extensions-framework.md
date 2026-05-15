@@ -1118,7 +1118,7 @@ git push origin v1.2.0
 - **v9**(2026-05-15):Codex 对抗性 review 第 8 轮跑完(plan v8 commit `3b34ebb` 后)。Codex 确认 §7 stale-output 修复足够,但 v8 的 F2-v7 fix 把 `roundLimit` 接到了不存在的 config 路径 —— 1 MAJOR,独立核实真问题(0 误报),accept 修订:
   - **F1-v8 MAJOR** §8 `roundLimit = config.convergence.max_rounds` 引用不存在的根级 `config.convergence`(schema 里 convergence 只在 `defaults.convergence` / `entry.convergence` / normalized `NormalizedStageExtensionEntry.convergence`)。修订:**runner `run` 的 unconverged JSON 输出加 `effectiveConvergence` + `userInteraction`**(runner 内 `validateStageExtensionsConfig` 已 normalize 出 entry 级 effective config,顺手输出);§8 Step B `roundLimit` 初值改 `null`,Step 3 从首轮 runner 输出 `effectiveConvergence.max_rounds` 设定,Step 4 `max_rounds_on_exceed` / Step 5 `block_unconverged` 同样改读 runner JSON —— AI 协议不碰 config 文件解析,单一数据源是 runner 输出。R-8 test 描述更新。
   - 测试数不变(19 scenario / 1081)—— F1-v8 是字段补充 + 数据源修正,无新 test。
-- (待:v10 — 若第 9 轮 Codex review 仍有 BLOCKER/MAJOR)
+- **v9 收敛达成**(2026-05-15):Codex 对抗性 review 第 9 轮跑完(plan v9 commit `79cc4de` 后)— **Verdict: `approve`,0 BLOCKER + 0 MAJOR**。v7 CLI/AI 职责分层架构重写后经 r7→r8→r9 三轮收敛(block 桶 2→1→0)。9 轮累计 21 finding(3 BLOCKER + 16 MAJOR + 2 MINOR)全独立核实真问题(0 误报)全 accept 修订。**plan 定稿,可进入 implementation**(沿 §2 Task list;Task 1-4 已 implement 完成)。
 
 ---
 

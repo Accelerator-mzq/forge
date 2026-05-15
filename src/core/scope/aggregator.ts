@@ -139,7 +139,7 @@ export async function scanArchivedFollowups(forgeRoot: string): Promise<Aggregat
               source_change: sup.source_change,
               entry_id: sup.entry_id,
               new_status: String(sup.new_status),
-              rationale: sup.rationale,
+              rationale: String(sup.rationale ?? ''),
               superseded_in_change: changeId,
               superseded_at: dirnameDate(changeId),
             });

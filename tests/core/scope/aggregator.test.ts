@@ -395,4 +395,62 @@ describe('scanArchivedFollowups (plan-9b Task 5)', () => {
       { change: '2026-05-01-a', file: 'proposal.md', reason: 'yaml-parse-error' },
     ]);
   });
+
+  it('Task1 M-2: superseding ref 指向不存在的 entry_id → snapshot 为 null(悬空引用)', async () => {
+    // 原 archived change 里没有该 entry,认领是悬空引用
+    await makeArchive(
+      '2026-05-01-a',
+      ossBlock(
+        'entries:\n  - {id: foo, category: out-of-scope, description: d, reason: r, priority: null, status: active, triggered_by: null, related_change: null}',
+      ),
+    );
+    await makeArchive(
+      '2026-05-09-b',
+      ossBlock(
+        'entries: []',
+        'superseding_entries:\n  - {source_change: 2026-05-01-a, entry_id: ghost, new_status: completed, rationale: done}',
+      ),
+    );
+    const r = await scanArchivedFollowups(forgeRoot);
+    expect(r.superseding).toHaveLength(1);
+    expect(r.superseding[0]!.entry_id).toBe('ghost');
+    expect(r.superseding[0]!.registry_entry_snapshot).toBeNull();
+  });
+
+  it('Task1 M-3: scope 段内 YAML 块解析成非对象(标量)→ skipped[] reason=schema-mismatch', async () => {
+    // fenced YAML 块内容是一个标量数字,非对象 → schema-mismatch 守卫
+    await makeArchive('2026-05-01-a', [
+      '# Proposal',
+      '## Out of Scope {#forge-oos}',
+      '',
+      '```yaml',
+      '42',
+      '```',
+    ].join('\n'));
+    const r = await scanArchivedFollowups(forgeRoot);
+    expect(r.skipped).toEqual([
+      { change: '2026-05-01-a', file: 'proposal.md', reason: 'schema-mismatch' },
+    ]);
+  });
+
+  it('Task1 M-4: archived 目录名无 YYYY-MM-DD 前缀 → superseded_at 为 unknown', async () => {
+    await makeArchive(
+      '2026-05-01-a',
+      ossBlock(
+        'entries:\n  - {id: foo, category: out-of-scope, description: d, reason: r, priority: null, status: active, triggered_by: null, related_change: null}',
+      ),
+    );
+    // 认领者目录名无日期前缀
+    await makeArchive(
+      'legacy-no-date',
+      ossBlock(
+        'entries: []',
+        'superseding_entries:\n  - {source_change: 2026-05-01-a, entry_id: foo, new_status: completed, rationale: done}',
+      ),
+    );
+    const r = await scanArchivedFollowups(forgeRoot);
+    expect(r.superseding).toHaveLength(1);
+    expect(r.superseding[0]!.superseded_in_change).toBe('legacy-no-date');
+    expect(r.superseding[0]!.superseded_at).toBe('unknown');
+  });
 });

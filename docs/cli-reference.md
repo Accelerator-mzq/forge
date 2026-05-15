@@ -230,6 +230,63 @@ LLM 扫 docs/+src/ 推测 role,产 anchors-draft.yaml + draft .md 概览。
 | 3   | 复写部分成功(.partial 文件)                               |
 | 5   | archive.lock 或 legacy-bridge.lock 被另一进程持有           |
 
+## `forge stage-extensions`(v1.2.0 新增)
+
+codex review stage extension framework 的 runner。**纯机械单轮执行器** —— 多轮收敛 / 用户介入 / 派 subagent 由 AI 主代理读 `commands/*.md` 末尾段协议驱动(v7 CLI/AI 职责分层)。两个子命令都输出结构化 JSON 到 stdout,**永远 exit 0**(loose —— codex 集成任何失败都不阻塞 forge 主流程 fence)。
+
+详见 [`docs/stage-extensions.md`](stage-extensions.md)(framework 协议)与 [`docs/codex-review.md`](codex-review.md)(用户指南)。
+
+### `forge stage-extensions run`
+
+跑一轮 codex review:spawn codex → 监控输出 → 解析 → 收敛判定,失败自动 retry。
+
+```
+forge stage-extensions run --stage <stage> --change-id <id> --extension <name> [--round <n>] [--thread-id <id>]
+```
+
+| 选项                 | 说明                                                                                                          |
+| -------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `--stage <stage>`    | 必选;stage 名:`brainstorming` / `propose` / `apply_critical_plan_review` / `review` / `verify`               |
+| `--change-id <id>`   | 必选;change 目录名                                                                                           |
+| `--extension <name>` | 必选;`forge/config.yaml#stage_extensions.<stage>` 数组里某 entry 的 `name`                                    |
+| `--round <n>`        | 当前轮次(默认 `1`);用于 output 文件名 + thread-map 轮次记录                                                  |
+| `--thread-id <id>`   | codex resume thread id(可选;首轮空)                                                                         |
+
+stdout 输出结构化 JSON,`kind` 字段为以下之一:`converged`(收敛完成)/ `unconverged`(需再轮)/ `failed`(retry 耗尽)/ `config_error`(config 加载/校验失败)/ `no_extension`(该 stage 无此 enabled extension)。
+
+### `forge stage-extensions analyze-trend`
+
+分析多轮收敛历史的 block finding 数趋势;AI 主代理在 max_rounds 到顶时调用拿建议。
+
+```
+forge stage-extensions analyze-trend --history '<JSON array>'
+```
+
+| 选项               | 说明                                                                       |
+| ------------------ | -------------------------------------------------------------------------- |
+| `--history <json>` | 必选;`[{"round":1,"block_count":5},{"round":2,"block_count":3}, ...]`       |
+
+stdout 输出 `TrendAdvice` JSON(`trend` / `recommendation` / `recommended_option`)。
+
+### 退出码
+
+| 码  | 含义                                                                                       |
+| --- | ------------------------------------------------------------------------------------------ |
+| 0   | 永远 0(loose 语义 —— codex 集成失败不阻塞主流程;失败信息在 stdout JSON 的 `kind` 字段)    |
+
+### 例子
+
+```bash
+# 跑一轮 review stage 的 codex-review extension
+forge stage-extensions run --stage review --change-id c1 --extension codex-review
+
+# resume 续接上一轮(带 thread-id)
+forge stage-extensions run --stage review --change-id c1 --extension codex-review --round 2 --thread-id cdx-abc123
+
+# 收敛趋势分析
+forge stage-extensions analyze-trend --history '[{"round":1,"block_count":5},{"round":2,"block_count":3},{"round":3,"block_count":1}]'
+```
+
 ## 错误退出码(全命令通用)
 
 | 码  | 含义                       |

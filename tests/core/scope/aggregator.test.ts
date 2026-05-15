@@ -274,7 +274,8 @@ describe('scanArchivedFollowups (plan-9b Task 5)', () => {
     expect(result.entries[0]!.id).toBe('active-entry');
   });
 
-  it('case 6: archived yaml 块缺 schema 字段 → skip + stderr warning', async () => {
+  it('case 6: archived yaml 块缺 schema 字段 → schema-mismatch 进 skipped[](plan-backlog-registry 行为变更)', async () => {
+    // plan-backlog-registry Task 1:缺 schema 字段不再写 stderr,改为结构化 skipped[]
     await makeArchive(
       'no-schema-archive',
       [
@@ -300,22 +301,11 @@ describe('scanArchivedFollowups (plan-9b Task 5)', () => {
       ].join('\n'),
     );
 
-    const stderrChunks: string[] = [];
-    const origWrite = process.stderr.write.bind(process.stderr);
-    (process.stderr.write as unknown) = ((chunk: string | Buffer) => {
-      stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
-      return true;
-    }) as typeof process.stderr.write;
-
-    try {
-      const result = await scanArchivedFollowups(forgeRoot);
-      expect(result.entries).toHaveLength(0);
-      const stderrMsg = stderrChunks.join('');
-      expect(stderrMsg).toMatch(/skipping yaml block/);
-      expect(stderrMsg).toMatch(/forge-scope-entries\/v1/);
-    } finally {
-      (process.stderr.write as unknown) = origWrite;
-    }
+    const result = await scanArchivedFollowups(forgeRoot);
+    expect(result.entries).toHaveLength(0);
+    expect(result.skipped).toEqual([
+      { change: 'no-schema-archive', file: 'proposal.md', reason: 'schema-mismatch' },
+    ]);
   });
 
   it('case 7: archive 目录不存在 → throw with code ENOENT', async () => {
@@ -325,5 +315,84 @@ describe('scanArchivedFollowups (plan-9b Task 5)', () => {
     } finally {
       await rm(noArchDir, { recursive: true, force: true });
     }
+  });
+
+  // ---- plan-backlog-registry Task 1 ----
+  function ossBlock(entriesYaml: string, supersedingYaml = ''): string {
+    return [
+      '# Proposal',
+      '## Out of Scope {#forge-oos}',
+      '',
+      '```yaml',
+      'schema: forge-scope-entries/v1',
+      'anchor_id: forge-oos',
+      entriesYaml,
+      supersedingYaml,
+      '```',
+      '',
+    ].join('\n');
+  }
+
+  it('Task1: superseding 明细被保留(含 superseded_in_change / superseded_at / snapshot)', async () => {
+    await makeArchive(
+      '2026-05-01-a',
+      ossBlock(
+        'entries:\n  - {id: foo, category: out-of-scope, description: d, reason: r, priority: null, status: active, triggered_by: null, related_change: null}',
+      ),
+    );
+    await makeArchive(
+      '2026-05-09-b',
+      ossBlock(
+        'entries: []',
+        'superseding_entries:\n  - {source_change: 2026-05-01-a, entry_id: foo, new_status: completed, rationale: done}',
+      ),
+    );
+    const r = await scanArchivedFollowups(forgeRoot);
+    expect(r.entries).toHaveLength(0);
+    expect(r.superseding).toHaveLength(1);
+    expect(r.superseding[0]!).toMatchObject({
+      source_change: '2026-05-01-a',
+      entry_id: 'foo',
+      new_status: 'completed',
+      superseded_in_change: '2026-05-09-b',
+      superseded_at: '2026-05-09',
+    });
+    expect(r.superseding[0]!.registry_entry_snapshot?.id).toBe('foo');
+  });
+
+  it('Task1: new_status=active 的 superseding 不扣减(§9c 守卫),但仍进 superseding[]', async () => {
+    await makeArchive(
+      '2026-05-01-a',
+      ossBlock(
+        'entries:\n  - {id: foo, category: out-of-scope, description: d, reason: r, priority: null, status: active, triggered_by: null, related_change: null}',
+      ),
+    );
+    await makeArchive(
+      '2026-05-09-b',
+      ossBlock(
+        'entries: []',
+        'superseding_entries:\n  - {source_change: 2026-05-01-a, entry_id: foo, new_status: active, rationale: bogus}',
+      ),
+    );
+    const r = await scanArchivedFollowups(forgeRoot);
+    expect(r.entries).toHaveLength(1);
+    expect(r.superseding).toHaveLength(1);
+    expect(r.superseding[0]!.new_status).toBe('active');
+  });
+
+  it('Task1: 坏 YAML 块进 skipped[](不再静默)', async () => {
+    await makeArchive('2026-05-01-a', [
+      '# Proposal',
+      '## Out of Scope {#forge-oos}',
+      '',
+      '```yaml',
+      'schema: forge-scope-entries/v1',
+      'entries: [unclosed',
+      '```',
+    ].join('\n'));
+    const r = await scanArchivedFollowups(forgeRoot);
+    expect(r.skipped).toEqual([
+      { change: '2026-05-01-a', file: 'proposal.md', reason: 'yaml-parse-error' },
+    ]);
   });
 });

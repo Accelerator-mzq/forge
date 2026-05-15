@@ -77,13 +77,13 @@ archive 成功后 stdout 渲染段(沿 design §2.4.4 模板):
   Acked by: <user> at <iso>
   Rationale: ...
 
-### Pending Suggestions (M) — handed off to backlog
+### Pending Suggestions (M) — recorded in archive_summary
 - [SUGGESTION] verify_findings#<id> (<dimension>/<check_type>)
   Source: ...
   Recommendation: ...
 
 Review handoff details: cat forge/changes/archive/<archive-id>/archive_summary.yaml
-v1.1+: run `forge backlog list` to query across changes
+Cross-change backlog: run `forge backlog list` (see forge/backlog/)
 ```
 
 ## --resume-summary 用法(plan-9e1 落地,罕见状态)
@@ -172,3 +172,7 @@ merge 顺序推荐:**9e1 → 9g → 9e2(已完成全链)** — 14 不变量真�
 | `forge archive --resume-summary <archive-id>`(plan-9e1 新增) | **2**     | 对齐 master §3.12.3 freeze                                                                                                                                                                                         |
 
 **v5 口径统一(v10 措辞收干)**:不再说 "9e1 不修留 GH issue 跟进"(原 v3 措辞);改为 reflection **将由 Task 6 Step 4-pre 实施时落到** master plan(沿 v5 选项 C 修订;**实施 plan 阶段** master 仍是 freeze 表无注脚,Task 6 Step 4-pre 实施完成后 master 加 known limitation 注脚)。后续 sub-plan(9z release / cleanup plan)接 master notation 统一全路径 exit 2。
+
+## backlog 产物(plan-backlog-registry)
+
+archive 成功后,CLI 自动重生成项目级 backlog 注册表 `forge/backlog/{active.md,archived.md}`(跨所有 archived change 聚合未决 scope-entry;首次生成时附带 `README.md`)。backlog 生成失败**不回滚 archive**(archive 主流程已成功,backlog 是衍生产物),仅 stderr WARNING + 提示手动跑 `forge backlog`。详见 `forge backlog` 子命令(`forge backlog` 重生成 / `forge backlog list` 查询 / `forge backlog --check` CI staleness 守门)。

@@ -130,6 +130,20 @@ async function syncCommands() {
   return cmdFiles;
 }
 
+// 同步 backlog assets:src/core/backlog/assets/*.md → dist/core/backlog/assets/
+async function syncBacklogAssets() {
+  const srcDir = join(REPO_ROOT, 'src', 'core', 'backlog', 'assets');
+  if (!existsSync(srcDir)) return;
+  const distDir = join(REPO_ROOT, 'dist', 'core', 'backlog', 'assets');
+  await mkdir(distDir, { recursive: true });
+  const mdFiles = (await readdir(srcDir)).filter((n) => n.endsWith('.md'));
+  for (const name of mdFiles) {
+    await writeFile(join(distDir, name), await readFile(join(srcDir, name), 'utf8'), 'utf8');
+  }
+  console.log(`✓ synced ${mdFiles.length} backlog assets`);
+}
+
 await syncSkills();
 await syncSharedSkillDocs(); // plan-9b §2.6.8(v2 修订:fail-fast)
 await syncCommands();
+await syncBacklogAssets(); // plan-backlog-registry

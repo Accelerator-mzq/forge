@@ -17,6 +17,7 @@ import { buildScopeCommand } from './commands/scope.js';
 import { buildFindingCommand } from './commands/finding.js';
 import { buildPreflightCommand } from './commands/preflight.js';
 import { buildStageExtensionsCommand } from './commands/stage-extensions.js';
+import { buildBacklogCommand } from './commands/backlog.js';
 
 // 创建主命令
 const program = new Command();
@@ -67,6 +68,9 @@ program.addCommand(buildPreflightCommand());
 
 // 注册 stage-extensions 子命令组(plan-stage-extensions Task 5 — runner CLI)
 program.addCommand(buildStageExtensionsCommand());
+
+// 注册 backlog 子命令(plan-backlog-registry)
+program.addCommand(buildBacklogCommand());
 
 // 解析命令行参数,遇到错误时打印并退出
 program.parseAsync(process.argv).catch((err: unknown) => {

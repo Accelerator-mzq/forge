@@ -31,6 +31,7 @@ warning_escaped=$(escape_for_json "$warning_message")
 
 # workflow-monitor:开关由 forge/config.yaml#monitor.enabled 决定(spec §9)
 # monitor-check.mjs 零依赖,exit 0 = 开启。任何异常都当关闭,绝不阻塞 session 启动。
+# monitor-check.mjs 与 workflow-monitor-injection.md 都在 hooks/ 目录,故用 SCRIPT_DIR(skills/ 才用 PLUGIN_ROOT)。
 monitor_injection=""
 if node "${SCRIPT_DIR}/monitor-check.mjs" >/dev/null 2>&1; then
   monitor_content=$(cat "${SCRIPT_DIR}/workflow-monitor-injection.md" 2>/dev/null || echo "")

@@ -116,3 +116,47 @@ describe('deriveWarningsAndTombstones (plan-backlog-registry Task 2)', () => {
     expect(r.warnings).toContainEqual({ kind: 'malformed-dirname', superseded_in_change: 'legacy-x' });
   });
 });
+
+import { renderActiveMarkdown } from '../../../src/core/backlog/render.js';
+import type { AggregatedScopeEntry } from '../../../src/core/scope/aggregator.js';
+
+function entry(p: Partial<AggregatedScopeEntry>): AggregatedScopeEntry {
+  return {
+    id: 'e', category: 'future-work', description: 'desc', reason: 'rsn',
+    priority: null, status: 'active', triggered_by: null, related_change: null,
+    source_change: '2026-05-01-a', ...p,
+  };
+}
+
+describe('renderActiveMarkdown (plan-backlog-registry Task 3)', () => {
+  it('无 entry 无 warning:待办计 0、Warnings (0) 渲染 (无)', () => {
+    const md = renderActiveMarkdown([], []);
+    expect(md).toContain('待办计 0 项');
+    expect(md).toContain('## Warnings (0)');
+    expect(md).toContain('(无)');
+  });
+
+  it('future-work + out-of-scope 计入待办数,non-goal 不计入', () => {
+    const md = renderActiveMarkdown(
+      [
+        entry({ id: 'fw', category: 'future-work' }),
+        entry({ id: 'oos', category: 'out-of-scope' }),
+        entry({ id: 'ng', category: 'non-goal' }),
+      ],
+      [],
+    );
+    expect(md).toContain('待办计 2 项');
+    expect(md).toContain('## Future Work (1)');
+    expect(md).toContain('## Out of Scope (1)');
+    expect(md).toContain('## Non-Goals (1)');
+    expect(md).toContain('### `2026-05-01-a::fw`');
+  });
+
+  it('warning 渲染进 ## Warnings 段', () => {
+    const md = renderActiveMarkdown([], [
+      { kind: 'dangling-reference', superseded_in_change: '2026-05-09-b', source_change: '2026-05-01-a', entry_id: 'foo' },
+    ]);
+    expect(md).toContain('## Warnings (1)');
+    expect(md).toContain('[dangling] 2026-05-09-b 认领的 2026-05-01-a::foo 不存在');
+  });
+});

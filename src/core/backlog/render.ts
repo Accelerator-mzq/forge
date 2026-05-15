@@ -108,3 +108,83 @@ export function deriveWarningsAndTombstones(
 
   return { warnings, tombstones };
 }
+
+import type { AggregatedScopeEntry } from '../scope/aggregator.js';
+import type { ScopeCategory } from '../schemas/scope-entries.js';
+
+/** 单条 BacklogWarning → 一行文本(spec §7.1 表) */
+export function renderWarningLine(w: BacklogWarning): string {
+  switch (w.kind) {
+    case 'dangling-reference':
+      return `- [dangling] ${w.superseded_in_change} 认领的 ${w.source_change}::${w.entry_id} 不存在`;
+    case 'invalid-new-status':
+      return `- [invalid-status] ${w.superseded_in_change} 认领 ${w.source_change}::${w.entry_id} new_status=${w.raw}`;
+    case 'duplicate-claim': {
+      const cs = w.claimants.map((c) => `${c.superseded_in_change}:${c.superseded_at}`).join(' ');
+      return `- [duplicate] ${w.source_change}::${w.entry_id} claimants=${cs} winner=${w.winner_superseded_in_change}`;
+    }
+    case 'malformed-dirname':
+      return `- [malformed-dirname] ${w.superseded_in_change} 目录名无日期前缀,superseded_at=unknown`;
+    case 'skipped-block':
+      return `- [skipped] ${w.change}/${w.file}: ${w.reason}`;
+  }
+}
+
+/** 单条 active entry → markdown 块 */
+function renderEntry(e: AggregatedScopeEntry): string {
+  // triggered_by 格式化:有则 source#id,无则 (无)
+  const tb = e.triggered_by ? `${e.triggered_by.source}#${e.triggered_by.id}` : '(无)';
+  return [
+    `### \`${e.source_change}::${e.id}\``,
+    '',
+    `- **source change**: ${e.source_change}`,
+    `- **description**: ${e.description}`,
+    `- **reason**: ${e.reason}`,
+    `- **priority**: ${e.priority ?? '(未排序)'}`,
+    `- **related change**: ${e.related_change ?? '(无)'}`,
+    `- **triggered_by**: ${tb}`,
+    '',
+  ].join('\n');
+}
+
+/** 渲染 active.md(spec §4) */
+export function renderActiveMarkdown(
+  entries: AggregatedScopeEntry[],
+  warnings: BacklogWarning[],
+): string {
+  // 按 category 分组过滤
+  const byCat = (c: ScopeCategory) => entries.filter((e) => e.category === c);
+  const fw = byCat('future-work');
+  const oos = byCat('out-of-scope');
+  const ng = byCat('non-goal');
+  // 待办计数:Future Work + Out of Scope;Non-Goals 不计入
+  const openCount = fw.length + oos.length;
+
+  const lines: string[] = [];
+  lines.push('# Active Backlog');
+  lines.push('');
+  lines.push('> 生成产物 —— 由 `/forge:archive` 自动重生成,**勿手编**。Schema 见 README.md。');
+  lines.push(`> 待办计 ${openCount} 项(Future Work + Out of Scope;Non-Goals 不计入)。`);
+  lines.push('');
+  lines.push(`## Warnings (${warnings.length})`);
+  lines.push('');
+  // 无 warning 则输出 (无),否则每条一行
+  lines.push(warnings.length === 0 ? '(无)' : warnings.map(renderWarningLine).join('\n'));
+  lines.push('');
+  // 三段 category:Future Work / Out of Scope / Non-Goals
+  for (const [title, list] of [
+    [`## Future Work (${fw.length})`, fw],
+    [`## Out of Scope (${oos.length})`, oos],
+    [`## Non-Goals (${ng.length}) — 原则不做,不计入待办`, ng],
+  ] as const) {
+    lines.push(title);
+    lines.push('');
+    if (list.length === 0) {
+      lines.push('(无)');
+      lines.push('');
+    } else {
+      for (const e of list) lines.push(renderEntry(e));
+    }
+  }
+  return lines.join('\n').trimEnd() + '\n';
+}

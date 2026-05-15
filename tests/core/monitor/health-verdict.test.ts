@@ -78,4 +78,9 @@ describe('computeVerdict', () => {
     expect(v.items).toHaveLength(1);
     expect(v.items[0]?.stage).toBe('review');
   });
+
+  it('forge 专属阶段(upgrade)有 CLI 事件但无 AI stage_enter → 不报 anomaly', () => {
+    const v = computeVerdict([ev({ layer: 'cli', event: 'cli_exit', stage: 'upgrade' })]);
+    expect(v.level).toBe('ok');
+  });
 });

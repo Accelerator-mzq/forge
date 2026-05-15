@@ -1,5 +1,11 @@
 // src/core/monitor/health-verdict.ts — 健康裁决(spec §10.1:只做可机检的判定)
-import type { TraceEvent, HealthVerdict, VerdictItem, MonitorStage } from './types.js';
+import {
+  COMPARABLE_STAGES,
+  type TraceEvent,
+  type HealthVerdict,
+  type VerdictItem,
+  type MonitorStage,
+} from './types.js';
 
 /**
  * 计算健康裁决。只做 spec §10.1 列的「可机检」项:
@@ -30,6 +36,9 @@ export function computeVerdict(events: TraceEvent[]): HealthVerdict {
     if (e.layer === 'ai' && e.event === 'stage_enter') stagesWithAiEnter.add(e.stage);
   }
   for (const stage of stagesWithCli) {
+    // 只对可对比阶段判 AI trace 缺失;forge 专属阶段(ack-confirm/upgrade/codex-adversarial)
+    // 按 spec §1.3 本就 CLI-only、注入内容不要求 AI record,跳过避免假阳性(M-3)
+    if (!(COMPARABLE_STAGES as readonly MonitorStage[]).includes(stage)) continue;
     if (!stagesWithAiEnter.has(stage)) {
       items.push({
         kind: 'anomaly',

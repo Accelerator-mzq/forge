@@ -39,6 +39,16 @@ export function renderReport(
 
   // ── 2. 阶段时间线 ──
   lines.push('## 2. 阶段时间线', '');
+  // §2.4:分维度覆盖标注 —— 中途启用监控时各维度覆盖范围不同,如实呈现、不假装完整
+  const markerStages = [...new Set(events.filter((e) => e.layer === 'cli').map((e) => e.stage))];
+  const aiStages = [...new Set(events.filter((e) => e.layer === 'ai').map((e) => e.stage))];
+  const exitCmds = [...new Set(cliExits.map((c) => c.command[0] ?? '?'))];
+  lines.push(
+    `维度覆盖 —— CLI 产物观察: ${markerStages.join(', ') || '(无)'};` +
+      ` AI trace: ${aiStages.join(', ') || '(无)'};` +
+      ` CLI exit: ${exitCmds.join(', ') || '(无)'}`,
+    '',
+  );
   if (events.length === 0) {
     lines.push('(无 trace 事件)', '');
   } else {

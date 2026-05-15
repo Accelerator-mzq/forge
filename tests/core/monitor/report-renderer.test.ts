@@ -71,4 +71,10 @@ describe('renderReport', () => {
     expect(md).toMatch(/forge verify x/);
     expect(md).toMatch(/exit 1/);
   });
+
+  it('阶段时间线含分维度覆盖标注', () => {
+    const md = renderReport('2026-05-15-x', [ev({ layer: 'ai', stage: 'verify' })], []);
+    expect(md).toMatch(/维度覆盖/);
+    expect(md).toMatch(/AI trace: verify/);
+  });
 });

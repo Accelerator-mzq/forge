@@ -19,6 +19,7 @@ try {
  * - 只在顶层(零缩进)monitor: 块内找 enabled:;
  * - 支持块式与 inline flow 式;
  * - 严格匹配裸 boolean true;其它一律 disabled。
+ * - 已知局限:重复顶层 monitor: 键时首个块胜出(YAML 规范视重复键为未定义;forge 生成的 config 不产生重复键)。
  */
 function scanMonitorEnabled(text) {
   const lines = text.split(/\r?\n/);

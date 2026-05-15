@@ -42,4 +42,10 @@ describe('monitor-check.mjs', () => {
   it('带引号的 "true" 不算裸 boolean → exit 1', () => {
     expect(check('schema: forge-spec-driven/v1\nmonitor:\n  enabled: "true"\n')).toBe(1);
   });
+  it('monitor: 为末尾孤立行(无子键) → exit 1', () => {
+    expect(check('schema: forge-spec-driven/v1\nmonitor:\n')).toBe(1);
+  });
+  it('inline flow monitor: { enabled: false } → exit 1', () => {
+    expect(check('schema: forge-spec-driven/v1\nmonitor: { enabled: false }\n')).toBe(1);
+  });
 });

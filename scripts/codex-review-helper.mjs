@@ -99,7 +99,7 @@ function buildPrompt(args) {
 
   if (!output) {
     // --output 是必填;--template 是可选的(可用 --stage/--mode 自动推导或 fallback)
-    exitWithError('build-prompt 需要 --template <path> 和 --output <path>');
+    exitWithError('build-prompt 需要 --output <path>');
   }
 
   // 模板解析优先级:
@@ -131,6 +131,12 @@ function buildPrompt(args) {
     }
   } else {
     // 优先级 3:fallback
+    // 若只给了 --stage 或只给了 --mode(未成对),提示用户避免静默 fallback
+    if (stage || mode) {
+      process.stderr.write(
+        `⚠️  --stage / --mode 需成对提供,已忽略,fallback → adversarial-default.md\n`,
+      );
+    }
     templatePath = DEFAULT_TEMPLATE;
   }
 
@@ -239,8 +245,15 @@ function runCodex(args) {
 
   // shell: true — 跨平台兼容:Windows 下 codex 是 .cmd wrapper,
   // 不加 shell:true 会 spawn ENOENT(沿 forge-repo execFileSync 同模式)
+  //
+  // 用「单条已转义命令字符串 + shell:true」而非「args 数组 + shell:true」:
+  //   1. Node 22+ 对「args 数组 + shell:true」会发 DEP0190 弃用警告(污染 stderr,
+  //      下游 Task 5 runner 会解析 stderr)
+  //   2. 每个 arg 显式加双引号并转义内部双引号,中和 threadId 等参数里
+  //      可能含 shell 元字符导致的注入
   const stdinMode = isCodeReview ? 'inherit' : 'pipe';
-  const codex = spawn('codex', codexArgs, {
+  const quoted = codexArgs.map((a) => `"${String(a).replace(/"/g, '\\"')}"`).join(' ');
+  const codex = spawn(`codex ${quoted}`, {
     stdio: [stdinMode, 'pipe', 'inherit'],
     shell: true,
   });

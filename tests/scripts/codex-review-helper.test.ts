@@ -13,7 +13,7 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -92,8 +92,22 @@ process.exit(0);
     `#!/usr/bin/env node\nimport { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(argvFile)}, JSON.stringify(process.argv.slice(2)));\nprocess.exit(0);\n`,
     'utf-8',
   );
+  // 加可执行位 — Linux CI(ubuntu-latest)上 shell:true spawn 沿 PATH 找到
+  // 此 stub 后需 +x 才能执行,否则 tests 2-5 在 Linux 上 spawn 失败
+  chmodSync(stubUnix, 0o755);
 
   return { stubBin: dir, argvFile };
+}
+
+// 构造把 stub codex 目录注入 PATH 最前的 env(让 helper spawn 到 stub 而非真 codex)
+function makeStubEnv(stubBin: string): Record<string, string> {
+  const sep = process.platform === 'win32' ? ';' : ':';
+  return {
+    ...(Object.fromEntries(
+      Object.entries(process.env).filter(([, v]) => v !== undefined),
+    ) as Record<string, string>),
+    PATH: `${stubBin}${sep}${process.env.PATH ?? ''}`,
+  };
 }
 
 // 读取 stub codex 记录到的 argv 数组
@@ -174,10 +188,10 @@ describe('codex-review-helper build-prompt', () => {
     expect(result.stderr).toContain('模板文件不存在');
   });
 
-  it('fails when --template / --output missing', () => {
+  it('fails when --output missing', () => {
     const result = spawnNode(['build-prompt']);
     expect(result.exitCode).not.toBe(0);
-    expect(result.stderr).toContain('需要 --template');
+    expect(result.stderr).toContain('需要 --output');
   });
 
   it('creates output directory if missing', () => {
@@ -248,12 +262,7 @@ describe('codex-review-helper run', () => {
 
     // 注入 stub 目录到 PATH 最前,让 helper spawn 到 stub codex
     const result = spawnNode(['run', '--mode', 'code-review'], {
-      env: {
-        ...(Object.fromEntries(
-          Object.entries(process.env).filter(([, v]) => v !== undefined),
-        ) as Record<string, string>),
-        PATH: `${stubBin}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH ?? ''}`,
-      },
+      env: makeStubEnv(stubBin),
     });
 
     // stub codex 退出 0
@@ -280,12 +289,7 @@ describe('codex-review-helper run', () => {
     const result = spawnNode(
       ['run', '--mode', 'adversarial', '--thread-id', 'cdx-123', '--prompt-file', promptFile],
       {
-        env: {
-          ...(Object.fromEntries(
-            Object.entries(process.env).filter(([, v]) => v !== undefined),
-          ) as Record<string, string>),
-          PATH: `${stubBin}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH ?? ''}`,
-        },
+        env: makeStubEnv(stubBin),
       },
     );
 
@@ -311,12 +315,7 @@ describe('codex-review-helper run', () => {
     writeFileSync(promptFile, 'rescue prompt', 'utf-8');
 
     const result = spawnNode(['run', '--mode', 'rescue', '--prompt-file', promptFile], {
-      env: {
-        ...(Object.fromEntries(
-          Object.entries(process.env).filter(([, v]) => v !== undefined),
-        ) as Record<string, string>),
-        PATH: `${stubBin}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH ?? ''}`,
-      },
+      env: makeStubEnv(stubBin),
     });
 
     expect(result.exitCode).toBe(0);
@@ -342,12 +341,7 @@ describe('codex-review-helper run', () => {
 
     // 不传 --thread-id
     const result = spawnNode(['run', '--prompt-file', promptFile], {
-      env: {
-        ...(Object.fromEntries(
-          Object.entries(process.env).filter(([, v]) => v !== undefined),
-        ) as Record<string, string>),
-        PATH: `${stubBin}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH ?? ''}`,
-      },
+      env: makeStubEnv(stubBin),
     });
 
     expect(result.exitCode).toBe(0);

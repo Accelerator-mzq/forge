@@ -166,4 +166,24 @@ describe('observeArtifacts', () => {
     expect(a?.stage).toBe('ack-confirm');
     expect(a?.data.finding_id).toBe('3');
   });
+
+  it('review-failed marker(unresolved_outcomes 未决)→ fence_observed ok=false', () => {
+    const dir = join(root, 'forge', 'changes', '2026-05-15-rf');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, '.review-failed'),
+      [
+        'schema: forge-review-failed/v1',
+        'failed_at: 2026-05-15T07:00:00Z',
+        'unresolved_outcomes:',
+        '  - { severity: CRITICAL, accepted: false, resolved: false }',
+        'appended_tasks: []',
+      ].join('\n') + '\n',
+      'utf8',
+    );
+    const events = observeArtifacts(root, '2026-05-15-rf');
+    const f = events.find((e) => e.event === 'fence_observed');
+    expect(f?.data.level).toBe('review');
+    expect(f?.data.ok).toBe(false);
+  });
 });

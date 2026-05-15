@@ -73,14 +73,21 @@ function observeMarkers(dir: string, relBase: string, changeId: string): TraceEv
           markerTs,
         ),
       );
-      // I-2(spec §3.2):verify/review 的 fence_observed —— 从 marker findings 抽未决项
-      const findingsKey = stage === 'verify' ? 'verify_findings' : 'review_outcomes';
-      const rawFindings = Array.isArray(obj[findingsKey])
-        ? (obj[findingsKey] as Record<string, unknown>[])
-        : [];
+      // I-2(spec §3.2):verify/review fence_observed —— 从 marker findings 抽未决项。
+      // findings 数组字段名按 marker 类型不同:verify(pass/fail)用 verify_findings;
+      // review-passed 用 review_outcomes;review-failed 用 unresolved_outcomes。
+      // 一个 marker 至多含其一,逐个探测取首个数组。
+      let rawFindings: Record<string, unknown>[] = [];
+      for (const key of ['verify_findings', 'review_outcomes', 'unresolved_outcomes']) {
+        if (Array.isArray(obj[key])) {
+          rawFindings = obj[key] as Record<string, unknown>[];
+          break;
+        }
+      }
       const blockedFindings = rawFindings
         .filter((f) => f.resolved === false)
         .map((f, i) => ({ id: f.id ?? i, severity: f.severity ?? null, dimension: f.dimension }));
+      // 'S' 是 review_outcomes 的 CRITICAL 简码(verify_findings 不用简码)
       const fenceOk = !blockedFindings.some((b) => b.severity === 'CRITICAL' || b.severity === 'S');
       events.push(
         mkEvent(

@@ -479,14 +479,14 @@ export async function terminateRound(
   // 1. 提前订阅 close 事件(proc 已 spawn,close 可能任意时刻派发)
   const closePromise: Promise<void> = once(proc, 'close').then(() => undefined);
 
-  // 1. 先本地 SIGTERM kill
+  // 2. 先本地 SIGTERM kill
   try {
     proc.kill();
   } catch {
     // 进程可能已退出,忽略
   }
 
-  // 2. best-effort 远程 cancel(jobId=null 时跳过)
+  // 3. best-effort 远程 cancel(jobId=null 时跳过)
   if (jobId !== null) {
     try {
       await withTimeout(cancelJob(jobId), 5000);
@@ -497,7 +497,7 @@ export async function terminateRound(
     }
   }
 
-  // 3. 等 SIGTERM 后 close;超时 → SIGKILL → 再次等 close(F2-v4 fix)
+  // 4. 等 SIGTERM 后 close;超时 → SIGKILL → 再次等 close(F2-v4 fix)
   try {
     await withTimeout(closePromise, 3000);
     return; // SIGTERM 后正常 close

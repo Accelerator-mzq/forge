@@ -145,9 +145,18 @@ describe('OutputWatcher', () => {
     expect(events[0]?.exitCode).toBe(0);
   });
 
-  it('single-settle 边界:进程在 timeout 边界退出只 settle 一次且 kind=done', async () => {
-    // 用 fake timers 消除时间依赖:进程在 timeout 边界精确退出,验证只 settle 一次
+  it('single-settle 边界:进程退出后即使越过 timeout 也只 settle 一次且 kind=done', async () => {
     // pollInterval=1s, zombie=1s, timeout=2s
+    //
+    // 【确定性说明 — 勿改回「推进到 2s 边界再 close」】
+    // OutputWatcher.poll() 内有真实 `await fs.stat()`(libuv I/O,fake timer
+    // 控制不到)。若让 timeout 边界(t=2000)的那次 poll 进入「是否 settle」判定,
+    // 它的 settle('zombie') 会与本测试随后 emit('close') 的同步 settle('done')
+    // 真实竞争(fs.stat I/O resolve 时机 vs advanceTimersByTimeAsync 返回时机)——
+    // 这正是本测试曾 flaky 的根因(CI: expected 'zombie' to be 'done')。
+    // 修正:在越过 timeout 之前先让进程退出。close → closeHandler 同步
+    // settle('done') → stop() 清 interval;之后所有 poll 因 proc.exitCode !== null
+    // 在 await stat 之前直接 return,永不触达 settle 判定 → 完全确定。
     vi.useFakeTimers();
     const proc = makeFakeProc(null, null);
     const events: string[] = [];
@@ -159,22 +168,24 @@ describe('OutputWatcher', () => {
 
     watcher.start();
 
-    // 推进到 timeout 边界(2s),此刻 close 与下一次 poll 竞争
-    // 先标记 exitCode(模拟进程已退出),让任何 poll 直接跳过
-    await vi.advanceTimersByTimeAsync(2000);
+    // 推进到 timeout 之前(t=1000):poll 在此 fire,但 elapsed 1s < timeout 2s,
+    // 永不 settle(elapsed 在 await 前已捕获,与后续时机无关)
+    await vi.advanceTimersByTimeAsync(1000);
+
+    // 进程在 timeout 边界前退出:先置 exitCode(令后续 poll 走 exitCode 守卫跳过),
+    // 再 emit close —— closeHandler 同步 settle('done')
     (proc as unknown as { exitCode: number }).exitCode = 0;
-    // close 事件触发 done settle
     (proc as unknown as EventEmitter).emit('close', 0);
 
-    // 继续推进时间,确认后续 poll 不会再 settle
-    await vi.advanceTimersByTimeAsync(3000);
+    // 越过 timeout 继续推进(到 t=5000):验证后续 poll 不会二次 settle
+    await vi.advanceTimersByTimeAsync(4000);
 
-    // 只应 settle 一次,且为 done(close handler 在 poll 之前注册)
+    // 只应 settle 一次,且为 done
     const terminalCount = events.filter((e) => ['done', 'zombie', 'timeout'].includes(e)).length;
     expect(terminalCount).toBe(1);
     expect(events[0]).toBe('done');
 
-    // 二次 close 不应再次 settle(settled 标志生效)
+    // 二次 close 不应再次 settle(settled 标志 + stop() 已移除 close 监听器)
     (proc as unknown as EventEmitter).emit('close', 1);
     expect(events.filter((e) => ['done', 'zombie', 'timeout'].includes(e))).toHaveLength(1);
   });

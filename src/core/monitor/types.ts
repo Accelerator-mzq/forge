@@ -1,18 +1,22 @@
 // src/core/monitor/types.ts — workflow-monitor 全模块共享类型(spec §3.2 / §6 / §10)
 
+/** 所有受监控的工作阶段(运行时数组;MonitorStage 类型由它派生 —— 单一数据源) */
+export const MONITOR_STAGES = [
+  'brainstorm',
+  'propose',
+  'apply',
+  'review',
+  'verify',
+  'archive',
+  'explore',
+  'ack-confirm',
+  'upgrade',
+  'codex-adversarial',
+  'unknown',
+] as const;
+
 /** 受监控的工作阶段;主流程 6 步 + explore 可进三方对比,forge 专属命令仅 CLI 层 */
-export type MonitorStage =
-  | 'brainstorm'
-  | 'propose'
-  | 'apply'
-  | 'review'
-  | 'verify'
-  | 'archive'
-  | 'explore'
-  | 'ack-confirm'
-  | 'upgrade'
-  | 'codex-adversarial'
-  | 'unknown';
+export type MonitorStage = (typeof MONITOR_STAGES)[number];
 
 /** 可与 OpenSpec/superpowers 三方对比的阶段(spec §1.3:forge 专属命令不进对比) */
 export const COMPARABLE_STAGES = [

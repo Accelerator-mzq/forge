@@ -84,4 +84,18 @@ describe('forge monitor record', () => {
     const { events } = readTrace(root, '2026-05-15-z');
     expect(events.some((e) => e.event === 'record_error')).toBe(true);
   });
+  it('非法 stage → 写一条 record_error', async () => {
+    await run(['enable']);
+    await run([
+      'record',
+      '--stage',
+      '不是合法stage',
+      '--event',
+      'decision',
+      '--change',
+      '2026-05-15-s',
+    ]);
+    const { events } = readTrace(root, '2026-05-15-s');
+    expect(events.some((e) => e.event === 'record_error')).toBe(true);
+  });
 });

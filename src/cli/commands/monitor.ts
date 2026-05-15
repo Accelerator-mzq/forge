@@ -2,7 +2,7 @@
 import { Command } from 'commander';
 import { isMonitorEnabled, setMonitorEnabled } from '../../core/monitor/config.js';
 import { readTrace, appendTraceEvent } from '../../core/monitor/trace-store.js';
-import type { TraceEvent, MonitorStage } from '../../core/monitor/types.js';
+import { MONITOR_STAGES, type TraceEvent, type MonitorStage } from '../../core/monitor/types.js';
 
 // 构建 monitor 子命令
 export function buildMonitorCommand(): Command {
@@ -54,13 +54,21 @@ export function buildMonitorCommand(): Command {
         const root = process.cwd();
         if (!isMonitorEnabled(root)) return; // 静默 no-op
         let data: Record<string, unknown>;
-        let event = opts.event;
+        let event = opts.event; // JSON 解析失败或 stage 非法时降级为 'record_error'
         try {
           data = JSON.parse(opts.json) as Record<string, unknown>;
         } catch (err) {
           // 坏输入降级为 record_error,不报错退出
           event = 'record_error';
           data = { original_event: opts.event, error: (err as Error).message };
+        }
+        // stage 合法性校验 —— 无效 stage 同样降级为 record_error(与坏 JSON 对称,spec §7「坏输入」)
+        if (
+          event !== 'record_error' &&
+          !(MONITOR_STAGES as readonly string[]).includes(opts.stage)
+        ) {
+          event = 'record_error';
+          data = { original_event: opts.event, error: `invalid stage: ${opts.stage}` };
         }
         const traceEvent: TraceEvent = {
           ts: new Date().toISOString(),

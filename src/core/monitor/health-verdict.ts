@@ -7,6 +7,9 @@ import {
   type MonitorStage,
 } from './types.js';
 
+/** 可对比阶段集合 —— check 2 只对它们判 AI trace 缺失(forge 专属阶段 CLI-only,不判) */
+const COMPARABLE_STAGE_SET = new Set<MonitorStage>(COMPARABLE_STAGES);
+
 /**
  * 计算健康裁决。只做 spec §10.1 列的「可机检」项:
  * - regression:hardening_step.executed === false(加固步骤未执行)。
@@ -38,7 +41,7 @@ export function computeVerdict(events: TraceEvent[]): HealthVerdict {
   for (const stage of stagesWithCli) {
     // 只对可对比阶段判 AI trace 缺失;forge 专属阶段(ack-confirm/upgrade/codex-adversarial)
     // 按 spec §1.3 本就 CLI-only、注入内容不要求 AI record,跳过避免假阳性(M-3)
-    if (!(COMPARABLE_STAGES as readonly MonitorStage[]).includes(stage)) continue;
+    if (!COMPARABLE_STAGE_SET.has(stage)) continue;
     if (!stagesWithAiEnter.has(stage)) {
       items.push({
         kind: 'anomaly',

@@ -43,12 +43,14 @@ export function renderReport(
   const markerStages = [...new Set(events.filter((e) => e.layer === 'cli').map((e) => e.stage))];
   const aiStages = [...new Set(events.filter((e) => e.layer === 'ai').map((e) => e.stage))];
   const exitCmds = [...new Set(cliExits.map((c) => c.command[0] ?? '?'))];
-  lines.push(
-    `维度覆盖 —— CLI 产物观察: ${markerStages.join(', ') || '(无)'};` +
-      ` AI trace: ${aiStages.join(', ') || '(无)'};` +
-      ` CLI exit: ${exitCmds.join(', ') || '(无)'}`,
-    '',
-  );
+  if (events.length > 0 || cliExits.length > 0) {
+    lines.push(
+      `维度覆盖 —— CLI 产物观察: ${markerStages.join(', ') || '(无)'};` +
+        ` AI trace: ${aiStages.join(', ') || '(无)'};` +
+        ` CLI exit: ${exitCmds.join(', ') || '(无)'}`,
+      '',
+    );
+  }
   if (events.length === 0) {
     lines.push('(无 trace 事件)', '');
   } else {

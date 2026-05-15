@@ -79,8 +79,10 @@ describe('computeVerdict', () => {
     expect(v.items[0]?.stage).toBe('review');
   });
 
-  it('forge 专属阶段(upgrade)有 CLI 事件但无 AI stage_enter → 不报 anomaly', () => {
-    const v = computeVerdict([ev({ layer: 'cli', event: 'cli_exit', stage: 'upgrade' })]);
-    expect(v.level).toBe('ok');
+  it('forge 专属阶段(upgrade/ack-confirm/codex-adversarial)有 CLI 事件但无 AI stage_enter → 不报 anomaly', () => {
+    for (const stage of ['upgrade', 'ack-confirm', 'codex-adversarial'] as const) {
+      const v = computeVerdict([ev({ layer: 'cli', event: 'cli_exit', stage })]);
+      expect(v.level, stage).toBe('ok');
+    }
   });
 });

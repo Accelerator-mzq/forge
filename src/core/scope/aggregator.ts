@@ -169,5 +169,30 @@ export async function scanArchivedFollowups(forgeRoot: string): Promise<Aggregat
     return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
   });
 
+  // 对 superseding 排序:保证 archived.md tombstone 顺序跨平台确定、--check 不误报
+  // 排序键:source_change → entry_id → superseded_in_change 字典序
+  superseding.sort((a, b) => {
+    if (a.source_change !== b.source_change) {
+      return a.source_change < b.source_change ? -1 : 1;
+    }
+    if (a.entry_id !== b.entry_id) {
+      return a.entry_id < b.entry_id ? -1 : 1;
+    }
+    return a.superseded_in_change < b.superseded_in_change
+      ? -1
+      : a.superseded_in_change > b.superseded_in_change
+        ? 1
+        : 0;
+  });
+
+  // 对 skipped 排序:保证 active.md Warnings 顺序跨平台确定、--check 不误报
+  // 排序键:change → file 字典序
+  skipped.sort((a, b) => {
+    if (a.change !== b.change) {
+      return a.change < b.change ? -1 : 1;
+    }
+    return a.file < b.file ? -1 : a.file > b.file ? 1 : 0;
+  });
+
   return { entries: filtered, superseding, skipped };
 }

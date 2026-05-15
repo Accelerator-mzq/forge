@@ -452,4 +452,105 @@ describe('scanArchivedFollowups (plan-9b Task 5)', () => {
     expect(r.superseding[0]!.superseded_in_change).toBe('legacy-no-date');
     expect(r.superseding[0]!.superseded_at).toBe('unknown');
   });
+
+  // ---- plan-backlog-registry 问题 2:排序确定性 ----
+
+  it('排序: superseding[] 按 source_change→entry_id→superseded_in_change 有序(与 readdir 顺序无关)', async () => {
+    // 故意让目录名字典序与期望的排序结果不同,以验证排序独立于 readdir 顺序
+    // 期望 superseding 排序:source_change('2026-05-01-a' < '2026-05-02-b')
+    //   在相同 source_change 内:entry_id('alpha' < 'beta')
+    await makeArchive(
+      '2026-05-01-a',
+      ossBlock(
+        [
+          'entries:',
+          '  - {id: alpha, category: out-of-scope, description: d, reason: r, priority: null, status: active, triggered_by: null, related_change: null}',
+          '  - {id: beta, category: out-of-scope, description: d, reason: r, priority: null, status: active, triggered_by: null, related_change: null}',
+        ].join('\n'),
+      ),
+    );
+    await makeArchive(
+      '2026-05-02-b',
+      ossBlock(
+        [
+          'entries:',
+          '  - {id: gamma, category: out-of-scope, description: d, reason: r, priority: null, status: active, triggered_by: null, related_change: null}',
+        ].join('\n'),
+      ),
+    );
+    // zzz-superseder 认领多条(字典序排最后,确保排序不依赖创建/readdir 顺序)
+    await makeArchive(
+      'zzz-superseder',
+      ossBlock(
+        'entries: []',
+        [
+          'superseding_entries:',
+          '  - {source_change: 2026-05-02-b, entry_id: gamma, new_status: completed, rationale: done}',
+          '  - {source_change: 2026-05-01-a, entry_id: beta, new_status: completed, rationale: done}',
+          '  - {source_change: 2026-05-01-a, entry_id: alpha, new_status: completed, rationale: done}',
+        ].join('\n'),
+      ),
+    );
+    const r = await scanArchivedFollowups(forgeRoot);
+    // 全部被 superseding → entries 为空
+    expect(r.entries).toHaveLength(0);
+    // superseding[] 共 3 条,排序期望:
+    //   [0] source=2026-05-01-a / entry=alpha
+    //   [1] source=2026-05-01-a / entry=beta
+    //   [2] source=2026-05-02-b / entry=gamma
+    expect(r.superseding).toHaveLength(3);
+    expect(r.superseding[0]).toMatchObject({ source_change: '2026-05-01-a', entry_id: 'alpha' });
+    expect(r.superseding[1]).toMatchObject({ source_change: '2026-05-01-a', entry_id: 'beta' });
+    expect(r.superseding[2]).toMatchObject({ source_change: '2026-05-02-b', entry_id: 'gamma' });
+  });
+
+  it('排序: skipped[] 按 change→file 有序(与 readdir 顺序无关)', async () => {
+    // aaa-change 的 proposal.md 和 design.md 都是坏块
+    // zzz-change 也有坏块(字典序排最后)
+    // 期望 skipped 排序:aaa-change/design.md → aaa-change/proposal.md → zzz-change/proposal.md
+    await makeArchive(
+      'zzz-change',
+      // proposal.md:坏块(无 schema 字段)
+      [
+        '# P',
+        '## Out of Scope {#forge-oos}',
+        '',
+        '```yaml',
+        'anchor_id: forge-oos',
+        'entries: []',
+        '```',
+      ].join('\n'),
+      // design.md:有效块(不进 skipped)
+      '# Design\n',
+    );
+    await makeArchive(
+      'aaa-change',
+      // proposal.md:坏块
+      [
+        '# P',
+        '## Out of Scope {#forge-oos}',
+        '',
+        '```yaml',
+        'anchor_id: forge-oos',
+        'entries: []',
+        '```',
+      ].join('\n'),
+      // design.md:坏块
+      [
+        '# D',
+        '## Out of Scope {#forge-oos}',
+        '',
+        '```yaml',
+        'anchor_id: forge-oos',
+        'entries: []',
+        '```',
+      ].join('\n'),
+    );
+    const r = await scanArchivedFollowups(forgeRoot);
+    // skipped[] 应有 3 条,排序:aaa-change/design.md < aaa-change/proposal.md < zzz-change/proposal.md
+    expect(r.skipped).toHaveLength(3);
+    expect(r.skipped[0]).toMatchObject({ change: 'aaa-change', file: 'design.md' });
+    expect(r.skipped[1]).toMatchObject({ change: 'aaa-change', file: 'proposal.md' });
+    expect(r.skipped[2]).toMatchObject({ change: 'zzz-change', file: 'proposal.md' });
+  });
 });

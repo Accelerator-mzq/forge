@@ -3,17 +3,23 @@ import type { TraceEvent, CliExitRecord } from './types.js';
 import { computeVerdict } from './health-verdict.js';
 import { DIVERGENCE_MAP, findScenario } from './divergence-map.js';
 
+/** 净化 markdown 表格单元格:转义管道符、压平换行(防 AI 自由文本破坏表格) */
+function sanitizeCell(s: string): string {
+  return s.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+}
+
 /** 渲染某 change 的完整监控报告 markdown */
 export function renderReport(
   changeId: string,
   events: TraceEvent[],
   cliExits: CliExitRecord[],
+  now: string = new Date().toISOString(),
 ): string {
   const verdict = computeVerdict(events);
   const lines: string[] = [];
 
   lines.push(`# Forge 工作流监控报告 — ${changeId}`, '');
-  lines.push(`生成时间:${new Date().toISOString()}`);
+  lines.push(`生成时间:${now}`);
   lines.push(`差异映射表同步于:${DIVERGENCE_MAP.meta.synced_at}`, '');
 
   // ── 1. 健康裁决 ──
@@ -38,7 +44,7 @@ export function renderReport(
   } else {
     lines.push('| 时间 | 阶段 | 层 | 事件 |', '| --- | --- | --- | --- |');
     for (const e of events) {
-      lines.push(`| ${e.ts} | ${e.stage} | ${e.layer} | ${e.event} |`);
+      lines.push(`| ${e.ts} | ${e.stage} | ${e.layer} | ${sanitizeCell(e.event)} |`);
     }
     lines.push('');
   }
@@ -61,10 +67,12 @@ export function renderReport(
     lines.push('| (无 decision record) | — | — | — | — |');
   } else {
     for (const d of decisions) {
-      const sid = String(d.data.scenario_id ?? '');
-      const chosen = String(d.data.chosen ?? '(未记录)');
-      const sc = findScenario(sid);
-      lines.push(`| ${sid} | ${chosen} | ${sc?.openspec ?? '?'} | ${sc?.superpowers ?? '?'} | ? |`);
+      const sidRaw = String(d.data.scenario_id ?? '');
+      const chosen = sanitizeCell(String(d.data.chosen ?? '(未记录)'));
+      const sc = findScenario(sidRaw);
+      lines.push(
+        `| ${sanitizeCell(sidRaw)} | ${chosen} | ${sanitizeCell(sc?.openspec ?? '?')} | ${sanitizeCell(sc?.superpowers ?? '?')} | ? |`,
+      );
     }
   }
   lines.push('');

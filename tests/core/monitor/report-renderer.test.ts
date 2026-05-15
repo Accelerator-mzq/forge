@@ -55,4 +55,20 @@ describe('renderReport', () => {
     expect(md).toMatch(/verify-tests-green/);
     expect(md).toMatch(/走了三维/);
   });
+  it('空 events → 时间线与对比表显示空态', () => {
+    const md = renderReport('2026-05-15-x', [], []);
+    expect(md).toMatch(/\(无 trace 事件\)/);
+    expect(md).toMatch(/无 decision record/);
+    expect(md).toMatch(/无命中项/);
+  });
+  it('cliExits 渲染进时间线段', () => {
+    const md = renderReport(
+      '2026-05-15-x',
+      [],
+      [{ ts: '2026-05-15T00:00:00.000Z', command: ['verify', 'x'], cwd: '/p', exit_code: 1 }],
+    );
+    expect(md).toMatch(/CLI exit 记录/);
+    expect(md).toMatch(/forge verify x/);
+    expect(md).toMatch(/exit 1/);
+  });
 });

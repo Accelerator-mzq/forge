@@ -931,18 +931,17 @@ describe('forge stage-extensions run — retry/失败路径(F-1..F-8)', () => {
     testDir = createTestDir();
 
     // 写一个会挂起的 stub(无限等待)
+    // 注:runOneRound 内部自己 spawn 并管理进程,测试无需也不应在外层另 spawn 进程
     const stubPath = join(testDir, 'stubs', 'hang.mjs');
     mkdirSync(join(stubPath, '..'), { recursive: true });
     writeFileSync(stubPath, `// stub: 无限等待,模拟 zombie 进程\nsetTimeout(() => {}, 999999);\n`);
-
-    // spawn 进程
-    const proc = spawn('node', [stubPath], { shell: false });
 
     // 调用 runOneRound:极小 timeout → zombie/timeout
     const outcome = await runOneRound({
       command: `node ${stubPath}`,
       promptFile: null,
       threadId: null,
+      changeId: 'c1',
       outputFile: join(testDir, 'output.json'),
       spawnStartMs: Date.now(),
       poll_interval_sec: 0.05, // 50ms 轮询
@@ -961,13 +960,6 @@ describe('forge stage-extensions run — retry/失败路径(F-1..F-8)', () => {
 
     // 进程应已终止(zombie 或 timeout)
     expect(['zombie', 'timeout', 'invalid_output']).toContain(outcome.kind);
-
-    // 清理残留进程
-    try {
-      proc.kill('SIGKILL');
-    } catch {
-      /* 忽略 */
-    }
   }, 10000);
 
   it('F-7: timeout → terminateRound kill → 直接调用', async () => {
@@ -994,6 +986,7 @@ setTimeout(() => { clearInterval(interval); }, 999999);
       command: `node ${stubPath}`,
       promptFile: null,
       threadId: null,
+      changeId: 'c1',
       outputFile,
       spawnStartMs: Date.now(),
       poll_interval_sec: 0.05,
@@ -1089,6 +1082,7 @@ setTimeout(() => { clearInterval(interval); }, 999999);
       command: `node ${noWriteStub}`,
       promptFile: null,
       threadId: null,
+      changeId: 'c1',
       outputFile, // 指向预置的残留旧文件
       spawnStartMs,
       poll_interval_sec: 0.05,
@@ -1273,4 +1267,250 @@ setTimeout(() => {}, 999999);
     expect(json).toHaveProperty('trend');
     expect(json).toHaveProperty('recommended_option');
   });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MD-1..MD-2:adversarial markdown 解析覆盖(code review C-1/I-3 — markdown parser
+// 此前零测试覆盖,JSON stub 永远走不到 markdown 分支)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('forge stage-extensions — adversarial markdown 解析(MD-1..MD-2)', () => {
+  afterEach(() => {
+    if (testDir) cleanupDir(testDir);
+  });
+
+  /**
+   * 写一个把预设 markdown 内容写到 ${OUTPUT_FILE} 的 stub。
+   */
+  function writeMarkdownStub(stubPath: string, markdown: string): void {
+    mkdirSync(join(stubPath, '..'), { recursive: true });
+    // markdown 内容用 base64 编码进 stub,避免引号/换行转义问题
+    const b64 = Buffer.from(markdown, 'utf-8').toString('base64');
+    writeFileSync(
+      stubPath,
+      `
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+const args = process.argv.slice(2);
+const outIdx = args.indexOf('--output');
+const outFile = args[outIdx + 1];
+mkdirSync(dirname(outFile), { recursive: true });
+const md = Buffer.from('${b64}', 'base64').toString('utf-8');
+writeFileSync(outFile, md);
+process.exit(0);
+`,
+    );
+  }
+
+  // 严格对照 src/core/codex-review/prompts/adversarial-default.md <output_format> 的真实 markdown
+  const ADVERSARIAL_MARKDOWN = `## Summary
+
+总体存在两个值得关注的风险点,需在合入前处理。
+
+## Findings
+
+### [BLOCKER] 空状态未处理导致崩溃
+
+**Location**: \`src/core/foo.ts:42\`
+**Confidence**: 0.95
+
+**Body**:
+当输入数组为空时,代码会直接访问 index 0 而抛出异常。
+这是第二行 body 内容,验证 body 不被 \$ 截断。
+
+**Recommendation**:
+在访问前加空数组守卫。
+
+---
+
+### [MINOR] 命名不一致
+
+**Location**: \`src/core/bar.ts:10\`
+**Confidence**: 0.6
+
+**Body**:
+变量命名风格与项目其余部分不一致。
+
+**Recommendation**:
+统一命名风格。
+
+---
+
+## Verdict
+
+needs-attention
+
+存在一个 BLOCKER 级别问题,不建议直接合入。
+`;
+
+  it('MD-1: adversarial markdown 输出 → runOneRound 正确解析 verdict + findings', async () => {
+    testDir = createTestDir();
+
+    const stubPath = join(testDir, 'stubs', 'md-stub.mjs');
+    writeMarkdownStub(stubPath, ADVERSARIAL_MARKDOWN);
+
+    const outputFile = join(testDir, 'md-output.md');
+    const spawnStartMs = Date.now();
+    // 等 5ms 让 spawnStartMs 不会因同毫秒精度卡 mtime 校验
+    await new Promise<void>((res) => setTimeout(res, 5));
+
+    const outcome = await runOneRound({
+      command: `node ${stubPath} --output \${OUTPUT_FILE}`,
+      promptFile: null,
+      threadId: null,
+      changeId: 'c1',
+      outputFile,
+      spawnStartMs,
+      poll_interval_sec: 0.05,
+      zombie_threshold_sec: 30,
+      timeout_sec: 30,
+      convergenceConfig: {
+        max_rounds: 5,
+        max_rounds_on_exceed: 'ask',
+        block_severity: ['BLOCKER', 'MAJOR'],
+        ignore_severity: ['MINOR', 'NIT'],
+        confidence_threshold: 0.5,
+        verdict_approve_short_circuit: true,
+      },
+      severityMap: { critical: 'BLOCKER', high: 'MAJOR', medium: 'MINOR', low: 'NIT' },
+    });
+
+    // markdown 含 1 个 BLOCKER → unconverged(block 桶非空)
+    expect(outcome.kind).toBe('unconverged');
+    if (outcome.kind !== 'unconverged' && outcome.kind !== 'converged') {
+      throw new Error(`期望 converged/unconverged,实得 ${outcome.kind}`);
+    }
+    const conv = outcome.convergence;
+    expect(conv.verdict).toBe('needs-attention');
+
+    // 2 个 finding:1 BLOCKER(→block 桶)+ 1 MINOR(→ignore 桶)
+    expect(conv.blockFindings).toHaveLength(1);
+    expect(conv.ignoreFindings).toHaveLength(1);
+
+    // BLOCKER finding:severity 反映射 BLOCKER → critical;forge_severity = BLOCKER
+    // 前面已 assert length===1,非空断言安全
+    const blockF = conv.blockFindings[0]!;
+    expect(blockF.severity).toBe('critical');
+    expect(blockF.forge_severity).toBe('BLOCKER');
+    expect(blockF.title).toBe('空状态未处理导致崩溃');
+    expect(blockF.confidence).toBe(0.95);
+    // body 必须完整解析(含第二行)—— 验证 finding 拆分正则不截断 body
+    expect(blockF.body).toContain('当输入数组为空时');
+    expect(blockF.body).toContain('验证 body 不被');
+    expect(blockF.recommendation).toContain('空数组守卫');
+    // Location 解析为 file:line
+    expect(blockF.file).toBe('src/core/foo.ts');
+    expect(blockF.line_start).toBe(42);
+
+    // MINOR finding:severity 反映射 MINOR → medium
+    const ignoreF = conv.ignoreFindings[0]!;
+    expect(ignoreF.severity).toBe('medium');
+    expect(ignoreF.confidence).toBe(0.6);
+    expect(ignoreF.title).toBe('命名不一致');
+  }, 10000);
+
+  it('MD-2: markdown 缺 Verdict 段 / Confidence 缺失默认 0.8', async () => {
+    testDir = createTestDir();
+
+    // case A:缺 ## Verdict 段 → parseCodexOutput throw → invalid_output
+    const noVerdictMd = `## Summary
+
+简述。
+
+## Findings
+
+### [MINOR] 小问题
+
+**Location**: \`a.ts:1\`
+**Confidence**: 0.6
+
+**Body**:
+内容。
+
+**Recommendation**:
+建议。
+`;
+    const stubA = join(testDir, 'stubs', 'md-no-verdict.mjs');
+    writeMarkdownStub(stubA, noVerdictMd);
+    const outputA = join(testDir, 'md-a.md');
+    const startA = Date.now();
+    await new Promise<void>((res) => setTimeout(res, 5));
+
+    const baseParams = {
+      promptFile: null,
+      threadId: null,
+      changeId: 'c1',
+      poll_interval_sec: 0.05,
+      zombie_threshold_sec: 30,
+      timeout_sec: 30,
+      convergenceConfig: {
+        max_rounds: 5,
+        max_rounds_on_exceed: 'ask' as const,
+        block_severity: ['BLOCKER', 'MAJOR'] as Array<'BLOCKER' | 'MAJOR' | 'MINOR' | 'NIT'>,
+        ignore_severity: ['MINOR', 'NIT'] as Array<'BLOCKER' | 'MAJOR' | 'MINOR' | 'NIT'>,
+        confidence_threshold: 0.5,
+        verdict_approve_short_circuit: true,
+      },
+      severityMap: {
+        critical: 'BLOCKER' as const,
+        high: 'MAJOR' as const,
+        medium: 'MINOR' as const,
+        low: 'NIT' as const,
+      },
+    };
+
+    const outcomeA = await runOneRound({
+      ...baseParams,
+      command: `node ${stubA} --output \${OUTPUT_FILE}`,
+      outputFile: outputA,
+      spawnStartMs: startA,
+    });
+    // 关键段(Verdict)缺失 → throw → invalid_output(绝不猜)
+    expect(outcomeA.kind).toBe('invalid_output');
+
+    // case B:finding 缺 Confidence 行 → 默认 0.8
+    const noConfidenceMd = `## Summary
+
+简述。
+
+## Findings
+
+### [BLOCKER] 严重问题
+
+**Location**: \`b.ts:5\`
+
+**Body**:
+没有 Confidence 行的 finding。
+
+**Recommendation**:
+修复。
+
+---
+
+## Verdict
+
+needs-attention
+
+存在严重问题。
+`;
+    const stubB = join(testDir, 'stubs', 'md-no-confidence.mjs');
+    writeMarkdownStub(stubB, noConfidenceMd);
+    const outputB = join(testDir, 'md-b.md');
+    const startB = Date.now();
+    await new Promise<void>((res) => setTimeout(res, 5));
+
+    const outcomeB = await runOneRound({
+      ...baseParams,
+      command: `node ${stubB} --output \${OUTPUT_FILE}`,
+      outputFile: outputB,
+      spawnStartMs: startB,
+    });
+    expect(outcomeB.kind).toBe('unconverged');
+    if (outcomeB.kind === 'unconverged' || outcomeB.kind === 'converged') {
+      expect(outcomeB.convergence.blockFindings).toHaveLength(1);
+      const f = outcomeB.convergence.blockFindings[0]!;
+      // Confidence 行缺失 → 默认 0.8
+      expect(f.confidence).toBe(0.8);
+    }
+  }, 10000);
 });

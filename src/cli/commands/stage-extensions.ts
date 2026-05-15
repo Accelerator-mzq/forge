@@ -56,6 +56,8 @@ export interface RunOneRoundParams {
   command: string;
   promptFile: string | null;
   threadId: string | null;
+  /** change ID(用于 ${CHANGE_ID} 模板变量替换;M-1 fix:此前硬编码空串) */
+  changeId: string;
   outputFile: string;
   spawnStartMs: number;
   poll_interval_sec: number;
@@ -142,9 +144,31 @@ function resolveOutputPath(
 }
 
 /**
+ * I-1 fix:命令注入面防护。
+ * substituteVars 把变量值原样插入命令字符串,spawn 又用 shell:true —— 若变量值
+ * 含 shell 元字符(`;` `|` `&` `$` 反引号 等)会造成命令注入。
+ * `changeId`(目录名式 ID)与 `threadId`(codex session ID)正常都在 `[A-Za-z0-9._-]`
+ * 字符集内。这里不无脑包引号(会与 config 模板作者自己加的引号冲突),改为输入校验:
+ * 含非白名单字符即视为非法 token,调用方拒绝执行(loose:config_error / invalid_output)。
+ *
+ * @param value  待校验值;null/空串视为合法(对应「首轮无 thread-id」等场景)
+ * @returns      true=合法 / false=含危险字符
+ */
+function isSafeShellToken(value: string | null): boolean {
+  if (value === null || value === '') {
+    return true;
+  }
+  // 受限白名单:字母/数字/点/下划线/连字符;长度上限防滥用
+  return /^[A-Za-z0-9._-]{1,256}$/.test(value);
+}
+
+/**
  * 对命令字符串做模板变量替换。
  * 变量:${FORGE_HELPER_DIR} ${PROMPT_FILE} ${THREAD_ID} ${OUTPUT_FILE} ${CHANGE_ID} ${TS}。
  * ${THREAD_ID} 首轮为 null 时替换为空字符串(spawn 时传空参数,codex CLI 忽略)。
+ *
+ * 注:调用方须先用 isSafeShellToken 校验 changeId/threadId(I-1 注入面防护);
+ * forgeHelperDir/outputFile/promptFile 是程序自身构造的受控路径,不经此校验。
  */
 function substituteVars(
   template: string,
@@ -223,7 +247,10 @@ function parseMarkdownOutput(raw: string): CodexReviewOutput {
   };
 
   // 提取 ## Verdict 段
-  const verdictMatch = raw.match(/^##\s+Verdict\s*\n([\s\S]*?)(?=^##\s|\Z)/im);
+  // C-1 fix:JS 正则无 \Z 锚(`\Z` 是字面字符 Z)。## Verdict 按 adversarial 模板永远
+  // 是末段,后面无 `^##`,原 `(?=^##\s|\Z)` 恒不匹配 → verdictMatch 恒 null。
+  // 改为直接吃到字符串结尾 `([\s\S]+)`。
+  const verdictMatch = raw.match(/^##\s+Verdict\s*\n([\s\S]+)/im);
   if (!verdictMatch) {
     throw new Error('parseCodexOutput: markdown 缺少 ## Verdict 段');
   }
@@ -242,13 +269,19 @@ function parseMarkdownOutput(raw: string): CodexReviewOutput {
   const summary = summaryMatch ? (summaryMatch[1] ?? '').trim() : '';
 
   // 提取 ## Findings 段
-  const findingsBlockMatch = raw.match(/^##\s+Findings\s*\n([\s\S]*?)(?=^##\s|\Z)/im);
+  // C-1 fix:Findings 段后跟 ## Verdict,用 `(?=^##\s)` 即可(去掉无效 `\Z`)。
+  const findingsBlockMatch = raw.match(/^##\s+Findings\s*\n([\s\S]*?)(?=^##\s)/im);
   const findings: CodexFinding[] = [];
 
   if (findingsBlockMatch) {
     const findingsBlock = findingsBlockMatch[1] ?? '';
-    // 每个 finding 以 ### [SEVERITY] Title 开始
-    const findingRegex = /^###\s+\[([A-Z]+)\]\s+(.+?)\s*$([\s\S]*?)(?=^###\s+\[|$)/gim;
+    // 每个 finding 以 ### [SEVERITY] Title 开始。
+    // C-1/I-3 fix:原正则 `(.+?)\s*$([\s\S]*?)(?=^###\s+\[|$)` 有两处 bug:
+    //   1. `m` flag 下 `(.+?)\s*$` 后接 `([\s\S]*?)` 在第一行尾就让 body 非贪婪匹配空串;
+    //   2. 终止锚 `$` 在 `m` flag 下匹配每个行尾 → body 被截断到 title 那一行。
+    // 修:title 用 `([^\n]+)` 取到行尾,显式 `\n` 分隔后 body 用 `[\s\S]*?`,
+    // 终止锚用 `$(?![\s\S])`(真正的字符串结尾,替代 JS 不支持的 `\Z`)。
+    const findingRegex = /^###\s+\[([A-Z]+)\]\s+([^\n]+)\n([\s\S]*?)(?=^###\s+\[|$(?![\s\S]))/gim;
     let match: RegExpExecArray | null;
 
     while ((match = findingRegex.exec(findingsBlock)) !== null) {
@@ -343,13 +376,22 @@ export async function runOneRound(params: RunOneRoundParams): Promise<RoundOutco
   const forgeHelperDir = resolveForgeHelperDir();
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
 
-  // 变量替换后的最终命令字符串
+  // I-1 fix:spawn(shell:true) 前校验插入命令字符串的 changeId/threadId 不含 shell 元字符。
+  // 非法 → invalid_output(失败态,顶层 retry 耗尽后 → failed,loose exit 0)。
+  if (!isSafeShellToken(params.changeId)) {
+    return { kind: 'invalid_output', reason: `changeId 含非法 shell 字符: ${params.changeId}` };
+  }
+  if (!isSafeShellToken(params.threadId)) {
+    return { kind: 'invalid_output', reason: `threadId 含非法 shell 字符: ${params.threadId}` };
+  }
+
+  // 变量替换后的最终命令字符串(M-1 fix:changeId 此前硬编码空串,${CHANGE_ID} 静默坏)
   const finalCommand = substituteVars(params.command, {
     forgeHelperDir,
     promptFile: params.promptFile,
     threadId: params.threadId,
     outputFile: params.outputFile,
-    changeId: '',
+    changeId: params.changeId,
     ts,
   });
 
@@ -412,6 +454,7 @@ export async function runOneRound(params: RunOneRoundParams): Promise<RoundOutco
 /**
  * 终结 zombie/timeout 轮次进程。
  * v4/v5 逻辑:
+ * 0. M-3 fix:进程已自然退出 → 直接 return(避免白等 6s + 减少 SIGKILL warning 噪声)
  * 1. 入口先订阅 close 事件(避免错过)
  * 2. 先 proc.kill(SIGTERM)
  * 3. jobId 非 null → best-effort cancelCodexJob(5s 上限)
@@ -427,7 +470,13 @@ export async function terminateRound(
   jobId: string | null,
   cancelJob: (jobId: string) => Promise<void> = cancelCodexJob,
 ): Promise<void> {
-  // 0. 提前订阅 close 事件(proc 已 spawn,close 可能任意时刻派发)
+  // 0. M-3 fix:进程已自然退出(exitCode/signalCode 非 null)→ 无需 kill/等待,直接返回。
+  //    避免对已死进程白等 3s+3s 才打 SIGKILL warning(也减少 Windows 噪声)。
+  if (proc.exitCode !== null || proc.signalCode !== null) {
+    return;
+  }
+
+  // 1. 提前订阅 close 事件(proc 已 spawn,close 可能任意时刻派发)
   const closePromise: Promise<void> = once(proc, 'close').then(() => undefined);
 
   // 1. 先本地 SIGTERM kill
@@ -478,6 +527,17 @@ async function runStageExtensionRound(args: RunArgs): Promise<number> {
   let entry: NormalizedStageExtensionEntry | undefined;
   let config: NormalizedStageExtensionsConfig;
 
+  // I-1 fix:用户传入的 --change-id / --thread-id 会经 substituteVars 插入 shell:true 命令,
+  // 提前校验拒绝含 shell 元字符的输入(注入面防护)。非法 → config_error,loose exit 0。
+  if (!isSafeShellToken(args.changeId)) {
+    emitJson({ kind: 'config_error', message: `--change-id 含非法 shell 字符: ${args.changeId}` });
+    return 0;
+  }
+  if (!isSafeShellToken(args.threadId)) {
+    emitJson({ kind: 'config_error', message: `--thread-id 含非法 shell 字符: ${args.threadId}` });
+    return 0;
+  }
+
   // F1-v5 fix:顶层 try/catch — config 加载/校验失败走 loose
   try {
     const configPath = join(process.cwd(), 'forge', 'config.yaml');
@@ -527,6 +587,7 @@ async function runStageExtensionRound(args: RunArgs): Promise<number> {
       command: entry.command,
       promptFile,
       threadId: args.threadId,
+      changeId: args.changeId, // M-1 fix:透传 changeId 供 ${CHANGE_ID} 替换
       outputFile,
       spawnStartMs,
       poll_interval_sec: entry.poll_interval_sec,

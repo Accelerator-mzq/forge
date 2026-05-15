@@ -23,8 +23,8 @@ You are about to handle `/forge:propose $ARGUMENTS`.
    - 每个 entry 显示:`[source_change] id — description`
    - 每项 5 选项:`inherit`(本 change 做)/ `acknowledge but defer`(留 active)/ `mark obsolete` / `mark superseded by some other change` / `mark completed`(本 change 已实际完成该 backlog 项)
 4. 用户决策聚合并写入:
-   - **`inherit`**:写到本 change 自己的 `## Out of Scope/Future Work` YAML 块成为新 entry,archived 来源用 **`related_change: "<source_change>"`** 字段记录(**勿**写 `triggered_by: {source: "from-archived", ...}` —— `from-archived` 不在 `TriggeredByRef.source` 枚举内,会被严格 validator 拒签);**并且**在 `superseding_entries` 数组写一条 `{source_change, entry_id, new_status: inherited, rationale}` —— 否则被继承的老 entry 不会从 backlog 注册表扣除,造成 double-count(plan-backlog-registry §9a/§9b)
-   - **`mark superseded` / `mark obsolete` / `mark completed`**:各写一条 `superseding_entries` 项(`{source_change, entry_id, new_status, rationale}`,`new_status` 取 `superseded` / `obsolete` / `completed`)
+   - **`inherit`**:写到本 change 自己的 `## Out of Scope/Future Work` YAML 块成为新 entry,archived 来源用 **`related_change: "<source_change>"`** 字段记录(change 粒度;entry 级精确来源由配套那条 superseding ref 的 `entry_id` 承载)(**勿**写 `triggered_by: {source: "from-archived", ...}` —— `from-archived` 不在 `TriggeredByRef.source` 枚举内,会被严格 validator 拒签);**并且**在 `superseding_entries` 数组写一条 `{source_change, entry_id, new_status: inherited, rationale}` —— 否则被继承的老 entry 不会从 backlog 注册表扣除,造成 double-count(plan-backlog-registry §9a/§9b)。此处 `rationale` 填「从 `<source_change>` 继承至本 change 实施」一类说明,勿留空
+   - **`mark obsolete` / `mark superseded` / `mark completed`**:各写一条 `superseding_entries` 项(`{source_change, entry_id, new_status, rationale}`,`new_status` 取 `obsolete` / `superseded` / `completed`)
 5. `acknowledge but defer` 不写(留原 archived entry 仍 active,下次再问)
 
 **不强制** — 用户可全跳过 / 部分处理。但**必须**显式提示,不能静默忽略。

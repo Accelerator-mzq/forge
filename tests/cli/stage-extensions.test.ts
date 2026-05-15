@@ -469,11 +469,13 @@ stage_extensions:
     expect(json.kind).toBe('no_extension');
   });
 
-  it('R-6: --thread-id 传入 → stub 命令字符串含 thread-id', () => {
+  it('R-6: --thread-id 传入 → ${THREAD_ID} 替换 + 透传到 spawn argv', () => {
     testDir = createTestDir();
     const stubPath = join(testDir, 'stubs', 'thread-capture.mjs');
 
-    // stub:写 thread_id 到输出文件(从环境/args 读)
+    // stub:从自己的 argv 读 --thread-id 实际收到的值,旁路写入一个 capture 文件,
+    // 再写 codex 输出。这样断言才真正验证 substituteVars 对 ${THREAD_ID} 的替换 + 透传。
+    const captureFile = join(testDir, 'thread-id-capture.txt');
     mkdirSync(join(stubPath, '..'), { recursive: true });
     writeFileSync(
       stubPath,
@@ -483,14 +485,19 @@ import { dirname } from 'node:path';
 const args = process.argv.slice(2);
 const outIdx = args.indexOf('--output');
 const outFile = args[outIdx + 1];
+// 读 stub argv 中实际收到的 --thread-id 值(由 runner 经 substituteVars 注入)
+const tidIdx = args.indexOf('--thread-id');
+const receivedThreadId = tidIdx === -1 ? '<MISSING>' : (args[tidIdx + 1] ?? '<EMPTY>');
+// 旁路写入 capture 文件 — 测试据此断言 runner 实际传给 codex 的 thread-id
+writeFileSync('${captureFile.replace(/\\/g, '/')}', receivedThreadId);
 mkdirSync(dirname(outFile), { recursive: true });
-// 写 converged 输出,带 thread_id
+// codex 本轮输出回写收到的 thread_id(模拟 codex resume 同一 session)
 writeFileSync(outFile, JSON.stringify({
   verdict: 'approve',
   summary: 'ok',
   findings: [],
   next_steps: [],
-  thread_id: 'cdx-resumed-thread',
+  thread_id: receivedThreadId,
 }));
 process.exit(0);
 `,
@@ -504,11 +511,12 @@ process.exit(0);
       'attempt${ATTEMPT}',
       'test-ext.json',
     );
+    // 关键:command 模板含 ${THREAD_ID} 占位符 —— runner substituteVars 会替换它
     writeSimpleConfig(
       testDir,
       'review',
       'test-ext',
-      `node ${stubPath} --output \${OUTPUT_FILE}`,
+      `node ${stubPath} --output \${OUTPUT_FILE} --thread-id \${THREAD_ID}`,
       outputTemplate,
     );
 
@@ -530,9 +538,13 @@ process.exit(0);
 
     expect(result.status).toBe(0);
     const json = JSON.parse(result.stdout);
-    // stub 写回了 cdx-resumed-thread,runner 正常输出 converged
     expect(json.kind).toBe('converged');
-    expect(json.threadId).toBe('cdx-resumed-thread');
+    // 核心断言:stub 实际收到的 thread-id == 传入的 --thread-id 值
+    // 证明 ${THREAD_ID} 被 substituteVars 替换并透传到 spawn argv
+    const receivedThreadId = readFileSync(captureFile, 'utf-8');
+    expect(receivedThreadId).toBe('cdx-existing-thread');
+    // runner 输出的 threadId 也是 codex 回写的(= 透传值)
+    expect(json.threadId).toBe('cdx-existing-thread');
   });
 
   it('R-7: codex 本轮缺 thread_id → 保留 --thread-id 传入值(F2-v3 fix)', () => {
@@ -1002,11 +1014,12 @@ setTimeout(() => { clearInterval(interval); }, 999999);
     expect(['timeout', 'zombie', 'invalid_output']).toContain(outcome.kind);
   }, 10000);
 
-  it('F-8: 残留旧 output 文件不误判假收敛(F1-v7 fix)', () => {
+  it('F-8: 残留旧 output 文件不误判假收敛(F1-v7 fix — existsSync + mtime 两条路径)', async () => {
     testDir = createTestDir();
 
-    // 先写一个旧的合法 converged JSON 文件到 output 路径
-    // stub 不写新文件(exit 0 但不产出 output)
+    // ── 路径一:CLI 整链路 —— stub exit 0 但不写文件 → !existsSync 分支 ──
+    // 走完整 CLI:attempt loop 的 spawn 前 rmSync 双保险删掉任何残留 →
+    // 新 attempt 文件天然不存在 → codex 不写 → !existsSync → invalid_output → failed
     const stubPath = join(testDir, 'stubs', 'no-write.mjs');
     writeNoOutputStub(stubPath);
 
@@ -1046,7 +1059,59 @@ setTimeout(() => { clearInterval(interval); }, 999999);
     // 关键:绝不应该是 converged(F1-v7 fix 防止假 converged)
     expect(json.kind).not.toBe('converged');
     expect(json.kind).toBe('failed');
-  });
+
+    // ── 路径二:直接调 runOneRound —— mtime 早于 spawnStartMs 残留旧文件分支 ──
+    // §7 Step 5.3 F-8 明列「预置一个旧的合法 verdict:approve JSON」。
+    // runStageExtensionRound 的 attempt loop 在 spawn 前 rmSync 会删掉预置文件,
+    // 走 CLI 无法触发此分支 —— 故直接调 runOneRound(同 F-6/F-7 直接调用模式)。
+    const outputFile = join(testDir, 'stale-output.json');
+    // 预置一个旧的合法 converged JSON(verdict:approve, findings 空)
+    writeFileSync(
+      outputFile,
+      JSON.stringify({
+        verdict: 'approve',
+        summary: '这是上一个 attempt 的残留旧文件',
+        findings: [],
+        next_steps: [],
+        thread_id: 'cdx-stale-thread',
+      }),
+    );
+
+    // 等 50ms,确保预置文件 mtime 严格早于稍后取的 spawnStartMs
+    await new Promise<void>((res) => setTimeout(res, 50));
+    const spawnStartMs = Date.now();
+
+    // 用 exit 0 但不写文件的 stub —— 旧文件仍在原处,mtime 早于 spawnStartMs
+    const noWriteStub = join(testDir, 'stubs', 'no-write-2.mjs');
+    writeNoOutputStub(noWriteStub);
+
+    const outcome = await runOneRound({
+      command: `node ${noWriteStub}`,
+      promptFile: null,
+      threadId: null,
+      outputFile, // 指向预置的残留旧文件
+      spawnStartMs,
+      poll_interval_sec: 0.05,
+      zombie_threshold_sec: 30,
+      timeout_sec: 30,
+      convergenceConfig: {
+        max_rounds: 5,
+        max_rounds_on_exceed: 'ask',
+        block_severity: ['BLOCKER', 'MAJOR'],
+        ignore_severity: ['MINOR', 'NIT'],
+        confidence_threshold: 0.7,
+        verdict_approve_short_circuit: true,
+      },
+      severityMap: { critical: 'BLOCKER', high: 'MAJOR', medium: 'MINOR', low: 'NIT' },
+    });
+
+    // 关键:旧文件 mtime < spawnStartMs → invalid_output(绝不 converged,
+    // 哪怕旧文件本身是合法 verdict:approve JSON — F1-v7 防假收敛)
+    expect(outcome.kind).toBe('invalid_output');
+    if (outcome.kind === 'invalid_output') {
+      expect(outcome.reason).toContain('残留旧文件');
+    }
+  }, 10000);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1058,14 +1123,15 @@ describe('forge stage-extensions — terminateRound + analyze-trend(T-1..T-3)', 
     if (testDir) cleanupDir(testDir);
   });
 
-  it('T-1: terminateRound — jobId=null + SIGTERM 超时后 SIGKILL 确认 close', async () => {
+  it('T-1: terminateRound — (a) jobId=null skip / (b) cancelCodexJob reject 吞错 / (c) SIGKILL', async () => {
     testDir = createTestDir();
+    mkdirSync(join(testDir, 'stubs'), { recursive: true });
 
+    // ── case (a)+(c):jobId=null → 跳过 cancel;SIGTERM 被忽略 → SIGKILL → 再次等 close ──
     // 写一个忽略 SIGTERM 的 stub(只被 SIGKILL 终止)
-    const stubPath = join(testDir, 'stubs', 'ignore-sigterm.mjs');
-    mkdirSync(join(stubPath, '..'), { recursive: true });
+    const stubIgnore = join(testDir, 'stubs', 'ignore-sigterm.mjs');
     writeFileSync(
-      stubPath,
+      stubIgnore,
       `
 // stub: 忽略 SIGTERM,只能被 SIGKILL 终止
 process.on('SIGTERM', () => { /* 忽略 */ });
@@ -1073,22 +1139,49 @@ setTimeout(() => {}, 999999);
 `,
     );
 
-    const proc = spawn('node', [stubPath], { shell: false });
-
+    const procA = spawn('node', [stubIgnore], { shell: false });
     // 等进程确实 started(pid 可用)
     await new Promise<void>((res) => setTimeout(res, 100));
+    expect(procA.pid).toBeGreaterThan(0);
 
-    const pid = proc.pid;
-    expect(pid).toBeGreaterThan(0);
-
-    // 调用 terminateRound:jobId=null → 跳过 cancelCodexJob
-    await terminateRound(proc, null);
+    // 调用 terminateRound:jobId=null → 跳过 cancelCodexJob(case a)
+    // SIGTERM 被忽略 → SIGKILL → 再次等 close(case c)
+    await terminateRound(procA, null);
 
     // 进程应已关闭(close 事件已触发)
-    // 验证方式:proc.exitCode 或 proc.signalCode 非 null
-    const isTerminated = proc.exitCode !== null || proc.signalCode !== null;
-    expect(isTerminated).toBe(true);
-  }, 15000);
+    const isTerminatedA = procA.exitCode !== null || procA.signalCode !== null;
+    expect(isTerminatedA).toBe(true);
+
+    // ── case (b):非 null jobId + cancelCodexJob reject → 已先 proc.kill() 吞错 ──
+    // 用一个普通可被 SIGTERM 杀死的 stub(本 case 焦点是 cancel reject 吞错,不是信号忽略)
+    const stubNormal = join(testDir, 'stubs', 'normal-hang.mjs');
+    writeFileSync(stubNormal, `setTimeout(() => {}, 999999);\n`);
+
+    const procB = spawn('node', [stubNormal], { shell: false });
+    await new Promise<void>((res) => setTimeout(res, 100));
+    expect(procB.pid).toBeGreaterThan(0);
+
+    // 注入一个一定 reject 的 fake cancelJob —— 验证 terminateRound 吞掉 reject
+    let cancelJobCalled = false;
+    let cancelJobArg: string | null = null;
+    const rejectingCancelJob = async (jobId: string): Promise<void> => {
+      cancelJobCalled = true;
+      cancelJobArg = jobId;
+      throw new Error('模拟 cancelCodexJob RPC 失败');
+    };
+
+    // 非 null jobId → 触发 cancel 路径;cancelJob reject 应被 catch 吞掉
+    // (b2):terminateRound 自身不 rethrow —— 若 rethrow,此 await 会抛出导致测试失败
+    await expect(terminateRound(procB, 'fake-job-id', rejectingCancelJob)).resolves.toBeUndefined();
+
+    // (b)前提:cancelJob 确实以正确 jobId 被调用过
+    expect(cancelJobCalled).toBe(true);
+    expect(cancelJobArg).toBe('fake-job-id');
+
+    // (b1):proc.kill() 仍先执行,进程最终 close —— reject 不阻断本地 kill
+    const isTerminatedB = procB.exitCode !== null || procB.signalCode !== null;
+    expect(isTerminatedB).toBe(true);
+  }, 20000);
 
   it('T-2: analyze-trend 子命令 — 各种 trend 输出正确', () => {
     testDir = createTestDir();

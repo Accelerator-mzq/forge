@@ -417,8 +417,16 @@ export async function runOneRound(params: RunOneRoundParams): Promise<RoundOutco
  * 3. jobId 非 null → best-effort cancelCodexJob(5s 上限)
  * 4. 等 SIGTERM close(3s);超时 → SIGKILL → 再次等 close(3s)
  * 导出供 T-1 直接调用测试。
+ *
+ * @param cancelJob  远程 cancel 实现;默认用模块内 no-op stub。
+ *   仅作可注入接缝供 T-1 测试 cancelCodexJob reject 吞错路径 —— 生产调用
+ *   `terminateRound(proc, jobId)` 不传此参,默认行为完全不变。
  */
-export async function terminateRound(proc: ChildProcess, jobId: string | null): Promise<void> {
+export async function terminateRound(
+  proc: ChildProcess,
+  jobId: string | null,
+  cancelJob: (jobId: string) => Promise<void> = cancelCodexJob,
+): Promise<void> {
   // 0. 提前订阅 close 事件(proc 已 spawn,close 可能任意时刻派发)
   const closePromise: Promise<void> = once(proc, 'close').then(() => undefined);
 
@@ -432,7 +440,7 @@ export async function terminateRound(proc: ChildProcess, jobId: string | null): 
   // 2. best-effort 远程 cancel(jobId=null 时跳过)
   if (jobId !== null) {
     try {
-      await withTimeout(cancelCodexJob(jobId), 5000);
+      await withTimeout(cancelJob(jobId), 5000);
     } catch (err) {
       log(
         `[terminateRound] cancelCodexJob(${jobId}) 失败(已本地 kill,忽略):${(err as Error).message}`,

@@ -70,9 +70,9 @@ describe('renderArchiveSummaryOutput', () => {
       },
     ];
     const out = renderArchiveSummaryOutput(s, '2026-05-12-add-oauth-refresh');
-    expect(out).toMatch(/### Pending Suggestions \(1\) — handed off to backlog/);
+    expect(out).toMatch(/### Pending Suggestions \(1\) — recorded in archive_summary/);
     expect(out).toMatch(/\[SUGGESTION\] verify_findings#3/);
     expect(out).toMatch(/handleLogin/);
-    expect(out).toMatch(/forge backlog list/); // v1.1 引用
+    expect(out).toMatch(/forge backlog list/); // Cross-change backlog 引用
   });
 });

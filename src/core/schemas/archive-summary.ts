@@ -32,7 +32,8 @@ export interface ArchiveSummary {
   review_passed: ReviewPassedRef;
   /** process_evidence 14 不变量 pass/fail/legacy 分布;9e1 仅 placeholder,9e2 接 9g 真实统计 */
   process_evidence_summary: ProcessEvidenceSummary;
-  /** 给 v1.1 forge backlog index 用 — 三类聚合(沿 design §2.4.3) */
+  /** 单 change archive 的不可变 handoff 记录 — 三类聚合(沿 design §2.4.3)。
+   *  注:跨 change backlog 注册表见 forge/backlog/,由 plan-backlog-registry 独立扫 scope YAML 生成,不消费本字段。 */
   handoff_to_backlog: HandoffEntry[];
   /** 给用户回顾用 — verify/review 中 WARNING + acked 的引用 */
   acked_warnings: AckedWarningRef[];

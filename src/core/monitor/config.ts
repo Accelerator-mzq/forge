@@ -30,6 +30,7 @@ export function isMonitorEnabled(projectRoot: string): boolean {
  * - config 不存在 → 报错提示先 forge init(不自行造 config)。
  * - config 损坏 → 报错 abort(不静默覆盖损坏文件)。
  * 正常路径 read-modify-write,保留其它字段值(注释/格式不保留,与 `forge config set` 一致)。
+ * monitor 段内部也走 spread 合并,保留 monitor 对象的其它字段。
  */
 export function setMonitorEnabled(projectRoot: string, enabled: boolean): void {
   const path = monitorConfigPath(projectRoot);
@@ -42,6 +43,6 @@ export function setMonitorEnabled(projectRoot: string, enabled: boolean): void {
   } catch (err) {
     throw new Error(`forge/config.yaml 解析失败,拒绝覆盖:${(err as Error).message}`);
   }
-  config.monitor = { enabled };
+  config.monitor = { ...config.monitor, enabled };
   writeFileSync(path, stringifyYAML(config), 'utf8');
 }

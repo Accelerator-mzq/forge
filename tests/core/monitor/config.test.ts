@@ -48,6 +48,11 @@ describe('setMonitorEnabled', () => {
     expect(txt).toMatch(/context: 我的项目/);
     expect(isMonitorEnabled(root)).toBe(true);
   });
+  it('setMonitorEnabled(false) 后 isMonitorEnabled 为 false', () => {
+    writeConfig('schema: forge-spec-driven/v1\nmonitor:\n  enabled: true\n');
+    setMonitorEnabled(root, false);
+    expect(isMonitorEnabled(root)).toBe(false);
+  });
   it('config 不存在 → 报错提示 forge init', () => {
     expect(() => setMonitorEnabled(root, true)).toThrow(/forge init/);
   });

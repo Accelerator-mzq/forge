@@ -1097,7 +1097,7 @@ git push origin v1.2.0
 - **v6**(2026-05-15):Codex 对抗性 review 第 5 轮跑完(plan v5 commit `634a8ce` 后)。Codex 确认 v5 的 terminateRound SIGKILL 二次等待 + OutputWatcher single-settle 规格基本闭合。收敛趋势 block 桶 6→4→3→2→1。Codex 拿 0 BLOCKER + 1 MAJOR,独立核实真问题(0 误报),accept 修订:
   - **F1-v5 MAJOR** config 加载/校验异常仍打穿 loose runner:v5 的 try/catch 只在 entry 循环内,`loadConfig` + `validateStageExtensionsConfig`(对非法值 throw ValidationError)在外。§7 runStage 把 config 加载 + 校验包进顶层 try/catch — 捕获 log + `return 0`(loose);加 F-14 test(非法 `confidence_threshold: 2` → log + exit 0)
   - 测试 21 scenario(7 happy + 14 failure)/ 总目标 1083(65 incremental)
-- (待:v7 — 若第 6 轮 Codex review 仍有 BLOCKER/MAJOR)
+- **v6 收敛达成**(2026-05-15):Codex 对抗性 review 第 6 轮跑完(plan v6 commit `c066579` 后)— **Verdict: `approve`,0 BLOCKER + 0 MAJOR**。6 轮累计 block 桶趋势 6→4→3→2→1→0 严格单调递减;累计 3 BLOCKER + 13 MAJOR + 2 MINOR = 18 finding 全独立核实真问题(0 误报)全 accept 修订。**plan 定稿,可进入 implementation**(沿 §2 Task list 1→9 顺序)。
 
 ---
 

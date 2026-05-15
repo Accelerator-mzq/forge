@@ -1,0 +1,1516 @@
+// tests/cli/stage-extensions.test.ts — Task 5 integration scenario
+// 19 个 runner integration scenario:
+//   R-1..R-8:run 单轮+输出
+//   F-1..F-8:retry/失败路径
+//   T-1..T-3:terminateRound + analyze-trend
+//
+// 策略:
+//   CLI scenario(R-1..R-8 / F-1..F-5 / F-8 / T-2 / T-3):
+//     spawnSync 走真 dist/cli/index.js,断言 JSON.parse(stdout) + status===0
+//   直接调用 scenario(F-6 / F-7 / T-1):
+//     zombie/timeout schema 限定 [60,3600];走 CLI 会超时 → 直接 import runOneRound/terminateRound
+
+import { describe, it, expect, afterEach } from 'vitest';
+import { spawnSync, spawn } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+// 导入被测函数(直接调用 scenario F-6/F-7/T-1 使用)
+import { runOneRound, terminateRound } from '../../src/cli/commands/stage-extensions.js';
+
+// CLI 编译产物入口(集成测试用)
+const CLI = join(process.cwd(), 'dist', 'cli', 'index.js');
+
+// ── 测试 tempdir 管理 ─────────────────────────────────────────────────────────
+let testDir: string;
+
+function createTestDir(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'forge-se-test-'));
+  return dir;
+}
+
+function cleanupDir(dir: string): void {
+  try {
+    rmSync(dir, { recursive: true, force: true });
+  } catch {
+    // Windows 偶尔文件锁定,忽略清理错误
+  }
+}
+
+// ── config 构建 helper ─────────────────────────────────────────────────────────
+
+/**
+ * 写简单 config 的 helper(不依赖复杂模板转义问题)
+ */
+function writeSimpleConfig(
+  dir: string,
+  stage: string,
+  extensionName: string,
+  command: string,
+  outputTemplate: string,
+  options: {
+    maxRetries?: number;
+    extraSection?: string;
+  } = {},
+): void {
+  mkdirSync(join(dir, 'forge'), { recursive: true });
+  const maxRetries = options.maxRetries ?? 1;
+  const extraSection = options.extraSection ?? '';
+
+  const yaml = `schema: forge-spec-driven/v1
+stage_extensions:
+${extraSection}  ${stage}:
+    - name: ${JSON.stringify(extensionName)}
+      enabled: true
+      command: ${JSON.stringify(command)}
+      output: ${JSON.stringify(outputTemplate)}
+      timeout_sec: 120
+      poll_interval_sec: 10
+      zombie_threshold_sec: 30
+      max_retries: ${maxRetries}
+`;
+  writeFileSync(join(dir, 'forge', 'config.yaml'), yaml);
+}
+
+// ── stub 脚本 helpers ─────────────────────────────────────────────────────────
+
+/**
+ * 写一个「直接写 JSON 并退出 0」的 stub。
+ * stub 解析 --output 参数,写 JSON,退出。
+ */
+function writeJsonStub(stubPath: string, outputJson: object): void {
+  const dir = join(stubPath, '..');
+  mkdirSync(dir, { recursive: true });
+  const content = `
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+// 解析 --output 参数
+const args = process.argv.slice(2);
+const outIdx = args.indexOf('--output');
+if (outIdx === -1) { console.error('stub: missing --output'); process.exit(1); }
+const outFile = args[outIdx + 1];
+mkdirSync(dirname(outFile), { recursive: true });
+writeFileSync(outFile, JSON.stringify(${JSON.stringify(outputJson)}, null, 2));
+process.exit(0);
+`;
+  writeFileSync(stubPath, content);
+}
+
+/**
+ * 写一个「不写文件直接退出 0」的 stub(用于 F-8:残留旧文件检测)。
+ */
+function writeNoOutputStub(stubPath: string): void {
+  mkdirSync(join(stubPath, '..'), { recursive: true });
+  writeFileSync(stubPath, `// stub: 不写任何文件,直接退出 0\nprocess.exit(0);\n`);
+}
+
+/**
+ * 写一个「退出非零状态码」的 stub(用于 F-3)。
+ */
+function writeExitErrorStub(stubPath: string, exitCode = 1): void {
+  mkdirSync(join(stubPath, '..'), { recursive: true });
+  writeFileSync(stubPath, `// stub: 退出非零(模拟 codex 失败)\nprocess.exit(${exitCode});\n`);
+}
+
+/**
+ * 写一个「写 malformed JSON 文件」的 stub(用于 F-1)。
+ */
+function writeMalformedJsonStub(stubPath: string): void {
+  mkdirSync(join(stubPath, '..'), { recursive: true });
+  writeFileSync(
+    stubPath,
+    `
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+const args = process.argv.slice(2);
+const outIdx = args.indexOf('--output');
+if (outIdx === -1) { process.exit(1); }
+const outFile = args[outIdx + 1];
+mkdirSync(dirname(outFile), { recursive: true });
+// 写缺少 verdict 字段的 malformed JSON
+writeFileSync(outFile, JSON.stringify({ findings: [], summary: 'bad' }));
+process.exit(0);
+`,
+  );
+}
+
+/**
+ * 标准 converged codex 输出 JSON。
+ */
+const CODEX_CONVERGED: object = {
+  verdict: 'approve',
+  summary: '测试通过',
+  findings: [],
+  next_steps: [],
+  thread_id: 'cdx-thread-001',
+};
+
+/**
+ * 含 BLOCKER finding 的 codex 输出(unconverged)。
+ */
+const CODEX_UNCONVERGED: object = {
+  verdict: 'needs-attention',
+  summary: '存在问题',
+  findings: [
+    {
+      severity: 'critical',
+      title: '严重问题',
+      body: '问题详情',
+      file: 'src/foo.ts',
+      line_start: 1,
+      line_end: 5,
+      confidence: 0.9,
+      recommendation: '修复建议',
+    },
+  ],
+  next_steps: ['请修复'],
+  thread_id: 'cdx-thread-001',
+};
+
+/**
+ * 含 BLOCKER finding 但 verdict=approve 的输出(F5 fix 测试:R-2)。
+ */
+const CODEX_APPROVE_WITH_BLOCKER: object = {
+  verdict: 'approve',
+  summary: '总体 OK 但有 blocker',
+  findings: [
+    {
+      severity: 'critical',
+      title: '严重问题',
+      body: '即使 approve 也有 blocker',
+      file: 'src/foo.ts',
+      line_start: 1,
+      line_end: 5,
+      confidence: 0.9,
+      recommendation: '修复',
+    },
+  ],
+  next_steps: [],
+  thread_id: 'cdx-thread-002',
+};
+
+// ── 运行 CLI 的 helper ─────────────────────────────────────────────────────────
+
+function runCli(args: string[], cwd: string): { stdout: string; stderr: string; status: number } {
+  const result = spawnSync('node', [CLI, ...args], {
+    cwd,
+    encoding: 'utf8',
+    env: process.env,
+  });
+  return {
+    stdout: result.stdout ?? '',
+    stderr: result.stderr ?? '',
+    status: result.status ?? 1,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// R-1..R-8:run 单轮 + 输出
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('forge stage-extensions run — 单轮+输出(R-1..R-8)', () => {
+  afterEach(() => {
+    if (testDir) cleanupDir(testDir);
+  });
+
+  it('R-1: 单轮收敛(verdict=approve, block 桶空) → kind:converged + thread-map 写入', () => {
+    testDir = createTestDir();
+    const stubPath = join(testDir, 'stubs', 'converge.mjs');
+    writeJsonStub(stubPath, CODEX_CONVERGED);
+
+    const outputTemplate = join(
+      testDir,
+      'output',
+      '${CHANGE_ID}',
+      'round${ROUND}',
+      'attempt${ATTEMPT}',
+      'test-ext.json',
+    );
+    writeSimpleConfig(
+      testDir,
+      'review',
+      'test-ext',
+      `node ${stubPath} --output \${OUTPUT_FILE}`,
+      outputTemplate,
+    );
+
+    const result = runCli(
+      [
+        'stage-extensions',
+        'run',
+        '--stage',
+        'review',
+        '--change-id',
+        'c1',
+        '--extension',
+        'test-ext',
+      ],
+      testDir,
+    );
+
+    expect(result.status).toBe(0);
+    const json = JSON.parse(result.stdout);
+    expect(json.kind).toBe('converged');
+    expect(json.verdict).toBe('approve');
+    expect(json.blockFindings).toEqual([]);
+    expect(json.threadId).toBe('cdx-thread-001');
+
+    // 验证 thread-map 已写入
+    const threadMapPath = join(testDir, 'forge', 'changes', 'c1', '.codex-threads.yaml');
+    expect(existsSync(threadMapPath)).toBe(true);
+    const content = readFileSync(threadMapPath, 'utf-8');
+    expect(content).toContain('test-ext');
+    expect(content).toContain('approve');
+  });
+
+  it('R-2: verdict=approve 但 findings 含 BLOCKER → unconverged(F5 fix)', () => {
+    testDir = createTestDir();
+    const stubPath = join(testDir, 'stubs', 'approve-blocker.mjs');
+    writeJsonStub(stubPath, CODEX_APPROVE_WITH_BLOCKER);
+
+    const outputTemplate = join(
+      testDir,
+      'output',
+      '${CHANGE_ID}',
+      'round${ROUND}',
+      'attempt${ATTEMPT}',
+      'test-ext.json',
+    );
+    writeSimpleConfig(
+      testDir,
+      'review',
+      'test-ext',
+      `node ${stubPath} --output \${OUTPUT_FILE}`,
+      outputTemplate,
+    );
+
+    const result = runCli(
+      [
+        'stage-extensions',
+        'run',
+        '--stage',
+        'review',
+        '--change-id',
+        'c1',
+        '--extension',
+        'test-ext',
+      ],
+      testDir,
+    );
+
+    expect(result.status).toBe(0);
+    const json = JSON.parse(result.stdout);
+    // 即使 verdict=approve,有 BLOCKER → unconverged
+    expect(json.kind).toBe('unconverged');
+    expect(json.blockFindings).toHaveLength(1);
+    expect(json.blockFindings[0].severity).toBe('critical');
+  });
+
+  it('R-3: 单轮 unconverged(block 非空) → blockFindings/ignoreFindings 分桶正确', () => {
+    testDir = createTestDir();
+    const stubPath = join(testDir, 'stubs', 'unconverge.mjs');
+    const mixedOutput = {
+      verdict: 'needs-attention',
+      summary: '有多类问题',
+      findings: [
+        {
+          severity: 'critical',
+          title: 'block1',
+          body: 'b',
+          file: 'a.ts',
+          line_start: 1,
+          line_end: 1,
+          confidence: 0.9,
+          recommendation: 'fix',
+        },
+        {
+          severity: 'high',
+          title: 'block2',
+          body: 'b',
+          file: 'a.ts',
+          line_start: 2,
+          line_end: 2,
+          confidence: 0.9,
+          recommendation: 'fix',
+        },
+        {
+          severity: 'medium',
+          title: 'ignore1',
+          body: 'b',
+          file: 'a.ts',
+          line_start: 3,
+          line_end: 3,
+          confidence: 0.9,
+          recommendation: 'fix',
+        },
+        {
+          severity: 'low',
+          title: 'ignore2',
+          body: 'b',
+          file: 'a.ts',
+          line_start: 4,
+          line_end: 4,
+          confidence: 0.9,
+          recommendation: 'fix',
+        },
+      ],
+      next_steps: [],
+      thread_id: 'cdx-thread-003',
+    };
+    writeJsonStub(stubPath, mixedOutput);
+
+    const outputTemplate = join(
+      testDir,
+      'output',
+      '${CHANGE_ID}',
+      'round${ROUND}',
+      'attempt${ATTEMPT}',
+      'test-ext.json',
+    );
+    writeSimpleConfig(
+      testDir,
+      'review',
+      'test-ext',
+      `node ${stubPath} --output \${OUTPUT_FILE}`,
+      outputTemplate,
+    );
+
+    const result = runCli(
+      [
+        'stage-extensions',
+        'run',
+        '--stage',
+        'review',
+        '--change-id',
+        'c1',
+        '--extension',
+        'test-ext',
+      ],
+      testDir,
+    );
+
+    expect(result.status).toBe(0);
+    const json = JSON.parse(result.stdout);
+    expect(json.kind).toBe('unconverged');
+    expect(json.blockFindings).toHaveLength(2); // critical + high → BLOCKER + MAJOR
+    expect(json.ignoreFindings).toHaveLength(2); // medium + low → MINOR + NIT
+  });
+
+  it('R-4: config_error(非法 confidence_threshold=2) → kind:config_error + exit 0', () => {
+    testDir = createTestDir();
+    mkdirSync(join(testDir, 'forge'), { recursive: true });
+    // 写 confidence_threshold: 2 (超出 [0,1] 范围)
+    writeFileSync(
+      join(testDir, 'forge', 'config.yaml'),
+      `schema: forge-spec-driven/v1
+stage_extensions:
+  review:
+    - name: test-ext
+      enabled: true
+      command: "node /nonexist.mjs"
+      output: "/tmp/out.json"
+      convergence:
+        confidence_threshold: 2
+`,
+    );
+
+    const result = runCli(
+      [
+        'stage-extensions',
+        'run',
+        '--stage',
+        'review',
+        '--change-id',
+        'c1',
+        '--extension',
+        'test-ext',
+      ],
+      testDir,
+    );
+
+    expect(result.status).toBe(0);
+    const json = JSON.parse(result.stdout);
+    expect(json.kind).toBe('config_error');
+    expect(json.message).toBeTruthy();
+  });
+
+  it('R-5: no_extension(stage 无此 enabled extension) → kind:no_extension + exit 0', () => {
+    testDir = createTestDir();
+    const stubPath = join(testDir, 'stubs', 'converge.mjs');
+    writeJsonStub(stubPath, CODEX_CONVERGED);
+
+    const outputTemplate = join(testDir, 'output', 'out.json');
+    writeSimpleConfig(
+      testDir,
+      'review',
+      'other-ext',
+      `node ${stubPath} --output \${OUTPUT_FILE}`,
+      outputTemplate,
+    );
+
+    // 查询不存在的 extension name
+    const result = runCli(
+      [
+        'stage-extensions',
+        'run',
+        '--stage',
+        'review',
+        '--change-id',
+        'c1',
+        '--extension',
+        'nonexistent',
+      ],
+      testDir,
+    );
+
+    expect(result.status).toBe(0);
+    const json = JSON.parse(result.stdout);
+    expect(json.kind).toBe('no_extension');
+  });
+
+  it('R-6: --thread-id 传入 → ${THREAD_ID} 替换 + 透传到 spawn argv', () => {
+    testDir = createTestDir();
+    const stubPath = join(testDir, 'stubs', 'thread-capture.mjs');
+
+    // stub:从自己的 argv 读 --thread-id 实际收到的值,旁路写入一个 capture 文件,
+    // 再写 codex 输出。这样断言才真正验证 substituteVars 对 ${THREAD_ID} 的替换 + 透传。
+    const captureFile = join(testDir, 'thread-id-capture.txt');
+    mkdirSync(join(stubPath, '..'), { recursive: true });
+    writeFileSync(
+      stubPath,
+      `
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+const args = process.argv.slice(2);
+const outIdx = args.indexOf('--output');
+const outFile = args[outIdx + 1];
+// 读 stub argv 中实际收到的 --thread-id 值(由 runner 经 substituteVars 注入)
+const tidIdx = args.indexOf('--thread-id');
+const receivedThreadId = tidIdx === -1 ? '<MISSING>' : (args[tidIdx + 1] ?? '<EMPTY>');
+// 旁路写入 capture 文件 — 测试据此断言 runner 实际传给 codex 的 thread-id
+writeFileSync('${captureFile.replace(/\\/g, '/')}', receivedThreadId);
+mkdirSync(dirname(outFile), { recursive: true });
+// codex 本轮输出回写收到的 thread_id(模拟 codex resume 同一 session)
+writeFileSync(outFile, JSON.stringify({
+  verdict: 'approve',
+  summary: 'ok',
+  findings: [],
+  next_steps: [],
+  thread_id: receivedThreadId,
+}));
+process.exit(0);
+`,
+    );
+
+    const outputTemplate = join(
+      testDir,
+      'output',
+      '${CHANGE_ID}',
+      'round${ROUND}',
+      'attempt${ATTEMPT}',
+      'test-ext.json',
+    );
+    // 关键:command 模板含 ${THREAD_ID} 占位符 —— runner substituteVars 会替换它
+    writeSimpleConfig(
+      testDir,
+      'review',
+      'test-ext',
+      `node ${stubPath} --output \${OUTPUT_FILE} --thread-id \${THREAD_ID}`,
+      outputTemplate,
+    );
+
+    const result = runCli(
+      [
+        'stage-extensions',
+        'run',
+        '--stage',
+        'review',
+        '--change-id',
+        'c1',
+        '--extension',
+        'test-ext',
+        '--thread-id',
+        'cdx-existing-thread',
+      ],
+      testDir,
+    );
+
+    expect(result.status).toBe(0);
+    const json = JSON.parse(result.stdout);
+    expect(json.kind).toBe('converged');
+    // 核心断言:stub 实际收到的 thread-id == 传入的 --thread-id 值
+    // 证明 ${THREAD_ID} 被 substituteVars 替换并透传到 spawn argv
+    const receivedThreadId = readFileSync(captureFile, 'utf-8');
+    expect(receivedThreadId).toBe('cdx-existing-thread');
+    // runner 输出的 threadId 也是 codex 回写的(= 透传值)
+    expect(json.threadId).toBe('cdx-existing-thread');
+  });
+
+  it('R-7: codex 本轮缺 thread_id → 保留 --thread-id 传入值(F2-v3 fix)', () => {
+    testDir = createTestDir();
+    const stubPath = join(testDir, 'stubs', 'no-thread.mjs');
+
+    // stub:写 converged 但不含 thread_id 字段
+    mkdirSync(join(stubPath, '..'), { recursive: true });
+    writeFileSync(
+      stubPath,
+      `
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+const args = process.argv.slice(2);
+const outIdx = args.indexOf('--output');
+const outFile = args[outIdx + 1];
+mkdirSync(dirname(outFile), { recursive: true });
+// 故意不写 thread_id 字段
+writeFileSync(outFile, JSON.stringify({
+  verdict: 'approve',
+  summary: 'ok',
+  findings: [],
+  next_steps: [],
+  // thread_id: undefined — 不写
+}));
+process.exit(0);
+`,
+    );
+
+    const outputTemplate = join(
+      testDir,
+      'output',
+      '${CHANGE_ID}',
+      'round${ROUND}',
+      'attempt${ATTEMPT}',
+      'test-ext.json',
+    );
+    writeSimpleConfig(
+      testDir,
+      'review',
+      'test-ext',
+      `node ${stubPath} --output \${OUTPUT_FILE}`,
+      outputTemplate,
+    );
+
+    const result = runCli(
+      [
+        'stage-extensions',
+        'run',
+        '--stage',
+        'review',
+        '--change-id',
+        'c1',
+        '--extension',
+        'test-ext',
+        '--thread-id',
+        'cdx-123',
+      ],
+      testDir,
+    );
+
+    expect(result.status).toBe(0);
+    const json = JSON.parse(result.stdout);
+    expect(json.kind).toBe('converged');
+    // codex 无 thread_id → 保留传入的 cdx-123(F2-v3 fix)
+    expect(json.threadId).toBe('cdx-123');
+
+    // 验证 thread-map 中记录的 thread_id 也是保留值
+    const threadMapPath = join(testDir, 'forge', 'changes', 'c1', '.codex-threads.yaml');
+    const content = readFileSync(threadMapPath, 'utf-8');
+    expect(content).toContain('cdx-123');
+  });
+
+  it('R-8: converged/unconverged JSON schema 完整(含 F1-v8 fix:unconverged 额外字段)', () => {
+    testDir = createTestDir();
+
+    // 先测 converged 输出
+    const stubConv = join(testDir, 'stubs', 'conv.mjs');
+    writeJsonStub(stubConv, CODEX_CONVERGED);
+    const outputTemplate = join(
+      testDir,
+      'output',
+      '${CHANGE_ID}',
+      'round${ROUND}',
+      'attempt${ATTEMPT}',
+      'test-ext.json',
+    );
+    writeSimpleConfig(
+      testDir,
+      'review',
+      'test-ext',
+      `node ${stubConv} --output \${OUTPUT_FILE}`,
+      outputTemplate,
+    );
+
+    const convResult = runCli(
+      [
+        'stage-extensions',
+        'run',
+        '--stage',
+        'review',
+        '--change-id',
+        'c1',
+        '--extension',
+        'test-ext',
+      ],
+      testDir,
+    );
+    expect(convResult.status).toBe(0);
+    const convJson = JSON.parse(convResult.stdout);
+    // converged 必含这 6 个字段
+    expect(convJson).toHaveProperty('kind', 'converged');
+    expect(convJson).toHaveProperty('threadId');
+    expect(convJson).toHaveProperty('verdict');
+    expect(convJson).toHaveProperty('blockFindings');
+    expect(convJson).toHaveProperty('ignoreFindings');
+    expect(convJson).toHaveProperty('droppedByConfidence');
+    // converged 不应含 effectiveConvergence / userInteraction
+    expect(convJson).not.toHaveProperty('effectiveConvergence');
+    expect(convJson).not.toHaveProperty('userInteraction');
+
+    // 再测 unconverged 输出
+    testDir = createTestDir();
+    const stubUnconv = join(testDir, 'stubs', 'unconv.mjs');
+    writeJsonStub(stubUnconv, CODEX_UNCONVERGED);
+    const outputTemplate2 = join(
+      testDir,
+      'output',
+      '${CHANGE_ID}',
+      'round${ROUND}',
+      'attempt${ATTEMPT}',
+      'test-ext.json',
+    );
+    writeSimpleConfig(
+      testDir,
+      'review',
+      'test-ext',
+      `node ${stubUnconv} --output \${OUTPUT_FILE}`,
+      outputTemplate2,
+    );
+
+    const unconvResult = runCli(
+      [
+        'stage-extensions',
+        'run',
+        '--stage',
+        'review',
+        '--change-id',
+        'c1',
+        '--extension',
+        'test-ext',
+      ],
+      testDir,
+    );
+    expect(unconvResult.status).toBe(0);
+    const unconvJson = JSON.parse(unconvResult.stdout);
+    expect(unconvJson.kind).toBe('unconverged');
+    // unconverged 额外含 effectiveConvergence + userInteraction(F1-v8 fix)
+    expect(unconvJson).toHaveProperty('effectiveConvergence');
+    expect(unconvJson).toHaveProperty('userInteraction');
+    expect(unconvJson.effectiveConvergence).toHaveProperty('block_severity');
+    expect(unconvJson.userInteraction).toHaveProperty('block_unconverged');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F-1..F-8:retry/失败路径
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('forge stage-extensions run — retry/失败路径(F-1..F-8)', () => {
+  afterEach(() => {
+    if (testDir) cleanupDir(testDir);
+  });
+
+  it('F-1: codex JSON malformed(缺 verdict) → invalid_output → retry → failed', () => {
+    testDir = createTestDir();
+    const stubPath = join(testDir, 'stubs', 'malformed.mjs');
+    writeMalformedJsonStub(stubPath);
+
+    const outputTemplate = join(
+      testDir,
+      'output',
+      '${CHANGE_ID}',
+      'round${ROUND}',
+      'attempt${ATTEMPT}',
+      'test-ext.json',
+    );
+    writeSimpleConfig(
+      testDir,
+      'review',
+      'test-ext',
+      `node ${stubPath} --output \${OUTPUT_FILE}`,
+      outputTemplate,
+    );
+
+    const result = runCli(
+      [
+        'stage-extensions',
+        'run',
+        '--stage',
+        'review',
+        '--change-id',
+        'c1',
+        '--extension',
+        'test-ext',
+      ],
+      testDir,
+    );
+
+    expect(result.status).toBe(0);
+    const json = JSON.parse(result.stdout);
+    expect(json.kind).toBe('failed');
+    expect(json.reason).toBeTruthy();
+  });
+
+  it('F-2: codex output file 不存在 → invalid_output → retry', () => {
+    testDir = createTestDir();
+    // stub:不写文件(同 writeNoOutputStub)
+    const stubPath = join(testDir, 'stubs', 'no-output.mjs');
+    writeNoOutputStub(stubPath);
+
+    const outputTemplate = join(
+      testDir,
+      'output',
+      '${CHANGE_ID}',
+      'round${ROUND}',
+      'attempt${ATTEMPT}',
+      'test-ext.json',
+    );
+    writeSimpleConfig(
+      testDir,
+      'review',
+      'test-ext',
+      `node ${stubPath} --output \${OUTPUT_FILE}`,
+      outputTemplate,
+    );
+
+    const result = runCli(
+      [
+        'stage-extensions',
+        'run',
+        '--stage',
+        'review',
+        '--change-id',
+        'c1',
+        '--extension',
+        'test-ext',
+      ],
+      testDir,
+    );
+
+    expect(result.status).toBe(0);
+    const json = JSON.parse(result.stdout);
+    // 所有 attempt 都 invalid_output → failed
+    expect(json.kind).toBe('failed');
+  });
+
+  it('F-3: codex spawn exit nonzero → attempt_failed → retry → failed', () => {
+    testDir = createTestDir();
+    const stubPath = join(testDir, 'stubs', 'exit-error.mjs');
+    writeExitErrorStub(stubPath, 1);
+
+    const outputTemplate = join(
+      testDir,
+      'output',
+      '${CHANGE_ID}',
+      'round${ROUND}',
+      'attempt${ATTEMPT}',
+      'test-ext.json',
+    );
+    writeSimpleConfig(
+      testDir,
+      'review',
+      'test-ext',
+      `node ${stubPath} --output \${OUTPUT_FILE}`,
+      outputTemplate,
+    );
+
+    const result = runCli(
+      [
+        'stage-extensions',
+        'run',
+        '--stage',
+        'review',
+        '--change-id',
+        'c1',
+        '--extension',
+        'test-ext',
+      ],
+      testDir,
+    );
+
+    expect(result.status).toBe(0);
+    const json = JSON.parse(result.stdout);
+    expect(json.kind).toBe('failed');
+  });
+
+  it('F-4: spawn_failed(ENOENT) → retry → failed', () => {
+    testDir = createTestDir();
+    // 配置一个绝对不存在的命令
+    const outputTemplate = join(
+      testDir,
+      'output',
+      '${CHANGE_ID}',
+      'round${ROUND}',
+      'attempt${ATTEMPT}',
+      'test-ext.json',
+    );
+    writeSimpleConfig(
+      testDir,
+      'review',
+      'test-ext',
+      // 使用不存在的可执行文件 — shell:true 会让它 exit 非零而不是 ENOENT
+      '/totally/nonexistent/binary/that/does/not/exist/at/all --output ${OUTPUT_FILE}',
+      outputTemplate,
+    );
+
+    const result = runCli(
+      [
+        'stage-extensions',
+        'run',
+        '--stage',
+        'review',
+        '--change-id',
+        'c1',
+        '--extension',
+        'test-ext',
+      ],
+      testDir,
+    );
+
+    expect(result.status).toBe(0);
+    const json = JSON.parse(result.stdout);
+    // shell:true 下 ENOENT 命令退出非零 → attempt_failed 或 failed
+    expect(['failed', 'config_error']).not.toContain(json.kind === 'converged' ? json.kind : 'ok');
+    expect(json.kind).toBe('failed');
+  });
+
+  it('F-5: retry 耗尽 → kind:failed + reason 非空', () => {
+    testDir = createTestDir();
+    const stubPath = join(testDir, 'stubs', 'always-fail.mjs');
+    writeMalformedJsonStub(stubPath); // 总是输出 malformed JSON
+
+    const outputTemplate = join(
+      testDir,
+      'output',
+      '${CHANGE_ID}',
+      'round${ROUND}',
+      'attempt${ATTEMPT}',
+      'test-ext.json',
+    );
+    // max_retries=1 → 2 次 attempt,都 malformed
+    writeSimpleConfig(
+      testDir,
+      'review',
+      'test-ext',
+      `node ${stubPath} --output \${OUTPUT_FILE}`,
+      outputTemplate,
+      { maxRetries: 1 },
+    );
+
+    const result = runCli(
+      [
+        'stage-extensions',
+        'run',
+        '--stage',
+        'review',
+        '--change-id',
+        'c1',
+        '--extension',
+        'test-ext',
+      ],
+      testDir,
+    );
+
+    expect(result.status).toBe(0);
+    const json = JSON.parse(result.stdout);
+    expect(json.kind).toBe('failed');
+    expect(typeof json.reason).toBe('string');
+    expect(json.reason.length).toBeGreaterThan(0);
+  });
+
+  it('F-6: zombie → terminateRound kill → 直接调用(绕过 schema 校验)', async () => {
+    testDir = createTestDir();
+
+    // 写一个会挂起的 stub(无限等待)
+    // 注:runOneRound 内部自己 spawn 并管理进程,测试无需也不应在外层另 spawn 进程
+    const stubPath = join(testDir, 'stubs', 'hang.mjs');
+    mkdirSync(join(stubPath, '..'), { recursive: true });
+    writeFileSync(stubPath, `// stub: 无限等待,模拟 zombie 进程\nsetTimeout(() => {}, 999999);\n`);
+
+    // 调用 runOneRound:极小 timeout → zombie/timeout
+    const outcome = await runOneRound({
+      command: `node ${stubPath}`,
+      promptFile: null,
+      threadId: null,
+      changeId: 'c1',
+      outputFile: join(testDir, 'output.json'),
+      spawnStartMs: Date.now(),
+      poll_interval_sec: 0.05, // 50ms 轮询
+      zombie_threshold_sec: 0.1, // 100ms zombie 阈值
+      timeout_sec: 0.2, // 200ms 超时
+      convergenceConfig: {
+        max_rounds: 5,
+        max_rounds_on_exceed: 'ask',
+        block_severity: ['BLOCKER', 'MAJOR'],
+        ignore_severity: ['MINOR', 'NIT'],
+        confidence_threshold: 0.7,
+        verdict_approve_short_circuit: true,
+      },
+      severityMap: { critical: 'BLOCKER', high: 'MAJOR', medium: 'MINOR', low: 'NIT' },
+    });
+
+    // 进程应已终止(zombie 或 timeout)
+    expect(['zombie', 'timeout', 'invalid_output']).toContain(outcome.kind);
+  }, 10000);
+
+  it('F-7: timeout → terminateRound kill → 直接调用', async () => {
+    testDir = createTestDir();
+
+    // stub:持续更新输出文件 mtime(模拟 timeout 而非 zombie)
+    const stubPath = join(testDir, 'stubs', 'mtime-updater.mjs');
+    const outputFile = join(testDir, 'output.json');
+    mkdirSync(join(stubPath, '..'), { recursive: true });
+    writeFileSync(
+      stubPath,
+      `
+import { mkdirSync, writeFileSync } from 'node:fs';
+mkdirSync('${testDir.replace(/\\/g, '/')}', { recursive: true });
+// 每 50ms 更新文件 mtime(模拟持续工作但不完成)
+const interval = setInterval(() => {
+  writeFileSync('${outputFile.replace(/\\/g, '/')}', 'partial-' + Date.now());
+}, 50);
+setTimeout(() => { clearInterval(interval); }, 999999);
+`,
+    );
+
+    const outcome = await runOneRound({
+      command: `node ${stubPath}`,
+      promptFile: null,
+      threadId: null,
+      changeId: 'c1',
+      outputFile,
+      spawnStartMs: Date.now(),
+      poll_interval_sec: 0.05,
+      zombie_threshold_sec: 0.5, // 500ms zombie(不触发)
+      timeout_sec: 0.3, // 300ms timeout
+      convergenceConfig: {
+        max_rounds: 5,
+        max_rounds_on_exceed: 'ask',
+        block_severity: ['BLOCKER', 'MAJOR'],
+        ignore_severity: ['MINOR', 'NIT'],
+        confidence_threshold: 0.7,
+        verdict_approve_short_circuit: true,
+      },
+      severityMap: { critical: 'BLOCKER', high: 'MAJOR', medium: 'MINOR', low: 'NIT' },
+    });
+
+    // 进程持续更新文件 → timeout(而非 zombie)
+    expect(['timeout', 'zombie', 'invalid_output']).toContain(outcome.kind);
+  }, 10000);
+
+  it('F-8: 残留旧 output 文件不误判假收敛(F1-v7 fix — existsSync + mtime 两条路径)', async () => {
+    testDir = createTestDir();
+
+    // ── 路径一:CLI 整链路 —— stub exit 0 但不写文件 → !existsSync 分支 ──
+    // 走完整 CLI:attempt loop 的 spawn 前 rmSync 双保险删掉任何残留 →
+    // 新 attempt 文件天然不存在 → codex 不写 → !existsSync → invalid_output → failed
+    const stubPath = join(testDir, 'stubs', 'no-write.mjs');
+    writeNoOutputStub(stubPath);
+
+    const outputTemplate = join(
+      testDir,
+      'output',
+      '${CHANGE_ID}',
+      'round${ROUND}',
+      'attempt${ATTEMPT}',
+      'test-ext.json',
+    );
+    writeSimpleConfig(
+      testDir,
+      'review',
+      'test-ext',
+      `node ${stubPath} --output \${OUTPUT_FILE}`,
+      outputTemplate,
+    );
+
+    const result = runCli(
+      [
+        'stage-extensions',
+        'run',
+        '--stage',
+        'review',
+        '--change-id',
+        'c1',
+        '--extension',
+        'test-ext',
+      ],
+      testDir,
+    );
+
+    expect(result.status).toBe(0);
+    const json = JSON.parse(result.stdout);
+    // stub 不写文件 → invalid_output → 所有 attempt 失败 → failed
+    // 关键:绝不应该是 converged(F1-v7 fix 防止假 converged)
+    expect(json.kind).not.toBe('converged');
+    expect(json.kind).toBe('failed');
+
+    // ── 路径二:直接调 runOneRound —— mtime 早于 spawnStartMs 残留旧文件分支 ──
+    // §7 Step 5.3 F-8 明列「预置一个旧的合法 verdict:approve JSON」。
+    // runStageExtensionRound 的 attempt loop 在 spawn 前 rmSync 会删掉预置文件,
+    // 走 CLI 无法触发此分支 —— 故直接调 runOneRound(同 F-6/F-7 直接调用模式)。
+    const outputFile = join(testDir, 'stale-output.json');
+    // 预置一个旧的合法 converged JSON(verdict:approve, findings 空)
+    writeFileSync(
+      outputFile,
+      JSON.stringify({
+        verdict: 'approve',
+        summary: '这是上一个 attempt 的残留旧文件',
+        findings: [],
+        next_steps: [],
+        thread_id: 'cdx-stale-thread',
+      }),
+    );
+
+    // 等 50ms,确保预置文件 mtime 严格早于稍后取的 spawnStartMs
+    await new Promise<void>((res) => setTimeout(res, 50));
+    const spawnStartMs = Date.now();
+
+    // 用 exit 0 但不写文件的 stub —— 旧文件仍在原处,mtime 早于 spawnStartMs
+    const noWriteStub = join(testDir, 'stubs', 'no-write-2.mjs');
+    writeNoOutputStub(noWriteStub);
+
+    const outcome = await runOneRound({
+      command: `node ${noWriteStub}`,
+      promptFile: null,
+      threadId: null,
+      changeId: 'c1',
+      outputFile, // 指向预置的残留旧文件
+      spawnStartMs,
+      poll_interval_sec: 0.05,
+      zombie_threshold_sec: 30,
+      timeout_sec: 30,
+      convergenceConfig: {
+        max_rounds: 5,
+        max_rounds_on_exceed: 'ask',
+        block_severity: ['BLOCKER', 'MAJOR'],
+        ignore_severity: ['MINOR', 'NIT'],
+        confidence_threshold: 0.7,
+        verdict_approve_short_circuit: true,
+      },
+      severityMap: { critical: 'BLOCKER', high: 'MAJOR', medium: 'MINOR', low: 'NIT' },
+    });
+
+    // 关键:旧文件 mtime < spawnStartMs → invalid_output(绝不 converged,
+    // 哪怕旧文件本身是合法 verdict:approve JSON — F1-v7 防假收敛)
+    expect(outcome.kind).toBe('invalid_output');
+    if (outcome.kind === 'invalid_output') {
+      expect(outcome.reason).toContain('残留旧文件');
+    }
+  }, 10000);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// T-1..T-3:terminateRound + analyze-trend
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('forge stage-extensions — terminateRound + analyze-trend(T-1..T-3)', () => {
+  afterEach(() => {
+    if (testDir) cleanupDir(testDir);
+  });
+
+  it('T-1: terminateRound — (a) jobId=null skip / (b) cancelCodexJob reject 吞错 / (c) SIGKILL', async () => {
+    testDir = createTestDir();
+    mkdirSync(join(testDir, 'stubs'), { recursive: true });
+
+    // ── case (a)+(c):jobId=null → 跳过 cancel;SIGTERM 被忽略 → SIGKILL → 再次等 close ──
+    // 写一个忽略 SIGTERM 的 stub(只被 SIGKILL 终止)
+    const stubIgnore = join(testDir, 'stubs', 'ignore-sigterm.mjs');
+    writeFileSync(
+      stubIgnore,
+      `
+// stub: 忽略 SIGTERM,只能被 SIGKILL 终止
+process.on('SIGTERM', () => { /* 忽略 */ });
+setTimeout(() => {}, 999999);
+`,
+    );
+
+    const procA = spawn('node', [stubIgnore], { shell: false });
+    // 等进程确实 started(pid 可用)
+    await new Promise<void>((res) => setTimeout(res, 100));
+    expect(procA.pid).toBeGreaterThan(0);
+
+    // 调用 terminateRound:jobId=null → 跳过 cancelCodexJob(case a)
+    // SIGTERM 被忽略 → SIGKILL → 再次等 close(case c)
+    await terminateRound(procA, null);
+
+    // 进程应已关闭(close 事件已触发)
+    const isTerminatedA = procA.exitCode !== null || procA.signalCode !== null;
+    expect(isTerminatedA).toBe(true);
+
+    // ── case (b):非 null jobId + cancelCodexJob reject → 已先 proc.kill() 吞错 ──
+    // 用一个普通可被 SIGTERM 杀死的 stub(本 case 焦点是 cancel reject 吞错,不是信号忽略)
+    const stubNormal = join(testDir, 'stubs', 'normal-hang.mjs');
+    writeFileSync(stubNormal, `setTimeout(() => {}, 999999);\n`);
+
+    const procB = spawn('node', [stubNormal], { shell: false });
+    await new Promise<void>((res) => setTimeout(res, 100));
+    expect(procB.pid).toBeGreaterThan(0);
+
+    // 注入一个一定 reject 的 fake cancelJob —— 验证 terminateRound 吞掉 reject
+    let cancelJobCalled = false;
+    let cancelJobArg: string | null = null;
+    const rejectingCancelJob = async (jobId: string): Promise<void> => {
+      cancelJobCalled = true;
+      cancelJobArg = jobId;
+      throw new Error('模拟 cancelCodexJob RPC 失败');
+    };
+
+    // 非 null jobId → 触发 cancel 路径;cancelJob reject 应被 catch 吞掉
+    // (b2):terminateRound 自身不 rethrow —— 若 rethrow,此 await 会抛出导致测试失败
+    await expect(terminateRound(procB, 'fake-job-id', rejectingCancelJob)).resolves.toBeUndefined();
+
+    // (b)前提:cancelJob 确实以正确 jobId 被调用过
+    expect(cancelJobCalled).toBe(true);
+    expect(cancelJobArg).toBe('fake-job-id');
+
+    // (b1):proc.kill() 仍先执行,进程最终 close —— reject 不阻断本地 kill
+    const isTerminatedB = procB.exitCode !== null || procB.signalCode !== null;
+    expect(isTerminatedB).toBe(true);
+  }, 20000);
+
+  it('T-2: analyze-trend 子命令 — 各种 trend 输出正确', () => {
+    testDir = createTestDir();
+
+    // data_insufficient(< 3 轮)
+    const r1 = runCli(
+      [
+        'stage-extensions',
+        'analyze-trend',
+        '--history',
+        JSON.stringify([{ round: 1, block_count: 5 }]),
+      ],
+      testDir,
+    );
+    expect(r1.status).toBe(0);
+    const j1 = JSON.parse(r1.stdout);
+    expect(j1.trend).toBe('data_insufficient');
+    expect(j1.recommended_option).toBe(1);
+
+    // strict_decrease
+    const r2 = runCli(
+      [
+        'stage-extensions',
+        'analyze-trend',
+        '--history',
+        JSON.stringify([
+          { round: 1, block_count: 5 },
+          { round: 2, block_count: 3 },
+          { round: 3, block_count: 1 },
+        ]),
+      ],
+      testDir,
+    );
+    expect(r2.status).toBe(0);
+    const j2 = JSON.parse(r2.stdout);
+    expect(j2.trend).toBe('strict_decrease');
+    expect(j2.recommended_option).toBe(1);
+
+    // stable(相邻差 ≤ 1)
+    const r3 = runCli(
+      [
+        'stage-extensions',
+        'analyze-trend',
+        '--history',
+        JSON.stringify([
+          { round: 1, block_count: 3 },
+          { round: 2, block_count: 3 },
+          { round: 3, block_count: 3 },
+        ]),
+      ],
+      testDir,
+    );
+    expect(r3.status).toBe(0);
+    const j3 = JSON.parse(r3.stdout);
+    expect(j3.trend).toBe('stable');
+    expect(j3.recommended_option).toBe(2);
+
+    // increase
+    const r4 = runCli(
+      [
+        'stage-extensions',
+        'analyze-trend',
+        '--history',
+        JSON.stringify([
+          { round: 1, block_count: 1 },
+          { round: 2, block_count: 3 },
+          { round: 3, block_count: 5 },
+        ]),
+      ],
+      testDir,
+    );
+    expect(r4.status).toBe(0);
+    const j4 = JSON.parse(r4.stdout);
+    expect(j4.trend).toBe('increase');
+    expect(j4.recommended_option).toBe(2);
+  });
+
+  it('T-3: analyze-trend 非法 JSON → exit 0 + emitJson 不抛(loose)', () => {
+    testDir = createTestDir();
+
+    const result = runCli(
+      ['stage-extensions', 'analyze-trend', '--history', 'not-valid-json'],
+      testDir,
+    );
+
+    expect(result.status).toBe(0);
+    // 输出合法 JSON(不抛出,loose)
+    const json = JSON.parse(result.stdout);
+    expect(json).toHaveProperty('trend');
+    expect(json).toHaveProperty('recommended_option');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MD-1..MD-2:adversarial markdown 解析覆盖(code review C-1/I-3 — markdown parser
+// 此前零测试覆盖,JSON stub 永远走不到 markdown 分支)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('forge stage-extensions — adversarial markdown 解析(MD-1..MD-2)', () => {
+  afterEach(() => {
+    if (testDir) cleanupDir(testDir);
+  });
+
+  /**
+   * 写一个把预设 markdown 内容写到 ${OUTPUT_FILE} 的 stub。
+   */
+  function writeMarkdownStub(stubPath: string, markdown: string): void {
+    mkdirSync(join(stubPath, '..'), { recursive: true });
+    // markdown 内容用 base64 编码进 stub,避免引号/换行转义问题
+    const b64 = Buffer.from(markdown, 'utf-8').toString('base64');
+    writeFileSync(
+      stubPath,
+      `
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+const args = process.argv.slice(2);
+const outIdx = args.indexOf('--output');
+const outFile = args[outIdx + 1];
+mkdirSync(dirname(outFile), { recursive: true });
+const md = Buffer.from('${b64}', 'base64').toString('utf-8');
+writeFileSync(outFile, md);
+process.exit(0);
+`,
+    );
+  }
+
+  // 严格对照 src/core/codex-review/prompts/adversarial-default.md <output_format> 的真实 markdown
+  const ADVERSARIAL_MARKDOWN = `## Summary
+
+总体存在两个值得关注的风险点,需在合入前处理。
+
+## Findings
+
+### [BLOCKER] 空状态未处理导致崩溃
+
+**Location**: \`src/core/foo.ts:42\`
+**Confidence**: 0.95
+
+**Body**:
+当输入数组为空时,代码会直接访问 index 0 而抛出异常。
+这是第二行 body 内容,验证 body 不被 \$ 截断。
+
+**Recommendation**:
+在访问前加空数组守卫。
+
+---
+
+### [MINOR] 命名不一致
+
+**Location**: \`src/core/bar.ts:10\`
+**Confidence**: 0.6
+
+**Body**:
+变量命名风格与项目其余部分不一致。
+
+**Recommendation**:
+统一命名风格。
+
+---
+
+## Verdict
+
+needs-attention
+
+存在一个 BLOCKER 级别问题,不建议直接合入。
+`;
+
+  it('MD-1: adversarial markdown 输出 → runOneRound 正确解析 verdict + findings', async () => {
+    testDir = createTestDir();
+
+    const stubPath = join(testDir, 'stubs', 'md-stub.mjs');
+    writeMarkdownStub(stubPath, ADVERSARIAL_MARKDOWN);
+
+    const outputFile = join(testDir, 'md-output.md');
+    const spawnStartMs = Date.now();
+    // 等 5ms 让 spawnStartMs 不会因同毫秒精度卡 mtime 校验
+    await new Promise<void>((res) => setTimeout(res, 5));
+
+    const outcome = await runOneRound({
+      command: `node ${stubPath} --output \${OUTPUT_FILE}`,
+      promptFile: null,
+      threadId: null,
+      changeId: 'c1',
+      outputFile,
+      spawnStartMs,
+      poll_interval_sec: 0.05,
+      zombie_threshold_sec: 30,
+      timeout_sec: 30,
+      convergenceConfig: {
+        max_rounds: 5,
+        max_rounds_on_exceed: 'ask',
+        block_severity: ['BLOCKER', 'MAJOR'],
+        ignore_severity: ['MINOR', 'NIT'],
+        confidence_threshold: 0.5,
+        verdict_approve_short_circuit: true,
+      },
+      severityMap: { critical: 'BLOCKER', high: 'MAJOR', medium: 'MINOR', low: 'NIT' },
+    });
+
+    // markdown 含 1 个 BLOCKER → unconverged(block 桶非空)
+    expect(outcome.kind).toBe('unconverged');
+    if (outcome.kind !== 'unconverged' && outcome.kind !== 'converged') {
+      throw new Error(`期望 converged/unconverged,实得 ${outcome.kind}`);
+    }
+    const conv = outcome.convergence;
+    expect(conv.verdict).toBe('needs-attention');
+
+    // 2 个 finding:1 BLOCKER(→block 桶)+ 1 MINOR(→ignore 桶)
+    expect(conv.blockFindings).toHaveLength(1);
+    expect(conv.ignoreFindings).toHaveLength(1);
+
+    // BLOCKER finding:severity 反映射 BLOCKER → critical;forge_severity = BLOCKER
+    // 前面已 assert length===1,非空断言安全
+    const blockF = conv.blockFindings[0]!;
+    expect(blockF.severity).toBe('critical');
+    expect(blockF.forge_severity).toBe('BLOCKER');
+    expect(blockF.title).toBe('空状态未处理导致崩溃');
+    expect(blockF.confidence).toBe(0.95);
+    // body 必须完整解析(含第二行)—— 验证 finding 拆分正则不截断 body
+    expect(blockF.body).toContain('当输入数组为空时');
+    expect(blockF.body).toContain('验证 body 不被');
+    expect(blockF.recommendation).toContain('空数组守卫');
+    // Location 解析为 file:line
+    expect(blockF.file).toBe('src/core/foo.ts');
+    expect(blockF.line_start).toBe(42);
+
+    // MINOR finding:severity 反映射 MINOR → medium
+    const ignoreF = conv.ignoreFindings[0]!;
+    expect(ignoreF.severity).toBe('medium');
+    expect(ignoreF.confidence).toBe(0.6);
+    expect(ignoreF.title).toBe('命名不一致');
+  }, 10000);
+
+  it('MD-2: markdown 缺 Verdict 段 / Confidence 缺失默认 0.8', async () => {
+    testDir = createTestDir();
+
+    // case A:缺 ## Verdict 段 → parseCodexOutput throw → invalid_output
+    const noVerdictMd = `## Summary
+
+简述。
+
+## Findings
+
+### [MINOR] 小问题
+
+**Location**: \`a.ts:1\`
+**Confidence**: 0.6
+
+**Body**:
+内容。
+
+**Recommendation**:
+建议。
+`;
+    const stubA = join(testDir, 'stubs', 'md-no-verdict.mjs');
+    writeMarkdownStub(stubA, noVerdictMd);
+    const outputA = join(testDir, 'md-a.md');
+    const startA = Date.now();
+    await new Promise<void>((res) => setTimeout(res, 5));
+
+    const baseParams = {
+      promptFile: null,
+      threadId: null,
+      changeId: 'c1',
+      poll_interval_sec: 0.05,
+      zombie_threshold_sec: 30,
+      timeout_sec: 30,
+      convergenceConfig: {
+        max_rounds: 5,
+        max_rounds_on_exceed: 'ask' as const,
+        block_severity: ['BLOCKER', 'MAJOR'] as Array<'BLOCKER' | 'MAJOR' | 'MINOR' | 'NIT'>,
+        ignore_severity: ['MINOR', 'NIT'] as Array<'BLOCKER' | 'MAJOR' | 'MINOR' | 'NIT'>,
+        confidence_threshold: 0.5,
+        verdict_approve_short_circuit: true,
+      },
+      severityMap: {
+        critical: 'BLOCKER' as const,
+        high: 'MAJOR' as const,
+        medium: 'MINOR' as const,
+        low: 'NIT' as const,
+      },
+    };
+
+    const outcomeA = await runOneRound({
+      ...baseParams,
+      command: `node ${stubA} --output \${OUTPUT_FILE}`,
+      outputFile: outputA,
+      spawnStartMs: startA,
+    });
+    // 关键段(Verdict)缺失 → throw → invalid_output(绝不猜)
+    expect(outcomeA.kind).toBe('invalid_output');
+
+    // case B:finding 缺 Confidence 行 → 默认 0.8
+    const noConfidenceMd = `## Summary
+
+简述。
+
+## Findings
+
+### [BLOCKER] 严重问题
+
+**Location**: \`b.ts:5\`
+
+**Body**:
+没有 Confidence 行的 finding。
+
+**Recommendation**:
+修复。
+
+---
+
+## Verdict
+
+needs-attention
+
+存在严重问题。
+`;
+    const stubB = join(testDir, 'stubs', 'md-no-confidence.mjs');
+    writeMarkdownStub(stubB, noConfidenceMd);
+    const outputB = join(testDir, 'md-b.md');
+    const startB = Date.now();
+    await new Promise<void>((res) => setTimeout(res, 5));
+
+    const outcomeB = await runOneRound({
+      ...baseParams,
+      command: `node ${stubB} --output \${OUTPUT_FILE}`,
+      outputFile: outputB,
+      spawnStartMs: startB,
+    });
+    expect(outcomeB.kind).toBe('unconverged');
+    if (outcomeB.kind === 'unconverged' || outcomeB.kind === 'converged') {
+      expect(outcomeB.convergence.blockFindings).toHaveLength(1);
+      const f = outcomeB.convergence.blockFindings[0]!;
+      // Confidence 行缺失 → 默认 0.8
+      expect(f.confidence).toBe(0.8);
+    }
+  }, 10000);
+});

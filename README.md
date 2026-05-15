@@ -1,6 +1,10 @@
 # Forge
 
-> **v1.1** Multi-harness **plugin** 把 OpenSpec 的产物驱动工作流和 superpowers 的行为塑造 skill 体系融合到一起。AI 在 Claude Code / OpenCode / Codex 三 harness 里按统一规范工作 — **skill auto-trigger** + **commands** + **forge CLI 严格门禁**。
+[![CI](https://github.com/Accelerator-mzq/forge/actions/workflows/ci.yml/badge.svg)](https://github.com/Accelerator-mzq/forge/actions/workflows/ci.yml)
+[![version](https://img.shields.io/github/package-json/v/Accelerator-mzq/forge)](https://github.com/Accelerator-mzq/forge/releases)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+> **v1.1** 三 harness AI 工作流 plugin。融合 [OpenSpec](https://github.com/Fission-AI/OpenSpec) 产物驱动工作流 + [superpowers](https://github.com/obra/superpowers) 行为塑造 skill,**外加 v1.0 反向加固协议(三级 severity / 三维 verify / 三级 fence / ack 两步)防 AI 在 spec 阶段偷懒**。
 
 ```bash
 # Tier 1 — Claude Code(全功能,推荐)
@@ -10,114 +14,146 @@
 
 OpenCode + Codex 见 [`docs/installation.md`](docs/installation.md)。
 
-## 它做什么
-
-1. **16 个行为塑造 skill 自动触发**:`brainstorming`(模糊需求时强制提问)、`test-driven-development`(red→green→refactor)、`subagent-driven-development`(派 fresh 子代理实施每个 task)、`verification-before-completion`(声称完成必附证据)、`writing-plans` 等。**v0.3 plugin 路径下 skill 真进 auto-trigger 池**(v0.2 P0 真根因解,Plan 0a + 0b.1 实测 PASS)。
-2. **9 个工作流 slash 命令**(Tier 1 Claude Code only):`/forge:brainstorm` → `/forge:propose` → `/forge:explore` → `/forge:apply` → `/forge:review` → `/forge:verify` → `/forge:archive` → `/forge:upgrade` → `/forge:ack-confirm`。OpenCode + Codex 路径用 skill 内嵌 fenced bash 让 AI 主动跑 helper(Plan 0a 实测 Variant B/C PASS)。
-3. **CLI 严格门禁**:`forge validate / archive` 验证产物完整性、verify+review marker hash 不对就拒绝;**plugin 内通过 `scripts/run-forge.mjs` helper 调用,避开 v0.2 P1 全局 PATH 问题**。
-4. **三 harness 全 unblock**(Plan 0a 实测):
-   - Tier 1 Claude Code:**ENABLE**(全功能)
-   - Tier 2 OpenCode:**PARTIAL_SHIP**(skills + skill-driven CLI;commands 推 v0.4)
-   - Tier 3 Codex:**PARTIAL_SHIP**(同上)
-
-## 5 分钟跑通(快速 reference)
+## TL;DR(5 分钟跑通)
 
 ```bash
 # 1. 装 plugin(Tier 1 Claude Code)
+mkdir my-todo-app && cd my-todo-app && git init && touch .gitignore
+claude   # 启动 Claude Code 会话
+
+# 在 Claude Code 会话里:
 /plugin marketplace add Accelerator-mzq/forge
 /plugin install forge@accelerator-mzq-forge
-/reload-plugins
-
-# 2-7. v1.1 端到端工作流主线
-我想做个 todo list 应用    # → §1 Brainstorm
-/forge:propose ...          # → §2 Propose
-/forge:apply                # → §3 Apply
-/forge:review               # → §4 Review
-/forge:verify               # → §5 Verify 三维
-/forge:archive              # → §6 Archive 三级 fence
+/exit && claude   # 重启,SessionStart hook 注入 skill + slash 命令
 ```
 
-完整端到端工作流详解见 [`docs/getting-started.md`](docs/getting-started.md)。
+主流程 6 步(每步对应一个 marker 产出):
+
+```
+我想做个 todo list 应用              # →  forge/drafts/<date>-todo-list.md(brainstorm)
+/forge:propose add-todo --from-draft <date>-todo-list
+                                     # →  forge/changes/add-todo/{proposal,specs/,design,tasks}.md
+/forge:apply                         # →  tasks.md 末尾 applied_commits YAML
+/forge:review                        # →  forge/changes/add-todo/.review-passed
+/forge:verify                        # →  forge/changes/add-todo/.verify-passed
+/forge:archive                       # →  forge/changes/archive/<date>-add-todo/
+```
+
+完整端到端演练 + Bug fix 快速路径见 [`docs/getting-started.md`](docs/getting-started.md)(含 [Bug fix 快速路径](docs/getting-started.md#bug-fix-快速路径) C1/C2 决策表)。
+
+## 核心交付 — v1.0+ 协议体系
+
+forge 不只是把 superpowers skill 搬到三 harness。v1.0 **fusion completion** 加了 9 块反向加固协议(plan-9a..9j),防 AI 在 spec / verify / archive 三阶段偷懒。
+
+### 1. 主流程 6 步 + 9 slash 命令
+
+`/forge:brainstorm` → `/forge:propose` → `/forge:apply` → `/forge:review` → `/forge:verify` → `/forge:archive`。
+
+横切命令:`/forge:explore`(非线性思考空间)、`/forge:ack-confirm`(WARNING 两步 ack)、`/forge:upgrade`(legacy 清理 + marker 重签)。
+
+每步产强校验 marker,后续阶段读 marker 的 `tasks_hash` / `content_hash` / `git.diff_hash` 验证未漂移(`src/core/markers/types.ts`)。
+
+### 2. 反向加固协议(forge 区别于上游的核心增量)
+
+- **三级 severity + critical_candidate**:CRITICAL automated(测试 fail / hash mismatch / coverage_gap 等)**不可 ack 降级**,JCS SHA256 `finding_hash` 兜底重算拒签(`src/core/schemas/severity.ts`,plan-9a)
+- **ack 两步协议**:WARNING 必须走 `forge ack propose` + `/forge:ack-confirm` 两步,AI 自 ack 不存在;archive fence 校验 `.ack-log.jsonl` 一致性(`src/cli/commands/ack.ts`)
+- **三维 verify**:Completeness(spec 覆盖度 grep)+ Correctness(`file:line` 映射)+ Coherence(design 决策追溯),取代 v0.4 "测试 pass" 二值判定(`skills/verifying-three-dimensions/SKILL.md`,plan-9d)
+- **三级 archive fence**:critical 硬墙(必修)/ warning ack(必两步确认)/ suggestion soft(聚合到 `archive_summary.handoff_to_backlog`)(`src/core/archive/three-level-fence.ts`,plan-9e1)
+
+### 3. 横切协议(主流程外的工具)
+
+- **Fluid Pause**:apply 中段 subagent 报告非 CRITICAL issue → 主代理弹四选项(扩 scope / 加 task / out-of-scope / Other)等用户决策;CRITICAL 仍走强 fence 拒签(`commands/apply.md` §"Fluid Pause Decision Point",plan-9c)
+- **exploring**:`/forge:explore` 非线性思考空间,**禁止直接写 artifact**,只给 `file:section` 具体 capture offer 等用户明确确认(`skills/exploring/SKILL.md`,plan-9f)
+- **process_evidence**:14 不变量 + worktree 重跑 + reporter parser;`forge evidence record-tdd/verify/review` + `freeze` 凝固到 marker(`skills/process-evidence/SKILL.md`,plan-9g)
+- **Out-of-Scope / Future Work / Non-Goals YAML 块** + `forge scope scan-archived-followups` 跨 change backlog 聚合(plan-9b)
+
+### 5. Stage Extensions Framework(plan-stage-extensions-framework)
+
+- **`stage_extensions` framework**:forge core 通用 stage-level extension runner,在 5 个 stage 挂钩调用外部工具(codex review / adversarial / 自定义 extension),多轮收敛协议由 AI 主代理驱动;CLI runner 永远 exit 0(loose,不阻塞主流程)
+- **codex review 预置 extension**:code-review mode(JSON 输出)+ adversarial mode(Markdown 输出),severity 四级映射(critical/high/medium/low → BLOCKER/MAJOR/MINOR/NIT),block 桶非空 = 未收敛,三选项 AskUserQuestion(auto_fix / manual_fix / give_up)
+- **thread map + 趋势分析**:同 stage 复用 codex thread context;`analyze-trend` 机械计算收敛趋势,辅助用户决策是否继续轮次
+- v1 Tier 1 Claude Code only;Tier 2/3 接口预留(`scripts/codex-review-helper.mjs` harness-agnostic)
+
+文档:[`docs/stage-extensions.md`](docs/stage-extensions.md) + [`docs/codex-review.md`](docs/codex-review.md)
+
+### 4. 实施纪律(plan-9h)
+
+- **`forge preflight branch-check`**:防 main/master 分支误改(exit 2 + 要求 `--allow-protected-branch` 显式绕过)
+- **Critical Plan Review**:主代理 dispatch subagent 前对 4 件套跑完整性/顺序/清晰度/scope 四维度检查,**不允许 vague pass-through**(`commands/apply.md:24-41`)
+- **Main Agent STOP Triggers**:5 触发表防"绕过失败 task / 修改 task 描述让它能过 / 重试 ≥3 次不停下"(`.claude/skills/subagent-driven-development/SKILL.md`)
 
 ## 安装(三 harness)
 
-详见 [`docs/installation.md`](docs/installation.md):
+| Harness         | 状态                                                                   | 入口                                                   |
+| --------------- | ---------------------------------------------------------------------- | ------------------------------------------------------ |
+| **Claude Code** | Tier 1 ENABLE(全功能 — skill auto-trigger + 9 slash 命令 + CLI helper) | [`docs/claude-install.md`](docs/claude-install.md)     |
+| **OpenCode**    | Tier 2 PARTIAL_SHIP(skills + skill-driven CLI;commands 不支持)         | [`docs/opencode-install.md`](docs/opencode-install.md) |
+| **Codex**       | Tier 3 PARTIAL_SHIP(同 OpenCode)                                       | [`docs/codex-install.md`](docs/codex-install.md)       |
 
-- [Claude Code](docs/claude-install.md)(Tier 1 全功能)
-- [OpenCode](docs/opencode-install.md)(Tier 2 PARTIAL_SHIP)
-- [Codex](docs/codex-install.md)(Tier 3 PARTIAL_SHIP)
+总览 + 选哪个 tier 见 [`docs/installation.md`](docs/installation.md)。
 
-## 从已有项目搬过来(v0.4+)
+## CLI 命令(14 个顶层子命令)
 
-如果项目已经在用 [OpenSpec](https://github.com/Fission-AI/OpenSpec) 或装过 [superpowers](https://github.com/obra/superpowers) plugin,跑 `forge migrate <source>` 一键搬到 forge 工作目录:
+按业务分组,详见 [`docs/cli-reference.md`](docs/cli-reference.md):
 
-```bash
-# OpenSpec 项目
-forge migrate openspec       # 默认 --regenerate(LLM 补缺件,会显示估价 + ack)
+**主流程**:`forge init`(v0.3 deprecated,v1.2 移除)/ `validate` / `archive`
 
-# superpowers 用户产物(docs/superpowers/{specs,plans}/)
-forge migrate superpowers    # 同上;design+plan 配对成 forge change
-```
+**反向加固协议(v1.0+)**:`ack propose/confirm/reject`(plan-9a)/ `evidence record-tdd/verify/review` + `freeze`(plan-9g)/ `scope scan-archived-followups`(plan-9b)/ `finding hash`(plan-9d)/ `preflight branch-check`(plan-9h)
 
-加 `--no-regenerate` 跳过 LLM,只搬结构 + 跑 markdown-aware transformer;失败件标 `[needs-fix]`(用户后续手补 / 重跑 `--regenerate`)。
+**Stage Extensions**:`stage-extensions run`(单轮 codex review 执行器)/ `stage-extensions analyze-trend`(收敛趋势分析)(plan-stage-extensions-framework)
 
-详见 [`docs/migration/from-openspec.md`](docs/migration/from-openspec.md) 与 [`docs/migration/from-superpowers.md`](docs/migration/from-superpowers.md)。
+**迁移与升级**:`migrate openspec/superpowers`(v0.4)/ `legacy-bridge`(v0.2 brownfield)/ `upgrade` + `--resign-markers`(plan-9j marker 重签)
 
-注:
+**杂项**:`config` / `update`
 
-- bundled plugin 中 `--regenerate` 不可用 — openspec source **静默退化**为 `--no-regenerate`;
-  superpowers source 因结构必缺 proposal/specs 会**前置 prompt 让你确认**(`--no-interactive` 直接 abort)。
-- archive 落点强制完整(M13):推测 archive 但缺 proposal/specs 且 regen 关闭 → 必须用户二次确认是否降级 active(`--no-interactive` 直接 abort exit 4)。
-- 默认 cp 不动源;migrate 跑完后用户手动 `git rm -r openspec/`(或 `docs/superpowers/{specs,plans}/`)清理。
+## 迁移与升级
 
-## v0.2 → v0.3 升级
-
-详见 [`docs/migration/v0.2-to-v0.3.md`](docs/migration/v0.2-to-v0.3.md)。
+**从已有项目搬过来**(v0.4+):
 
 ```bash
-# 简版:升 npm CLI + 跑 upgrade 命令(5 阶段事务,forge/ 产物不动)
-npm i -g @accelerator-mzq/forge@0.3.0
-cd <your v0.2 project>
-forge upgrade
-# y → STASH legacy adapter 产物 + 输出 plugin install 指引
-# 24h 内可 forge upgrade --recover 还原
+forge migrate openspec       # 默认 --regenerate(LLM 补缺件,估价 ≥ $5 需 ack)
+forge migrate superpowers    # design+plan 配对成 forge change
 ```
 
-## CLI 命令(7 个公开)
+加 `--no-regenerate` 跳过 LLM,失败件标 `[needs-fix]` 后续手补 / 重跑。详见 [`docs/migration/from-openspec.md`](docs/migration/from-openspec.md) + [`from-superpowers.md`](docs/migration/from-superpowers.md)。
 
-`forge init / upgrade / validate / archive / config / update / legacy-bridge`。详见 [`docs/cli-reference.md`](docs/cli-reference.md)。
+**升级既有 forge 项目**(v0.x → v1.1):
 
-注:`forge init` 在 v0.3 标记 deprecated(stderr 警告),v0.4 移除。新项目改用 plugin install 路径。
+```bash
+forge upgrade                              # 5 阶段事务(SCAN→SHOW DIFF→ASK→STASH→VERIFY→COMMIT)
+forge upgrade --recover                    # 24h 内还原
+forge upgrade --resign-markers <changeId>  # plan-9j v1.0+ marker 重签(legacy 13 不变量精确豁免)
+```
 
-## 设计文档
+详见 [`docs/migration/v0.2-to-v0.3.md`](docs/migration/v0.2-to-v0.3.md);v0.3 → v1.1 路径待补单独文档。
 
-- [v0.4 融合方案 spec](docs/specs/2026-05-04-forge-fusion-design.md)(1273 行,21 条决策)
-- [v0.3 plugin migration spec](docs/specs/2026-05-09-v0.3-plugin-migration-design.md)(918 行,7 条新决策 #22-28)
-- [Plan 0a-6 v0.3 实施计划](docs/plans/2026-05-09-plan-*.md)(8 份)
-- [Phase 0.5 v0.3 spike 实测结果](spike/v0.3/0a-summary.md)(三 harness 协议假设全 PASS)
+## 状态 + 文档导航
 
-## 状态
+**v1.2.0** released 2026-05-15(`CHANGELOG.md:11`):
 
-**当前状态**:v1.1.0 released(2026-05-14 tag),v1.0 fusion completion + v1.1 polish 累计 10 sub-plan + plan-9z polish 工作单全消化。
+- 本地 5 命令(`typecheck` / `lint` / `format:check` / `build` / `test`)全 0
+- **1115 tests pass**(`CHANGELOG.md:23`)
+- 自动化 skill eval(`pnpm eval`,`forge-eval/scenarios/` 双轨 baseline)
+- 16 skill + 9 slash 命令 + 14 CLI 子命令
 
-- 本地 5 命令(typecheck / lint / format:check / build / test)全 0
-- 测试 490 PASS + 16 schema/upgrade 单测,1 skipped
-- 自动化 skill eval(`pnpm eval`)— Plan 2 加 P2/P3 fixture
-- `npm publish` 工件待 release-gate(`scripts/release-gate.mjs` + `docs/release-gate-checklist.md` §3 v0.3 段)
+**v1.0 fusion completion** 经 Codex CLI(gpt-5.4-codex)累计 5+ 轮对抗性 review(跨 10 sub-plan)+ Opus subagent 多轮自检,共修 200+ 条问题;**v1.1 polish leftover** 经 Codex 七轮 review 累计 32 finding 全处置(0 严重 / 0 阻塞 / 0 Major)。
 
-**Plan 0a + 0b.1 实测验证(2026-05-09)**:
+**文档导航**:
 
-- Tier 1 Claude Code:`/plugin marketplace add` + `/plugin install` + brainstorming auto-trigger + `/test:test` commands 注册 全 PASS
-- Tier 2 OpenCode:opencode.json plugin 数组 + `'experimental.chat.messages.transform'` hook + skills.paths discovery 全 PASS;`/test:test` FAIL(commands 不支持)
-- Tier 3 Codex:`~/.agents/skills/<plugin>` skill auto-trigger PASS;literal `!command` IGNORED;fenced bash + must-execute Variant B/C PASS
-
-> v0.2 fixture 测试发现的 4 项缺陷(P0/P1/P2/P3),v0.3 全部修(详见 [`docs/v0.2-known-limitations.md`](docs/v0.2-known-limitations.md) 末尾)。
+- [`docs/getting-started.md`](docs/getting-started.md) — v1.1 端到端工作流 + Bug fix 快速路径
+- [`docs/cli-reference.md`](docs/cli-reference.md) — 14 CLI 子命令完整参数 + 退出码
+- [`docs/installation.md`](docs/installation.md) — 三 harness 安装总览
+- [`docs/stage-extensions.md`](docs/stage-extensions.md) — stage-extensions framework 协议文档 + config schema + troubleshooting
+- [`docs/codex-review.md`](docs/codex-review.md) — codex review 预置 extension 用户指南
+- [`docs/migration/`](docs/migration/) — OpenSpec / superpowers 迁移 + 版本升级
+- [`docs/specs/2026-05-10-v1.0-fusion-completion-design.md`](docs/specs/2026-05-10-v1.0-fusion-completion-design.md) — v1.0 fusion 21 决策权威 spec
+- [`docs/plans/`](docs/plans/) — plan-9a..9j + plan-9z + plan-v1.1 累积 ~20 份 plan 文件
 
 ## 许可
 
-MIT。复制了 superpowers 的 12 个 skill 文本(MIT 许可),attribution 见 [`LICENSE-THIRD-PARTY.md`](LICENSE-THIRD-PARTY.md)。
+MIT。复制了 superpowers 的 16 个 skill 文本(MIT 许可),attribution 见 [`LICENSE-THIRD-PARTY.md`](LICENSE-THIRD-PARTY.md)。
 
 ## 致谢
 
-- [OpenSpec](https://github.com/Fission-AI/OpenSpec) — 产物驱动工作流的设计灵感
-- [superpowers](https://github.com/obra/superpowers) — 行为塑造 skill 体系的源头(skill 文本 + plugin 形态经 MIT 许可移植)
+- [OpenSpec](https://github.com/Fission-AI/OpenSpec) — 产物驱动工作流的设计灵感(`/opsx:propose` `/opsx:apply` `/opsx:verify` 等 12 个 workflow 协议直接借鉴)
+- [superpowers](https://github.com/obra/superpowers) — 行为塑造 skill 体系的源头(16 skill 文本 + plugin 形态经 MIT 许可移植 + 命名空间 `superpowers:` → `forge:`)

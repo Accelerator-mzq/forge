@@ -7,7 +7,7 @@ metadata:
   author: forgeue project (extracted to generic)
   version: "1.0-generic"
   scenario_subtype_count: 28
-  case_study_count: 9
+  case_study_count: 10
   retrospect_protocol: trigger-type-matrix(5 types × per-type intensity)
 ---
 
@@ -1354,6 +1354,62 @@ git update-ref refs/heads/<wrong-branch> <prior-base-sha>
 
 ---
 
+### Case 10: forge-repo / plan-stage-extensions / Task 5 — runner CLI 子命令(run + analyze-trend)
+
+**Date**:2026-05-15
+**Trigger Type**:Type 1(3-stage full retrospect)
+**Project context**:TS/Node monorepo(opsp/forge-repo),plan-stage-extensions Task 5 落 `src/cli/commands/stage-extensions.ts`(v7 单轮执行器:spawn codex + watch + parse + judge + retry,2 子命令 `run` + `analyze-trend`,结构化 JSON 输出,loose exit 0)+ `src/cli/index.ts` 注册 + `tests/cli/stage-extensions.test.ts` integration scenario。plan v10 经 9 轮 Codex 对抗性 review 收敛 + v10 C 方案修订(parseCodexOutput markdown 解析)。
+
+**Subagent dispatch**:
+| Subagent | Scenario subtype(§1.X.Y)| Model | $cost | Verdict |
+|---|---|---|---|---|
+| Task 5 implementer(3 rounds:初版 + round-2 spec fix + round-3 quality fix)| §1.1.3 Multi-file integration | sonnet | ~$0.80 | DONE → DONE → DONE |
+| spec_reviewer(2 rounds)| §1.2.4 acceptance criteria | sonnet | ~$0.30 | ❌ 3 issues → ✅ |
+| code_quality_reviewer(2 rounds)| §1.3.4 runtime correctness | sonnet | ~$0.50 | ❌ 1C/3I/3M → ✅ Ready to merge |
+| M-4 inline fix | direct | controller(opus 4.7)| ~$0.05 | terminateRound 步骤注释编号顺延(cosmetic)|
+| Retrospect(本次)| Type 1 mandatory | controller(opus 4.7)| ~$0.40 | Q1/Q2/Q3/Q4 YES → add Case 10 + §6 1 row |
+
+**Real issues caught / failed**:
+| Issue | Severity | Caught by | Scenario subtype 验证 |
+|---|---|---|---|
+| **C-1 parseCodexOutput markdown parser `\Z` 锚 —— JS 正则无 `\Z`(是字面字符 Z),`## Verdict` 末段后无 `^##` → `verdictMatch` 恒 null → adversarial mode 所有 markdown 输出永远 `failed`** | **Critical(adversarial 模式全量 breakage)**| code_quality reviewer round-1 + controller `node -e` 实测 repro | **NEW Pattern AA + NEW edge** — implementer 自写正则含 cross-language false-cognate 锚 + 该路径零测试覆盖 |
+| finding 拆分正则 `m`-flag `$` 截断 body(Location/Confidence/Body/Recommendation 全丢)| Critical(C-1 修复时 TDD markdown 测试一并暴露)| round-3 新加的 markdown 测试(MD-1)| §1.3.4 — 同 C-1,implementer 自写正则 + 零覆盖 |
+| R-6 thread-id 透传循环断言 / F-8 漏 mtime 残留旧文件分支 / T-1 缺 cancelCodexJob reject case | Important×3 | spec_reviewer round-1 | §1.2.4 — 测试不验真实行为(stub 硬编码回写值 / 只覆盖 existsSync 分支 / 三 case 缺一)|
+| **M-1 `runOneRound` 硬编码 `changeId:''` → `${CHANGE_ID}` 替换变量在 `entry.command` 静默失效** | **reviewer 标 Minor / controller cross-verify 升 Important** | code_quality reviewer + controller 读码核实 §7 + docstring 明列 `${CHANGE_ID}` | §3.2 — reviewer 严重度低估(Case 05 Pattern J 的 reverse:不是低估为 Important,是低估为 Minor)|
+| I-1 `substituteVars` 无 shell 转义,`shell:true` spawn 注入面(threadId 来自 codex 输出非完全受控)| Important | code_quality reviewer round-1 | §1.3.4 — 与项目 `codex-review-helper.mjs` 既有转义实践不一致 |
+
+**Lesson**(reinforce / new pattern / 边界 refinement):
+
+1. **NEW Pattern AA — plan 增量修订加功能但漏加 test scenario → 该功能代码路径零覆盖,bug 穿透 implementer 自检 + spec review,只 code_quality runtime review 兜底**
+   - 实证:plan v10 在 9 轮 Codex review 收敛**之后**才追加 §7 Step 5.2ter(parseCodexOutput markdown C 方案);但 §7 Step 5.3 的 19 个 integration scenario 是 v10 之前定稿的,stub 全输出 JSON,**没有一个 scenario 覆盖 markdown 路径**。implementer 自写的 `parseMarkdownOutput`(plan 只给了格式说明,没给正则)含 C-1 `\Z` 全量 breakage bug —— 因为零测试覆盖,implementer 自检(19 测试全过)+ spec compliance review 都漏掉,只有 §1.3.4 code_quality runtime-correctness review 读码 + 实测兜底抓到。
+   - **与 §6 catalog "Plan inline code 含 latent bug" 行区别**:那行是 plan **给了** inline code 但 code 自带 bug;Pattern AA 是 plan **新增功能但漏给对应 test scenario**,implementer 自写实现 + 该路径无任何回归网。
+   - **fix 模式 / 协议升级**:
+     - **controller dispatch 前**:plan 经多轮 review 后若有**增量修订加功能**(vN → vN+1 加 Step / 加 helper),controller 必检查「每个新增代码路径是否有对应 test scenario」;若无 → dispatch prompt 显式要求 implementer 为该路径补测试(不被 plan 的固定 scenario 计数束缚 —— 计数交 test inventory 统一 Task 校准)。
+     - **implementer prompt 加**:对 implementer **自写**(非 plan-inline 给定)的解析器 / 正则 / 状态机,self-review checklist 加项「我自写的 X 是否有专门测试?plan 的固定 scenario 是否覆盖了它?若否,补测试」。
+     - **§6 catalog 加 row**(见下)。
+
+2. **NEW edge(并入 Pattern AA)— implementer 自写正则含 cross-language false-cognate 锚**
+   - 实证:sonnet implementer 写 `parseMarkdownOutput` 用了 `\Z`(Python/Perl 的字符串末尾锚)—— JS 正则**没有 `\Z`**,`\Z` 在 JS 里是字面字符 `Z`。另加 `m`-flag 下 `$` 匹配每行尾导致 finding body 非贪婪截断。两个 bug 都是「在 A 语言成立、B 语言不成立」的 false-cognate。
+   - **fix 模式**:涉及 implementer 自写正则(尤其跨语言背景的 model)→ code_quality reviewer 必**实测 repro**(`node -e` 跑真实输入)而非读码判断;TDD 顺序补测试驱动修(round-3 即用此法,markdown 测试 RED→修 parser→GREEN,且一举暴露第二个 `$` 截断 bug)。
+
+3. **REINFORCE — §1.3.4 Sonnet code_quality runtime-correctness review 是唯一防线(Case 01-05 累计第 6 次)**
+   - C-1 这种「整条代码路径全量 breakage」既不被 implementer 自检发现(零覆盖)、也不被 spec compliance review 发现(spec review 比对「实现 vs spec 字面」,不读运行时行为)—— 只有 §1.3.4 code_quality 读码 + adversarial 实测兜底。**再次实证 §1.3.4 MANDATORY Sonnet 不可降级、不可 skip**。
+
+4. **REINFORCE — Case 05 Pattern J 的 reverse:reviewer 严重度低估,controller cross-verify 升级**
+   - Case 05 Pattern J 是 reviewer 标 Important、controller 实测升 Critical;本次是 code_quality reviewer 把 M-1(`${CHANGE_ID}` 替换变量静默失效)标 **Minor**,controller 读 §7 + substituteVars docstring 核实「`${CHANGE_ID}` 是文档化的替换变量」→ 升 **Important**。
+   - **强化 §3.2**:reviewer 的严重度评级双向都要 cross-verify —— 不仅「Important 含 system-wide 关键词 → 可能该升 Critical」,也包括「Minor 实为文档化功能静默失效 → 该升 Important」。判据:**该问题是否让一个文档化/spec 化的功能静默产出错误结果**;是 → 至少 Important。
+
+**Cost vs all-Opus alternative**:
+- 实际:implementer 3 rounds(sonnet ~$0.80)+ spec_reviewer 2 rounds(sonnet ~$0.30)+ code_quality_reviewer 2 rounds(sonnet ~$0.50)+ M-4 inline(opus ~$0.05)+ retrospect(opus ~$0.40)≈ **$2.05**
+- 全 Opus 假设:implementer 3 + reviewer 4 + inline + retrospect ≈ **~$9**
+- 节省 ratio:~77%
+- **质量**:4 commits(`4c59eef` + `e684b21` + `99caaeb` + `76855fd`)全 commit 落 `docs/plan-stage-extensions-framework` 分支;Task 5 测试 19 → 21 scenario(新增 MD-1/MD-2 markdown 覆盖);全 suite 1090 passed / 0 fail / 无回归;typecheck/lint/format:check 全绿;3-stage SDD 全 ✅(spec compliant + code_quality Ready to merge)。
+
+**Followup 建议**(留 plan-stage-extensions Task 7「测试 inventory 统一」消化):
+- Task 5 测试由 plan §7「19 scenario」→ 实际 21(加 MD-1/MD-2)。Task 7 校准 plan §2/§7/Test plan 的「19」字面引用 + 总测试计数。
+
+---
+
 ## §6 Pattern Catalog(failure mode → scenario subtype + recovery)
 
 | Subagent failure mode | Root cause(scenario subtype 误配)| Prevention | Recovery |
@@ -1383,6 +1439,7 @@ git update-ref refs/heads/<wrong-branch> <prior-base-sha>
 | **cross-Task test interaction(N regression test assume N+1 logic placeholder)(see §5 Case 05 Pattern K)**| Task N 加 regression test assuming Task N+1 logic 仍是 placeholder(eg. `const findings = []` 占位);test PASS 快速 1.3s。Task N+1 enable real logic(eg. 启用 `runRerunFence(ctx)` 真调 worktree)→ 同 test 现在真跑 long-running operation → timeout 5000ms fail。Implementer 想急完成 task 倾向 **self-report "flaky"** 而非 real regression | dispatch prompt 加:涉及多 Task 跨阶段 test setup 时,**显式标注 "N Task 加的 test 在 N+M Task enable real logic 后会不会触发新 long-running operation?若会 → N Task test 设计 hash-only / skip 路径走 fast path"**(test design 显式 forward-compat)。controller cross-verify 必拒绝 "flaky" self-report → 实测 stash 前后对比 + deterministic 触发条件分析 | Round 2 fix:test 改 staging mode='hash-only' 走 skip 路径(hash-only 直接 return),仍验目标 fence(因子检仍跑);controller cross-verify stash 前后确认是 deterministic regression 而非 flaky |
 | **implementer "acceptable risk"/"flaky" 自报 → controller final review 必实测 verify(see §5 Case 05 Pattern L)**| per-task code_quality reviewer 标 Important 但 implementer self-report "acceptable risk" / "flaky 与 X 无关" / "low priority" 误导 final review 阶段。Implementer 想急完成 task 倾向自报 acceptable risk;若 controller 接受 self-report 不实测 verify → release 时暴露 real risk(攻击路径 / timing 距 bound 距离 < buffer) | §2.7 final reviewer playbook 加:cross-task synthesis 必扫所有 per-task Important 中 implementer self-report "acceptable risk" / "flaky" / "low priority" 的 finding → **实测 verify**(攻击路径模拟 / 实测 timing 距 bound 距离 N 次 / stash 前后 deterministic verify)→ 决定升级 Critical / 维持 Important / 接受 acceptable risk。**Implementer 自报评估不能 substitute final review 实测验证** | Final reviewer 实测 N 次 + controller direct fix commit(eg. catch 块加 else 转 CRITICAL finding + timeout buffer 加大);PR description 必标"final review 实测升级"留 audit trail |
 | **CI 环境 env var 累积 latent bug(long-lived feature branch first CI run)(see §5 Case 05 Pattern M)**| 老 test 不 override `CI` env / 其他 CI-sensitive env var(GH_TOKEN / TZ / LANG);GitHub runner 默认 `CI=true` → child process 检 `process.env.CI` 调整行为(如 ack propose exit 2 拒);本地 `process.env.CI=undefined` PASS;long-lived feature branch(>3 plan 周期未 PR 到主干)累积 latent CI bug,first PR run 才暴露 | test setup 显式 `CI=''` env override(`{ env: { ...process.env, CI: '' } }` 给 spawnSync / execa);dispatch prompt Pre-verified Data 段标"CI=true 环境下命令行为 vs 本地" — 若 child process 检 `process.env.CI` 调整行为,test setup 必显式 override。§3.2 cross-verify 加:**long-lived feature branch(>3 plan 周期未 PR 到主干)PR 前必跑 `gh pr create --draft` 触发 CI dry run** — 累积 latent CI bug 早发现 | chore commit `chore(<old plan> test fix): 加 CI='' env override`(本地 + CI 双 PASS 验证);PR description 标"累积 N plan 周期 latent CI bug,first CI run 暴露" |
+| **plan 增量修订加功能但漏加 test scenario → 该功能代码路径零覆盖,bug 穿透 implementer 自检 + spec review(see §5 Case 10 Pattern AA)**| plan 在多轮 review 收敛**之后**追加新 Step / helper(本例 v10 加 parseCodexOutput markdown 解析),但固定的 integration scenario 集是修订前定稿的,无一覆盖新路径;implementer 自写实现(plan 只给格式说明不给代码)含 bug(本例 `\Z` cross-language false-cognate 锚 → 整条 markdown 路径全量 breakage);零覆盖 → implementer 自检(原 scenario 全过)+ spec compliance review(只比对 spec 字面)双漏 | controller dispatch 前检查「plan vN→vN+1 增量加的每个代码路径是否有对应 test scenario」,无则 dispatch prompt 显式要求 implementer 补测试(不被固定 scenario 计数束缚,计数交 test inventory 统一 Task 校准);implementer self-review checklist 加「自写的解析器/正则/状态机是否有专门测试」;涉及 implementer 自写正则 → code_quality reviewer 必 `node -e` 实测 repro 而非读码判断 | §1.3.4 Sonnet code_quality runtime review 兜底(读码 + adversarial 实测);TDD 补测试(markdown 测试 RED → 修 parser → GREEN,一举暴露连带的第二个 bug)|
 
 ---
 

@@ -22,6 +22,7 @@
 - [第 6 步 — Archive 三级 fence](#第-6-步--archive-三级-fence)
 - [出问题怎么办](#出问题怎么办)
 - [与 superpowers plugin 共存](#与-superpowers-plugin-共存)
+- [Bug fix 快速路径](#bug-fix-快速路径)(三条短路 A/B/C + C1/C2 决策表)
 - [接下来](#接下来)
 
 ## 第 0 步 — 安装
@@ -317,6 +318,27 @@ tail -10 forge/changes/add-todo/tasks.md  # 期望:末尾有 applied_commits YAM
 > - accept → `.ack-log.jsonl` append `status=confirmed` + `acked_by` + `ack_at`
 > - reject → `.ack-log.jsonl` append `status=rejected`,你回头修代码
 
+### 嵌入 deep-dive: stage-extensions(review)
+
+> 💡 **深入:Review 结束后自动触发 codex review 多轮收敛协议**
+>
+> 若 `forge/config.yaml` 含 `stage_extensions.review` 配置,AI 主代理在 review 完成后自动跑 codex review extension(code-review 或 adversarial 模式)。codex finding 按 severity 分为 block 桶(BLOCKER/MAJOR)和 ignore 桶(MINOR/NIT),block 桶非空 → 未收敛 → AI 弹三选项(auto_fix / manual_fix / give_up)。**loose 模式:不影响 forge 主流程 fence**。
+>
+> 快速开启(review stage):
+>
+> ```yaml
+> stage_extensions:
+>   review:
+>     - name: codex-code-review
+>       enabled: true
+>       command: >
+>         node "${FORGE_HELPER_DIR}/codex-review-helper.mjs" run
+>         --mode code-review --output-log "${OUTPUT_FILE}"
+>       output: forge/changes/${CHANGE_ID}/.evidence/codex-review-r${ROUND}-a${ATTEMPT}.json
+> ```
+>
+> 完整协议 + config schema + severity 映射见 [`docs/stage-extensions.md`](stage-extensions.md) 和 [`docs/codex-review.md`](codex-review.md)。
+
 ### 确认
 
 ```bash
@@ -364,6 +386,27 @@ test:
 - ✅ AI 调 `forge evidence freeze <id> --kind verify` 把 staging 凝固到 marker.process_evidence
 
 > ❌ 如果 freeze 报 "staging file not found ... 必须先调 forge evidence record-*" → AI 漏调 record-verify,提示 AI invoke 该 helper 再 freeze(代码事实 `src/cli/commands/evidence.ts:639`)
+
+### 嵌入 deep-dive: stage-extensions(verify)
+
+> 💡 **深入:Verify 结束后自动触发 codex adversarial review**
+>
+> 若 `forge/config.yaml` 含 `stage_extensions.verify` 配置,AI 主代理在 verify 完成后自动跑 codex adversarial extension。adversarial 模式使用对抗性 prompt 深度审查,找 review 可能遗漏的问题。结果同样走多轮收敛协议(block 桶非空 → 未收敛 → 三选项),**loose 模式不阻塞主流程**。
+>
+> 快速开启(verify stage):
+>
+> ```yaml
+> stage_extensions:
+>   verify:
+>     - name: codex-adversarial
+>       enabled: true
+>       command: >
+>         node "${FORGE_HELPER_DIR}/codex-review-helper.mjs" run
+>         --mode adversarial --output-log "${OUTPUT_FILE}"
+>       output: forge/changes/${CHANGE_ID}/.evidence/codex-adversarial-r${ROUND}-a${ATTEMPT}.md
+> ```
+>
+> 推荐新用户先只开 review + verify 两个 stage(D/E 路径)再按需扩展。完整协议见 [`docs/stage-extensions.md`](stage-extensions.md)。
 
 ### 嵌入 deep-dive
 
@@ -511,6 +554,119 @@ forge 的 16 个 skill 是从 [superpowers](https://github.com/obra/superpowers)
 **B. 跑 forge 项目时通过 `/plugins` 暂时关掉 superpowers**
 
 forge 16 个 skill 跟 superpowers 几乎相同(同源 MIT 移植),关 superpowers 不会损失能力。
+
+## Bug fix 快速路径
+
+主流程跑通后,小 bug 不必每次都走完整 6 步。本段给三条短路 + 决策表。**前提:你已经跑通过至少 1 次主流程**(不熟主流程请回 §1-§6)。
+
+### 三条短路概览
+
+| 路径 | 触发场景 | 耗时 | 关键动作 |
+|---|---|---|---|
+| **A 跳协议** | typo / 注释 / docs only / 死码删除(non-behavior 改动) | 30 秒 | 直接 Edit + `git commit`,**不起 change** |
+| **B Fluid Pause #2** | apply 中段发现"本 scope 应做但漏 task" | 2-5 分钟 | 主代理 append tasks.md(沿 [§3 嵌入 deep-dive 2](#嵌入-deep-dive-2)) |
+| **C light mode** | 新 bug,改 ≤ 80 行 tasks 能写完 | 10-15 分钟 | `/forge:propose <id> --light` |
+
+A 沿 [`skills/exploring/SKILL.md:40`](../skills/exploring/SKILL.md) "修 typo / 加一行示例的小改动 → 直接做,跳协议";B 见上文 [§3 嵌入 deep-dive 2](#嵌入-deep-dive-2);C 是本段重点。
+
+### Path C 适用判断
+
+来自 [`skills/writing-plans/SKILL.md:46`](../skills/writing-plans/SKILL.md):"加 1 个字段、加 1 个 CLI flag、改 1 个常量、**修 1 个简单 bug**、纯文本修改 / docs 改动"。
+
+判断信号:
+
+- ✅ 1-2 task,tasks.md ≤ 80 行能写完
+- ✅ 改动 ≤ 1-2 个文件
+- ✅ 不涉及新增 design 决策 / 跨模块协调 / 合约变更
+- ❌ 跨 3+ 文件 → 走主流程 full mode
+- ❌ 涉及新增 spec Requirement / 改动 API 合约 → 走主流程
+
+### Path C 前置(两条都要)
+
+```bash
+# 1. 确认无活跃 change(否则 /forge:apply 撞 multi-change 报错)
+ls forge/changes/    # 期望:只看到 archive/ 子目录
+
+# 2. 切 feature branch(不在 main/master,否则 preflight branch-check exit 2)
+git checkout -b fix/<bug-slug>
+
+# 3. cwd 进项目根(不是 forge-repo)
+cd /path/to/my-app
+```
+
+### Path C1:最短 — 跳 brainstorm 直接 propose --light
+
+适合 root cause 已定位、成功标准清楚的场景。
+
+```
+# Claude Code 会话(替换 slug)
+/forge:propose fix-<bug-slug> --light
+
+# AI 反问 2-3 个澄清问题(root cause / 成功标准 / 涉及文件)
+# 答完后产 4 件套到 forge/changes/fix-<bug-slug>/,tasks.md ≤ 80 行
+```
+
+代价:没 draft 上下文,AI 反问质量取决于你的回答;proposal.md 比 brainstorm 路径浅。
+
+证据:[`commands/propose.md:11`](../commands/propose.md) "**可选** `--from-draft`";步骤 1 写"若提供了 `--from-draft <name>`"(条件分支,没提供时 AI 走对话上下文 + AskUserQuestion)。
+
+### Path C2:协议纯净 — brainstorm + propose --light
+
+适合 root cause 还没 100% 定位、想用 brainstorm 反问逼自己想清楚的场景。
+
+```
+# Claude Code 会话:模糊描述触发 brainstorming skill
+我想修一个 bug:<bug 描述>
+
+# AI 反问 2-3 轮 → 提 approach 对比 → 落 draft 到 forge/drafts/<date>-<bug-slug>.md
+# 你 approve draft 后:
+/forge:propose fix-<bug-slug> --from-draft <date>-<bug-slug> --light
+```
+
+代价:多 3-5 分钟 brainstorm 对话;但 draft 完整,4 件套质量更高。
+
+### C1 vs C2 决策表
+
+| 信号 | 选 C1 | 选 C2 |
+|---|---|---|
+| Root cause 100% 定位 | ✅ | |
+| Root cause 还要现场调试 | | ✅ |
+| 改动 ≤ 1 个文件 | ✅ | |
+| 改动跨 2+ 文件 | | ✅ |
+| 能 1 句话讲清成功标准 | ✅ | |
+| 成功标准还要想想 | | ✅ |
+| 之前没用过 forge | | ✅(brainstorm 给你协议熟悉度) |
+
+### 后续(C1 / C2 殊途同归)
+
+```bash
+# 确认 light mode 真出 ~80 行(若 200+ 说明 AI 没识别 light → 删 change 重 propose --light)
+wc -l forge/changes/<change-id>/tasks.md
+```
+
+```
+# Claude Code 会话顺序跑
+/forge:apply     # AI 派 subagent 跑 1-2 task
+/forge:review    # fresh subagent 审 4 件套 + diff
+/forge:verify    # 三维度审实施完整度
+/forge:archive   # 归档到 forge/changes/archive/<date>-<id>/
+```
+
+端到端 **10-15 分钟**,比 full mode(20-30 分钟)省一半。
+
+### 禁区(C 路径不能用的场景)
+
+| 场景 | 走哪条 |
+|---|---|
+| typo / docs only / 死码 | **A 路径**(直接 Edit + commit,跳协议) |
+| 当前已有活跃 change,bug 在该 change scope 内 | **B 路径**(Fluid Pause #2 append task);不要新起 change |
+| 当前已有活跃 change,bug 跟该 change scope **无关** | **先完当前 change**,完了再走 C 起新 change |
+| 跨 3+ 模块 / 涉及合约 / 涉及 design 决策 | **主流程 full mode**(回 §1 brainstorm) |
+
+❌ **破坏 marker 的高危行为**(沿 [§出问题怎么办 第 2 条](#2-forgearchive-被拒marker-已过期--hash-mismatch)):
+
+- apply 跑到一半时手动 `git commit -m "fix typo"` — 破坏 `content_hash` / `git.diff_hash`,后续 archive fence 拒签
+- 起 parallel change("当前不归档,旁边新建一个修 bug") — `/forge:apply` 会报错要求 `--change-id` 显式指定
 
 ## 接下来
 

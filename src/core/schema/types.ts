@@ -106,6 +106,12 @@ export interface ForgeConfig {
    *     - trunk
    */
   protected_branches?: string[];
+
+  /**
+   * plan-stage-extensions Task 1 — stage 扩展点配置。
+   * 缺失时调用方应以空对象 fallback 或调 validateStageExtensionsConfig 拿完整 normalized 值。
+   */
+  stage_extensions?: StageExtensionsConfig;
 }
 
 /**
@@ -159,3 +165,107 @@ export const DEFAULT_CODE_EXCLUDE = [
 
 // §3.12.1 Interface Freeze 共享字段 single source of truth — 后续 sub-plan reference 此处
 export * from '../schemas/severity.js';
+
+// ─── plan-stage-extensions Task 1: StageExtensions 配置类型 ───────────────────
+
+/** 单个 stage extension 条目(用户配置层;可选字段由 validator 填充) */
+export interface StageExtensionEntry {
+  name: string;
+  enabled: boolean;
+  command: string;
+  /** codex review 模式可不传 prompt */
+  build_prompt?: string;
+  output: string;
+  timeout_sec?: number;
+  poll_interval_sec?: number;
+  zombie_threshold_sec?: number;
+  max_retries?: number;
+  /** 用户可局部覆盖 convergence;缺省字段由 defaults 填充 */
+  convergence?: Partial<ConvergenceConfig>;
+}
+
+/** convergence 收敛策略(完整配置;Partial 版本用于用户输入) */
+export interface ConvergenceConfig {
+  /** 最多收敛轮次 [1, 100] */
+  max_rounds: number;
+  /** 轮次上限时行为 */
+  max_rounds_on_exceed: 'ask' | 'force_end';
+  /** 阻塞 merge 的 severity 列表 */
+  block_severity: Array<'BLOCKER' | 'MAJOR' | 'MINOR' | 'NIT'>;
+  /** 忽略不计入收敛的 severity 列表 */
+  ignore_severity: Array<'BLOCKER' | 'MAJOR' | 'MINOR' | 'NIT'>;
+  /** 通过信心阈值 [0, 1] */
+  confidence_threshold: number;
+  /** verdict=APPROVE 时直接短路跳出收敛循环 */
+  verdict_approve_short_circuit: boolean;
+}
+
+/** stage_extensions.defaults 用户配置层(所有字段可选) */
+export interface StageExtensionsDefaults {
+  /** 运行模式;v1 仅 'sync','background' 预留给 v2 async 模式(plan 决策 Q5) */
+  mode: 'background' | 'sync';
+  poll_interval_sec: number;
+  zombie_threshold_sec: number;
+  timeout_sec: number;
+  max_retries: number;
+  convergence: ConvergenceConfig;
+  /** codex severity → forge severity 映射(codex → 内部) */
+  severity_map: {
+    critical: 'BLOCKER' | 'MAJOR' | 'MINOR' | 'NIT';
+    high: 'BLOCKER' | 'MAJOR' | 'MINOR' | 'NIT';
+    medium: 'BLOCKER' | 'MAJOR' | 'MINOR' | 'NIT';
+    low: 'BLOCKER' | 'MAJOR' | 'MINOR' | 'NIT';
+  };
+  /** forge severity → forge finding 级别映射(内部 → CLI 输出) */
+  severity_map_to_forge: {
+    BLOCKER: 'critical' | 'warning' | 'suggestion';
+    MAJOR: 'critical' | 'warning' | 'suggestion';
+    MINOR: 'critical' | 'warning' | 'suggestion';
+    NIT: 'critical' | 'warning' | 'suggestion';
+  };
+  /** 用户交互策略(未收敛 / 超轮次时推荐动作) */
+  user_interaction: {
+    block_unconverged: 'auto_fix_recommended' | 'manual_fix_recommended' | 'give_up_recommended';
+    max_rounds_exceed: 'give_up_recommended' | 'continue_recommended' | 'accept_recommended';
+  };
+}
+
+/** stage_extensions 顶层用户配置(forge/config.yaml#stage_extensions) */
+export interface StageExtensionsConfig {
+  defaults?: Partial<StageExtensionsDefaults>;
+  brainstorming?: StageExtensionEntry[];
+  propose?: StageExtensionEntry[];
+  apply_critical_plan_review?: StageExtensionEntry[];
+  review?: StageExtensionEntry[];
+  verify?: StageExtensionEntry[];
+}
+
+// ─── Normalized 类型 — validator 输出;所有 optional 已填充 ──────────────────
+
+/** normalized entry:所有数值字段已填充,convergence 为完整 ConvergenceConfig */
+export interface NormalizedStageExtensionEntry {
+  name: string;
+  enabled: boolean;
+  command: string;
+  /** codex review 模式仍可无 prompt */
+  build_prompt?: string;
+  output: string;
+  timeout_sec: number;
+  poll_interval_sec: number;
+  zombie_threshold_sec: number;
+  max_retries: number;
+  /** 完整 convergence(deep-merge defaults + entry.convergence) */
+  convergence: ConvergenceConfig;
+}
+
+/** normalized 顶层配置:所有 stage 数组已填充(缺省 []) */
+export interface NormalizedStageExtensionsConfig {
+  severity_map: StageExtensionsDefaults['severity_map'];
+  severity_map_to_forge: StageExtensionsDefaults['severity_map_to_forge'];
+  user_interaction: StageExtensionsDefaults['user_interaction'];
+  brainstorming: NormalizedStageExtensionEntry[];
+  propose: NormalizedStageExtensionEntry[];
+  apply_critical_plan_review: NormalizedStageExtensionEntry[];
+  review: NormalizedStageExtensionEntry[];
+  verify: NormalizedStageExtensionEntry[];
+}

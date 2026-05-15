@@ -16,6 +16,7 @@ import { buildEvidenceCommand } from './commands/evidence.js';
 import { buildScopeCommand } from './commands/scope.js';
 import { buildFindingCommand } from './commands/finding.js';
 import { buildPreflightCommand } from './commands/preflight.js';
+import { buildStageExtensionsCommand } from './commands/stage-extensions.js';
 
 // 创建主命令
 const program = new Command();
@@ -63,6 +64,9 @@ program.addCommand(buildFindingCommand());
 
 // 注册 preflight 子命令组(plan-9h §2.8.3 C — main/master 分支保护)
 program.addCommand(buildPreflightCommand());
+
+// 注册 stage-extensions 子命令组(plan-stage-extensions Task 5 — runner CLI)
+program.addCommand(buildStageExtensionsCommand());
 
 // 解析命令行参数,遇到错误时打印并退出
 program.parseAsync(process.argv).catch((err: unknown) => {

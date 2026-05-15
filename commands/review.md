@@ -69,3 +69,37 @@ You are about to handle `/forge:review $ARGUMENTS`.
 - 不允许跳过 review subagent 直接打 review-passed
 - 不允许接受意见但不实现就打 review-passed(违反 b)
 - 非 git 项目跳过 git 字段时,review-passed YAML 必须 `is_git_repo: false`(archive --force 才接受)
+
+## (可选)Stage extensions hook — Tier 1 Claude Code only
+
+> codex review 集成。AI 主代理在本 stage(`review`)跑多轮收敛协议。
+> Tier 2/3(Codex/OpenCode)见 [`docs/stage-extensions.md §未来 Tier 2/3 集成`](../docs/stage-extensions.md#未来-tier-23-集成)。
+
+**Step A — 检查是否启用**:读 `forge/config.yaml#stage_extensions.review`。无该字段 / 数组为空 / 全部 entry `enabled: false` → **跳过本段,流程结束**。
+
+**Step B — 对每个 `enabled` entry 跑多轮收敛 loop**:
+
+初始化 `round = 1`、`threadId = ''`、`roundHistory = []`、`roundLimit = null`(F1-v8 fix:`roundLimit` **不从 config 文件读** —— effective convergence 由 runner 输出,见 Step 3。AI 协议不碰 config 文件解析 / deep-merge,单一数据源是 runner JSON)。循环:
+
+1. **跑单轮 runner**:
+   ```bash
+   node "${CLAUDE_PLUGIN_ROOT}/scripts/run-forge.mjs" stage-extensions run \
+     --stage review --change-id <change-id> --extension <entry-name> \
+     --round <round>${threadId:+ --thread-id $threadId}
+   ```
+2. **解析 stdout JSON 的 `kind`**:
+   - `converged` → 该 entry 收敛完成,**break loop**(codex 输出 verbatim 透传给用户)
+   - `failed` / `config_error` / `no_extension` → 该 entry 放弃,**break loop**(loose,不阻塞主流程)
+   - `unconverged` → 继续 3
+3. **从 unconverged JSON 取状态**(F1-v8 fix:effective config 来自 runner 输出,runner 内 `validateStageExtensionsConfig` 已 normalize):
+   - `roundHistory.push({ round, block_count: <blockFindings.length> })`;`threadId = <JSON.threadId>`;codex finding verbatim 透传给用户
+   - 首轮:`roundLimit = <JSON.effectiveConvergence.max_rounds>`(后续轮 `roundLimit` 已设,不覆盖 —— 选项①的 `roundLimit += N` 增量须保留)
+4. **若 `round >= roundLimit`**(F2-v7 fix:用可增长的 `roundLimit`):
+   - 若 `<JSON.effectiveConvergence.max_rounds_on_exceed>` 为 `force_end` → 把 blockFindings 写 `forge/changes/<id>/.evidence/codex-pending-findings.yaml`(backlog),**break loop**
+   - 否则跑 `node "${CLAUDE_PLUGIN_ROOT}/scripts/run-forge.mjs" stage-extensions analyze-trend --history '<roundHistory JSON>'` 拿 TrendAdvice,再 `AskUserQuestion` 三选项(默认推 `TrendAdvice.recommended_option`):**①再跑 N 轮**(F2-v7 fix:读用户输入的 `N`,执行 `roundLimit += N`,然后 `round++` 继续 loop —— 后续 `round >= roundLimit` 判定按新上限走,不会立刻又进 Step 4)/ **②放弃 codex**(break loop)/ **③接受当前**(blockFindings 写 backlog,break loop)
+5. **否则(`round < roundLimit`)**:`AskUserQuestion` 三选项(默认推 `<JSON.userInteraction.block_unconverged>`):
+   - **①auto_fix** → 用 `Task` 工具 dispatch fresh fix subagent 修 blockFindings → `round++`,继续 loop
+   - **②manual_fix** → 等用户改完 → `round++`,继续 loop
+   - **③give_up** → break loop
+
+**Step C — loose**:本段任何步骤(runner 调用 / AskUserQuestion / fix dispatch)失败都**不阻塞主流程 fence**。runner 永远 exit 0;AskUserQuestion harness 不支持时降级终端 prompt。

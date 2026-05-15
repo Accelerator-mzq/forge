@@ -67,6 +67,15 @@ forge 不只是把 superpowers skill 搬到三 harness。v1.0 **fusion completio
 - **process_evidence**:14 不变量 + worktree 重跑 + reporter parser;`forge evidence record-tdd/verify/review` + `freeze` 凝固到 marker(`skills/process-evidence/SKILL.md`,plan-9g)
 - **Out-of-Scope / Future Work / Non-Goals YAML 块** + `forge scope scan-archived-followups` 跨 change backlog 聚合(plan-9b)
 
+### 5. Stage Extensions Framework(plan-stage-extensions-framework)
+
+- **`stage_extensions` framework**:forge core 通用 stage-level extension runner,在 5 个 stage 挂钩调用外部工具(codex review / adversarial / 自定义 extension),多轮收敛协议由 AI 主代理驱动;CLI runner 永远 exit 0(loose,不阻塞主流程)
+- **codex review 预置 extension**:code-review mode(JSON 输出)+ adversarial mode(Markdown 输出),severity 四级映射(critical/high/medium/low → BLOCKER/MAJOR/MINOR/NIT),block 桶非空 = 未收敛,三选项 AskUserQuestion(auto_fix / manual_fix / give_up)
+- **thread map + 趋势分析**:同 stage 复用 codex thread context;`analyze-trend` 机械计算收敛趋势,辅助用户决策是否继续轮次
+- v1 Tier 1 Claude Code only;Tier 2/3 接口预留(`scripts/codex-review-helper.mjs` harness-agnostic)
+
+文档:[`docs/stage-extensions.md`](docs/stage-extensions.md) + [`docs/codex-review.md`](docs/codex-review.md)
+
 ### 4. 实施纪律(plan-9h)
 
 - **`forge preflight branch-check`**:防 main/master 分支误改(exit 2 + 要求 `--allow-protected-branch` 显式绕过)
@@ -83,13 +92,15 @@ forge 不只是把 superpowers skill 搬到三 harness。v1.0 **fusion completio
 
 总览 + 选哪个 tier 见 [`docs/installation.md`](docs/installation.md)。
 
-## CLI 命令(13 个顶层子命令)
+## CLI 命令(14 个顶层子命令)
 
 按业务分组,详见 [`docs/cli-reference.md`](docs/cli-reference.md):
 
 **主流程**:`forge init`(v0.3 deprecated,v1.2 移除)/ `validate` / `archive`
 
 **反向加固协议(v1.0+)**:`ack propose/confirm/reject`(plan-9a)/ `evidence record-tdd/verify/review` + `freeze`(plan-9g)/ `scope scan-archived-followups`(plan-9b)/ `finding hash`(plan-9d)/ `preflight branch-check`(plan-9h)
+
+**Stage Extensions**:`stage-extensions run`(单轮 codex review 执行器)/ `stage-extensions analyze-trend`(收敛趋势分析)(plan-stage-extensions-framework)
 
 **迁移与升级**:`migrate openspec/superpowers`(v0.4)/ `legacy-bridge`(v0.2 brownfield)/ `upgrade` + `--resign-markers`(plan-9j marker 重签)
 
@@ -118,20 +129,22 @@ forge upgrade --resign-markers <changeId>  # plan-9j v1.0+ marker 重签(legacy 
 
 ## 状态 + 文档导航
 
-**v1.1.0** released 2026-05-14(`CHANGELOG.md:11`):
+**v1.2.0** released 2026-05-15(`CHANGELOG.md:11`):
 
 - 本地 5 命令(`typecheck` / `lint` / `format:check` / `build` / `test`)全 0
-- **1018 tests pass**(`CHANGELOG.md:17`)
+- **1115 tests pass**(`CHANGELOG.md:23`)
 - 自动化 skill eval(`pnpm eval`,`forge-eval/scenarios/` 双轨 baseline)
-- 16 skill + 9 slash 命令 + 13 CLI 子命令
+- 16 skill + 9 slash 命令 + 14 CLI 子命令
 
 **v1.0 fusion completion** 经 Codex CLI(gpt-5.4-codex)累计 5+ 轮对抗性 review(跨 10 sub-plan)+ Opus subagent 多轮自检,共修 200+ 条问题;**v1.1 polish leftover** 经 Codex 七轮 review 累计 32 finding 全处置(0 严重 / 0 阻塞 / 0 Major)。
 
 **文档导航**:
 
 - [`docs/getting-started.md`](docs/getting-started.md) — v1.1 端到端工作流 + Bug fix 快速路径
-- [`docs/cli-reference.md`](docs/cli-reference.md) — 13 CLI 子命令完整参数 + 退出码
+- [`docs/cli-reference.md`](docs/cli-reference.md) — 14 CLI 子命令完整参数 + 退出码
 - [`docs/installation.md`](docs/installation.md) — 三 harness 安装总览
+- [`docs/stage-extensions.md`](docs/stage-extensions.md) — stage-extensions framework 协议文档 + config schema + troubleshooting
+- [`docs/codex-review.md`](docs/codex-review.md) — codex review 预置 extension 用户指南
 - [`docs/migration/`](docs/migration/) — OpenSpec / superpowers 迁移 + 版本升级
 - [`docs/specs/2026-05-10-v1.0-fusion-completion-design.md`](docs/specs/2026-05-10-v1.0-fusion-completion-design.md) — v1.0 fusion 21 决策权威 spec
 - [`docs/plans/`](docs/plans/) — plan-9a..9j + plan-9z + plan-v1.1 累积 ~20 份 plan 文件

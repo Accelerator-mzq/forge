@@ -8,6 +8,44 @@ All notable changes to this project will be documented in this file.
 
 (暂无)
 
+## [1.2.0] - 2026-05-15
+
+**plan-stage-extensions-framework**:forge core 通用 stage-level extension runner —— 预置 codex review/adversarial 作 default entries(Tier 1 Claude Code only;generic ExtensionContract 留 v2/v3 refactor)。plan 经 9 轮 Codex 对抗性 review 收敛(累计 21 finding:3 BLOCKER + 16 MAJOR + 2 MINOR 全独立核实为真问题、全 accept);实施(Task 5-9)经 `superpowers:subagent-driven-development` SDD —— 每 Task fresh implementer subagent → spec compliance reviewer → code quality reviewer 三阶段。
+
+### Added
+
+- **Stage Extensions Framework**:`stage_extensions` config 段 —— forge core 通用 stage-level extension runner(v7 CLI/AI 职责分层:CLI 纯机械单轮执行,多轮收敛 / 交互 / 派 subagent 归 AI 主代理协议)。
+- **CLI**:`forge stage-extensions` 子命令组 —— `run`(单轮执行器:spawn codex + watch + parse + judge + retry,显式 RoundOutcome 状态机,结构化 JSON 输出)+ `analyze-trend`(收敛趋势分析)。runner 永远 exit 0(loose,不阻塞主流程 fence)。
+- **Core**:`src/core/stage-extensions/` 6 模块(severity-mapper / convergence-judge / thread-map / trend-analyzer / output-watcher / state-machine)+ `src/core/schema/` config schema + validator + `src/core/codex-review/prompts/adversarial-default.md` 通用模板(B-full Task 0 已 ship)。
+- **Commands**:`commands/*.md` 5 处末尾段(brainstorm / propose / apply / review / verify)—— AI 主代理多轮收敛协议(反复调单轮 runner + AskUserQuestion 介入 + Task dispatch fix subagent);新 slash 命令 `commands/codex-adversarial.md`(B-full Task 0 已 ship)。
+- **Helper**:`scripts/codex-review-helper.mjs` 扩展 —— `--thread-id` resume / mode 多分支(code-review / adversarial / rescue);harness-agnostic。
+- **Docs**:`docs/stage-extensions.md`(framework 协议)+ `docs/codex-review.md`(codex 预置 extension 用户指南)+ `docs/getting-started.md` 嵌入 deep-dive + `README.md` 更新。
+- **Tests**:全 suite 1115 tests pass / 0 fail(Task 0-4 基线 1069 + Task 5 runner +21 integration + Task 6 commands sync +25 integration)。
+
+### Notes
+
+- **forge 协议层 SKILL.md 0 改动**:stage-extensions framework 不触碰 forge 协议层 skills(`skills/*/SKILL.md`)—— 多轮收敛 / askUser / fix dispatch 落在 commands/\*.md 末尾段(v7 CLI/AI 职责分层),协议层纯净。
+- **loose 语义**:codex 集成任何失败(spawn 失败 / retry 耗尽 / config 非法 / markdown 解析失败)都不阻塞 forge 主流程 fence;runner 永远 exit 0。
+
+### Codex Review 收敛
+
+plan 经 9 轮 Codex 对抗性 review 收敛,首轮(v2)7 个 finding 全 accept 修订:
+
+- **F1**(BLOCKER):runner 变量作用域 + 控制流隐患 → §7 重写为显式 RoundOutcome 状态机。
+- **F2**(MAJOR):多轮 continue 消耗 retry 配额 → 拆 attempt 与 round budget 两个独立计数器(v7 后 round budget 移 §8 AI 协议)。
+- **F3**(MAJOR):background 异步模式决策与实施矛盾 → v1 锁定 sync,`--background` 留 v2。
+- **F4**(MAJOR):generic 抽象泄漏 → v1 收窄 codex-specific scope,generic ExtensionContract 留 v2/v3。
+- **F5**(MAJOR):`verdict=approve` 短路掩盖 BLOCKER → judgeConvergence 短路条件改为 approve **且** block 桶空。
+- **F6**(MAJOR):测试 inventory 跨段不一致 → §2 单一来源表。
+- **F7**(MINOR):DoD 不可机器验证 → §14 验收 checklist 全改真 shell 断言。
+
+后续 v3-v9 再 7 轮收敛(F1-v2 BLOCKER normalized config 深合并 / F3-v2 timeout 状态分支 / F2-v3 thread_id 缺失保留旧值 / F1-v8 roundLimit 数据源修正 等),累计 21 finding 全独立核实为真问题(0 误报)。
+
+### Acknowledgments
+
+- Codex 对抗性 review 9 轮收敛(block 桶 r1→r9:6→4→3→2→1→0→2→1→0,v7 CLI/AI 架构重写在 r7 引入 2 再收敛至 0);累计 21 finding(3 BLOCKER + 16 MAJOR + 2 MINOR)全独立核实为真问题(0 误报)全 accept 修订。
+- 实施经 SDD spec compliance + code quality 双 reviewer 兜底;code quality runtime-correctness review 抓到 markdown parser `\Z`(JS 正则无此锚)等 implementer 自写代码 bug。
+
 ## [1.1.0] - 2026-05-14
 
 **plan-v1.1 polish leftover**:plan-9z release 留底 3 类 polish 消化(协议升级 + 内部技术债 + 同源审查盲点修补)。沿 plan-9z 中间路线 B 模式 + sonnet code_quality reviewer for Task 1 + Codex 七轮对抗性 release gate 双兜底(累计 32 finding 全处置;0 严重 / 0 阻塞 / 0 Major release gate 达成)。

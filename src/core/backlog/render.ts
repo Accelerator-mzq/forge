@@ -2,8 +2,9 @@
 // plan-backlog-registry — 纯函数:聚合结果 → BacklogWarning[] + tombstone + markdown
 // 本文件 Task 2 放 warning/tombstone 派生;Task 3/4 续加 renderActive / renderArchived。
 
-import type { SupersedingDetail, SkippedBlock } from '../scope/aggregator.js';
+import type { SupersedingDetail, SkippedBlock, AggregatedScopeEntry } from '../scope/aggregator.js';
 import { VALID_SUPERSEDING_NEW_STATUS } from '../schemas/scope-entries.js';
+import type { ScopeCategory } from '../schemas/scope-entries.js';
 
 /** render 层呈现类型 —— 由 superseding[] / skipped[] 派生(spec §7.1) */
 export type BacklogWarning =
@@ -108,9 +109,6 @@ export function deriveWarningsAndTombstones(
 
   return { warnings, tombstones };
 }
-
-import type { AggregatedScopeEntry } from '../scope/aggregator.js';
-import type { ScopeCategory } from '../schemas/scope-entries.js';
 
 /** 单条 BacklogWarning → 一行文本(spec §7.1 表) */
 export function renderWarningLine(w: BacklogWarning): string {

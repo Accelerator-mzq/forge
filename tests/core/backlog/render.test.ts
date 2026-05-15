@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { deriveWarningsAndTombstones } from '../../../src/core/backlog/render.js';
-import type { SupersedingDetail, SkippedBlock } from '../../../src/core/scope/aggregator.js';
+import { deriveWarningsAndTombstones, renderActiveMarkdown } from '../../../src/core/backlog/render.js';
+import type { SupersedingDetail, SkippedBlock, AggregatedScopeEntry } from '../../../src/core/scope/aggregator.js';
 import type { ScopeEntry } from '../../../src/core/schemas/scope-entries.js';
 
 const snap: ScopeEntry = {
@@ -116,9 +116,6 @@ describe('deriveWarningsAndTombstones (plan-backlog-registry Task 2)', () => {
     expect(r.warnings).toContainEqual({ kind: 'malformed-dirname', superseded_in_change: 'legacy-x' });
   });
 });
-
-import { renderActiveMarkdown } from '../../../src/core/backlog/render.js';
-import type { AggregatedScopeEntry } from '../../../src/core/scope/aggregator.js';
 
 function entry(p: Partial<AggregatedScopeEntry>): AggregatedScopeEntry {
   return {

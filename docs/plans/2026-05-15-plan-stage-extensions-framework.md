@@ -781,6 +781,43 @@ async function terminateRound(proc: ChildProcess, jobId: string | null): Promise
 }
 ```
 
+### Step 5.2ter: parseCodexOutput 实现(v10 — C 方案:markdown 解析 + 格式归一)
+
+`parseCodexOutput(outputFile): CodexReviewOutput` 处理两种 codex 输出格式,**归一成统一 `CodexReviewOutput`**(severity 字段统一 `critical/high/medium/low`)—— 这样 `judgeConvergence` / `severity-mapper` / `CodexReviewOutput` 类型(Task 2 已实现)**不回溯改动**,C 方案影响收窄在本函数。
+
+```typescript
+function parseCodexOutput(outputFile: string): CodexReviewOutput {
+  const raw = readFileSync(outputFile, 'utf-8').trim();
+
+  // 1. 优先尝试 JSON(code-review mode:codex review 输出 review-output.schema.json)
+  //    codex review JSON 的 severity 已是 critical/high/medium/low,直接用。
+  try {
+    const json = JSON.parse(raw);
+    if (json && typeof json.verdict === 'string' && Array.isArray(json.findings)) {
+      return json as CodexReviewOutput;
+    }
+  } catch {
+    /* 非 JSON,落 markdown 解析 */
+  }
+
+  // 2. markdown 解析(adversarial mode:codex exec + adversarial-default.md prompt)
+  //    模板 <output_format>:## Summary / ## Findings(### [SEVERITY] Title +
+  //    Location + Confidence + Body + Recommendation)/ ## Verdict。
+  //    severity 是 BLOCKER/MAJOR/MINOR/NIT —— 反映射回 critical/high/medium/low
+  //    使 CodexReviewOutput 统一(judgeConvergence 的 mapCodexToForge 再正向映射回去)。
+  const FORGE_TO_CODEX: Record<string, CodexFinding['severity']> = {
+    BLOCKER: 'critical', MAJOR: 'high', MINOR: 'medium', NIT: 'low',
+  };
+  // 提取 ## Verdict 段(approve | needs-attention)
+  // 提取每个 ### [SEVERITY] finding —— severity 经 FORGE_TO_CODEX 反映射
+  // 提取 Confidence 行(无则默认 0.8 —— adversarial 模板要求 BLOCKER/MAJOR confidence≥0.8)
+  // 解析失败 / 关键段缺失 → throw(runOneRound catch → invalid_output → retry)
+  // ... 完整 markdown parser 实现见 Task 5;不可靠输出走 invalid_output 兜底
+}
+```
+
+**关键**(C 方案):adversarial markdown 解析脆弱 —— codex 输出格式漂移就解析失败。`runOneRound` 已有 `try { parseCodexOutput } catch → invalid_output → retry` 兜底(§7 Step 5.2),max_retries 耗尽 → `failed`(loose,不阻塞主流程)。markdown parser 尽量宽容(容忍 codex 输出前后有推理文字),但**绝不猜** —— 关键段(Verdict / Findings)缺失即 throw。
+
 ### Step 5.2bis: judgeConvergence 修订(F5 fix)
 
 ```typescript
@@ -1119,6 +1156,7 @@ git push origin v1.2.0
   - **F1-v8 MAJOR** §8 `roundLimit = config.convergence.max_rounds` 引用不存在的根级 `config.convergence`(schema 里 convergence 只在 `defaults.convergence` / `entry.convergence` / normalized `NormalizedStageExtensionEntry.convergence`)。修订:**runner `run` 的 unconverged JSON 输出加 `effectiveConvergence` + `userInteraction`**(runner 内 `validateStageExtensionsConfig` 已 normalize 出 entry 级 effective config,顺手输出);§8 Step B `roundLimit` 初值改 `null`,Step 3 从首轮 runner 输出 `effectiveConvergence.max_rounds` 设定,Step 4 `max_rounds_on_exceed` / Step 5 `block_unconverged` 同样改读 runner JSON —— AI 协议不碰 config 文件解析,单一数据源是 runner 输出。R-8 test 描述更新。
   - 测试数不变(19 scenario / 1081)—— F1-v8 是字段补充 + 数据源修正,无新 test。
 - **v9 收敛达成**(2026-05-15):Codex 对抗性 review 第 9 轮跑完(plan v9 commit `79cc4de` 后)— **Verdict: `approve`,0 BLOCKER + 0 MAJOR**。v7 CLI/AI 职责分层架构重写后经 r7→r8→r9 三轮收敛(block 桶 2→1→0)。9 轮累计 21 finding(3 BLOCKER + 16 MAJOR + 2 MINOR)全独立核实真问题(0 误报)全 accept 修订。**plan 定稿,可进入 implementation**(沿 §2 Task list;Task 1-4 已 implement 完成)。
+- **v10**(2026-05-15,implementation 阶段 Task 5 实施前发现):§7 `parseCodexOutput` 怎么解析 codex 输出 —— code-review mode(`codex review`)输出 JSON schema(severity `critical/high/medium/low`)易解析;adversarial mode(`codex exec` + `adversarial-default.md` prompt)输出 freeform markdown(severity `BLOCKER/MAJOR/MINOR/NIT`),9 轮 plan review 没下钻此实施细节。用户选 **C 方案**:`parseCodexOutput` 解析 markdown。最简实现 —— parseCodexOutput **格式归一**:JSON 直接用 / markdown 解析 + `BLOCKER→critical / MAJOR→high / MINOR→medium / NIT→low` 反映射,输出统一 `CodexReviewOutput`(severity `critical/high/medium/low`)→ Task 2 的 convergence-judge / severity-mapper / 类型**不回溯改**,C 影响收窄在 parseCodexOutput。新增 §7 Step 5.2ter。
 
 ---
 

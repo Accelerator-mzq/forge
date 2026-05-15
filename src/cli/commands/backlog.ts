@@ -47,7 +47,10 @@ export function buildBacklogCommand(): Command {
       try {
         const forgeRoot = join(process.cwd(), 'forge');
         const built = await buildBacklog(forgeRoot);
-        process.stdout.write(built.activeMd);
+        // 大 active.md 可能在 process.exit 前未 flush 完 —— 等 write 回调后再退出
+        await new Promise<void>((resolve) => {
+          process.stdout.write(built.activeMd, () => resolve());
+        });
         process.exit(0);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

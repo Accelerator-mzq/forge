@@ -256,4 +256,42 @@ describe('renderArchivedMarkdown (plan-backlog-registry Task 4)', () => {
     expect(md).toContain('- **cancellation_reason**: done');
     expect(md).toContain('"id":"foo"');
   });
+
+  it('多 tombstone:两条复合键标题 + 各自 5 字段 + 块间空行分隔', () => {
+    const md = renderArchivedMarkdown([
+      sup({
+        source_change: '2026-05-01-a',
+        entry_id: 'foo',
+        new_status: 'completed',
+        rationale: 'done-foo',
+        superseded_in_change: '2026-05-09-b',
+        superseded_at: '2026-05-09',
+      }),
+      sup({
+        source_change: '2026-05-02-c',
+        entry_id: 'bar',
+        new_status: 'obsolete',
+        rationale: 'drop-bar',
+        superseded_in_change: '2026-05-10-d',
+        superseded_at: '2026-05-10',
+      }),
+    ]);
+    // 两条复合键标题都出现
+    const h1 = '### `2026-05-01-a::foo`';
+    const h2 = '### `2026-05-02-c::bar`';
+    expect(md).toContain(h1);
+    expect(md).toContain(h2);
+    // 第一条的 5 字段
+    expect(md).toContain('- **superseded_in_change**: 2026-05-09-b');
+    expect(md).toContain('- **superseded_at**: 2026-05-09');
+    expect(md).toContain('- **new_status**: completed');
+    expect(md).toContain('- **cancellation_reason**: done-foo');
+    // 第二条的 5 字段
+    expect(md).toContain('- **superseded_in_change**: 2026-05-10-d');
+    expect(md).toContain('- **superseded_at**: 2026-05-10');
+    expect(md).toContain('- **new_status**: obsolete');
+    expect(md).toContain('- **cancellation_reason**: drop-bar');
+    // 两块之间有空行分隔:第一块末尾字段后接空行再到第二条标题
+    expect(md).toContain(`- **registry_entry_snapshot**: ${JSON.stringify(snap)}\n\n${h2}`);
+  });
 });

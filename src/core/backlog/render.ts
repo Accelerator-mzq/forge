@@ -212,7 +212,7 @@ export function renderArchivedMarkdown(tombstones: SupersedingDetail[]): string 
   lines.push('');
   if (tombstones.length === 0) {
     lines.push('(无)');
-    return lines.join('\n') + '\n';
+    return lines.join('\n').trimEnd() + '\n';
   }
   for (const t of tombstones) {
     // registry_entry_snapshot 一定非 null(deriveWarningsAndTombstones 已剔 dangling)
@@ -222,6 +222,7 @@ export function renderArchivedMarkdown(tombstones: SupersedingDetail[]): string 
     lines.push(`- **superseded_in_change**: ${t.superseded_in_change}`);
     lines.push(`- **superseded_at**: ${t.superseded_at}`);
     lines.push(`- **new_status**: ${t.new_status}`);
+    // rationale 字段对应 spec §5 tombstone 的 cancellation_reason 显示标签
     lines.push(`- **cancellation_reason**: ${t.rationale}`);
     lines.push(`- **registry_entry_snapshot**: ${snapshot}`);
     lines.push('');

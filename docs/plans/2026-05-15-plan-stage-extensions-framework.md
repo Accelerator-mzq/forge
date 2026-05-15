@@ -577,7 +577,12 @@ type RunResult =
   | { kind: 'converged'; threadId: string | null; verdict: string;
       blockFindings: ForgeFinding[]; ignoreFindings: ForgeFinding[]; droppedByConfidence: number }
   | { kind: 'unconverged'; threadId: string | null; verdict: string;
-      blockFindings: ForgeFinding[]; ignoreFindings: ForgeFinding[]; droppedByConfidence: number }
+      blockFindings: ForgeFinding[]; ignoreFindings: ForgeFinding[]; droppedByConfidence: number;
+      // F1-v8 fix:runner 内 validateStageExtensionsConfig 已 normalize 出本 entry 的
+      // effective convergence + user_interaction;unconverged 时一并输出,§8 AI 协议
+      // 据此设 roundLimit / max_rounds_on_exceed / block_unconverged —— AI 不碰 config 文件解析。
+      effectiveConvergence: ConvergenceConfig;
+      userInteraction: StageExtensionsDefaults['user_interaction'] }
   | { kind: 'failed'; reason: string }                // retry 耗尽
   | { kind: 'config_error'; message: string }         // config 加载/校验异常
   | { kind: 'no_extension' };                         // 该 stage 无此 enabled extension
@@ -647,6 +652,12 @@ async function runStageExtensionRound(args: RunArgs): Promise<number> {
       blockFindings: c.blockFindings,
       ignoreFindings: c.ignoreFindings,
       droppedByConfidence: c.droppedByConfidence,
+      // F1-v8 fix:unconverged 时输出 normalized effective config,供 §8 AI 协议
+      // 设 roundLimit / max_rounds_on_exceed / block_unconverged(converged 时这俩
+      // 字段可省 —— AI 收敛即 break,不需要多轮决策配置)。
+      ...(outcome.kind === 'unconverged'
+        ? { effectiveConvergence: entry.convergence, userInteraction: config.user_interaction }
+        : {}),
     });
     return 0;
   }
@@ -824,7 +835,7 @@ function judgeConvergence(
 | R-5 no_extension(stage 无此 enabled extension) | `--extension` 不存在 / disabled → emitJson `kind:'no_extension'`,exit 0 |
 | R-6 `--thread-id` 传入 → codex resume | runOneRound 用 `--thread-id` spawn codex(传 resume);assert spawn argv 含 thread id |
 | R-7 thread_id 缺失保留旧值(F2-v3 fix) | `--thread-id cdx-123` 传入,codex 本轮输出缺 thread_id → thread-map recordRound 写回 `null ?? 'cdx-123'` 保留 |
-| R-8 output JSON schema 完整 | converged/unconverged 输出含 kind/threadId/verdict/blockFindings/ignoreFindings/droppedByConfidence 全字段 |
+| R-8 output JSON schema 完整 | converged/unconverged 输出含 kind/threadId/verdict/blockFindings/ignoreFindings/droppedByConfidence;**unconverged 额外含 effectiveConvergence + userInteraction**(F1-v8 fix:供 §8 AI 协议设 roundLimit) |
 
 **runner retry + 失败路径**(8 个):
 
@@ -876,7 +887,7 @@ function judgeConvergence(
 
 **Step B — 对每个 `enabled` entry 跑多轮收敛 loop**:
 
-初始化 `round = 1`、`threadId = ''`、`roundHistory = []`、`roundLimit = config.convergence.max_rounds`(F2-v7 fix:`roundLimit` 是可增长的轮数上限,初值 = `max_rounds`)。循环:
+初始化 `round = 1`、`threadId = ''`、`roundHistory = []`、`roundLimit = null`(F1-v8 fix:`roundLimit` **不从 config 文件读** —— effective convergence 由 runner 输出,见 Step 3。AI 协议不碰 config 文件解析 / deep-merge,单一数据源是 runner JSON)。循环:
 
 1. **跑单轮 runner**:
    ```bash
@@ -888,11 +899,13 @@ function judgeConvergence(
    - `converged` → 该 entry 收敛完成,**break loop**(codex 输出 verbatim 透传给用户)
    - `failed` / `config_error` / `no_extension` → 该 entry 放弃,**break loop**(loose,不阻塞主流程)
    - `unconverged` → 继续 3
-3. `roundHistory.push({ round, block_count: <blockFindings.length> })`;`threadId = <JSON.threadId>`;codex finding verbatim 透传给用户
-4. **若 `round >= roundLimit`**(F2-v7 fix:用可增长的 `roundLimit`,不是固定 `max_rounds`):
-   - 若 config `max_rounds_on_exceed: force_end` → 把 blockFindings 写 `forge/changes/<id>/.evidence/codex-pending-findings.yaml`(backlog),**break loop**
-   - 否则跑 `node "${CLAUDE_PLUGIN_ROOT}/scripts/run-forge.mjs" stage-extensions analyze-trend --history '<roundHistory JSON>'` 拿 TrendAdvice,再 `AskUserQuestion` 三选项(默认推 `TrendAdvice.recommended_option`):**①再跑 N 轮**(F2-v7 fix:读用户输入的 `N`,执行 `roundLimit += N`,然后 `round++` 继续 loop —— 这样后续 `round >= roundLimit` 判定按新上限走,不会立刻又进 Step 4)/ **②放弃 codex**(break loop)/ **③接受当前**(blockFindings 写 backlog,break loop)
-5. **否则(`round < roundLimit`)**:`AskUserQuestion` 三选项(默认推 config `user_interaction.block_unconverged`):
+3. **从 unconverged JSON 取状态**(F1-v8 fix:effective config 来自 runner 输出,runner 内 `validateStageExtensionsConfig` 已 normalize):
+   - `roundHistory.push({ round, block_count: <blockFindings.length> })`;`threadId = <JSON.threadId>`;codex finding verbatim 透传给用户
+   - 首轮:`roundLimit = <JSON.effectiveConvergence.max_rounds>`(后续轮 `roundLimit` 已设,不覆盖 —— 选项①的 `roundLimit += N` 增量须保留)
+4. **若 `round >= roundLimit`**(F2-v7 fix:用可增长的 `roundLimit`):
+   - 若 `<JSON.effectiveConvergence.max_rounds_on_exceed>` 为 `force_end` → 把 blockFindings 写 `forge/changes/<id>/.evidence/codex-pending-findings.yaml`(backlog),**break loop**
+   - 否则跑 `node "${CLAUDE_PLUGIN_ROOT}/scripts/run-forge.mjs" stage-extensions analyze-trend --history '<roundHistory JSON>'` 拿 TrendAdvice,再 `AskUserQuestion` 三选项(默认推 `TrendAdvice.recommended_option`):**①再跑 N 轮**(F2-v7 fix:读用户输入的 `N`,执行 `roundLimit += N`,然后 `round++` 继续 loop —— 后续 `round >= roundLimit` 判定按新上限走,不会立刻又进 Step 4)/ **②放弃 codex**(break loop)/ **③接受当前**(blockFindings 写 backlog,break loop)
+5. **否则(`round < roundLimit`)**:`AskUserQuestion` 三选项(默认推 `<JSON.userInteraction.block_unconverged>`):
    - **①auto_fix** → 用 `Task` 工具 dispatch fresh fix subagent 修 blockFindings → `round++`,继续 loop
    - **②manual_fix** → 等用户改完 → `round++`,继续 loop
    - **③give_up** → break loop
@@ -1102,7 +1115,10 @@ git push origin v1.2.0
   - **F1-v7 MAJOR** 单轮 runner 可能解析旧 output 文件 → 假收敛:`resolveOutputPath` 只带 round 不带 attempt,同 round 的 retry attempt 复用文件名;codex exit 0 但未写文件时 `parseCodexOutput` 读到旧 attempt 的 JSON 误判 converged。§7 修订:`resolveOutputPath` 加 attempt 维度(每 attempt 唯一文件名)+ spawn 前 `rmSync` 残留同名文件 + runOneRound parse 前校验 `existsSync` & `mtimeMs >= spawnStartMs`;Step 5.3 加 F-8 test(预置旧 approve JSON + 新进程不写 → 必 invalid_output 不 converged)
   - **F2-v7 MAJOR** §8 max_rounds 到顶"再跑 N 轮"无状态承载:只 `round++` 没记 N、没扩 max_rounds → 下轮 round 仍 ≥ max_rounds 立刻又问。§8 修订:Step B 加 `roundLimit`(初值 = `max_rounds`),选项①"再跑 N 轮"执行 `roundLimit += N`,Step 4/5 判定改用 `round >= roundLimit`
   - 测试 runner 18 → 19 scenario(加 F-8);总目标 1080 → 1081
-- (待:v9 — 若第 8 轮 Codex review 仍有 BLOCKER/MAJOR)
+- **v9**(2026-05-15):Codex 对抗性 review 第 8 轮跑完(plan v8 commit `3b34ebb` 后)。Codex 确认 §7 stale-output 修复足够,但 v8 的 F2-v7 fix 把 `roundLimit` 接到了不存在的 config 路径 —— 1 MAJOR,独立核实真问题(0 误报),accept 修订:
+  - **F1-v8 MAJOR** §8 `roundLimit = config.convergence.max_rounds` 引用不存在的根级 `config.convergence`(schema 里 convergence 只在 `defaults.convergence` / `entry.convergence` / normalized `NormalizedStageExtensionEntry.convergence`)。修订:**runner `run` 的 unconverged JSON 输出加 `effectiveConvergence` + `userInteraction`**(runner 内 `validateStageExtensionsConfig` 已 normalize 出 entry 级 effective config,顺手输出);§8 Step B `roundLimit` 初值改 `null`,Step 3 从首轮 runner 输出 `effectiveConvergence.max_rounds` 设定,Step 4 `max_rounds_on_exceed` / Step 5 `block_unconverged` 同样改读 runner JSON —— AI 协议不碰 config 文件解析,单一数据源是 runner 输出。R-8 test 描述更新。
+  - 测试数不变(19 scenario / 1081)—— F1-v8 是字段补充 + 数据源修正,无新 test。
+- (待:v10 — 若第 9 轮 Codex review 仍有 BLOCKER/MAJOR)
 
 ---
 

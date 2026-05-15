@@ -118,4 +118,52 @@ describe('observeArtifacts', () => {
     const m = events.find((e) => e.event === 'marker_observed');
     expect(m?.ts).toBe('2026-05-15T04:00:00Z');
   });
+
+  it('verify marker 含未决 finding → fence_observed ok=false', () => {
+    const dir = join(root, 'forge', 'changes', '2026-05-15-fc');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, '.verify-passed'),
+      [
+        'schema: forge-verify/v1',
+        'verified_at: 2026-05-15T05:00:00Z',
+        'verified_by: ai-agent',
+        'tasks_hash: sha256:' + 'c'.repeat(64),
+        'content_hash: sha256:' + 'd'.repeat(64),
+        'evidence: []',
+        'verify_findings:',
+        '  - { id: 1, severity: CRITICAL, resolved: false, dimension: correctness }',
+      ].join('\n') + '\n',
+      'utf8',
+    );
+    const events = observeArtifacts(root, '2026-05-15-fc');
+    const f = events.find((e) => e.event === 'fence_observed');
+    expect(f).toBeDefined();
+    expect(f?.data.level).toBe('verify');
+    expect(f?.data.ok).toBe(false);
+  });
+
+  it('ack-log 有 ack entry → ack_observed', () => {
+    const dir = join(root, 'forge', 'changes', '2026-05-15-ak', '.evidence');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'ack-log.jsonl'),
+      JSON.stringify({
+        schema: 'forge-ack-log/v1',
+        kind: 'ack',
+        timestamp: '2026-05-15T06:00:00Z',
+        action: 'ack-warning',
+        change_id: '2026-05-15-ak',
+        finding_id: '3',
+        user: 'msc',
+        target_severity: 'WARNING',
+      }) + '\n',
+      'utf8',
+    );
+    const events = observeArtifacts(root, '2026-05-15-ak');
+    const a = events.find((e) => e.event === 'ack_observed');
+    expect(a).toBeDefined();
+    expect(a?.stage).toBe('ack-confirm');
+    expect(a?.data.finding_id).toBe('3');
+  });
 });

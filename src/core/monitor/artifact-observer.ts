@@ -73,10 +73,65 @@ function observeMarkers(dir: string, relBase: string, changeId: string): TraceEv
           markerTs,
         ),
       );
+      // I-2(spec §3.2):verify/review 的 fence_observed —— 从 marker findings 抽未决项
+      const findingsKey = stage === 'verify' ? 'verify_findings' : 'review_outcomes';
+      const rawFindings = Array.isArray(obj[findingsKey])
+        ? (obj[findingsKey] as Record<string, unknown>[])
+        : [];
+      const blockedFindings = rawFindings
+        .filter((f) => f.resolved === false)
+        .map((f, i) => ({ id: f.id ?? i, severity: f.severity ?? null, dimension: f.dimension }));
+      const fenceOk = !blockedFindings.some((b) => b.severity === 'CRITICAL' || b.severity === 'S');
+      events.push(
+        mkEvent(
+          changeId,
+          stage,
+          'fence_observed',
+          { level: stage, ok: fenceOk, blocked_findings: blockedFindings, path: relPath },
+          markerTs,
+        ),
+      );
     } catch (err) {
       events.push(
         mkEvent(changeId, stage, 'record_error', { path: relPath, error: (err as Error).message }),
       );
+    }
+  }
+  return events;
+}
+
+/** 读一个 change 目录的 .evidence/ack-log.jsonl,对每条 ack entry 产 ack_observed 事件(spec §3.2) */
+function observeAckLog(dir: string, changeId: string): TraceEvent[] {
+  const events: TraceEvent[] = [];
+  const logPath = join(dir, '.evidence', 'ack-log.jsonl');
+  if (!existsSync(logPath)) return events;
+  let lines: string[];
+  try {
+    lines = readFileSync(logPath, 'utf8').split(/\r?\n/);
+  } catch {
+    return events; // 读失败 → 跳过,never-throw
+  }
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    try {
+      const entry = JSON.parse(line) as Record<string, unknown>;
+      if (entry.kind !== 'ack') continue; // 只记 ack entry,跳过 evidence-helper
+      events.push(
+        mkEvent(
+          changeId,
+          'ack-confirm',
+          'ack_observed',
+          {
+            action: entry.action ?? null,
+            finding_id: entry.finding_id ?? null,
+            severity: entry.target_severity ?? null,
+            user: entry.user ?? null,
+          },
+          typeof entry.timestamp === 'string' ? entry.timestamp : undefined,
+        ),
+      );
+    } catch {
+      /* 坏 JSON 行跳过 */
     }
   }
   return events;
@@ -91,10 +146,11 @@ function observeMarkers(dir: string, relBase: string, changeId: string): TraceEv
 export function observeArtifacts(projectRoot: string, changeId: string): TraceEvent[] {
   const events: TraceEvent[] = [];
 
-  // 1. active change 目录的 marker
+  // 1. active change 目录的 marker + ack-log
   const activeDir = join(projectRoot, 'forge', 'changes', changeId);
   if (existsSync(activeDir)) {
     events.push(...observeMarkers(activeDir, join('forge', 'changes', changeId), changeId));
+    events.push(...observeAckLog(activeDir, changeId));
   }
 
   // 2. archive 目录 —— archive 成功后 change 移到 forge/changes/archive/<YYYY-MM-DD>-<changeId>/
@@ -112,6 +168,7 @@ export function observeArtifacts(projectRoot: string, changeId: string): TraceEv
         const archiveDir = join(archiveRoot, entry.name);
         const archiveRel = join('forge', 'changes', 'archive', entry.name);
         events.push(...observeMarkers(archiveDir, archiveRel, changeId));
+        events.push(...observeAckLog(archiveDir, changeId));
 
         // archive_summary.yaml —— 三级 fence 的 archive 侧裁决产物(spec §3.2)
         const summaryPath = join(archiveDir, 'archive_summary.yaml');

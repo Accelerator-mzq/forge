@@ -15,7 +15,7 @@ export type MonitorStage =
   | 'unknown';
 
 /** 可与 OpenSpec/superpowers 三方对比的阶段(spec §1.3:forge 专属命令不进对比) */
-export const COMPARABLE_STAGES: MonitorStage[] = [
+export const COMPARABLE_STAGES = [
   'brainstorm',
   'propose',
   'apply',
@@ -23,8 +23,9 @@ export const COMPARABLE_STAGES: MonitorStage[] = [
   'verify',
   'archive',
   'explore',
-];
+] as const satisfies readonly MonitorStage[];
 
+/** trace 事件的层:cli = CLI 产物/exit 观察;ai = AI 主代理上报 */
 export type TraceLayer = 'cli' | 'ai';
 
 /** trace.jsonl 里的一条事件(spec §3.2) */
@@ -62,7 +63,10 @@ export interface DivergenceScenario {
 export interface DivergenceMap {
   meta: {
     schema: 'forge-monitor-divergence-map/v1';
-    synced_against: { openspec: string; superpowers: string };
+    synced_against: {
+      openspec: string; // 挖掘时 OpenSpec 仓的 commit / 版本号
+      superpowers: string; // 挖掘时 superpowers 仓的 commit / 版本号
+    };
     synced_at: string; // YYYY-MM-DD
   };
   scenarios: DivergenceScenario[];
@@ -79,6 +83,7 @@ export interface VerdictItem {
   evidence: string;
 }
 
+/** 单次健康检查的完整裁决结果(spec §10) */
 export interface HealthVerdict {
   level: VerdictLevel;
   items: VerdictItem[];

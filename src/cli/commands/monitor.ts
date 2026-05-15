@@ -100,6 +100,7 @@ export function buildMonitorCommand(): Command {
     .requiredOption('--change <id>', 'change-id')
     .option('--out <path>', '报告输出路径(默认 forge/.monitor/<change>/report.md)')
     .action((opts: { change: string; out?: string }) => {
+      // query 命令 —— 出错允许 non-zero exit(spec §7:与 record 不同,report 不强制 exit 0,故不包 try/catch)
       const root = process.cwd();
       // AI trace 事件 + CLI 产物回扫事件合并(spec §2.4:产物层可回溯全程)
       const aiEvents = readTrace(root, opts.change).events;
@@ -111,7 +112,7 @@ export function buildMonitorCommand(): Command {
       mkdirSync(dirname(outPath), { recursive: true });
       writeFileSync(outPath, md, 'utf8');
       console.log(md);
-      console.error(`\n报告已写入 ${outPath}`);
+      console.error(`报告已写入 ${outPath}`);
     });
 
   return cmd;

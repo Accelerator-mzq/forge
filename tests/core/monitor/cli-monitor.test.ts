@@ -117,4 +117,19 @@ describe('forge monitor report', () => {
     expect(existsSync(reportPath)).toBe(true);
     expect(readFileSync(reportPath, 'utf8')).toMatch(/# Forge 工作流监控报告 — 2026-05-15-r/);
   });
+  it('--out 指定自定义报告路径', async () => {
+    await run(['enable']);
+    await run([
+      'record',
+      '--stage',
+      'verify',
+      '--event',
+      'stage_enter',
+      '--change',
+      '2026-05-15-o',
+    ]);
+    const customOut = join(root, 'my-report.md');
+    await run(['report', '--change', '2026-05-15-o', '--out', customOut]);
+    expect(existsSync(customOut)).toBe(true);
+  });
 });

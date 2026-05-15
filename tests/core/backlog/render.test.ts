@@ -4,18 +4,33 @@ import {
   renderActiveMarkdown,
   renderArchivedMarkdown,
 } from '../../../src/core/backlog/render.js';
-import type { SupersedingDetail, SkippedBlock, AggregatedScopeEntry } from '../../../src/core/scope/aggregator.js';
+import type {
+  SupersedingDetail,
+  SkippedBlock,
+  AggregatedScopeEntry,
+} from '../../../src/core/scope/aggregator.js';
 import type { ScopeEntry } from '../../../src/core/schemas/scope-entries.js';
 
 const snap: ScopeEntry = {
-  id: 'foo', category: 'out-of-scope', description: 'd', reason: 'r',
-  priority: null, status: 'active', triggered_by: null, related_change: null,
+  id: 'foo',
+  category: 'out-of-scope',
+  description: 'd',
+  reason: 'r',
+  priority: null,
+  status: 'active',
+  triggered_by: null,
+  related_change: null,
 };
 function sup(p: Partial<SupersedingDetail>): SupersedingDetail {
   return {
-    source_change: '2026-05-01-a', entry_id: 'foo', new_status: 'completed',
-    rationale: 'done', superseded_in_change: '2026-05-09-b', superseded_at: '2026-05-09',
-    registry_entry_snapshot: snap, ...p,
+    source_change: '2026-05-01-a',
+    entry_id: 'foo',
+    new_status: 'completed',
+    rationale: 'done',
+    superseded_in_change: '2026-05-09-b',
+    superseded_at: '2026-05-09',
+    registry_entry_snapshot: snap,
+    ...p,
   };
 }
 
@@ -24,7 +39,12 @@ describe('deriveWarningsAndTombstones (plan-backlog-registry Task 2)', () => {
     const r = deriveWarningsAndTombstones([sup({ registry_entry_snapshot: null })], []);
     expect(r.tombstones).toHaveLength(0);
     expect(r.warnings).toEqual([
-      { kind: 'dangling-reference', superseded_in_change: '2026-05-09-b', source_change: '2026-05-01-a', entry_id: 'foo' },
+      {
+        kind: 'dangling-reference',
+        superseded_in_change: '2026-05-09-b',
+        source_change: '2026-05-01-a',
+        entry_id: 'foo',
+      },
     ]);
   });
 
@@ -47,7 +67,9 @@ describe('deriveWarningsAndTombstones (plan-backlog-registry Task 2)', () => {
     expect(r.tombstones[0]!.superseded_in_change).toBe('2026-05-03-c');
     expect(r.warnings).toEqual([
       {
-        kind: 'duplicate-claim', source_change: '2026-05-01-a', entry_id: 'foo',
+        kind: 'duplicate-claim',
+        source_change: '2026-05-01-a',
+        entry_id: 'foo',
         claimants: [
           { superseded_in_change: '2026-05-09-b', superseded_at: '2026-05-09' },
           { superseded_in_change: '2026-05-03-c', superseded_at: '2026-05-03' },
@@ -67,14 +89,26 @@ describe('deriveWarningsAndTombstones (plan-backlog-registry Task 2)', () => {
     );
     // noUncheckedIndexedAccess:用 ! 断言保证 TS 编译通过
     expect(r.tombstones[0]!.superseded_in_change).toBe('2026-05-09-b');
-    expect(r.warnings).toContainEqual({ kind: 'malformed-dirname', superseded_in_change: 'legacy-x' });
+    expect(r.warnings).toContainEqual({
+      kind: 'malformed-dirname',
+      superseded_in_change: 'legacy-x',
+    });
   });
 
   it('skipped block → skipped-block warning', () => {
-    const sk: SkippedBlock = { change: '2026-05-01-a', file: 'proposal.md', reason: 'yaml-parse-error' };
+    const sk: SkippedBlock = {
+      change: '2026-05-01-a',
+      file: 'proposal.md',
+      reason: 'yaml-parse-error',
+    };
     const r = deriveWarningsAndTombstones([], [sk]);
     expect(r.warnings).toEqual([
-      { kind: 'skipped-block', change: '2026-05-01-a', file: 'proposal.md', reason: 'yaml-parse-error' },
+      {
+        kind: 'skipped-block',
+        change: '2026-05-01-a',
+        file: 'proposal.md',
+        reason: 'yaml-parse-error',
+      },
     ]);
   });
 
@@ -89,8 +123,18 @@ describe('deriveWarningsAndTombstones (plan-backlog-registry Task 2)', () => {
     );
     expect(r.tombstones).toHaveLength(0);
     expect(r.warnings).toEqual([
-      { kind: 'dangling-reference', superseded_in_change: '2026-05-09-b', source_change: '2026-05-01-a', entry_id: 'foo' },
-      { kind: 'dangling-reference', superseded_in_change: '2026-05-03-c', source_change: '2026-05-01-a', entry_id: 'foo' },
+      {
+        kind: 'dangling-reference',
+        superseded_in_change: '2026-05-09-b',
+        source_change: '2026-05-01-a',
+        entry_id: 'foo',
+      },
+      {
+        kind: 'dangling-reference',
+        superseded_in_change: '2026-05-03-c',
+        source_change: '2026-05-01-a',
+        entry_id: 'foo',
+      },
     ]);
   });
 
@@ -102,30 +146,56 @@ describe('deriveWarningsAndTombstones (plan-backlog-registry Task 2)', () => {
     );
     expect(r.tombstones).toHaveLength(0);
     expect(r.warnings).toContainEqual({
-      kind: 'invalid-new-status', superseded_in_change: 'legacy-x', source_change: '2026-05-01-a', entry_id: 'foo', raw: 'active',
+      kind: 'invalid-new-status',
+      superseded_in_change: 'legacy-x',
+      source_change: '2026-05-01-a',
+      entry_id: 'foo',
+      raw: 'active',
     });
-    expect(r.warnings).toContainEqual({ kind: 'malformed-dirname', superseded_in_change: 'legacy-x' });
+    expect(r.warnings).toContainEqual({
+      kind: 'malformed-dirname',
+      superseded_in_change: 'legacy-x',
+    });
   });
 
   // 边界:snapshot=null + superseded_at=unknown 同时命中 → dangling-reference 与 malformed-dirname 正交各报一条
   it('snapshot=null + superseded_at=unknown → dangling-reference + malformed-dirname 各 1 条', () => {
     const r = deriveWarningsAndTombstones(
-      [sup({ superseded_in_change: 'legacy-x', registry_entry_snapshot: null, superseded_at: 'unknown' })],
+      [
+        sup({
+          superseded_in_change: 'legacy-x',
+          registry_entry_snapshot: null,
+          superseded_at: 'unknown',
+        }),
+      ],
       [],
     );
     expect(r.tombstones).toHaveLength(0);
     expect(r.warnings).toContainEqual({
-      kind: 'dangling-reference', superseded_in_change: 'legacy-x', source_change: '2026-05-01-a', entry_id: 'foo',
+      kind: 'dangling-reference',
+      superseded_in_change: 'legacy-x',
+      source_change: '2026-05-01-a',
+      entry_id: 'foo',
     });
-    expect(r.warnings).toContainEqual({ kind: 'malformed-dirname', superseded_in_change: 'legacy-x' });
+    expect(r.warnings).toContainEqual({
+      kind: 'malformed-dirname',
+      superseded_in_change: 'legacy-x',
+    });
   });
 });
 
 function entry(p: Partial<AggregatedScopeEntry>): AggregatedScopeEntry {
   return {
-    id: 'e', category: 'future-work', description: 'desc', reason: 'rsn',
-    priority: null, status: 'active', triggered_by: null, related_change: null,
-    source_change: '2026-05-01-a', ...p,
+    id: 'e',
+    category: 'future-work',
+    description: 'desc',
+    reason: 'rsn',
+    priority: null,
+    status: 'active',
+    triggered_by: null,
+    related_change: null,
+    source_change: '2026-05-01-a',
+    ...p,
   };
 }
 
@@ -154,9 +224,17 @@ describe('renderActiveMarkdown (plan-backlog-registry Task 3)', () => {
   });
 
   it('warning 渲染进 ## Warnings 段', () => {
-    const md = renderActiveMarkdown([], [
-      { kind: 'dangling-reference', superseded_in_change: '2026-05-09-b', source_change: '2026-05-01-a', entry_id: 'foo' },
-    ]);
+    const md = renderActiveMarkdown(
+      [],
+      [
+        {
+          kind: 'dangling-reference',
+          superseded_in_change: '2026-05-09-b',
+          source_change: '2026-05-01-a',
+          entry_id: 'foo',
+        },
+      ],
+    );
     expect(md).toContain('## Warnings (1)');
     expect(md).toContain('[dangling] 2026-05-09-b 认领的 2026-05-01-a::foo 不存在');
   });

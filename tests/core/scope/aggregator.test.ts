@@ -381,15 +381,18 @@ describe('scanArchivedFollowups (plan-9b Task 5)', () => {
   });
 
   it('Task1: 坏 YAML 块进 skipped[](不再静默)', async () => {
-    await makeArchive('2026-05-01-a', [
-      '# Proposal',
-      '## Out of Scope {#forge-oos}',
-      '',
-      '```yaml',
-      'schema: forge-scope-entries/v1',
-      'entries: [unclosed',
-      '```',
-    ].join('\n'));
+    await makeArchive(
+      '2026-05-01-a',
+      [
+        '# Proposal',
+        '## Out of Scope {#forge-oos}',
+        '',
+        '```yaml',
+        'schema: forge-scope-entries/v1',
+        'entries: [unclosed',
+        '```',
+      ].join('\n'),
+    );
     const r = await scanArchivedFollowups(forgeRoot);
     expect(r.skipped).toEqual([
       { change: '2026-05-01-a', file: 'proposal.md', reason: 'yaml-parse-error' },
@@ -419,14 +422,10 @@ describe('scanArchivedFollowups (plan-9b Task 5)', () => {
 
   it('Task1 M-3: scope 段内 YAML 块解析成非对象(标量)→ skipped[] reason=schema-mismatch', async () => {
     // fenced YAML 块内容是一个标量数字,非对象 → schema-mismatch 守卫
-    await makeArchive('2026-05-01-a', [
-      '# Proposal',
-      '## Out of Scope {#forge-oos}',
-      '',
-      '```yaml',
-      '42',
-      '```',
-    ].join('\n'));
+    await makeArchive(
+      '2026-05-01-a',
+      ['# Proposal', '## Out of Scope {#forge-oos}', '', '```yaml', '42', '```'].join('\n'),
+    );
     const r = await scanArchivedFollowups(forgeRoot);
     expect(r.skipped).toEqual([
       { change: '2026-05-01-a', file: 'proposal.md', reason: 'schema-mismatch' },

@@ -8,8 +8,19 @@ import type { ScopeCategory } from '../schemas/scope-entries.js';
 
 /** render 层呈现类型 —— 由 superseding[] / skipped[] 派生(spec §7.1) */
 export type BacklogWarning =
-  | { kind: 'dangling-reference'; superseded_in_change: string; source_change: string; entry_id: string }
-  | { kind: 'invalid-new-status'; superseded_in_change: string; source_change: string; entry_id: string; raw: string }
+  | {
+      kind: 'dangling-reference';
+      superseded_in_change: string;
+      source_change: string;
+      entry_id: string;
+    }
+  | {
+      kind: 'invalid-new-status';
+      superseded_in_change: string;
+      source_change: string;
+      entry_id: string;
+      raw: string;
+    }
   | {
       kind: 'duplicate-claim';
       source_change: string;
@@ -192,8 +203,12 @@ export function renderArchivedMarkdown(tombstones: SupersedingDetail[]): string 
   const lines: string[] = [];
   lines.push('# Archived Backlog (Tombstones)');
   lines.push('');
-  lines.push('> 生成产物 —— 由 `/forge:archive` 自动重生成。每条记录一个 backlog 项的退役。Schema 见 README.md。');
-  lines.push('> 异常(悬空认领 / 非法 new_status / 重复认领 / 跳过坏块 / 目录名异常)见 active.md `## Warnings`。');
+  lines.push(
+    '> 生成产物 —— 由 `/forge:archive` 自动重生成。每条记录一个 backlog 项的退役。Schema 见 README.md。',
+  );
+  lines.push(
+    '> 异常(悬空认领 / 非法 new_status / 重复认领 / 跳过坏块 / 目录名异常)见 active.md `## Warnings`。',
+  );
   lines.push('');
   if (tombstones.length === 0) {
     lines.push('(无)');

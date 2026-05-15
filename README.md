@@ -129,10 +129,10 @@ forge upgrade --resign-markers <changeId>  # plan-9j v1.0+ marker 重签(legacy 
 
 ## 状态 + 文档导航
 
-**v1.1.0** released 2026-05-14(`CHANGELOG.md:11`):
+**v1.2.0** released 2026-05-15(`CHANGELOG.md:11`):
 
 - 本地 5 命令(`typecheck` / `lint` / `format:check` / `build` / `test`)全 0
-- **1115 tests pass**(`CHANGELOG.md:17`)
+- **1115 tests pass**(`CHANGELOG.md:23`)
 - 自动化 skill eval(`pnpm eval`,`forge-eval/scenarios/` 双轨 baseline)
 - 16 skill + 9 slash 命令 + 14 CLI 子命令
 

@@ -35,7 +35,7 @@ export function computeVerdict(events: TraceEvent[]): HealthVerdict {
         kind: 'anomaly',
         stage,
         detail: `${stage} 阶段有 CLI 事件但缺 AI stage_enter record`,
-        evidence: 'AI trace 不完整(可能漏记或中途启用)',
+        evidence: `${stage} AI trace 不完整(可能漏记或中途启用)`,
       });
     }
   }

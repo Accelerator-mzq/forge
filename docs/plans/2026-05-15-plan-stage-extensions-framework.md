@@ -52,7 +52,7 @@
 - **Task 0(已 ship,B-full 前置 enabling)**:slash 命令 / helper script / prompt 模板 / 12 tests 已 commit `02710da`
 - **A 组 核心模块**(4 Task):config schema → core 子模块 → helper script 扩展 → prompt 模板增量
 - **B 组 整合**(2 Task):runner CLI 子命令(显式状态机)→ commands/*.md 5 处末尾段
-- **C 组 测试与文档**(2 Task):integration + unit tests(runner 单轮 CLI 19 scenario)→ 文档全套
+- **C 组 测试与文档**(2 Task):integration + unit tests(runner 单轮 CLI 21 scenario)→ 文档全套
 - **Verify + retrospect**(1 Task):全 5 verify + CHANGELOG + version bump
 
 **估时 P50 ~3.5-4.5d / P90 ~6d / cost ~$2-4**(v2 修订 — 减去 B-full 已花 ~0.5d ~$0.5;加 F1/F2/F6 修订工程量 ~0.5d;净增减相当)。
@@ -81,9 +81,9 @@
 | 2 | core 子模块 | `src/core/stage-extensions/` 6 模块(severity-mapper / convergence-judge / thread-map / trend-analyzer / output-watcher / state-machine) | 1.0 | 1 | unit test 各模块覆盖 ≥ 85% |
 | 3 | helper script 扩展(在 B-full ship 基础上)| 扩展 `scripts/codex-review-helper.mjs`:加 `--thread-id` resume / `--poll-interval` / mode 多分支(code-review / adversarial / rescue);保留 B-full 已有 2 子命令向后兼容 | 0.5 | 0, 1, 2 | helper integration test 扩展 +5 case;harness-compat test 已在 Task 0 验过 |
 | 4 | prompt 模板增量(在 B-full ship 基础上)| 评估 stage-specific 模板必要性:若 stage-stage 攻击面差异大 → 加 `<stage>-adversarial.md`;否则保留 B-full `adversarial-default.md` 通用模板 | 0.3 | 0 | self-review:决定加 / 不加;若加附理由 |
-| 5 | runner CLI 子命令(v7 单轮执行器)| `src/cli/commands/stage-extensions.ts` — `run` 单轮(spawn+watch+parse+judge+retry,7 state 显式状态机)+ `analyze-trend` 子命令 + 结构化 JSON 输出;**多轮 loop/askUser/dispatch 移 §8 AI 协议**(v7 CLI/AI 分层) | 1.2 | 1, 2, 3, 4 | integration test 19 scenario(8 run + 8 retry/失败 + 3 terminate/trend);TypeScript strict 0 error |
+| 5 | runner CLI 子命令(v7 单轮执行器)| `src/cli/commands/stage-extensions.ts` — `run` 单轮(spawn+watch+parse+judge+retry,7 state 显式状态机)+ `analyze-trend` 子命令 + 结构化 JSON 输出;**多轮 loop/askUser/dispatch 移 §8 AI 协议**(v7 CLI/AI 分层) | 1.2 | 1, 2, 3, 4 | integration test 21 scenario(19:8 run + 8 retry/失败 + 3 terminate/trend;+ 2 markdown);TypeScript strict 0 error |
 | 6 | commands/*.md 5 处 | 末尾各加 ~5 行调 runner;build sync verify | 0.5 | 5 | `pnpm build` md5 sync 通过;commands sync test 验 5 文件改动 |
-| 7 | 测试 inventory 统一 + 失败路径补全 | 跨 §2 / §9 / §14 统一 test 计数 | 0.5 | 1-6 | 跨段 test 数一致;`pnpm test` 全 1030 + 51 = **1081 PASS**(详见下方单一来源表) |
+| 7 | 测试 inventory 统一 + 失败路径补全 | 跨 §2 / §9 / §14 统一 test 计数 | 0.5 | 1-6 | 跨段 test 数一致;`pnpm test` 全 **1115 PASS**(实测;详见下方单一来源表) |
 | 8 | 文档 | `docs/stage-extensions.md` 协议 + `docs/codex-review.md` 用户指南 + `docs/getting-started.md` 嵌入 deep-dive + README 更新 | 0.5 | 1-7 | self-review:每文档 含 quick start + 完整 config schema + troubleshooting + Tier 2/3 未来路径 |
 | 9 | verify + retrospect | 全 5 verify(typecheck / lint / format:check / build / test)+ version 1.1.0→1.2.0 + CHANGELOG + git tag v1.2.0 + master plan 状态回写 | 0.5 | 1-8 | 全 5 命令 exit 0;CHANGELOG `[1.2.0]` 段含 24 决策(v2 修订)+ breaking changes(无)+ ack |
 
@@ -91,18 +91,14 @@
 
 **测试 inventory 单一来源**(F6 fix — 跨段权威表;§9 / §14 引用本表数字):
 
-| 阶段 | 测试 | 累计 |
+| 阶段 | 测试 | 累计(实测)|
 |---|---|---|
-| Baseline(plan-v1.1 ship 后) | 1018 | 1018 |
-| Task 0 B-full(已 ship)| +12 | **1030** |
-| Task 1 config schema | +4 unit(v3:加 partial deep-merge test)| 1034 |
-| Task 2 core 子模块 | +22 unit(severity-mapper 4 / convergence-judge 5 / thread-map 4 / trend-analyzer 4 / output-watcher 5;v5:output-watcher 3→5 加 done happy + single-settle)| 1056 |
-| Task 3 helper 扩展 | +5 integration(thread resume / mode 多分支)| 1061 |
-| Task 5 runner | +19 integration(8 run + 8 retry/失败 + 3 terminate/trend;v7 单轮 CLI / v8 加 F-8)| 1080 |
-| Task 6 commands sync | +1 integration | **1081** |
-| Task 7 / 9 cross-cutting | 0(仅协调 / verify,无新 test)| 1081 |
+| Task 0-4 完成基线 | B-full Task 0(`02710da`)+ Task 1 config schema + Task 2 core 6 模块 + Task 3 helper 扩展 + Task 4 评估(0 新 test);IMPL-STATUS handoff 实测 | **1069** |
+| Task 5 runner | +21 integration(19 scenario:8 run + 8 retry/失败 + 3 terminate/trend;+ 2 markdown MD-1/MD-2,code review round-3 加,见 §7 Step 5.2ter)| 1090 |
+| Task 6 commands sync | +25 integration(`stage-extensions-commands-sync.test.ts`:5 文件 ×(md5 一致 + 4 内容断言))| 1115 |
+| Task 7 inventory 统一 / Task 9 verify | +0(仅协调 / verify,无新 test)| **1115** |
 
-**Plan v8 实施后目标:1081 tests pass**(51 个新 + B-full ship 12 个 = 63 incremental)。
+**实测最终:1115 tests pass / 0 fail**(Task 7 实测对账,2026-05-15)。plan v8 原估 1081 —— 差异:① Task 5 实际 21(原估 19;code review round-3 加 2 个 markdown 解析覆盖测试)② Task 6 实际 +25(原估 +1;sync test 为 data-driven 5 文件 ×5 断言)③ Task 0-4 实测累计 1069(原 per-task 估算表累计 1061,以 IMPL-STATUS handoff 实测为准)。所有偏差均为合法新增 / 估算修正,无缺失或失败测试。
 
 ---
 
@@ -895,7 +891,7 @@ function judgeConvergence(
 | T-2 analyze-trend 子命令各 trend | `analyze-trend --history` 对 data_insufficient / strict_decrease / stable / increase\|fluctuate 输出正确 TrendAdvice |
 | T-3 analyze-trend 非法 history JSON | `--history 'not-json'` → emitJson 不抛出,exit 0(loose) |
 
-**总 19 个 runner integration scenario**。多轮收敛 loop / askUser / auto-fix dispatch / max_rounds 到顶趋势建议 —— 这些是 §8 AI 协议行为,由 §8 commands sync test 验末尾段协议字面存在(不是 runner 单元测试范围)。
+**总 21 个 runner integration scenario**(原 plan 19 + code review round-3 新增 MD-1/MD-2 adversarial markdown 解析覆盖)。多轮收敛 loop / askUser / auto-fix dispatch / max_rounds 到顶趋势建议 —— 这些是 §8 AI 协议行为,由 §8 commands sync test 验末尾段协议字面存在(不是 runner 单元测试范围)。
 
 ### Step 5.4: commit Task 5
 
@@ -977,16 +973,16 @@ pnpm build  # 沿 [[feedback-forge-commands-build-sync]] 必跑
 
 详见 §2 "**测试 inventory 单一来源**" 表。本 Task 任务是**校对各 Task commit 后的累计 test 数符合 §2 表预期**,不增加新 test 项。
 
-权威累计:1018 baseline + 12 B-full(已 ship) + 51 本 plan 新增 = **1081 target**。
+权威累计见 §2「测试 inventory 单一来源」表:Task 0-4 基线 1069 + Task 5 +21 + Task 6 +25 = **1115(实测)**。plan v8 原估 1081 已由 Task 7 实测对账修正(见 §2 表注)。
 
 ### Step 7.2: 跑全 suite
 
 ```bash
-pnpm test  # 期望 1081 PASS
-# 若 PASS 数 != 1081,跨 Task 1-6 commit 各回查累计
+pnpm test  # 期望 1115 PASS(实测)
+# 若 PASS 数 != 1115,跨 Task 1-6 commit 各回查累计
 
-# 同时显式跑 runner retry/失败路径段:
-pnpm vitest run tests/cli/stage-extensions.test.ts -t "failure"
+# 同时显式跑 runner retry/失败路径段(test 名为中文「失败」):
+pnpm vitest run tests/cli/stage-extensions.test.ts -t "失败"
 ```
 
 ### Step 7.3: commit Task 7(若有补漏)
@@ -1026,7 +1022,7 @@ pnpm vitest run tests/cli/stage-extensions.test.ts -t "failure"
 ### Step 8.4: `README.md` 更新
 
 - §"核心交付" 加 "stage_extensions framework"(plan-stage-extensions-framework)bullet
-- §状态段 update 测试数 1018 → 1081
+- §状态段 update 测试数 → 1115
 
 ### Step 8.5: commit Task 8
 
@@ -1054,7 +1050,7 @@ pnpm typecheck && pnpm lint && pnpm format:check && pnpm build && pnpm test
 - **Added — CLI**:`forge stage-extensions run` 子命令(显式状态机 / 拆 retry+round budget / 僵尸检测 cancel)
 - **Added — Core**:`src/core/stage-extensions/` 6 模块 + `src/core/codex-review/prompts/adversarial-default.md`(B-full Task 0 已 ship 通用模板)
 - **Added — Skills + Templates**:`commands/*.md` 5 处末尾段(brainstorm/propose/apply/review/verify)+ 1 个新 slash 命令 `commands/codex-adversarial.md`(B-full Task 0 已 ship)
-- **Added — Tests**:63 incremental tests(B-full Task 0 ship 12 + plan 实施 51;1018 baseline + 63 = 1081 total)
+- **Added — Tests**:全 suite 1115 tests pass / 0 fail(Task 0-4 基线 1069 + Task 5 runner +21 + Task 6 commands sync +25;详 plan §2 inventory 表)
 - **Added — Docs**:`docs/stage-extensions.md`(framework 协议)+ `docs/codex-review.md`(用户指南)+ `docs/getting-started.md` 嵌入 deep-dive + README 更新
 - **Acknowledgments**:Codex 对抗性 review N 轮(plan v1 → v2 已经 ship 1 轮发现 1 BLOCKER + 5 MAJOR + 1 MINOR 全 accept 修订;后续 v2 → v3 视情况;沿 v1.0/v1.1 ack 模式)
 
@@ -1076,9 +1072,9 @@ gh pr create --title "feat: stage-extensions framework + codex review integratio
 
 ## Test plan
 - [x] `pnpm typecheck && pnpm lint && pnpm format:check && pnpm build && pnpm test`
-- [x] 1018 + 63(12 B-full + 51 本 plan)= 1081 tests pass
+- [x] 全 suite 1115 tests pass / 0 fail(实测 2026-05-15;详 plan §2 inventory 表)
 - [x] config schema validation 边界 case 覆盖
-- [x] integration test 19 scenario(runner 单轮 CLI;详 plan §7 Step 5.3)
+- [x] integration test 21 scenario(runner 单轮 CLI;详 plan §7 Step 5.3)
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 EOF
@@ -1165,16 +1161,16 @@ git push origin v1.2.0
 每条都是真 shell 断言(`test` / `grep -q` / `[ ]`),exit code 0 = 通过;不需推理:
 
 - [ ] **全 5 verify exit 0**:`pnpm typecheck && pnpm lint && pnpm format:check && pnpm build && pnpm test`
-- [ ] **总测试 1081 PASS**:`pnpm test 2>&1 | grep -E "Tests +.*1081 passed"`
+- [ ] **总测试 1115 PASS**:`pnpm test 2>&1 | grep -E "Tests +.*1115 passed"`
 - [ ] **CHANGELOG 段存在**:`grep -q "^## \[1.2.0\]" CHANGELOG.md`
 - [ ] **CHANGELOG 含 finding 修订记录**(v3 修订,F4-v2 fix — grep `CHANGELOG.md` 不是 plan 文件):`test "$(grep -cE '\b(F1|F2|F3|F4|F5|F6|F7)\b' CHANGELOG.md)" -ge 7`
 - [ ] **PR 已合并到 main**:`git log main --oneline | head -1 | grep -E "stage-extensions"`(必须 PR 合并后才存在该 commit)
 - [ ] **git tag v1.2.0 指向 main HEAD**(v3 修订,F4-v2 fix — 真 shell 断言,`^{}` 解 annotated tag):`test "$(git rev-parse 'v1.2.0^{}')" = "$(git rev-parse main)"`(tag 必须在 PR 合并后创建,不能合并前推)
 - [ ] **README badge v1.2.0**:`grep -oE '"version":\s*"[^"]+' package.json | grep -q "1.2.0"`(GitHub package-json badge 自动读)
-- [ ] **SKILL.md 0 改动**(全 repo 不限 skills/):`test "$(git diff main^..HEAD --name-only | grep -cE '(^|/)SKILL\.md$')" -eq 0`
+- [ ] **forge 协议 SKILL.md 0 改动**(`skills/` 协议层 + 其 `src/core/templates/skills/` 同步副本;`.claude/skills/` 过程 skill 如 subagent-driven-discipline 的 retrospect 增长不计 — 协议纯净指 forge 协议层):`test "$(git diff main^..HEAD --name-only | grep -cE '^(skills|src/core/templates/skills)/.+/SKILL\.md$')" -eq 0`
 - [ ] **5 commands/*.md 末尾段一致**:`test "$(grep -l 'stage-extensions run' commands/*.md | wc -l)" -eq 5`
 - [ ] **commands sync 一致**:`test "$(grep -l 'stage-extensions run' src/core/templates/commands/*.md | wc -l)" -eq 5`
 - [ ] **helper harness-agnostic**:`test "$(grep -cE 'process\.env\.(CLAUDE_PLUGIN_ROOT|FORGE_PLUGIN_ROOT)' scripts/codex-review-helper.mjs)" -eq 0`(沿 B-full Task 0 harness-compat test 同协议)
-- [ ] **runner 19 scenario 跑过**:`pnpm vitest run tests/cli/stage-extensions.test.ts 2>&1 | grep -E "19 passed"`
+- [ ] **runner 21 scenario 跑过**:`pnpm vitest run tests/cli/stage-extensions.test.ts 2>&1 | grep -E "21 passed"`
 - [ ] **docs 文档存在 + 含 quick start**:`for f in docs/stage-extensions.md docs/codex-review.md; do grep -qi "quick start" "$f" || { echo "MISSING quick start in $f"; exit 1; }; done`
 - [ ] **README §核心交付 含 stage-extensions**:`grep -q "stage-extensions" README.md`

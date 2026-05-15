@@ -318,6 +318,27 @@ tail -10 forge/changes/add-todo/tasks.md  # 期望:末尾有 applied_commits YAM
 > - accept → `.ack-log.jsonl` append `status=confirmed` + `acked_by` + `ack_at`
 > - reject → `.ack-log.jsonl` append `status=rejected`,你回头修代码
 
+### 嵌入 deep-dive: stage-extensions(review)
+
+> 💡 **深入:Review 结束后自动触发 codex review 多轮收敛协议**
+>
+> 若 `forge/config.yaml` 含 `stage_extensions.review` 配置,AI 主代理在 review 完成后自动跑 codex review extension(code-review 或 adversarial 模式)。codex finding 按 severity 分为 block 桶(BLOCKER/MAJOR)和 ignore 桶(MINOR/NIT),block 桶非空 → 未收敛 → AI 弹三选项(auto_fix / manual_fix / give_up)。**loose 模式:不影响 forge 主流程 fence**。
+>
+> 快速开启(review stage):
+>
+> ```yaml
+> stage_extensions:
+>   review:
+>     - name: codex-code-review
+>       enabled: true
+>       command: >
+>         node "${FORGE_HELPER_DIR}/codex-review-helper.mjs" run
+>         --mode code-review --output-log "${OUTPUT_FILE}"
+>       output: forge/changes/${CHANGE_ID}/.evidence/codex-review-r${ROUND}-a${ATTEMPT}.json
+> ```
+>
+> 完整协议 + config schema + severity 映射见 [`docs/stage-extensions.md`](stage-extensions.md) 和 [`docs/codex-review.md`](codex-review.md)。
+
 ### 确认
 
 ```bash
@@ -365,6 +386,27 @@ test:
 - ✅ AI 调 `forge evidence freeze <id> --kind verify` 把 staging 凝固到 marker.process_evidence
 
 > ❌ 如果 freeze 报 "staging file not found ... 必须先调 forge evidence record-*" → AI 漏调 record-verify,提示 AI invoke 该 helper 再 freeze(代码事实 `src/cli/commands/evidence.ts:639`)
+
+### 嵌入 deep-dive: stage-extensions(verify)
+
+> 💡 **深入:Verify 结束后自动触发 codex adversarial review**
+>
+> 若 `forge/config.yaml` 含 `stage_extensions.verify` 配置,AI 主代理在 verify 完成后自动跑 codex adversarial extension。adversarial 模式使用对抗性 prompt 深度审查,找 review 可能遗漏的问题。结果同样走多轮收敛协议(block 桶非空 → 未收敛 → 三选项),**loose 模式不阻塞主流程**。
+>
+> 快速开启(verify stage):
+>
+> ```yaml
+> stage_extensions:
+>   verify:
+>     - name: codex-adversarial
+>       enabled: true
+>       command: >
+>         node "${FORGE_HELPER_DIR}/codex-review-helper.mjs" run
+>         --mode adversarial --output-log "${OUTPUT_FILE}"
+>       output: forge/changes/${CHANGE_ID}/.evidence/codex-adversarial-r${ROUND}-a${ATTEMPT}.md
+> ```
+>
+> 推荐新用户先只开 review + verify 两个 stage(D/E 路径)再按需扩展。完整协议见 [`docs/stage-extensions.md`](stage-extensions.md)。
 
 ### 嵌入 deep-dive
 

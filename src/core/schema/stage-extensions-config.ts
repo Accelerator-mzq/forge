@@ -22,7 +22,7 @@ import type {
  * 所有字段均为合法值,作为 normalization 基础。
  */
 export const STAGE_EXTENSIONS_DEFAULTS: StageExtensionsDefaults = {
-  // sync 模式:等待 codex 完成后继续
+  // mode 预留给 v2 async 模式(plan 决策 Q5);v1 仅 'sync',不进 NormalizedStageExtensionsConfig
   mode: 'sync',
   // 轮询间隔(秒)
   poll_interval_sec: 300,
@@ -89,6 +89,21 @@ function isValidSeverityArray(arr: unknown): arr is SeverityLevel[] {
   return Array.isArray(arr) && arr.every((v) => VALID_SEVERITIES.includes(v as SeverityLevel));
 }
 
+/**
+ * I-2:剔除对象中值为 undefined 的 key。
+ * 防止用户配置里的显式 undefined(如 `{ timeout_sec: undefined }`)在 spread merge
+ * 时覆盖掉合法默认值,导致 required 字段实际变 undefined。
+ */
+function stripUndefined<T extends object>(obj: T): Partial<T> {
+  const out: Partial<T> = {};
+  for (const key of Object.keys(obj) as Array<keyof T>) {
+    if (obj[key] !== undefined) {
+      out[key] = obj[key];
+    }
+  }
+  return out;
+}
+
 // ─── 单 entry 校验 + normalization ───────────────────────────────────────────
 
 /**
@@ -120,6 +135,26 @@ function normalizeEntry(
     throw new ConfigValidationError(
       `timeout_sec must be in [60, 3600], got ${timeout_sec}`,
       `${path}.timeout_sec`,
+    );
+  }
+
+  // I-1:poll_interval_sec 范围校验 [10, 3600]
+  if (!Number.isFinite(poll_interval_sec) || poll_interval_sec < 10 || poll_interval_sec > 3600) {
+    throw new ConfigValidationError(
+      `poll_interval_sec must be in [10, 3600], got ${poll_interval_sec}`,
+      `${path}.poll_interval_sec`,
+    );
+  }
+
+  // I-1:zombie_threshold_sec 范围校验 [10, 3600]
+  if (
+    !Number.isFinite(zombie_threshold_sec) ||
+    zombie_threshold_sec < 10 ||
+    zombie_threshold_sec > 3600
+  ) {
+    throw new ConfigValidationError(
+      `zombie_threshold_sec must be in [10, 3600], got ${zombie_threshold_sec}`,
+      `${path}.zombie_threshold_sec`,
     );
   }
 
@@ -181,6 +216,25 @@ function normalizeEntry(
     );
   }
 
+  // I-3:max_rounds_on_exceed 必须为 'ask' | 'force_end'
+  if (
+    effectiveConvergence.max_rounds_on_exceed !== 'ask' &&
+    effectiveConvergence.max_rounds_on_exceed !== 'force_end'
+  ) {
+    throw new ConfigValidationError(
+      `max_rounds_on_exceed must be 'ask' or 'force_end', got ${JSON.stringify(effectiveConvergence.max_rounds_on_exceed)}`,
+      `${cvgPath}.max_rounds_on_exceed`,
+    );
+  }
+
+  // I-3:verdict_approve_short_circuit 必须为 boolean
+  if (typeof effectiveConvergence.verdict_approve_short_circuit !== 'boolean') {
+    throw new ConfigValidationError(
+      `verdict_approve_short_circuit must be a boolean, got ${JSON.stringify(effectiveConvergence.verdict_approve_short_circuit)}`,
+      `${cvgPath}.verdict_approve_short_circuit`,
+    );
+  }
+
   return {
     name: entry.name,
     enabled: entry.enabled,
@@ -207,33 +261,37 @@ function normalizeEntry(
  * @throws     ConfigValidationError  校验失败时
  */
 export function validateStageExtensionsConfig(raw: unknown): NormalizedStageExtensionsConfig {
-  // null / undefined → 视为空配置,全用默认值
-  const config = (raw as StageExtensionsConfig | null | undefined) ?? {};
+  // C-1:narrow unknown — 必须是非 null 非数组的对象才视为配置,否则视为空配置
+  const config: StageExtensionsConfig =
+    raw !== null && typeof raw === 'object' && !Array.isArray(raw)
+      ? (raw as StageExtensionsConfig)
+      : {};
 
   // ── step 1: deep-merge user defaults over built-in defaults ──
   const userDefaults = config.defaults ?? {};
   const mergedDefaults: StageExtensionsDefaults = {
     ...STAGE_EXTENSIONS_DEFAULTS,
-    ...userDefaults,
+    // I-2:剔除值为 undefined 的 key,防止显式 undefined 覆盖合法默认值
+    ...stripUndefined(userDefaults),
     // convergence 需单独 deep-merge
     convergence: {
       ...STAGE_EXTENSIONS_DEFAULTS.convergence,
-      ...(userDefaults.convergence ?? {}),
+      ...stripUndefined(userDefaults.convergence ?? {}),
     },
     // severity_map deep-merge
     severity_map: {
       ...STAGE_EXTENSIONS_DEFAULTS.severity_map,
-      ...(userDefaults.severity_map ?? {}),
+      ...stripUndefined(userDefaults.severity_map ?? {}),
     },
     // severity_map_to_forge deep-merge
     severity_map_to_forge: {
       ...STAGE_EXTENSIONS_DEFAULTS.severity_map_to_forge,
-      ...(userDefaults.severity_map_to_forge ?? {}),
+      ...stripUndefined(userDefaults.severity_map_to_forge ?? {}),
     },
     // user_interaction deep-merge
     user_interaction: {
       ...STAGE_EXTENSIONS_DEFAULTS.user_interaction,
-      ...(userDefaults.user_interaction ?? {}),
+      ...stripUndefined(userDefaults.user_interaction ?? {}),
     },
   };
 

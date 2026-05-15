@@ -202,6 +202,7 @@ export interface ConvergenceConfig {
 
 /** stage_extensions.defaults 用户配置层(所有字段可选) */
 export interface StageExtensionsDefaults {
+  /** 运行模式;v1 仅 'sync','background' 预留给 v2 async 模式(plan 决策 Q5) */
   mode: 'background' | 'sync';
   poll_interval_sec: number;
   zombie_threshold_sec: number;

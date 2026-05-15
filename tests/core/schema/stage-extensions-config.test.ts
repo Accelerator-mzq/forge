@@ -1,5 +1,6 @@
 // tests/core/schema/stage-extensions-config.test.ts — plan-stage-extensions Task 1.4
-// 4 unit tests: defaults / override / rejection / partial-convergence deep-merge
+// unit tests: defaults / override / rejection(多 case)/ partial-convergence deep-merge
+//   + 范围校验(poll_interval_sec)/ enum 校验(max_rounds_on_exceed)
 
 import { describe, it, expect } from 'vitest';
 import {
@@ -48,10 +49,10 @@ describe('validateStageExtensionsConfig', () => {
       STAGE_EXTENSIONS_DEFAULTS.convergence.block_severity,
     );
 
-    // severity_map / severity_map_to_forge / user_interaction 存在
-    expect(result.severity_map).toBeDefined();
-    expect(result.severity_map_to_forge).toBeDefined();
-    expect(result.user_interaction).toBeDefined();
+    // severity_map / severity_map_to_forge / user_interaction 等于内置默认值(m-1:强断言)
+    expect(result.severity_map).toEqual(STAGE_EXTENSIONS_DEFAULTS.severity_map);
+    expect(result.severity_map_to_forge).toEqual(STAGE_EXTENSIONS_DEFAULTS.severity_map_to_forge);
+    expect(result.user_interaction).toEqual(STAGE_EXTENSIONS_DEFAULTS.user_interaction);
   });
 
   // Test 2: 用户 override defaults.convergence.max_rounds → 返回 20
@@ -78,9 +79,8 @@ describe('validateStageExtensionsConfig', () => {
     expect(result.verify).toEqual([]);
   });
 
-  // Test 3: 非法值 → 抛 ConfigValidationError
-  it('rejects invalid values — max_rounds=-1 / confidence_threshold=2 均抛出', () => {
-    // max_rounds=-1 → 违反 [1, 100] 范围
+  // Test 3a: max_rounds=-1 → 违反 [1, 100] 范围,抛 ConfigValidationError(m-2:拆分)
+  it('rejects invalid values — max_rounds=-1 抛 ConfigValidationError', () => {
     expect(() =>
       validateStageExtensionsConfig({
         review: [
@@ -91,14 +91,47 @@ describe('validateStageExtensionsConfig', () => {
         ],
       }),
     ).toThrow(ConfigValidationError);
+  });
 
-    // confidence_threshold=2 → 违反 [0, 1] 范围
+  // Test 3b: confidence_threshold=2 → 违反 [0, 1] 范围,抛 ConfigValidationError(m-2:拆分)
+  it('rejects invalid values — confidence_threshold=2 抛 ConfigValidationError', () => {
     expect(() =>
       validateStageExtensionsConfig({
         review: [
           {
             ...minimalEntry('bad-confidence'),
             convergence: { confidence_threshold: 2 },
+          },
+        ],
+      }),
+    ).toThrow(ConfigValidationError);
+  });
+
+  // Test 5: poll_interval_sec 越界 → 抛 ConfigValidationError(I-1 新校验)
+  it('rejects invalid values — poll_interval_sec 越界(>3600)抛 ConfigValidationError', () => {
+    expect(() =>
+      validateStageExtensionsConfig({
+        review: [
+          {
+            ...minimalEntry('bad-poll'),
+            poll_interval_sec: 99999,
+          },
+        ],
+      }),
+    ).toThrow(ConfigValidationError);
+  });
+
+  // Test 6: max_rounds_on_exceed 非法 enum 值 → 抛 ConfigValidationError(I-3 新校验)
+  it('rejects invalid values — max_rounds_on_exceed 非法 enum 抛 ConfigValidationError', () => {
+    expect(() =>
+      validateStageExtensionsConfig({
+        review: [
+          {
+            ...minimalEntry('bad-on-exceed'),
+            // 'banana' 不是 'ask' | 'force_end'
+            convergence: {
+              max_rounds_on_exceed: 'banana' as unknown as 'ask',
+            },
           },
         ],
       }),

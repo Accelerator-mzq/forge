@@ -110,6 +110,7 @@ export function buildMonitorCommand(): Command {
       const aiEvents = readTrace(root, opts.change).events;
       const sessionEvents = readSessionTrace(root); // spec §2.4/§3.2:并入 pre-change _session 桶事件
       const cliEvents = observeArtifacts(root, opts.change);
+      // 三源 change_id 不同,sort 合并不去重(同一事件不会重复;附录原始 trace 忠实呈现)
       const all = [...cliEvents, ...aiEvents, ...sessionEvents].sort((a, b) =>
         a.ts.localeCompare(b.ts),
       );

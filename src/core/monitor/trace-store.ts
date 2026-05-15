@@ -61,7 +61,13 @@ function sessionIdFile(projectRoot: string): string {
 
 /**
  * 返回本项目的 _session-<uuid> change-id —— pre-change(brainstorm/explore)事件的桶。
- * 首次调用生成 uuid 并持久化到 forge/.monitor/.session-id,后续读回同一 id,保证一个 session 一个桶。
+ * 首次调用生成 uuid 并持久化到 forge/.monitor/.session-id,后续读回同一 id。
+ *
+ * 已知 v1 限制:`.session-id` 一经生成即长期存活(不随会话/工作流运行轮转),
+ * 故多个工作流运行的 pre-change 事件会累积在同一 _session 桶 —— report 合并时
+ * 会带入跨 run 的 pre-change 噪声。spec §2.4/§3.2 接受此 best-effort 行为。
+ * TOCTOU:existsSync + readFileSync 间(及并发 writeFileSync)有竞争窗口;
+ * 单进程 CLI 场景可接受(对齐 readTrace / ack-log.ts 惯例)。
  */
 export function sessionChangeId(projectRoot: string): string {
   const file = sessionIdFile(projectRoot);
@@ -83,7 +89,10 @@ export function sessionChangeId(projectRoot: string): string {
   return id;
 }
 
-/** 读所有 _session-* 桶的 trace 事件并合并(spec §2.4/§3.2:report 渲染时并入 pre-change 事件) */
+/**
+ * 读所有 _session-* 桶的 trace 事件并合并(spec §2.4/§3.2:report 渲染时并入 pre-change 事件)。
+ * 正常情况下只有一个 _session-<uuid> 桶;glob 多桶是防御性写法(.session-id 写失败偶发多桶)。
+ */
 export function readSessionTrace(projectRoot: string): TraceEvent[] {
   const dir = monitorDir(projectRoot);
   if (!existsSync(dir)) return [];

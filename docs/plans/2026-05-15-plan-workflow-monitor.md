@@ -1949,3 +1949,37 @@ Codex 末轮全局收敛复查:第 4 轮两项修订确认有效;F-1~F-4、新-1
 | 第 5 轮 Finding 1 Task 5 时间戳用 `as string | undefined` 编译期断言、无运行时检查;schema-invalid marker 的时间戳字段若非 string 会漏进 `TraceEvent.ts`,致 Task 11 排序 `localeCompare` 崩溃 | 成立 | `markerTs` 与 `archived_at` 均改为 `typeof x === 'string'` runtime guard,非 string 即 `undefined`、回退观察时刻 |
 
 **收敛结论**:Codex 末轮判定 —— 该 Finding 修掉后计划已收敛、可进入实施。5 轮对抗性审查累计 13 项 finding(F-1~F-4 / 新-1~新-3 / Finding 2~4 / 检查点 3、5 / 第 5 轮 Finding 1),全部独立对照代码核实为真问题并修正。
+
+---
+
+## 补齐任务(SDD 最终全量 review 后追加)
+
+执行完 Task 1-14 后,`superpowers:subagent-driven-development` 的最终全量 code review(opus)发现:本实施计划自身的 scope 比权威 spec 窄 —— Task 5 的 artifact-observer 只实现了 spec §3.2 CLI 层 4 类事件里的 2 类,且 `_session` 桶并入(spec §2.4/§3.2)无任何任务覆盖。3 项缺口经独立对照 spec + 代码核实成立。用户裁决:补齐做成 spec 一致。
+
+### Task 15: artifact-observer 补 `ack_observed` + verify/review `fence_observed`
+
+**Files:** Modify `src/core/monitor/artifact-observer.ts`;Modify `tests/core/monitor/artifact-observer.test.ts`。
+
+- **I-2 verify/review `fence_observed`**:`observeMarkers` 里,对 verify 类 marker(`forge-verify/v1` / `forge-verify-failed/v1`)在 `marker_observed` 之后再产一条 `fence_observed`,`data = { level:'verify', ok, blocked_findings, path }`;`blocked_findings` 取 marker `verify_findings` 中 `resolved===false` 的项(每项 `{id, severity, dimension, resolved}`),`ok = blocked_findings 无 CRITICAL`;review 类 marker(`forge-review/v1` / `forge-review-failed/v1`)同理用 `review_outcomes`(`level:'review'`,未决项取 `resolved===false`)。`verify_findings`/`review_outcomes` 缺失等价 `[]`。事件 `ts` 复用 `markerTs`。
+- **I-1 `ack_observed`**:`observeArtifacts` 对每个扫到的 change 目录(active + archive)读 `<dir>/.evidence/ack-log.jsonl`(NDJSON,同步 `readFileSync` + 逐行解析,坏行跳过 —— 与 marker 路径一致的 never-throw);对每条 `kind==='ack'` 的 entry 产一条 `ack_observed`,`stage:'ack-confirm'`,`layer:'cli'`,`data = { action, finding_id, severity: target_severity ?? null, user }`,`ts` 取 entry `timestamp`。文件不存在 → 跳过。
+- 测试补:verify marker 带未决 finding → `fence_observed` ok=false;ack-log 有 ack entry → `ack_observed`。
+
+> spec §3.2 微调:`ack_observed` data 字段按 forge 实际 ack-log `AckEntry`(`action`/`finding_id`/`severity`/`user`)记录 —— 原 spec 表的 `kind:propose|confirm` 是示意,forge ack-log 实为 `action` 字段。
+
+### Task 16: `_session` 桶 —— record 默认值 + report 并入(I-3)
+
+**Files:** Modify `src/core/monitor/trace-store.ts`;Modify `src/cli/commands/monitor.ts`;Modify `hooks/workflow-monitor-injection.md`;补测试。
+
+- `trace-store.ts` 加 `sessionChangeId(projectRoot)`:读-或-建 `forge/.monitor/.session-id`(首次 `crypto.randomUUID()` 生成 `_session-<uuid>` 写入,后续读回),返回该 id。加 `readSessionTrace(projectRoot)`:glob `forge/.monitor/_session-*/` 各 `trace.jsonl` 合并读出 `TraceEvent[]`。
+- `monitor.ts` `record`:`--change` 不再默认字面量 `_session`;改为 `.option('--change <id>')`(无默认),action 内 `const changeId = opts.change ?? sessionChangeId(root)`。
+- `monitor.ts` `report`:合并事件时追加 `readSessionTrace(root)`(spec §2.4/§3.2:propose 后 report 渲染器并入 `_session` 桶)。
+- `workflow-monitor-injection.md`:加一句 —— brainstorm/explore 阶段还没 change-id 时省略 `--change`(自动落 `_session` 桶)。
+
+### Task 17: 报告分维度覆盖标注(M-1)+ health-verdict forge 专属阶段不误报(M-3)
+
+**Files:** Modify `src/core/monitor/report-renderer.ts`、`src/core/monitor/health-verdict.ts` + 各自测试。
+
+- **M-1**:`report-renderer.ts` 阶段时间线段加一行「维度覆盖」摘要 —— 分别列 marker / cli_exit / AI trace 三维度各覆盖了哪些 stage(spec §2.4:中途启用时按维度标注覆盖范围,不假装完整)。
+- **M-3**:`health-verdict.ts` 检查 2(某阶段有 CLI 事件但无 AI stage_enter → anomaly)只对 `COMPARABLE_STAGES` 生效 —— forge 专属阶段(ack-confirm/upgrade/codex-adversarial)按 spec §1.3 本就 CLI-only、注入内容不要求 AI record,跳过它们避免假阳性。
+
+每个任务照常 implementer → spec review → code quality review。

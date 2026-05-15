@@ -230,7 +230,7 @@ LLM 扫 docs/+src/ 推测 role,产 anchors-draft.yaml + draft .md 概览。
 | 3   | 复写部分成功(.partial 文件)                               |
 | 5   | archive.lock 或 legacy-bridge.lock 被另一进程持有           |
 
-## `forge monitor`(v1.3.0 新增)
+## `forge monitor`(unreleased)
 
 低耦合旁路工作流监控观察者。开启后由 AI 层在每个 forge 阶段调 `forge monitor record` 写入 trace 事件;`forge monitor report` 汇总渲染 markdown 报告,与 OpenSpec/superpowers 静态差异映射表对比做回归探测。**永远 exit 0**(loose —— 监控关闭或记录失败都静默 no-op,不影响主流程)。
 
@@ -240,7 +240,7 @@ LLM 扫 docs/+src/ 推测 role,产 anchors-draft.yaml + draft .md 概览。
 
 开启 workflow-monitor:写 `forge/config.yaml#monitor.enabled = true`。
 
-```bash
+```
 forge monitor enable
 ```
 
@@ -248,7 +248,7 @@ forge monitor enable
 
 关闭 workflow-monitor:写 `forge/config.yaml#monitor.enabled = false`。
 
-```bash
+```
 forge monitor disable
 ```
 
@@ -279,8 +279,6 @@ forge monitor record --stage <stage> --event <event> [--change <id>] [--json <pa
 | `--change <id>`    | 可选;关联的 change id                                                             |
 | `--json <payload>` | 可选;附加 JSON payload(结构化事件数据)                                           |
 
-永远 exit 0。
-
 ### `forge monitor report`
 
 渲染指定 change 的 markdown 监控报告。默认写入 `forge/.monitor/<change>/report.md`。
@@ -302,7 +300,7 @@ forge monitor report --change <id> [--out <path>]
 
 ### 例子
 
-```bash
+```
 # 开启监控
 forge monitor enable
 
@@ -324,8 +322,6 @@ forge monitor report --change c1 --out /tmp/c1-monitor.md
 # 关闭监控
 forge monitor disable
 ```
-
----
 
 ## `forge stage-extensions`(v1.2.0 新增)
 

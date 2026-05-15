@@ -2,9 +2,10 @@
 // 4 个测试:缺文件→空map / recordRound+save+reload roundtrip / getThreadId无记录→null / resetStage
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { parse as parseYaml } from 'yaml';
 import { ThreadMap } from '../../../src/core/stage-extensions/thread-map.js';
 import type { ThreadMapEntry } from '../../../src/core/stage-extensions/thread-map.js';
 
@@ -45,17 +46,19 @@ describe('ThreadMap', () => {
     tm.recordRound('review', 'codex-review', entry);
     await tm.save();
 
-    // 重新 load 验证数据持久化
+    // 重新 load 验证 thread_id 持久化
     const tm2 = new ThreadMap('c1', tmp);
     await tm2.load();
-
     expect(tm2.getThreadId('review', 'codex-review')).toBe('thread-abc');
 
-    // 验证其他字段也正确保存
-    const reloaded = new ThreadMap('c1', tmp);
-    await reloaded.load();
-    reloaded.recordRound('review', 'codex-review', entry); // 覆盖写入
-    expect(reloaded.getThreadId('review', 'codex-review')).toBe('thread-abc');
+    // 直接读盘 YAML 验证 ALL 字段都经磁盘 roundtrip 完整保留
+    const yamlPath = path.join(tmp, 'changes', 'c1', '.codex-threads.yaml');
+    const raw = await readFile(yamlPath, 'utf8');
+    const parsed = parseYaml(raw) as {
+      threads: Record<string, Record<string, ThreadMapEntry>>;
+    };
+    const persisted = parsed.threads['review']?.['codex-review'];
+    expect(persisted).toEqual(entry);
   });
 
   it('getThreadId 无记录时返回 null', async () => {

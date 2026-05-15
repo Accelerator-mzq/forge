@@ -2,8 +2,7 @@
 // plan-stage-extensions Task 2.3
 // 读写 forge/changes/<changeId>/.codex-threads.yaml,管理每个 stage+extension 的 thread 状态
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
@@ -62,11 +61,17 @@ export class ThreadMap {
    */
   async load(): Promise<void> {
     this.map = new Map();
-    if (!existsSync(this.filePath)) {
-      // 文件不存在是正常情况(首轮),返回空 map
-      return;
+    // 直接 readFile + 捕获 ENOENT,避免 existsSync 的 TOCTOU 竞态
+    let raw: string;
+    try {
+      raw = await readFile(this.filePath, 'utf8');
+    } catch (e) {
+      // 文件不存在是正常情况(首轮),返回空 map;其他错误(损坏/不可读)继续抛出
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+        return;
+      }
+      throw e;
     }
-    const raw = await readFile(this.filePath, 'utf8');
     const parsed = parseYaml(raw) as ThreadsFile | null;
     if (!parsed?.threads) {
       // 文件为空或无 threads 段 → 空 map
@@ -85,6 +90,7 @@ export class ThreadMap {
   /**
    * 将内部 map 写回 YAML 文件。
    * 若父目录不存在则自动创建。
+   * 采用 tmp 文件写 + rename atomic(POSIX + Windows NTFS 同卷),与 forge 其他 state 文件一致。
    */
   async save(): Promise<void> {
     const dir = path.dirname(this.filePath);
@@ -99,7 +105,11 @@ export class ThreadMap {
       }
     }
     const content = stringifyYaml({ threads });
-    await writeFile(this.filePath, content, 'utf8');
+
+    // tmp 文件写 + rename atomic(避免半写状态)
+    const tmpPath = `${this.filePath}.tmp.${process.pid}`;
+    await writeFile(tmpPath, content, 'utf8');
+    await rename(tmpPath, this.filePath);
   }
 
   /**

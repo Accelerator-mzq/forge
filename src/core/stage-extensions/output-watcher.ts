@@ -24,6 +24,15 @@ export class OutputWatcher extends EventEmitter {
   private lastMtime = 0;
   private startTime = 0;
 
+  /**
+   * close 事件 handler 引用。
+   * 保存引用以便 stop() 精确移除(避免误删 runner 自己挂的 close 监听器)。
+   */
+  private readonly closeHandler = (code: number | null): void => {
+    // 进程退出,emit done(单次 settle)
+    this.settle('done', code ?? 0);
+  };
+
   /** @param proc              被监控的子进程 */
   /** @param filePath          codex 输出文件路径 */
   /** @param pollIntervalSec   轮询间隔(秒) */
@@ -47,11 +56,8 @@ export class OutputWatcher extends EventEmitter {
   start(): void {
     this.startTime = Date.now();
 
-    // 监听进程退出:首选 settle 路径
-    this.proc.once('close', (code: number | null) => {
-      // 进程退出,emit done(单次 settle)
-      this.settle('done', code ?? 0);
-    });
+    // 监听进程退出:首选 settle 路径(用具名 handler 引用,stop 时精确移除)
+    this.proc.once('close', this.closeHandler);
 
     // 定时轮询:检测 zombie / timeout / progress
     this.intervalId = setInterval(() => {
@@ -79,6 +85,11 @@ export class OutputWatcher extends EventEmitter {
       mtime = s.mtimeMs;
     } catch {
       // 文件尚未创建,mtime 保持上次值
+    }
+
+    // await stat() 让出后,close handler 可能已 settle+stop,此时跳过后续 mtime 计算
+    if (this.settled) {
+      return;
     }
 
     const mtimeAge = (now - mtime) / 1000;
@@ -133,16 +144,21 @@ export class OutputWatcher extends EventEmitter {
       clearInterval(this.intervalId);
       this.intervalId = null;
     }
-    // 移除 close 监听器防止内存泄漏(已 settle 后无需再监听)
-    this.proc.removeAllListeners('close');
+    // 精确移除本 watcher 注册的 close 监听器(不影响 runner 自己挂的 close 监听器)
+    this.proc.removeListener('close', this.closeHandler);
   }
 
-  /** EventEmitter 类型重载,提供类型安全的事件注册 */
-  override on(
-    event: 'zombie' | 'timeout' | 'progress' | 'done',
-    listener: (...args: unknown[]) => void,
-  ): this {
-    return super.on(event, listener);
+  /**
+   * EventEmitter 类型重载,提供 per-event 类型安全的事件注册。
+   * - 'done' listener 收到 exitCode (number)
+   * - 'zombie' / 'timeout' / 'progress' listener 无参数
+   * - 'error' 保留 EventEmitter 标准 error 接口
+   */
+  override on(event: 'done', listener: (exitCode: number) => void): this;
+  override on(event: 'zombie' | 'timeout' | 'progress', listener: () => void): this;
+  override on(event: 'error', listener: (err: Error) => void): this;
+  override on(event: string | symbol, listener: (...args: never[]) => void): this {
+    return super.on(event, listener as (...args: unknown[]) => void);
   }
 }
 
@@ -184,9 +200,8 @@ export function watchProcess(
       opts.timeout_sec,
     );
 
-    // done:进程正常退出
-    watcher.on('done', (...args: unknown[]) => {
-      const exitCode = typeof args[0] === 'number' ? args[0] : 0;
+    // done:进程正常退出(per-event overload 保证 exitCode 为 number)
+    watcher.on('done', (exitCode: number) => {
       resolve({ kind: 'done', exitCode });
     });
 

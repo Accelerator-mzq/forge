@@ -20,8 +20,6 @@ function makeFakeProc(exitCode: number | null = null, signalCode: string | null 
   const emitter = new EventEmitter() as EventEmitter & {
     exitCode: number | null;
     signalCode: string | null;
-    removeAllListeners: (event?: string) => EventEmitter;
-    once: <T>(event: string, cb: (...args: T[]) => void) => EventEmitter;
   };
   emitter.exitCode = exitCode;
   emitter.signalCode = signalCode;
@@ -128,8 +126,8 @@ describe('OutputWatcher', () => {
 
     // timeout=5s,但进程很快退出
     const watcher = new OutputWatcher(proc, filePath, 1, 1, 5);
-    watcher.on('done', (...args: unknown[]) => {
-      events.push({ kind: 'done', exitCode: args[0] as number });
+    watcher.on('done', (exitCode: number) => {
+      events.push({ kind: 'done', exitCode });
     });
     watcher.on('zombie', () => events.push({ kind: 'zombie' }));
     watcher.on('timeout', () => events.push({ kind: 'timeout' }));
@@ -148,31 +146,36 @@ describe('OutputWatcher', () => {
   });
 
   it('single-settle 边界:进程在 timeout 边界退出只 settle 一次且 kind=done', async () => {
-    // 同时触发:进程退出 close 和超时轮询几乎同时发生
-    // 预期:只 settle 一次,且 done 优先(close handler 最先检查 settled)
+    // 用 fake timers 消除时间依赖:进程在 timeout 边界精确退出,验证只 settle 一次
+    // pollInterval=1s, zombie=1s, timeout=2s
+    vi.useFakeTimers();
     const proc = makeFakeProc(null, null);
     const events: string[] = [];
 
-    // pollInterval=30ms, timeout=60ms — 进程在约 55ms 时退出(接近 timeout 边界)
-    const watcher = new OutputWatcher(proc, filePath, 0.03, 0.01, 0.06);
+    const watcher = new OutputWatcher(proc, filePath, 1, 1, 2);
     watcher.on('done', () => events.push('done'));
     watcher.on('zombie', () => events.push('zombie'));
     watcher.on('timeout', () => events.push('timeout'));
 
     watcher.start();
 
-    // 在 timeout 边界附近(55ms)触发 close 事件
-    await wait(55);
-    // 标记 exitCode 让 poll 跳过(模拟进程已退出)
+    // 推进到 timeout 边界(2s),此刻 close 与下一次 poll 竞争
+    // 先标记 exitCode(模拟进程已退出),让任何 poll 直接跳过
+    await vi.advanceTimersByTimeAsync(2000);
     (proc as unknown as { exitCode: number }).exitCode = 0;
+    // close 事件触发 done settle
     (proc as unknown as EventEmitter).emit('close', 0);
 
-    await wait(100);
+    // 继续推进时间,确认后续 poll 不会再 settle
+    await vi.advanceTimersByTimeAsync(3000);
 
-    // 无论哪个先触发,只应 settle 一次
+    // 只应 settle 一次,且为 done(close handler 在 poll 之前注册)
     const terminalCount = events.filter((e) => ['done', 'zombie', 'timeout'].includes(e)).length;
     expect(terminalCount).toBe(1);
-    // close 在 poll 之前注册,进程退出优先
     expect(events[0]).toBe('done');
+
+    // 二次 close 不应再次 settle(settled 标志生效)
+    (proc as unknown as EventEmitter).emit('close', 1);
+    expect(events.filter((e) => ['done', 'zombie', 'timeout'].includes(e))).toHaveLength(1);
   });
 });

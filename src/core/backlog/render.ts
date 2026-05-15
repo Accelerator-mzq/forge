@@ -3,6 +3,7 @@
 // 本文件 Task 2 放 warning/tombstone 派生;Task 3/4 续加 renderActive / renderArchived。
 
 import type { SupersedingDetail, SkippedBlock } from '../scope/aggregator.js';
+import { VALID_SUPERSEDING_NEW_STATUS } from '../schemas/scope-entries.js';
 
 /** render 层呈现类型 —— 由 superseding[] / skipped[] 派生(spec §7.1) */
 export type BacklogWarning =
@@ -17,8 +18,6 @@ export type BacklogWarning =
     }
   | { kind: 'malformed-dirname'; superseded_in_change: string }
   | { kind: 'skipped-block'; change: string; file: string; reason: string };
-
-const VALID_NEW_STATUS = new Set(['superseded', 'obsolete', 'completed', 'inherited']);
 
 /** superseded_at 比较:有效 YYYY-MM-DD 按字典序;'unknown' 一律排最后(spec §5) */
 function compareSupersededAt(a: string, b: string): number {
@@ -56,7 +55,7 @@ export function deriveWarningsAndTombstones(
       });
       continue;
     }
-    if (!VALID_NEW_STATUS.has(s.new_status)) {
+    if (!VALID_SUPERSEDING_NEW_STATUS.has(s.new_status)) {
       warnings.push({
         kind: 'invalid-new-status',
         superseded_in_change: s.superseded_in_change,

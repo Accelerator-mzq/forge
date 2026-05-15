@@ -9,6 +9,7 @@ import { parseMarkdown } from '../parse/markdown.js';
 import { parseFencedYamlBlocks, FencedYamlParseError } from '../parse/fenced-yaml.js';
 import {
   SCOPE_ANCHOR_IDS,
+  VALID_SUPERSEDING_NEW_STATUS,
   type ScopeEntry,
   type SupersedingRef,
   type ScopeCategory,
@@ -61,9 +62,6 @@ const CATEGORY_ORDER: Record<ScopeCategory, number> = {
   'out-of-scope': 1,
   'non-goal': 2,
 };
-
-/** 合法的 superseding new_status —— 仅这些值参与扣减(§9c 守卫) */
-const VALID_SUPERSEDING_STATUS = new Set(['superseded', 'obsolete', 'completed', 'inherited']);
 
 /** 从 archived 目录名取日期前缀;无 YYYY-MM-DD 前缀 → 'unknown' */
 function dirnameDate(changeId: string): string {
@@ -144,7 +142,7 @@ export async function scanArchivedFollowups(forgeRoot: string): Promise<Aggregat
               superseded_at: dirnameDate(changeId),
             });
             // §9c 守卫:只有合法 new_status 才扣减
-            if (VALID_SUPERSEDING_STATUS.has(String(sup.new_status))) {
+            if (VALID_SUPERSEDING_NEW_STATUS.has(String(sup.new_status))) {
               superseded.add(`${sup.source_change}::${sup.entry_id}`);
             }
           }

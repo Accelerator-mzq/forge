@@ -73,4 +73,46 @@ describe('deriveWarningsAndTombstones (plan-backlog-registry Task 2)', () => {
       { kind: 'skipped-block', change: '2026-05-01-a', file: 'proposal.md', reason: 'yaml-parse-error' },
     ]);
   });
+
+  // 边界:同组两条 claim 都 snapshot=null → 两条都被剔为 dangling,不进分组,无 tombstone
+  it('同组两条 claim 都 snapshot=null → tombstones 空、2 条 dangling-reference', () => {
+    const r = deriveWarningsAndTombstones(
+      [
+        sup({ superseded_in_change: '2026-05-09-b', registry_entry_snapshot: null }),
+        sup({ superseded_in_change: '2026-05-03-c', registry_entry_snapshot: null }),
+      ],
+      [],
+    );
+    expect(r.tombstones).toHaveLength(0);
+    expect(r.warnings).toEqual([
+      { kind: 'dangling-reference', superseded_in_change: '2026-05-09-b', source_change: '2026-05-01-a', entry_id: 'foo' },
+      { kind: 'dangling-reference', superseded_in_change: '2026-05-03-c', source_change: '2026-05-01-a', entry_id: 'foo' },
+    ]);
+  });
+
+  // 边界:new_status 非法 + superseded_at=unknown 同时命中 → invalid-new-status 与 malformed-dirname 正交各报一条
+  it('new_status 非法 + superseded_at=unknown → invalid-new-status + malformed-dirname 各 1 条', () => {
+    const r = deriveWarningsAndTombstones(
+      [sup({ superseded_in_change: 'legacy-x', new_status: 'active', superseded_at: 'unknown' })],
+      [],
+    );
+    expect(r.tombstones).toHaveLength(0);
+    expect(r.warnings).toContainEqual({
+      kind: 'invalid-new-status', superseded_in_change: 'legacy-x', source_change: '2026-05-01-a', entry_id: 'foo', raw: 'active',
+    });
+    expect(r.warnings).toContainEqual({ kind: 'malformed-dirname', superseded_in_change: 'legacy-x' });
+  });
+
+  // 边界:snapshot=null + superseded_at=unknown 同时命中 → dangling-reference 与 malformed-dirname 正交各报一条
+  it('snapshot=null + superseded_at=unknown → dangling-reference + malformed-dirname 各 1 条', () => {
+    const r = deriveWarningsAndTombstones(
+      [sup({ superseded_in_change: 'legacy-x', registry_entry_snapshot: null, superseded_at: 'unknown' })],
+      [],
+    );
+    expect(r.tombstones).toHaveLength(0);
+    expect(r.warnings).toContainEqual({
+      kind: 'dangling-reference', superseded_in_change: 'legacy-x', source_change: '2026-05-01-a', entry_id: 'foo',
+    });
+    expect(r.warnings).toContainEqual({ kind: 'malformed-dirname', superseded_in_change: 'legacy-x' });
+  });
 });

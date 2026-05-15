@@ -34,3 +34,4 @@ eval-report.md
 # 防止 fixture 内部的 git repo 进入主仓库(vitest globalSetup 会创建)
 tests/fixtures/**/.git/
 vitest-output.txt
+forge/.monitor/

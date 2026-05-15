@@ -6,7 +6,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-(暂无)
+### Added
+
+- **workflow-monitor**:低耦合旁路工作流监控观察者。`forge monitor enable` 开启后,记录
+  forge 每阶段状态与动作选择,与 OpenSpec/superpowers 静态差异映射表对比做回归探测;
+  `forge monitor report` 渲染 markdown 报告。详见
+  `docs/specs/2026-05-15-workflow-monitor-design.md`。
 
 ## [1.2.0] - 2026-05-15
 

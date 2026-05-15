@@ -52,14 +52,14 @@
 - **Task 0(已 ship,B-full 前置 enabling)**:slash 命令 / helper script / prompt 模板 / 12 tests 已 commit `02710da`
 - **A 组 核心模块**(4 Task):config schema → core 子模块 → helper script 扩展 → prompt 模板增量
 - **B 组 整合**(2 Task):runner CLI 子命令(显式状态机)→ commands/*.md 5 处末尾段
-- **C 组 测试与文档**(2 Task):integration + unit tests(含 12 失败路径)→ 文档全套
+- **C 组 测试与文档**(2 Task):integration + unit tests(含 13 失败路径)→ 文档全套
 - **Verify + retrospect**(1 Task):全 5 verify + CHANGELOG + version bump
 
 **估时 P50 ~3.5-4.5d / P90 ~6d / cost ~$2-4**(v2 修订 — 减去 B-full 已花 ~0.5d ~$0.5;加 F1/F2/F6 修订工程量 ~0.5d;净增减相当)。
 
 **LOC 估计**(v2 修订,减去 B-full ~698 LOC 已 ship):
 - 本 plan 剩余 LOC ~1300(原估 2000 LOC - B-full 698 LOC)
-- 测试新增 49 个(plan 实施;不含 B-full Task 0 已 ship 12 个)— 详 §2 "测试 inventory 单一来源" 表
+- 测试新增 52 个(plan 实施;不含 B-full Task 0 已 ship 12 个)— 详 §2 "测试 inventory 单一来源" 表
 
 **不在本 plan scope**(v2 修订,明确 scope-out):
 - **Generic ExtensionContract**(`output_format` / `parser` / `success_criteria` / `retry_policy` / `artifact_contract`)→ 留 v2/v3 真有非 codex 工具集成需求时 refactor 加;v1 codex-only 防预设抽象错(F4 fix)
@@ -81,9 +81,9 @@
 | 2 | core 子模块 | `src/core/stage-extensions/` 6 模块(severity-mapper / convergence-judge / thread-map / trend-analyzer / output-watcher / state-machine) | 1.0 | 1 | unit test 各模块覆盖 ≥ 85% |
 | 3 | helper script 扩展(在 B-full ship 基础上)| 扩展 `scripts/codex-review-helper.mjs`:加 `--thread-id` resume / `--poll-interval` / mode 多分支(code-review / adversarial / rescue);保留 B-full 已有 2 子命令向后兼容 | 0.5 | 0, 1, 2 | helper integration test 扩展 +5 case;harness-compat test 已在 Task 0 验过 |
 | 4 | prompt 模板增量(在 B-full ship 基础上)| 评估 stage-specific 模板必要性:若 stage-stage 攻击面差异大 → 加 `<stage>-adversarial.md`;否则保留 B-full `adversarial-default.md` 通用模板 | 0.3 | 0 | self-review:决定加 / 不加;若加附理由 |
-| 5 | runner CLI 子命令(显式状态机)| `src/cli/commands/stage-extensions.ts` — 7 state 显式状态机(含 timeout,F3-v2 fix)+ 拆 retry/round budget(F1+F2 fix)+ verdict-approve AND block 桶空短路(F5 fix)+ normalized config(F1-v2 fix)+ AskUserQuestion 介入 | 1.5 | 1, 2, 3, 4 | integration test 19 scenario(7 happy + 12 失败路径);TypeScript strict 模式 0 error |
+| 5 | runner CLI 子命令(显式状态机)| `src/cli/commands/stage-extensions.ts` — 7 state 显式状态机(含 timeout,F3-v2 fix)+ 拆 retry/round budget(F1+F2 fix)+ verdict-approve AND block 桶空短路(F5 fix)+ normalized config(F1-v2 fix)+ AskUserQuestion 介入 | 1.5 | 1, 2, 3, 4 | integration test 20 scenario(7 happy + 13 失败路径);TypeScript strict 模式 0 error |
 | 6 | commands/*.md 5 处 | 末尾各加 ~5 行调 runner;build sync verify | 0.5 | 5 | `pnpm build` md5 sync 通过;commands sync test 验 5 文件改动 |
-| 7 | 测试 inventory 统一 + 失败路径补全 | 跨 §2 / §9 / §14 统一 test 计数 + 加 10 失败路径(F6 8 个 + v3 F-9 timeout + F-10 partial config) | 0.5 | 1-6 | 跨段 test 数一致;`pnpm test` 全 1030 + 49 = **1079 PASS**(详见下方单一来源表) |
+| 7 | 测试 inventory 统一 + 失败路径补全 | 跨 §2 / §9 / §14 统一 test 计数 + 加 13 失败路径(F6 8 个 + F-9..F-13 累计 5 个) | 0.5 | 1-6 | 跨段 test 数一致;`pnpm test` 全 1030 + 52 = **1082 PASS**(详见下方单一来源表) |
 | 8 | 文档 | `docs/stage-extensions.md` 协议 + `docs/codex-review.md` 用户指南 + `docs/getting-started.md` 嵌入 deep-dive + README 更新 | 0.5 | 1-7 | self-review:每文档 含 quick start + 完整 config schema + troubleshooting + Tier 2/3 未来路径 |
 | 9 | verify + retrospect | 全 5 verify(typecheck / lint / format:check / build / test)+ version 1.1.0→1.2.0 + CHANGELOG + git tag v1.2.0 + master plan 状态回写 | 0.5 | 1-8 | 全 5 命令 exit 0;CHANGELOG `[1.2.0]` 段含 24 决策(v2 修订)+ breaking changes(无)+ ack |
 
@@ -96,13 +96,13 @@
 | Baseline(plan-v1.1 ship 后) | 1018 | 1018 |
 | Task 0 B-full(已 ship)| +12 | **1030** |
 | Task 1 config schema | +4 unit(v3:加 partial deep-merge test)| 1034 |
-| Task 2 core 子模块 | +20 unit(severity-mapper 4 / convergence-judge 5 / thread-map 4 / trend-analyzer 4 / output-watcher 3)| 1054 |
-| Task 3 helper 扩展 | +5 integration(thread resume / mode 多分支)| 1059 |
-| Task 5 runner | +19 integration(7 happy + 12 失败路径;v4:加 F1-v3 done / F2-v3 thread 保留 / F3-v3 terminateRound)| 1078 |
-| Task 6 commands sync | +1 integration | **1079** |
-| Task 7 / 9 cross-cutting | 0(仅协调 / verify,无新 test)| 1079 |
+| Task 2 core 子模块 | +22 unit(severity-mapper 4 / convergence-judge 5 / thread-map 4 / trend-analyzer 4 / output-watcher 5;v5:output-watcher 3→5 加 done happy + single-settle)| 1056 |
+| Task 3 helper 扩展 | +5 integration(thread resume / mode 多分支)| 1061 |
+| Task 5 runner | +20 integration(7 happy + 13 失败路径;v5:加 F-13 entry 异常隔离)| 1081 |
+| Task 6 commands sync | +1 integration | **1082** |
+| Task 7 / 9 cross-cutting | 0(仅协调 / verify,无新 test)| 1082 |
 
-**Plan v4 实施后目标:1079 tests pass**(49 个新 + B-full ship 12 个 = 61 incremental)。
+**Plan v5 实施后目标:1082 tests pass**(52 个新 + B-full ship 12 个 = 64 incremental)。
 
 ---
 
@@ -385,7 +385,17 @@ export class OutputWatcher {
 
 **关键**(F1-v3 fix):`done` 与 `zombie`/`timeout` 是 race — codex 正常退出时 `proc.close` 先到 → emit `done`,polling 立即停;只有进程**没退出**才可能走 zombie/timeout。`watchProcess(proc, outputFile, opts)` 包装本 watcher,返回首个到达的 outcome(`{ kind: 'done', exitCode }` / `{ kind: 'zombie', jobId }` / `{ kind: 'timeout', jobId }`)。
 
-**unit test**:stub codex 写合法 JSON 后 `exit 0` → watcher emit `done` exitCode=0,**不等 timeout**;断言 `watchProcess` 在 timeout_sec 之前返回。
+**single-settle 规格**(v5 修订,F3-v4 fix):`watchProcess` 必须保证**只 settle 一次**,消除 interval / close 边界竞争:
+
+- watcher 持一个 `settled: boolean` 标志,初值 false
+- **所有** emit 路径(`done` / `zombie` / `timeout`)settle 前先检查 `if (settled) return; settled = true;`
+- interval callback 在判 `zombie` / `timeout` 前**先检查 `proc.exitCode !== null || proc.signalCode !== null`** — 若进程已退出,不发 zombie/timeout(让 `close` 事件走 `done` 路径)
+- 任一最终事件(done/zombie/timeout)后立即调 `stop()`(clearInterval + 移除 proc listener)
+- 边界 case:进程在 timeout 边界写完合法 JSON 并退出,interval 与 close 近同时触发 → single-settle 保证只返回一次,且**优先 done**(interval 先检查 exitCode 发现已退出 → 不发 timeout)
+
+**unit test**(2 个):
+- stub codex 写合法 JSON 后 `exit 0` → watcher emit `done` exitCode=0,**不等 timeout**;断言 `watchProcess` 在 timeout_sec 之前返回
+- 进程在 timeout 边界退出(interval 与 close 近同时)→ `watchProcess` 只返回一次,且 kind=done(F3-v4 fix single-settle 边界)
 
 ### Step 2.6: `state-machine.ts`(v2 新增,F1 fix;v3 修订加 timeout — F3-v2 fix)
 
@@ -414,9 +424,9 @@ state-machine 模块只放纯类型 + 分类 helper;runner Step 5.2 的 `runExte
 - `timeout`:总超时 BUT output mtime 仍在更新 — codex 还活着但跑太久
 - **两者都必须 kill 进程 + cancel job**(F3-v2 fix 关键:v2 只 kill zombie,timeout 的 codex 进程会残留与 retry 竞争写 output file)
 
-### Step 2.7: 写 4 + 5 + 4 + 4 + 3 + 0 = 20 unit test 覆盖每模块
+### Step 2.7: 写 4 + 5 + 4 + 4 + 5 + 0 = 22 unit test 覆盖每模块(v5:output-watcher 3→5,加 done happy + single-settle 边界)
 
-state-machine 是纯类型 + 1 个 helper,`isFailureOutcome` 的覆盖并入 runner integration test(§7 Step 5.3 F-1..F-12)。trend-analyzer 4 fixture(data_insufficient / strict_decrease / stable / increase|fluctuate)。
+state-machine 是纯类型 + 1 个 helper,`isFailureOutcome` 的覆盖并入 runner integration test(§7 Step 5.3 F-1..F-13)。trend-analyzer 4 fixture(data_insufficient / strict_decrease / stable / increase|fluctuate)。
 
 ### Step 2.8: commit Task 2
 
@@ -546,7 +556,15 @@ async function runStage(stage: StageName, changeId: string): Promise<number> {
 
   for (const entry of entries) {
     if (!entry.enabled) continue;
-    await runExtension(entry, stage, changeId, config);  // 传整个 normalized config(拿 severity_map / user_interaction)
+    // v5 修订(F1-v4 fix):per-entry try/catch — runExtension 内的非 RoundOutcome
+    // 异常(buildPrompt / threadMap.save / askUser / dispatchFix / writePendingFindings
+    // 等 reject)必须被隔离,否则一个 entry 异常打穿整个 stage,后续 enabled
+    // entries 不跑,违背 loose 不互相影响语义。
+    try {
+      await runExtension(entry, stage, changeId, config);
+    } catch (err) {
+      log(`[runStage] extension '${entry.name}' 抛出非预期异常(已隔离,继续下一 entry):${(err as Error).message}`);
+    }
   }
   return 0;   // 永远 exit 0(loose)
 }
@@ -724,9 +742,14 @@ async function runOneRound(params): Promise<RoundOutcome> {
   return { kind: 'unconverged', convergence };
 }
 
-// terminateRound(v4 新增,F3-v3 fix):终结 zombie/timeout 轮次的进程。
-// 顺序保证:本地 proc.kill() 在不可跳过路径先执行;cancel 是 best-effort。
+// terminateRound(v4 新增,F3-v3 fix;v5 修订 F2-v4 fix:SIGKILL 后再确认 close)。
+// 终结 zombie/timeout 轮次的进程。terminateRound resolve 时进程**已确认 close**
+// (或明确记录"无法确认终止")— runner 据此保证 retry 不与旧进程竞争。
 async function terminateRound(proc: ChildProcess, jobId: string | null): Promise<void> {
+  // 0. v5 修订(F2-v4 fix):入口先订阅 close,避免后续错过事件
+  //    proc 已 spawn,close 可能在任意时刻派发 — 提前挂 listener。
+  const closePromise: Promise<void> = once(proc, 'close').then(() => undefined);
+
   // 1. 本地 kill — 必须先做,不被 cancel 失败阻断
   try {
     proc.kill();  // SIGTERM
@@ -743,11 +766,19 @@ async function terminateRound(proc: ChildProcess, jobId: string | null): Promise
     }
   }
 
-  // 3. 等进程真正 close;超时则强杀(SIGKILL)
+  // 3. 等 SIGTERM 后 close;超时 → SIGKILL → **再次等 close**(F2-v4 fix:
+  //    v4 缺陷是 SIGKILL 后立即 return,close 是异步事件未确认)
   try {
-    await withTimeout(once(proc, 'close'), 3000);
+    await withTimeout(closePromise, 3000);
+    return;  // ✓ SIGTERM 后正常 close
   } catch {
     proc.kill('SIGKILL');
+  }
+  try {
+    await withTimeout(closePromise, 3000);  // 第二次等待 — SIGKILL 后确认 close
+  } catch {
+    // 第二次仍超时 — 明确记录"无法确认终止"(极端情况,如僵死内核态)
+    log(`[terminateRound] ⚠️ 进程 ${proc.pid} SIGKILL 后仍未确认 close — 无法确认终止;retry 风险标记`);
   }
 }
 ```
@@ -791,7 +822,7 @@ function judgeConvergence(
 }
 ```
 
-### Step 5.3: 19 integration scenario(v4 修订 — 7 happy + 12 失败路径;F6 + F1-v2 + F3-v2 + F1-v3/F2-v3/F3-v3 fix)
+### Step 5.3: 20 integration scenario(v5 修订 — 7 happy + 13 失败路径;累计 F6 + F1-v2/v3 + F3-v2/v3 + F1-v4 fix)
 
 **7 Happy Path Scenarios**(v4 加第 7 个 — F1-v3 fix):
 
@@ -805,7 +836,7 @@ function judgeConvergence(
 | max_rounds_on_exceed=force_end → 写 pending-findings.yaml | round 10 不 ask,直接落 backlog |
 | **codex 正常 exit 0 → watcher emit `done` 不等 timeout(v4 新增,F1-v3 fix)** | stub codex 写合法 JSON 后 exit 0 → `proc.close` 触发 → watcher emit `done` exitCode=0 → **在 timeout_sec 之前** runOneRound 返回 converged;assert 总耗时 ≪ timeout_sec |
 
-**12 Failure Path Scenarios**(v4 修订 — F6 8 个 + F1-v2/F3-v2 + F2-v3/F3-v3 各加):
+**13 Failure Path Scenarios**(v5 修订 — F6 8 个 + F1-v2/F3-v2 + F2-v3/F3-v3 + F1-v4 各加):
 
 | Scenario | 验证 |
 |---|---|
@@ -820,7 +851,8 @@ function judgeConvergence(
 | F-9 timeout 进程被 kill 且不进 max_rounds(F3-v2 fix;v4 强化) | output mtime 持续更新直到 timeout_sec → RoundOutcome.kind=timeout → `terminateRound` 先 proc.kill();assert codex 进程已终止 + 进 retry attempt |
 | F-10 entry partial convergence 仍可 judge(F1-v2 fix) | config entry 只覆盖 `convergence: { max_rounds: 20 }` → validateStageExtensionsConfig 深合并 → judgeConvergence 不抛异常 |
 | **F-11 thread_id 缺失轮次保留旧 thread(v4 新增,F2-v3 fix)** | round1 codex 返 `cdx-123` 写入 map;round2 resume 后 codex 输出**缺** `thread_id`(judgeConvergence threadId=null)→ recordRound 写回 `null ?? threadId` 保留 `cdx-123`;round3 仍 `--resume cdx-123` |
-| **F-12 terminateRound:jobId=null + cancel reject 进程仍终止(v4 新增,F3-v3 fix)** | (a) `jobId=null` → 跳过 cancelCodexJob,proc 仍被 kill;(b) `cancelCodexJob` reject → 已先 proc.kill(),错误被吞 + log;两 case 都 assert 进程最终 close / SIGKILL |
+| F-12 terminateRound:jobId=null + cancel reject 进程仍终止(F3-v3 fix;v5 强化)| (a) `jobId=null` → 跳过 cancelCodexJob,proc 仍被 kill;(b) `cancelCodexJob` reject → 已先 proc.kill(),错误被吞 + log;(c) **SIGTERM 被忽略 → SIGKILL → 再次等 close**(v5,F2-v4 fix);三 case 都 assert 进程最终确认 close |
+| **F-13 单 entry 非 RoundOutcome 异常被隔离(v5 新增,F1-v4 fix)** | entry A 的 `buildPrompt` 或 `threadMap.save` reject → runStage per-entry try/catch 捕获 + log → entry B 仍被执行 → CLI exit 0(loose 不打穿)|
 
 ### Step 5.4: commit Task 5
 
@@ -887,15 +919,15 @@ assert 5 个 commands/*.md 末尾段的 5 个 stage 字段都正确(grep 命令�
 
 详见 §2 "**测试 inventory 单一来源**" 表。本 Task 任务是**校对各 Task commit 后的累计 test 数符合 §2 表预期**,不增加新 test 项。
 
-权威累计:1018 baseline + 12 B-full(已 ship) + 49 本 plan 新增 = **1079 target**。
+权威累计:1018 baseline + 12 B-full(已 ship) + 52 本 plan 新增 = **1082 target**。
 
 ### Step 7.2: 跑全 suite
 
 ```bash
-pnpm test  # 期望 1079 PASS
-# 若 PASS 数 != 1079,跨 Task 1-6 commit 各回查累计
+pnpm test  # 期望 1082 PASS
+# 若 PASS 数 != 1082,跨 Task 1-6 commit 各回查累计
 
-# 同时显式跑 12 失败路径(F6 + F1-v2/v3 + F3-v2/v3 关键 case):
+# 同时显式跑 13 失败路径(F6 + F1-v2/v3 + F3-v2/v3 + F1-v4 关键 case):
 pnpm vitest run tests/cli/stage-extensions.test.ts -t "failure path"
 ```
 
@@ -936,7 +968,7 @@ pnpm vitest run tests/cli/stage-extensions.test.ts -t "failure path"
 ### Step 8.4: `README.md` 更新
 
 - §"核心交付" 加 "stage_extensions framework"(plan-stage-extensions-framework)bullet
-- §状态段 update 测试数 1018 → 1079
+- §状态段 update 测试数 1018 → 1082
 
 ### Step 8.5: commit Task 8
 
@@ -964,7 +996,7 @@ pnpm typecheck && pnpm lint && pnpm format:check && pnpm build && pnpm test
 - **Added — CLI**:`forge stage-extensions run` 子命令(显式状态机 / 拆 retry+round budget / 僵尸检测 cancel)
 - **Added — Core**:`src/core/stage-extensions/` 6 模块 + `src/core/codex-review/prompts/adversarial-default.md`(B-full Task 0 已 ship 通用模板)
 - **Added — Skills + Templates**:`commands/*.md` 5 处末尾段(brainstorm/propose/apply/review/verify)+ 1 个新 slash 命令 `commands/codex-adversarial.md`(B-full Task 0 已 ship)
-- **Added — Tests**:61 incremental tests(B-full Task 0 ship 12 + plan 实施 49;1018 baseline + 61 = 1079 total)
+- **Added — Tests**:64 incremental tests(B-full Task 0 ship 12 + plan 实施 52;1018 baseline + 64 = 1082 total)
 - **Added — Docs**:`docs/stage-extensions.md`(framework 协议)+ `docs/codex-review.md`(用户指南)+ `docs/getting-started.md` 嵌入 deep-dive + README 更新
 - **Acknowledgments**:Codex 对抗性 review N 轮(plan v1 → v2 已经 ship 1 轮发现 1 BLOCKER + 5 MAJOR + 1 MINOR 全 accept 修订;后续 v2 → v3 视情况;沿 v1.0/v1.1 ack 模式)
 
@@ -986,9 +1018,9 @@ gh pr create --title "feat: stage-extensions framework + codex review integratio
 
 ## Test plan
 - [x] `pnpm typecheck && pnpm lint && pnpm format:check && pnpm build && pnpm test`
-- [x] 1018 + 61(12 B-full + 49 本 plan)= 1079 tests pass
+- [x] 1018 + 64(12 B-full + 52 本 plan)= 1082 tests pass
 - [x] config schema validation 边界 case 覆盖
-- [x] integration test 19 scenario:7 happy + 12 failure path(F-1..F-12 详 plan §7 Step 5.3)
+- [x] integration test 20 scenario:7 happy + 13 failure path(F-1..F-13 详 plan §7 Step 5.3)
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 EOF
@@ -1043,8 +1075,13 @@ git push origin v1.2.0
   - **F1-v3 MAJOR** OutputWatcher 没定义 `done` 产生 → 正常退出轮次误判:§2.5 watcher 构造函数加 `proc` 参数 + 明确监听 `proc.once('close')` emit `done` + 立即 clearInterval;加第 7 个 happy-path test(codex exit 0 不等 timeout)
   - **F2-v3 MAJOR** `thread_id: null` 覆盖已有 thread → resume 静默失效:§7 runner recordRound 写回改 `outcome.convergence.threadId ?? threadId`(本轮缺失保留旧值);加 F-11 test
   - **F3-v3 MAJOR** timeout/zombie 先 cancel 后 kill,cancel 失败留进程:§7 加 `terminateRound` helper — 先 `proc.kill()`(不可跳过)再 best-effort cancel(jobId null 跳过 + 5s timeout + 吞错)+ 等 close 否则 SIGKILL;加 F-12 test
-  - 测试 19 scenario(7 happy + 12 failure)/ 总目标 1079(61 incremental)
-- (待:v5 — 若第 4 轮 Codex review 仍有 BLOCKER/MAJOR)
+  - 测试(v4 当时)19 scenario(7 happy + 12 failure)/ 总目标 1079(61 incremental)
+- **v5**(2026-05-15):Codex 对抗性 review 第 4 轮跑完(plan v4 commit `7810765` 后)。Codex 确认 v4 thread_id 保留修复成立。收敛趋势 block 桶 6→4→3→2,持续递减。Codex 拿 0 BLOCKER + 2 MAJOR + 1 MINOR,全独立核实真问题(0 误报),全 accept 修订:
+  - **F1-v4 MAJOR** 单 entry 非 RoundOutcome 异常打穿 loose 隔离:§7 `runStage` 每个 entry 加 `try/catch`(隔离 buildPrompt / threadMap.save / askUser / dispatchFix / writePendingFindings 等 reject)+ log + 继续下一 entry;加 F-13 test
+  - **F2-v4 MAJOR** `terminateRound` SIGKILL fallback 未确认 close:§7 terminateRound 入口先订阅 `closePromise`,SIGTERM 等待超时 → SIGKILL → **再次等 close**,第二次仍超时则记录"无法确认终止";F-12 test 加 SIGKILL case
+  - **F3-v4 MINOR** OutputWatcher 无 single-settle 防护:§2.5 加 `settled` flag 规格(所有 emit 路径先检查 + interval 发 zombie/timeout 前检查 `proc.exitCode`),output-watcher unit test 3→5(加 done happy + single-settle 边界)
+  - 测试 20 scenario(7 happy + 13 failure)/ 总目标 1082(64 incremental)
+- (待:v6 — 若第 5 轮 Codex review 仍有 BLOCKER/MAJOR)
 
 ---
 
@@ -1053,7 +1090,7 @@ git push origin v1.2.0
 每条都是真 shell 断言(`test` / `grep -q` / `[ ]`),exit code 0 = 通过;不需推理:
 
 - [ ] **全 5 verify exit 0**:`pnpm typecheck && pnpm lint && pnpm format:check && pnpm build && pnpm test`
-- [ ] **总测试 1079 PASS**:`pnpm test 2>&1 | grep -E "Tests +.*1079 passed"`
+- [ ] **总测试 1082 PASS**:`pnpm test 2>&1 | grep -E "Tests +.*1082 passed"`
 - [ ] **CHANGELOG 段存在**:`grep -q "^## \[1.2.0\]" CHANGELOG.md`
 - [ ] **CHANGELOG 含 finding 修订记录**(v3 修订,F4-v2 fix — grep `CHANGELOG.md` 不是 plan 文件):`test "$(grep -cE '\b(F1|F2|F3|F4|F5|F6|F7)\b' CHANGELOG.md)" -ge 7`
 - [ ] **PR 已合并到 main**:`git log main --oneline | head -1 | grep -E "stage-extensions"`(必须 PR 合并后才存在该 commit)
@@ -1063,6 +1100,6 @@ git push origin v1.2.0
 - [ ] **5 commands/*.md 末尾段一致**:`test "$(grep -l 'stage-extensions run' commands/*.md | wc -l)" -eq 5`
 - [ ] **commands sync 一致**:`test "$(grep -l 'stage-extensions run' src/core/templates/commands/*.md | wc -l)" -eq 5`
 - [ ] **helper harness-agnostic**:`test "$(grep -cE 'process\.env\.(CLAUDE_PLUGIN_ROOT|FORGE_PLUGIN_ROOT)' scripts/codex-review-helper.mjs)" -eq 0`(沿 B-full Task 0 harness-compat test 同协议)
-- [ ] **12 failure path tests 跑过**:`pnpm vitest run tests/cli/stage-extensions.test.ts -t "failure path" 2>&1 | grep -E "12 passed"`
+- [ ] **13 failure path tests 跑过**:`pnpm vitest run tests/cli/stage-extensions.test.ts -t "failure path" 2>&1 | grep -E "13 passed"`
 - [ ] **docs 文档存在 + 含 quick start**:`for f in docs/stage-extensions.md docs/codex-review.md; do grep -qi "quick start" "$f" || { echo "MISSING quick start in $f"; exit 1; }; done`
 - [ ] **README §核心交付 含 stage-extensions**:`grep -q "stage-extensions" README.md`

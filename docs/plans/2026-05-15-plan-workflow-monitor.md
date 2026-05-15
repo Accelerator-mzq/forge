@@ -488,7 +488,8 @@ describe('maybeRecordCliExit', () => {
     maybeRecordCliExit(root, ['verify', '2026-05-15-x'], 1);
     const recs = readCliExits(root);
     expect(recs).toHaveLength(1);
-    expect(recs[0]).toMatchObject({ command: ['verify', '2026-05-15-x'], exit_code: 1 });
+    expect(recs[0]?.command).toEqual(['verify', '2026-05-15-x']); // ?. — noUncheckedIndexedAccess
+    expect(recs[0]?.exit_code).toBe(1);
   });
   it('argv 以 monitor 开头 → 跳过自身,不记录', () => {
     enable();
@@ -578,10 +579,10 @@ git commit -m "feat(monitor): exit 处理器接入 CLI 入口"
 - Create: `src/core/monitor/artifact-observer.ts`
 - Test: `tests/core/monitor/artifact-observer.test.ts`
 
-- [ ] **Step 1: 确认 marker 文件位置**
+- [ ] **Step 1: 确认 marker / archive_summary 文件位置**
 
-Run: `grep -rn "verify-passed\|review-passed\|archive_summary" src/cli/commands/archive.ts | head -20`
-Expected: 看到 archive CLI 读取的 marker 文件名与路径。确认 marker 文件位于 `forge/changes/<change-id>/` 下、文件名形如 `.verify-passed` / `.review-passed`,archive summary 位于 `forge/changes/archive/<archive-id>/archive_summary.yaml`。**实现 Step 3 时以此处实际路径为准。**
+Run: `grep -rn "verify-passed\|review-passed\|archive_summary\|changes/archive" src/cli/commands/archive.ts | head -30`
+Expected: 确认 (a) marker 文件位于 `forge/changes/<change-id>/` 下、文件名形如 `.verify-passed` / `.review-passed` / `.verify-failed` / `.review-failed`;(b) archive 成功后 change 目录移到 **`forge/changes/archive/<YYYY-MM-DD>-<change-id>/`**(`transaction.ts:56` 给目录名加 `archiveDate-` 前缀),`archive_summary.yaml` 也写在那里。**实现 Step 4 时以此处实际路径为准 —— observer 不知道 archiveDate,须按正则反解目录名。**
 
 - [ ] **Step 2: 写失败测试**
 
@@ -599,17 +600,21 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-function writeVerifyMarker(changeId: string): void {
+const HASH_A = 'sha256:' + 'a'.repeat(64);
+const HASH_B = 'sha256:' + 'b'.repeat(64);
+
+/** 写一个合法的 verify marker 到 active change 目录 */
+function writeVerifyMarker(changeId: string, taskHash: string = HASH_A): void {
   const dir = join(root, 'forge', 'changes', changeId);
   mkdirSync(dir, { recursive: true });
   writeFileSync(
     join(dir, '.verify-passed'),
     [
       'schema: forge-verify/v1',
-      'verified_at: 2026-05-15T01:00:00.000Z',
+      'verified_at: 2026-05-15T01:00:00Z', // marker-schema ISO 正则不接受毫秒
       'verified_by: ai-agent',
-      'tasks_hash: abc',
-      'content_hash: def',
+      `tasks_hash: ${taskHash}`,
+      `content_hash: ${HASH_B}`,
       'evidence: []',
     ].join('\n') + '\n',
     'utf8',
@@ -620,35 +625,82 @@ describe('observeArtifacts', () => {
   it('无 change 目录 → 空事件', () => {
     expect(observeArtifacts(root, '无此 change')).toEqual([]);
   });
-  it('存在 verify marker → 产出 marker_observed 事件', () => {
+
+  it('合法 verify marker → marker_observed,含 hashes 与 ok=true', () => {
     writeVerifyMarker('2026-05-15-x');
     const events = observeArtifacts(root, '2026-05-15-x');
     const m = events.find((e) => e.event === 'marker_observed');
     expect(m).toBeDefined();
     expect(m?.layer).toBe('cli');
-    expect(m?.data.marker_schema).toBe('forge-verify/v1');
     expect(m?.stage).toBe('verify');
+    expect(m?.data.marker_schema).toBe('forge-verify/v1');
+    expect(m?.data.ok).toBe(true);
+    expect((m?.data.hashes as Record<string, unknown>).tasks_hash).toBe(HASH_A);
+    expect(m?.ts).toBe('2026-05-15T01:00:00Z'); // 事件 ts = marker 的 verified_at,非观察时刻
   });
-  it('marker 文件损坏 → 不抛,产出 record_error 事件', () => {
+
+  it('hash 格式非法的 marker → marker_observed 但 ok=false', () => {
+    writeVerifyMarker('2026-05-15-bad', '非法hash');
+    const events = observeArtifacts(root, '2026-05-15-bad');
+    const m = events.find((e) => e.event === 'marker_observed');
+    expect(m?.data.ok).toBe(false);
+  });
+
+  it('marker YAML 损坏 → record_error,不抛', () => {
     const dir = join(root, 'forge', 'changes', '2026-05-15-y');
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, '.verify-passed'), ': : 损坏 : :\n', 'utf8');
+    writeFileSync(join(dir, '.verify-passed'), '{ this is: [unclosed\n', 'utf8');
     const events = observeArtifacts(root, '2026-05-15-y');
     expect(events.some((e) => e.event === 'record_error')).toBe(true);
+  });
+
+  it('archive 目录有 archive_summary.yaml → fence_observed(archive 阶段)', () => {
+    // archive 目录名带 <YYYY-MM-DD>- 前缀(transaction.ts:56);changeId 仍是 2026-05-15-z
+    const adir = join(root, 'forge', 'changes', 'archive', '2026-05-16-2026-05-15-z');
+    mkdirSync(adir, { recursive: true });
+    writeFileSync(
+      join(adir, 'archive_summary.yaml'),
+      [
+        'schema: forge-archive-summary/v1',
+        'version: 1.0.0',
+        'archived_at: 2026-05-15T02:00:00Z',
+        'change_id: 2026-05-15-z',
+        'verify_passed: { verified_invariants: [] }',
+        'review_passed: { reviewers: [ai-agent] }',
+        'process_evidence_summary: { placeholder: true }',
+        'handoff_to_backlog: []',
+        'acked_warnings: []',
+        'pending_suggestions: []',
+      ].join('\n') + '\n',
+      'utf8',
+    );
+    const events = observeArtifacts(root, '2026-05-15-z');
+    const f = events.find((e) => e.event === 'fence_observed');
+    expect(f).toBeDefined();
+    expect(f?.stage).toBe('archive');
+    expect(f?.data.ok).toBe(true);
   });
 });
 ```
 
-- [ ] **Step 3: 实现 `src/core/monitor/artifact-observer.ts`**
+- [ ] **Step 3: 运行测试确认失败**
+
+Run: `pnpm vitest run tests/core/monitor/artifact-observer.test.ts`
+Expected: FAIL —— `Cannot find module '.../monitor/artifact-observer.js'`。
+
+- [ ] **Step 4: 实现 `src/core/monitor/artifact-observer.ts`**
 
 ```typescript
-// src/core/monitor/artifact-observer.ts — 把 forge 常规产物反推成 CLI 层 trace 事件(spec §3.2)
-import { existsSync, readFileSync } from 'node:fs';
+// src/core/monitor/artifact-observer.ts — 把 forge 常规产物反推成 CLI 层 trace 事件(spec §3 / §3.2)
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { parse as parseYAML } from 'yaml';
 import { parseMarker } from '../markers/parse.js';
+import { validateMarkerSchema } from '../validate/marker-schema.js';
+import { validateArchiveSummarySchema } from '../validate/archive-summary-schema.js';
 import type { TraceEvent, MonitorStage } from './types.js';
 
-/** marker 文件名 → 监控阶段。以 Step 1 确认的实际文件名为准。 */
+/** marker 文件名 → 监控阶段(以 Step 1 确认的实际文件名为准) */
 const MARKER_FILES: Record<string, MonitorStage> = {
   '.verify-passed': 'verify',
   '.verify-failed': 'verify',
@@ -661,9 +713,11 @@ function mkEvent(
   stage: MonitorStage,
   event: string,
   data: Record<string, unknown>,
+  ts?: string,
 ): TraceEvent {
   return {
-    ts: new Date().toISOString(),
+    // 优先用产物自带时间戳;缺失才回退观察时刻 —— 报告时间线才不乱序(Codex 计划审查第 4 轮 检查点 3)
+    ts: ts ?? new Date().toISOString(),
     schema: 'forge-monitor-trace/v1',
     change_id: changeId,
     stage,
@@ -673,50 +727,135 @@ function mkEvent(
   };
 }
 
-/**
- * 扫描某 change 的产物目录,反推 CLI 层事件(marker_observed 等)。
- * 这些产物是 forge 常规输出、与监控开关无关,故可回溯 enable 之前的阶段(spec §2.4)。
- * 单个产物解析失败不抛,产出一条 record_error 事件。
- */
-export function observeArtifacts(projectRoot: string, changeId: string): TraceEvent[] {
+/** 扫一个目录里的 4 个 marker 文件,产出 marker_observed / record_error 事件 */
+function observeMarkers(dir: string, relBase: string, changeId: string): TraceEvent[] {
   const events: TraceEvent[] = [];
-  const changeDir = join(projectRoot, 'forge', 'changes', changeId);
-  if (!existsSync(changeDir)) return events;
-
   for (const [fileName, stage] of Object.entries(MARKER_FILES)) {
-    const markerPath = join(changeDir, fileName);
+    const markerPath = join(dir, fileName);
     if (!existsSync(markerPath)) continue;
+    const relPath = join(relBase, fileName);
     try {
       const marker = parseMarker(readFileSync(markerPath, 'utf8'));
+      // marker 是 union 类型;失败类 marker 无 hash 字段,转 record 安全取值
+      const obj = marker as unknown as Record<string, unknown>;
+      const validation = validateMarkerSchema(marker, markerPath);
+      // 事件 ts 取 marker 自带时间戳(verify→verified_at / review→reviewed_at / failed→failed_at);
+      // 报告「阶段时间线」按真实时序排序才有意义(Codex 计划审查第 4 轮 检查点 3)。
+      // 用 typeof runtime guard 而非 as 断言 —— schema-invalid marker 的时间戳字段可能不是 string,
+      // as 会让非 string 值漏进 TraceEvent.ts,致 Task 11 排序 localeCompare 崩溃(第 5 轮 Finding 1)
+      const markerTs =
+        typeof obj.verified_at === 'string'
+          ? obj.verified_at
+          : typeof obj.reviewed_at === 'string'
+            ? obj.reviewed_at
+            : typeof obj.failed_at === 'string'
+              ? obj.failed_at
+              : undefined;
       events.push(
-        mkEvent(changeId, stage, 'marker_observed', {
-          marker_schema: marker.schema,
-          path: join('forge', 'changes', changeId, fileName),
-        }),
+        mkEvent(
+          changeId,
+          stage,
+          'marker_observed',
+          {
+            marker_schema: marker.schema,
+            path: relPath,
+            hashes: { tasks_hash: obj.tasks_hash, content_hash: obj.content_hash },
+            ok: validation.valid, // spec §3.2:ok = marker schema 校验是否通过
+            observed_at: new Date().toISOString(), // observer 实际跑的时刻,与 ts 区分
+          },
+          markerTs,
+        ),
       );
     } catch (err) {
       events.push(
-        mkEvent(changeId, stage, 'record_error', {
-          path: join('forge', 'changes', changeId, fileName),
-          error: (err as Error).message,
-        }),
+        mkEvent(changeId, stage, 'record_error', { path: relPath, error: (err as Error).message }),
       );
     }
   }
   return events;
 }
+
+/**
+ * 扫描某 change 的产物,反推 CLI 层事件(spec §3 / §3.2)。
+ * 同时扫 active 目录 forge/changes/<id>/ 与 archive 目录 forge/changes/archive/<id>/
+ * —— 产物是 forge 常规输出、与监控开关无关,故可回溯 enable 之前的阶段(spec §2.4)。
+ * 单个产物解析失败不抛,产出一条 record_error 事件。
+ */
+export function observeArtifacts(projectRoot: string, changeId: string): TraceEvent[] {
+  const events: TraceEvent[] = [];
+
+  // 1. active change 目录的 marker
+  const activeDir = join(projectRoot, 'forge', 'changes', changeId);
+  if (existsSync(activeDir)) {
+    events.push(...observeMarkers(activeDir, join('forge', 'changes', changeId), changeId));
+  }
+
+  // 2. archive 目录 —— archive 成功后 change 移到 forge/changes/archive/<YYYY-MM-DD>-<changeId>/
+  //    (transaction.ts:56 给目录名加 archiveDate 前缀;monitor 不知 archiveDate,按正则反解;
+  //     Codex 计划审查第 2 轮 F-2 / 新-1 / 新-3)
+  const archiveRoot = join(projectRoot, 'forge', 'changes', 'archive');
+  if (existsSync(archiveRoot)) {
+    for (const entry of readdirSync(archiveRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      // 目录名 = <YYYY-MM-DD>-<changeId>;剥一层日期前缀,余下须严格等于 changeId
+      const m = /^\d{4}-\d{2}-\d{2}-(.+)$/.exec(entry.name);
+      if (!m || m[1] !== changeId) continue;
+
+      const archiveDir = join(archiveRoot, entry.name);
+      const archiveRel = join('forge', 'changes', 'archive', entry.name);
+      events.push(...observeMarkers(archiveDir, archiveRel, changeId));
+
+      // archive_summary.yaml —— 三级 fence 的 archive 侧裁决产物(spec §3.2)
+      const summaryPath = join(archiveDir, 'archive_summary.yaml');
+      if (!existsSync(summaryPath)) continue;
+      const summaryRel = join(archiveRel, 'archive_summary.yaml');
+      try {
+        const summary = parseYAML(readFileSync(summaryPath, 'utf8')) as unknown;
+        // Codex 计划审查第 2 轮 新-2:用完整 schema 校验定 ok,而非浅守卫 looksLikeArchiveSummary
+        const validation = validateArchiveSummarySchema(summary, summaryPath);
+        const s = (summary ?? {}) as Record<string, unknown>;
+        events.push(
+          mkEvent(
+            changeId,
+            'archive',
+            'fence_observed',
+            {
+              level: 'archive',
+              ok: validation.valid,
+              path: summaryRel,
+              verify_passed: s.verify_passed,
+              review_passed: s.review_passed,
+              process_evidence_summary: s.process_evidence_summary,
+              observed_at: new Date().toISOString(),
+            },
+            typeof s.archived_at === 'string' ? s.archived_at : undefined, // ts 取 archived_at,typeof guard(第 5 轮 Finding 1)
+          ),
+        );
+      } catch (err) {
+        events.push(
+          mkEvent(changeId, 'archive', 'record_error', {
+            path: summaryRel,
+            error: (err as Error).message,
+          }),
+        );
+      }
+    }
+  }
+
+  return events;
+}
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [ ] **Step 5: 运行测试确认通过**
 
 Run: `pnpm vitest run tests/core/monitor/artifact-observer.test.ts`
-Expected: PASS。
+Expected: PASS(5 个用例全绿)。
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add src/core/monitor/artifact-observer.ts tests/core/monitor/artifact-observer.test.ts
-git commit -m "feat(monitor): artifact-observer 反推 CLI 层事件"
+git commit -m "feat(monitor): artifact-observer 反推 CLI 层事件(含 archive_summary)"
 ```
 
 ---
@@ -812,13 +951,15 @@ export function findScenario(id: string): DivergenceScenario | undefined {
 
 - [ ] **Step 4: 补全其余 5 个阶段的场景(挖掘 OpenSpec/superpowers)**
 
+**上游仓位置(Codex 计划审查第 1 轮 F-3)**:`OpenSpec/` 与 `superpowers/` 是 `forge-repo/` 的 **sibling 仓**,位于项目根 `D:\ClaudeProject\opsp\` 下 —— 从 `forge-repo` 当前目录看即 `../OpenSpec/` 与 `../superpowers/`。挖掘前先确认这两个目录存在(`ls ../OpenSpec ../superpowers`);若不存在,向 msc 确认获取方式后再做本 Step。
+
 逐项挖掘并向 `DIVERGENCE_MAP.scenarios` 数组追加场景,直到 `brainstorm` / `propose` / `apply` / `review` / `explore` 每个阶段**至少 1 条**(spec §6 要求覆盖 7 个可对比阶段)。每条按下面的清单做:
 
-- `brainstorm` —— 读 `superpowers/skills/brainstorming/SKILL.md` 与 OpenSpec proposal 流程,场景示例:「用户给一句话需求,要不要先问澄清问题」。
-- `propose` —— 读 `OpenSpec` 的 propose/change 流程与 forge `commands/propose.md`,场景示例:「proposal 与 spec 产物的强校验差异」。
-- `apply` —— 读 superpowers `subagent-driven-development` / `test-driven-development` 与 forge `commands/apply.md`,场景示例:「子任务发现 scope 外问题时 Fluid Pause 三选项」。
-- `review` —— 读 superpowers `requesting-code-review` 与 forge `commands/review.md`,场景示例:「review finding 的 severity 分级与 ack」。
-- `explore` —— 读 superpowers `exploring` 与 forge `commands/explore.md`,场景示例:「探索结论是否要落产物」。
+- `brainstorm` —— 读 `../superpowers/skills/brainstorming/SKILL.md` 与 `../OpenSpec/` 的 proposal 流程,场景示例:「用户给一句话需求,要不要先问澄清问题」。
+- `propose` —— 读 `../OpenSpec/` 的 propose/change 流程与 forge `commands/propose.md`,场景示例:「proposal 与 spec 产物的强校验差异」。
+- `apply` —— 读 `../superpowers/skills/subagent-driven-development/` 与 `../superpowers/skills/test-driven-development/` 及 forge `commands/apply.md`,场景示例:「子任务发现 scope 外问题时 Fluid Pause 三选项」。
+- `review` —— 读 `../superpowers/skills/requesting-code-review/` 与 forge `commands/review.md`,场景示例:「review finding 的 severity 分级与 ack」。
+- `explore` —— 读 `../superpowers/skills/exploring/` 与 forge `commands/explore.md`,场景示例:「探索结论是否要落产物」。
 
 每条场景的 `openspec` / `superpowers` 写「未加固基线」走法,`forge` 写加固后走法,`regression_signal` 写「什么 trace 模式 = forge 塌回基线」。`meta.synced_against` 的 `openspec` / `superpowers` 从 `'unknown'` 改成挖掘时 `OpenSpec/` 与 `superpowers/` 两仓的实际 commit/版本号。
 
@@ -872,14 +1013,14 @@ describe('computeVerdict', () => {
       ev({ layer: 'ai', event: 'hardening_step', data: { step: '三维 verify', executed: false } }),
     ]);
     expect(v.level).toBe('regression');
-    expect(v.items[0].kind).toBe('regression');
+    expect(v.items[0]?.kind).toBe('regression'); // ?. — tsconfig noUncheckedIndexedAccess
   });
   it('stage 有 CLI 事件但无 AI stage_enter → anomaly', () => {
     const v = computeVerdict([
       ev({ layer: 'cli', event: 'marker_observed', stage: 'verify' }),
     ]);
     expect(v.level).toBe('anomaly');
-    expect(v.items[0].detail).toMatch(/缺 AI/);
+    expect(v.items[0]?.detail).toMatch(/缺 AI/); // ?. — tsconfig noUncheckedIndexedAccess
   });
   it('hardening 全 executed=true 且有 stage_enter → ok', () => {
     const v = computeVerdict([
@@ -1264,7 +1405,7 @@ describe('forge monitor record', () => {
     const { events } = readTrace(root, '2026-05-15-x');
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ layer: 'ai', event: 'decision', stage: 'verify' });
-    expect(events[0].data.chosen).toBe('走了三维');
+    expect(events[0]?.data.chosen).toBe('走了三维'); // ?. — tsconfig noUncheckedIndexedAccess
   });
   it('监控关闭 → 静默 no-op,不写文件', async () => {
     await run(['record', '--stage', 'verify', '--event', 'stage_enter', '--change', '2026-05-15-y']);
@@ -1679,6 +1820,8 @@ session_context="<EXTREMELY_IMPORTANT>\n...${using_forge_escaped}\n\n${warning_e
 
 - [ ] **Step 4: 手动验证 hook 行为**
 
+> **在 Git Bash 中运行**(forge 项目的标准 shell,见环境约定 —— Windows 11 + Git-Bash)。下面命令是 bash / MSYS 路径风格,PowerShell 下无法直接照抄。
+
 Run(监控关闭时):
 ```bash
 cd /tmp && mkdir -p fm-test/forge && cd fm-test && echo 'schema: forge-spec-driven/v1' > forge/config.yaml && node "$(git -C /d/ClaudeProject/opsp/forge-repo rev-parse --show-toplevel)/hooks/monitor-check.mjs"; echo "exit=$?"
@@ -1717,7 +1860,7 @@ forge/.monitor/
 
 - [ ] **Step 2: `CHANGELOG.md` 记一条**
 
-在 `CHANGELOG.md` 的 `## [Unreleased]`(若无则按 Keep a Changelog 格式新建)的 `### Added` 下加:
+`CHANGELOG.md` 当前 `## [Unreleased]` 区下只有一行占位符 `(暂无)`、无 `### Added` 小节。把 `(暂无)` 这一行替换为 `### Added` 标题,然后在其下插入条目:
 
 ```markdown
 - **workflow-monitor**:低耦合旁路工作流监控观察者。`forge monitor enable` 开启后,记录
@@ -1749,3 +1892,60 @@ git commit -m "docs(monitor): CHANGELOG + cli-reference + gitignore"
 - [ ] **全链路冒烟**:在一个测试项目里 `forge init` → `forge monitor enable` → 确认 `forge/config.yaml` 有 `monitor.enabled: true` → 跑 `forge monitor record --stage verify --event stage_enter --change test-x` → `forge monitor report --change test-x` → 确认报告生成且含四个章节。
 - [ ] **关闭验证**:`forge monitor disable` 后,`forge monitor record ...` 静默无输出、不写 trace;任意 `forge` 命令不再写 `cli-exits.jsonl`。
 - [ ] 确认 `pnpm test` 全绿、release gate 通过。
+
+---
+
+## 修订记录
+
+### 第 1 轮 Codex 对抗性审查后修订(2026-05-16)
+
+Codex 对计划做对抗性审查,提出 4 项 finding,均经独立对照代码核实成立:
+
+| Finding | 核实 | 修正 |
+| ------- | ---- | ---- |
+| F-1 Task 5 `marker_observed` 漏 `hashes` / `ok` 字段(spec §3.2 要求) | 成立 | Task 5 重写:observer 调 `validateMarkerSchema`(`marker-schema.ts:58`,返回 `.valid`)填 `ok`,从 marker 取 `tasks_hash`/`content_hash` 填 `hashes`;测试 fixture 改用合法 sha256 与无毫秒时间戳 |
+| F-2 Task 5 不扫 `forge/changes/archive/<id>/`、漏 `archive_summary.yaml`(spec §3 明列) | 成立 | Task 5 重写:`observeArtifacts` 同时扫 active 与 archive 目录;archive 目录额外读 `archive_summary.yaml`,经 `looksLikeArchiveSummary` 校验后产 `fence_observed`(archive) |
+| F-3 Task 6 上游仓路径写裸名 `superpowers/...`,实为 `forge-repo` 的 sibling | 成立 | Task 6 Step 4 改为 `../OpenSpec/` / `../superpowers/`,并加挖掘前存在性确认 |
+| F-4 Task 13 手动验证命令是 bash 风格,未注明 shell | 成立 | Task 13 Step 4 加注「在 Git Bash 中运行」 |
+
+附带修复:Task 5 原缺「运行确认失败」TDD 步骤,重写时补齐(现为 6 步)。
+
+### 第 2 轮 Codex 对抗性审查后修订(2026-05-16)
+
+Codex 重审:F-1 / F-3 / F-4 确认已修复;F-2 未修好;新提 3 项。均经独立核实:
+
+| Finding | 核实 | 修正 |
+| ------- | ---- | ---- |
+| F-2 / 新-1 / 新-3 archive 目录名带 `<YYYY-MM-DD>-` 前缀,Task 5 第 1 轮的 `archive/<changeId>` 路径仍错 | 成立 | 读 `transaction.ts:56` 确认目录名 = `${archiveDate}-${changeId}`。Task 5 改为 `readdirSync` 扫 `forge/changes/archive/`,用正则 `^\d{4}-\d{2}-\d{2}-(.+)$` 反解、捕获组严格等于 `changeId`。Task 11 传 `changeId` 不变(observeArtifacts 内部反解,新-3 一并解决) |
+| 新-2 `looksLikeArchiveSummary` 只查 schema 字段,残缺 summary 也记 `ok:true` | 成立 | 读 `archive-summary-schema.ts:35` 确认 `validateArchiveSummarySchema` 存在。Task 5 改用它,`ok = validation.valid`;测试 fixture 的 archive 目录改为带日期前缀 `2026-05-16-2026-05-15-z` |
+
+### 第 3 轮 Codex 对抗性审查后修订(2026-05-16)
+
+Codex 重审:第 2 轮全部修订确认有效落地。新提 4 项(1 项「无缺陷」),其余 3 项经独立核实:
+
+| Finding | 核实 | 修正 |
+| ------- | ---- | ---- |
+| Finding 2 Task 7 测试 `v.items[0].kind/.detail` 在 `noUncheckedIndexedAccess` 下 typecheck 失败 | 成立 | 读 `tsconfig.json:10`(`noUncheckedIndexedAccess:true`)+ `tsconfig.test.json:7`(含 `tests/**/*`)确认。改为 `v.items[0]?.kind` / `?.detail` |
+| Finding 3 Task 10 测试 `events[0].data.chosen` 同问题 | 成立 | 改为 `events[0]?.data.chosen` |
+| Finding 4 Task 14 CHANGELOG 指令假设有 `### Added` 节,实为 `(暂无)` 占位符 | 成立 | 读 `CHANGELOG.md:7-9` 确认。Task 14 Step 2 改为「把 `(暂无)` 替换为 `### Added` 标题再插入条目」 |
+
+Finding 1(exit 处理器 `code` 类型)经 Codex 核实无缺陷,不修。
+
+### 第 4 轮 Codex 对抗性审查后修订(2026-05-16)
+
+Codex 收敛性审查:Finding 2/3/4 确认已修复;import 路径/命名、archive_summary fixture YAML、commander 用法均确认无问题。新提 2 项实质问题,经独立核实:
+
+| Finding | 核实 | 修正 |
+| ------- | ---- | ---- |
+| 检查点 3 Task 5 artifact 事件 `ts` 用 `new Date()`(观察时刻)而非产物时刻,Task 11 报告「阶段时间线」按 `ts` 排序会把回扫事件全堆到末尾 | 成立 | `mkEvent` 加 `ts?` 参数;`marker_observed` 取 marker 的 `verified_at`/`reviewed_at`/`failed_at`、`fence_observed` 取 `archived_at` 作 `ts`;观察时刻另记 `data.observed_at`;测试加 `ts` 断言 |
+| 检查点 5 Task 4 测试 `recs[0]` 直接传 `toMatchObject`,与 Finding 2/3 同类未统一修 | 成立 | 改为 `recs[0]?.command` / `recs[0]?.exit_code` 两条 `?.` 断言 |
+
+### 第 5 轮 Codex 对抗性审查后修订(2026-05-16,末轮)
+
+Codex 末轮全局收敛复查:第 4 轮两项修订确认有效;F-1~F-4、新-1~新-3、Finding 2~4、检查点 3/5 修订叠加后无残留矛盾;任务顺序无前向引用阻断。仅剩 1 项真实问题,经核实:
+
+| Finding | 核实 | 修正 |
+| ------- | ---- | ---- |
+| 第 5 轮 Finding 1 Task 5 时间戳用 `as string | undefined` 编译期断言、无运行时检查;schema-invalid marker 的时间戳字段若非 string 会漏进 `TraceEvent.ts`,致 Task 11 排序 `localeCompare` 崩溃 | 成立 | `markerTs` 与 `archived_at` 均改为 `typeof x === 'string'` runtime guard,非 string 即 `undefined`、回退观察时刻 |
+
+**收敛结论**:Codex 末轮判定 —— 该 Finding 修掉后计划已收敛、可进入实施。5 轮对抗性审查累计 13 项 finding(F-1~F-4 / 新-1~新-3 / Finding 2~4 / 检查点 3、5 / 第 5 轮 Finding 1),全部独立对照代码核实为真问题并修正。

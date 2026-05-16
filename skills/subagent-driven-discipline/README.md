@@ -12,16 +12,16 @@
 
 ### 这个 skill 在 `forge:subagent-driven-development` 之上加什么
 
-| upstream skill | 本 skill |
-|---|---|
-| Generic 3-stage 流程(implementer + spec_reviewer + code_quality_reviewer + final_reviewer) | **场景 taxonomy**(28 任务子类 × 显式 model tier × WHY) |
-| 松散 3-tier model 选择("cheap / standard / most-capable") | **§1 28-子类 × model-tier 矩阵**,每行带选型理由 |
-| Generic prompt 模板 | **§2 strict prompt 元素**(per scenario:precondition + 必含元素 + skip 后果) |
-| Status 处理 | **§3.3 inline-fix vs round-2 vs 升级 user 决策树** |
-| Red flags | **§3.1 STRICT cwd verify** + **§3.2 controller cross-verify**(5 类 claim) |
-| (无 cost guidance) | model 列含 cost tier;**§4.2 mid-phase 升级触发** |
-| (无 recovery flow) | **§4.1 cherry-pick recovery**(防 worktree-scope leak) |
-| (无增长机制) | **§3.4 Trigger-Type Matrix retrospect** — 5 trigger types × per-type retrospect intensity 强制 skill 增长 |
+| upstream skill                                                                             | 本 skill                                                                                                  |
+| ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
+| Generic 3-stage 流程(implementer + spec_reviewer + code_quality_reviewer + final_reviewer) | **场景 taxonomy**(28 任务子类 × 显式 model tier × WHY)                                                    |
+| 松散 3-tier model 选择("cheap / standard / most-capable")                                  | **§1 28-子类 × model-tier 矩阵**,每行带选型理由                                                           |
+| Generic prompt 模板                                                                        | **§2 strict prompt 元素**(per scenario:precondition + 必含元素 + skip 后果)                               |
+| Status 处理                                                                                | **§3.3 inline-fix vs round-2 vs 升级 user 决策树**                                                        |
+| Red flags                                                                                  | **§3.1 STRICT cwd verify** + **§3.2 controller cross-verify**(5 类 claim)                                 |
+| (无 cost guidance)                                                                         | model 列含 cost tier;**§4.2 mid-phase 升级触发**                                                          |
+| (无 recovery flow)                                                                         | **§4.1 cherry-pick recovery**(防 worktree-scope leak)                                                     |
+| (无增长机制)                                                                               | **§3.4 Trigger-Type Matrix retrospect** — 5 trigger types × per-type retrospect intensity 强制 skill 增长 |
 
 上游 skill 是 3-stage 流程的**真源**。本 skill **不复制不重写**上游 prompt 模板,只补 controller-side 场景判断。
 
@@ -29,11 +29,11 @@
 
 bundle 已支持三平台,SKILL.md 文件格式三平台一致(YAML frontmatter + markdown);差异在工具名引用 + 安装路径,通过 `references/` 子目录的映射文件解决。
 
-| 平台 | 安装路径 | Skill 调用 | Subagent dispatch | 详细 mapping |
-|---|---|---|---|---|
-| Claude Code | `.claude/skills/<name>/` 或 `~/.claude/skills/<name>/` | `Skill(name)` tool | `Agent` tool + `model:` 参数 | (本身就是真源,无需 mapping) |
-| Codex CLI | `.codex/skills/<name>/` 或 `~/.agents/skills/<name>/` | 自动 load | `spawn_agent` / `wait_agent` / `close_agent`(需 `multi_agent = true`)| `references/codex-tools.md` |
-| OpenCode | `.opencode/skills/<name>/` 或 `.claude/skills/<name>/`(直接复用!)| `skill({name:...})` tool | `Task` tool + agent 定义 in `.opencode/agents/<name>.md` | `references/opencode-tools.md` |
+| 平台        | 安装路径                                                          | Skill 调用               | Subagent dispatch                                                     | 详细 mapping                   |
+| ----------- | ----------------------------------------------------------------- | ------------------------ | --------------------------------------------------------------------- | ------------------------------ |
+| Claude Code | `.claude/skills/<name>/` 或 `~/.claude/skills/<name>/`            | `Skill(name)` tool       | `Agent` tool + `model:` 参数                                          | (本身就是真源,无需 mapping)    |
+| Codex CLI   | `.codex/skills/<name>/` 或 `~/.agents/skills/<name>/`             | 自动 load                | `spawn_agent` / `wait_agent` / `close_agent`(需 `multi_agent = true`) | `references/codex-tools.md`    |
+| OpenCode    | `.opencode/skills/<name>/` 或 `.claude/skills/<name>/`(直接复用!) | `skill({name:...})` tool | `Task` tool + agent 定义 in `.opencode/agents/<name>.md`              | `references/opencode-tools.md` |
 
 **关键发现**:OpenCode 原生扫描 `.claude/skills/` 路径 — 你装在 Claude Code 安装位置 **就同时被 OpenCode 读到**,不必双装。
 
@@ -82,12 +82,14 @@ cp -r subagent-driven-discipline-generic <your-project>/.claude/skills/subagent-
 注册到 skill loader 的名字是 `subagent-driven-discipline`(取 `name:` frontmatter 字段,目录名只是文件系统布局)。
 
 验证安装(任一平台):
+
 ```bash
 ls <安装路径>/subagent-driven-discipline/SKILL.md
 ls <安装路径>/subagent-driven-discipline/references/  # 应见 codex-tools.md + opencode-tools.md
 ```
 
 装完后:
+
 - Claude Code: skill 出现在新对话起头的 system-reminder skill 列表
 - Codex CLI: skill 自动 load 到 agent 视野
 - OpenCode: agent 看到 available skills 列表,需要时调 `skill({ name: "subagent-driven-discipline" })` 加载
@@ -106,6 +108,7 @@ controller 即将通过 `forge:subagent-driven-development`(或任何等价 3-st
 ## Preflight Subagent Discipline (MANDATORY before dispatch)
 
 Agent tool 派 subagent 之前:
+
 1. invoke `Skill(subagent-driven-discipline)` 加载 taxonomy
 2. 在 §1 定位任务(找 §1.X.Y 行匹配 subagent 角色)
 3. 从 §1 model 列选 model — 显式作为 Agent tool 的 `model:` 参数传
@@ -125,13 +128,13 @@ Agent tool 派 subagent 之前:
 
 phase 或单 dispatch 完成,按 trigger type 跑对应 `§3.4` retrospect:
 
-| Trigger type | Retrospect 强度 | Actor model |
-|---|---|---|
-| Type 1: 3-stage 完整(implementer + spec + code-quality 全绿 + 3 evidence) | **MANDATORY 全 Q1–Q6** | **仅 Opus** |
-| Type 2: Parallel dispatch(多 implementer 并行 + spec + code-quality 全绿) | **MANDATORY 全 Q1–Q6 + Q7**(parallel-specific) | **仅 Opus** |
-| Type 3: Standalone Task(单 subagent,无 3-stage 包装) | **轻量:Q2 + Q3 + Q4** | Opus 或 Sonnet |
-| Type 4: Ad-hoc research Task(无 commit evidence) | **跳 retrospect;仅 §3.2 cross-verify** | 任意 tier |
-| Type 5: Codex CLI subprocess | **本 skill 不 cover** | N/A |
+| Trigger type                                                              | Retrospect 强度                                | Actor model    |
+| ------------------------------------------------------------------------- | ---------------------------------------------- | -------------- |
+| Type 1: 3-stage 完整(implementer + spec + code-quality 全绿 + 3 evidence) | **MANDATORY 全 Q1–Q6**                         | **仅 Opus**    |
+| Type 2: Parallel dispatch(多 implementer 并行 + spec + code-quality 全绿) | **MANDATORY 全 Q1–Q6 + Q7**(parallel-specific) | **仅 Opus**    |
+| Type 3: Standalone Task(单 subagent,无 3-stage 包装)                      | **轻量:Q2 + Q3 + Q4**                          | Opus 或 Sonnet |
+| Type 4: Ad-hoc research Task(无 commit evidence)                          | **跳 retrospect;仅 §3.2 cross-verify**         | 任意 tier      |
+| Type 5: Codex CLI subprocess                                              | **本 skill 不 cover**                          | N/A            |
 
 retrospect 结果决定是否加 §5 case study(任一 Yes → MANDATORY 加 case;全 No → silent 跳过)。
 
@@ -139,13 +142,13 @@ retrospect 结果决定是否加 §5 case study(任一 Yes → MANDATORY 加 cas
 
 本 bundle ship **0 个 case study**(§5 仅含 `### Case <NN>` 模板)。你的项目从自己 retrospect 增长 §5。
 
-| 定制点 | 替换内容 |
-|---|---|
-| §1.1.2 prompt 例 "沿 `<existing-project-module>` 的代码风格和模式" | 换成你项目的真实 sister-file 路径 |
-| §2.1 "Sister file path: `<e.g. existing project module path>`" | 同上,选一个有代表性的 module |
-| §3.4.2 Type 2 trigger 提到的 "或对应 parallel dispatch 命令模板" | 若你项目有 parallel-dispatch slash command(`<your-review-command>` 等),在这里写它的名 |
-| §5 case studies | 你项目 retrospect(Q1–Q6 / Q7 / 轻量 Q2–Q4)触发时增长 — 见 §8 增长协议 |
-| frontmatter `case_study_count` | 加 case 时同步 bump(`0 → 1 → 2 → ...`) |
+| 定制点                                                             | 替换内容                                                                              |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
+| §1.1.2 prompt 例 "沿 `<existing-project-module>` 的代码风格和模式" | 换成你项目的真实 sister-file 路径                                                     |
+| §2.1 "Sister file path: `<e.g. existing project module path>`"     | 同上,选一个有代表性的 module                                                          |
+| §3.4.2 Type 2 trigger 提到的 "或对应 parallel dispatch 命令模板"   | 若你项目有 parallel-dispatch slash command(`<your-review-command>` 等),在这里写它的名 |
+| §5 case studies                                                    | 你项目 retrospect(Q1–Q6 / Q7 / 轻量 Q2–Q4)触发时增长 — 见 §8 增长协议                 |
+| frontmatter `case_study_count`                                     | 加 case 时同步 bump(`0 → 1 → 2 → ...`)                                                |
 
 §1 28 子类 taxonomy 本身是**故意通用**的 — **不要**在适配你项目时改 subtype 行。新 subtype 只在 retrospect Q5 触发(真实任务暴露 28 类外的 subtype)时才加。
 
@@ -186,16 +189,16 @@ MIT License。
 
 ### What this skill adds on top of `forge:subagent-driven-development`
 
-| upstream skill | this skill |
-|---|---|
-| Generic 3-stage process (implementer + spec_reviewer + code_quality_reviewer + final_reviewer) | **Scenario taxonomy** (28 task subtypes × explicit model tier × WHY) |
-| Loose 3-tier model selection ("cheap / standard / most-capable") | **§1 28-subtype × model-tier matrix** with rationale per row |
-| Generic prompt templates | **§2 strict prompt elements** per scenario (preconditions + must-have prompt elements + failure mode if skipped) |
-| Status handling | **§3.3 inline-fix vs round-2 vs escalate decision tree** |
-| Red flags | **§3.1 STRICT cwd verify** + **§3.2 controller cross-verify** (5 claim types) |
-| (no cost guidance) | model column carries cost tier; **§4.2 mid-phase upgrade trigger** |
-| (no recovery flow) | **§4.1 cherry-pick recovery** for worktree-scope leaks |
-| (no growth mechanism) | **§3.4 Trigger-Type Matrix retrospect** — 5 trigger types × per-type retrospect intensity gates skill growth |
+| upstream skill                                                                                 | this skill                                                                                                       |
+| ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Generic 3-stage process (implementer + spec_reviewer + code_quality_reviewer + final_reviewer) | **Scenario taxonomy** (28 task subtypes × explicit model tier × WHY)                                             |
+| Loose 3-tier model selection ("cheap / standard / most-capable")                               | **§1 28-subtype × model-tier matrix** with rationale per row                                                     |
+| Generic prompt templates                                                                       | **§2 strict prompt elements** per scenario (preconditions + must-have prompt elements + failure mode if skipped) |
+| Status handling                                                                                | **§3.3 inline-fix vs round-2 vs escalate decision tree**                                                         |
+| Red flags                                                                                      | **§3.1 STRICT cwd verify** + **§3.2 controller cross-verify** (5 claim types)                                    |
+| (no cost guidance)                                                                             | model column carries cost tier; **§4.2 mid-phase upgrade trigger**                                               |
+| (no recovery flow)                                                                             | **§4.1 cherry-pick recovery** for worktree-scope leaks                                                           |
+| (no growth mechanism)                                                                          | **§3.4 Trigger-Type Matrix retrospect** — 5 trigger types × per-type retrospect intensity gates skill growth     |
 
 The upstream skill is the **source of truth** for the 3-stage process. This skill **does not duplicate or rewrite** upstream prompt templates — it only adds controller-side scenario judgment.
 
@@ -203,11 +206,11 @@ The upstream skill is the **source of truth** for the 3-stage process. This skil
 
 The bundle supports all three harnesses. SKILL.md format is identical across them (YAML frontmatter + markdown); differences in tool-name references and install paths are handled by the mapping files in `references/`.
 
-| Harness | Install path | Skill invocation | Subagent dispatch | Detailed mapping |
-|---|---|---|---|---|
-| Claude Code | `.claude/skills/<name>/` or `~/.claude/skills/<name>/` | `Skill(name)` tool | `Agent` tool with `model:` parameter | (source of truth — no mapping needed) |
-| Codex CLI | `.codex/skills/<name>/` or `~/.agents/skills/<name>/` | auto-loads | `spawn_agent` / `wait_agent` / `close_agent` (requires `multi_agent = true`) | `references/codex-tools.md` |
-| OpenCode | `.opencode/skills/<name>/` or `.claude/skills/<name>/` (reused!) | `skill({name:...})` tool | `Task` tool + agent definitions in `.opencode/agents/<name>.md` | `references/opencode-tools.md` |
+| Harness     | Install path                                                     | Skill invocation         | Subagent dispatch                                                            | Detailed mapping                      |
+| ----------- | ---------------------------------------------------------------- | ------------------------ | ---------------------------------------------------------------------------- | ------------------------------------- |
+| Claude Code | `.claude/skills/<name>/` or `~/.claude/skills/<name>/`           | `Skill(name)` tool       | `Agent` tool with `model:` parameter                                         | (source of truth — no mapping needed) |
+| Codex CLI   | `.codex/skills/<name>/` or `~/.agents/skills/<name>/`            | auto-loads               | `spawn_agent` / `wait_agent` / `close_agent` (requires `multi_agent = true`) | `references/codex-tools.md`           |
+| OpenCode    | `.opencode/skills/<name>/` or `.claude/skills/<name>/` (reused!) | `skill({name:...})` tool | `Task` tool + agent definitions in `.opencode/agents/<name>.md`              | `references/opencode-tools.md`        |
 
 **Key finding**: OpenCode natively scans `.claude/skills/` paths — installing under the Claude Code location makes the skill **simultaneously visible to OpenCode** without duplication.
 
@@ -256,12 +259,14 @@ cp -r subagent-driven-discipline-generic <your-project>/.claude/skills/subagent-
 The skill name registered with the loader is `subagent-driven-discipline` (taken from the `name:` frontmatter field — directory name is just filesystem layout).
 
 Verify install (any harness):
+
 ```bash
 ls <install-path>/subagent-driven-discipline/SKILL.md
 ls <install-path>/subagent-driven-discipline/references/  # should show codex-tools.md + opencode-tools.md
 ```
 
 After install:
+
 - Claude Code: skill appears in the system-reminder skill list at conversation start
 - Codex CLI: skill auto-loads into agent visibility
 - OpenCode: agent sees the available-skills list and invokes `skill({ name: "subagent-driven-discipline" })` to load full content on demand
@@ -280,6 +285,7 @@ In a slash-command template or a skill that orchestrates dispatch, add a "Prefli
 ## Preflight Subagent Discipline (MANDATORY before dispatch)
 
 Before invoking the Agent tool to dispatch a subagent:
+
 1. Invoke `Skill(subagent-driven-discipline)` to load the taxonomy.
 2. Locate the task in §1 (find the §1.X.Y row matching the subagent role).
 3. Pick the model from §1's model column — pass it explicitly as the Agent tool's `model:` parameter.
@@ -299,13 +305,13 @@ Whenever a subagent returns DONE / DONE_WITH_CONCERNS, run `§3.2 controller cro
 
 When a phase or single dispatch completes, run the `§3.4` retrospect appropriate to the trigger type:
 
-| Trigger type | Retrospect intensity | Actor model |
-|---|---|---|
-| Type 1: 3-stage full (implementer + spec + code-quality, all green + 3 evidence files) | **MANDATORY full Q1–Q6** | **Opus only** |
-| Type 2: Parallel dispatch (multiple implementers in parallel, then spec + code-quality green) | **MANDATORY full Q1–Q6 + Q7** (parallel-specific) | **Opus only** |
-| Type 3: Standalone Task (single subagent, no 3-stage wrapper) | **Light: Q2 + Q3 + Q4** | Opus or Sonnet |
-| Type 4: Ad-hoc research Task (no committed evidence) | **Skip retrospect; only §3.2 cross-verify** | any tier |
-| Type 5: Codex CLI subprocess | **out of scope** for this skill | N/A |
+| Trigger type                                                                                  | Retrospect intensity                              | Actor model    |
+| --------------------------------------------------------------------------------------------- | ------------------------------------------------- | -------------- |
+| Type 1: 3-stage full (implementer + spec + code-quality, all green + 3 evidence files)        | **MANDATORY full Q1–Q6**                          | **Opus only**  |
+| Type 2: Parallel dispatch (multiple implementers in parallel, then spec + code-quality green) | **MANDATORY full Q1–Q6 + Q7** (parallel-specific) | **Opus only**  |
+| Type 3: Standalone Task (single subagent, no 3-stage wrapper)                                 | **Light: Q2 + Q3 + Q4**                           | Opus or Sonnet |
+| Type 4: Ad-hoc research Task (no committed evidence)                                          | **Skip retrospect; only §3.2 cross-verify**       | any tier       |
+| Type 5: Codex CLI subprocess                                                                  | **out of scope** for this skill                   | N/A            |
 
 Retrospect outcome decides whether to add a §5 case study (any "Yes" answer → MANDATORY case study; all "No" → skip silently).
 
@@ -315,13 +321,13 @@ This bundle ships **0 case studies** in §5 — the file contains only the `### 
 
 Project-specific customization points:
 
-| Slot | What to customize |
-|---|---|
-| §1.1.2 prompt example "following `<existing-project-module>` code style and patterns" | Replace with a real sister-file path from your project |
-| §2.1 "Sister file path: `<e.g. existing project module path>`" | Same — pick a representative module |
-| §3.4.2 Type 2 trigger reference "or equivalent parallel-dispatch command template" | If your project has a parallel-dispatch slash command (e.g., `<your-review-command>`), name it here |
-| §5 case studies | Grow as your project's retrospects fire (Q1–Q6 / Q7 / Light Q2–Q4) — see §8 growth protocol |
-| frontmatter `case_study_count` | Bump as you add cases (`0 → 1 → 2 → ...`) |
+| Slot                                                                                  | What to customize                                                                                   |
+| ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| §1.1.2 prompt example "following `<existing-project-module>` code style and patterns" | Replace with a real sister-file path from your project                                              |
+| §2.1 "Sister file path: `<e.g. existing project module path>`"                        | Same — pick a representative module                                                                 |
+| §3.4.2 Type 2 trigger reference "or equivalent parallel-dispatch command template"    | If your project has a parallel-dispatch slash command (e.g., `<your-review-command>`), name it here |
+| §5 case studies                                                                       | Grow as your project's retrospects fire (Q1–Q6 / Q7 / Light Q2–Q4) — see §8 growth protocol         |
+| frontmatter `case_study_count`                                                        | Bump as you add cases (`0 → 1 → 2 → ...`)                                                           |
 
 The §1 28-subtype taxonomy itself is intentionally generic — **do not edit subtype rows when adapting to your project**. New subtypes only get added when retrospect Q5 fires (a real task surfaces a subtype outside the existing 28).
 

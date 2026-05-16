@@ -112,6 +112,15 @@ export interface ForgeConfig {
    * 缺失时调用方应以空对象 fallback 或调 validateStageExtensionsConfig 拿完整 normalized 值。
    */
   stage_extensions?: StageExtensionsConfig;
+
+  /**
+   * workflow-monitor 开关(spec §3.1)。
+   * 缺失或 `enabled` 缺失时,调用方一律视为 false(监控关闭)。
+   * 读取走 monitor/config.ts#isMonitorEnabled;写入走 setMonitorEnabled。
+   */
+  monitor?: {
+    enabled?: boolean;
+  };
 }
 
 /**

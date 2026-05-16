@@ -230,6 +230,99 @@ LLM 扫 docs/+src/ 推测 role,产 anchors-draft.yaml + draft .md 概览。
 | 3   | 复写部分成功(.partial 文件)                               |
 | 5   | archive.lock 或 legacy-bridge.lock 被另一进程持有           |
 
+## `forge monitor`(unreleased)
+
+低耦合旁路工作流监控观察者。开启后由 AI 层在每个 forge 阶段调 `forge monitor record` 写入 trace 事件;`forge monitor report` 汇总渲染 markdown 报告,与 OpenSpec/superpowers 静态差异映射表对比做回归探测。**永远 exit 0**(loose —— 监控关闭或记录失败都静默 no-op,不影响主流程)。
+
+详见 [`docs/specs/2026-05-15-workflow-monitor-design.md`](specs/2026-05-15-workflow-monitor-design.md)。
+
+### `forge monitor enable`
+
+开启 workflow-monitor:写 `forge/config.yaml#monitor.enabled = true`。
+
+```
+forge monitor enable
+```
+
+### `forge monitor disable`
+
+关闭 workflow-monitor:写 `forge/config.yaml#monitor.enabled = false`。
+
+```
+forge monitor disable
+```
+
+### `forge monitor status`
+
+查看 workflow-monitor 开关状态;传 `--change` 时附带该 change 的 trace 事件数与损坏行数。
+
+```
+forge monitor status [--change <id>]
+```
+
+| 选项              | 说明                                                               |
+| ----------------- | ------------------------------------------------------------------ |
+| `--change <id>`   | 可选;输出该 change 的 trace 事件总数 + 损坏行数(JSON 解析失败行) |
+
+### `forge monitor record`
+
+记录一条 AI 层 trace 事件(由 `hooks/workflow-monitor-injection.md` 注入内容指示 AI 调用)。监控关闭时静默 no-op。
+
+```
+forge monitor record --stage <stage> --event <event> [--change <id>] [--json <payload>]
+```
+
+| 选项               | 说明                                                                              |
+| ------------------ | --------------------------------------------------------------------------------- |
+| `--stage <stage>`  | 必选;当前 forge 阶段名(如 `brainstorming` / `propose` / `apply` / `review` / `verify` / `archive`) |
+| `--event <event>`  | 必选;事件标识符(如 `stage_start` / `action_selected` / `stage_end`)             |
+| `--change <id>`    | 可选;关联的 change id                                                             |
+| `--json <payload>` | 可选;附加 JSON payload(结构化事件数据)                                           |
+
+### `forge monitor report`
+
+渲染指定 change 的 markdown 监控报告。默认写入 `forge/.monitor/<change>/report.md`。
+
+```
+forge monitor report --change <id> [--out <path>]
+```
+
+| 选项            | 说明                                                                   |
+| --------------- | ---------------------------------------------------------------------- |
+| `--change <id>` | 必选;要报告的 change id                                               |
+| `--out <path>`  | 可选;覆盖默认输出路径(`forge/.monitor/<id>/report.md`)               |
+
+### 退出码
+
+| 码  | 含义                                                                      |
+| --- | ------------------------------------------------------------------------- |
+| 0   | 永远 0(loose 语义 —— 监控关闭 / 记录失败均静默 no-op;status / report 正常出错也 exit 0) |
+
+### 例子
+
+```
+# 开启监控
+forge monitor enable
+
+# 查看状态
+forge monitor status
+
+# 查看某 change 的 trace 摘要
+forge monitor status --change c1
+
+# 记录一条事件(由 AI 按 workflow-monitor-injection.md 协议调用)
+forge monitor record --stage review --event stage_start --change c1
+
+# 渲染监控报告
+forge monitor report --change c1
+
+# 输出到自定义路径
+forge monitor report --change c1 --out /tmp/c1-monitor.md
+
+# 关闭监控
+forge monitor disable
+```
+
 ## `forge stage-extensions`(v1.2.0 新增)
 
 codex review stage extension framework 的 runner。**纯机械单轮执行器** —— 多轮收敛 / 用户介入 / 派 subagent 由 AI 主代理读 `commands/*.md` 末尾段协议驱动(v7 CLI/AI 职责分层)。两个子命令都输出结构化 JSON 到 stdout,**永远 exit 0**(loose —— codex 集成任何失败都不阻塞 forge 主流程 fence)。

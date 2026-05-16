@@ -2,15 +2,15 @@
 
 > 双语 README — [中文](#中文版) / [English](#english-version)
 
-`superpowers:subagent-driven-development` 的 sister skill,在上游 generic 3-stage 流程之上补 **controller-side 场景判断**:任务类型 taxonomy、model tier 矩阵、cheap-model 高质量 playbook、cross-verify 纪律、Trigger Type retrospect 让 skill 从实证增长。
+`forge:subagent-driven-development` 的 sister skill,在上游 generic 3-stage 流程之上补 **controller-side 场景判断**:任务类型 taxonomy、model tier 矩阵、cheap-model 高质量 playbook、cross-verify 纪律、Trigger Type retrospect 让 skill 从实证增长。
 
-本 bundle 是从 ForgeUE 项目抽出的**通用版本**(已剥离项目锚点),可直接 drop 到任何使用 `superpowers:subagent-driven-development` 的项目,通过 §5 case study 增长层适配本地实证。
+本 bundle 是从 ForgeUE 项目抽出的**通用版本**(已剥离项目锚点),可直接 drop 到任何使用 `forge:subagent-driven-development` 的项目,通过 §5 case study 增长层适配本地实证。
 
 ---
 
 ## 中文版
 
-### 这个 skill 在 `superpowers:subagent-driven-development` 之上加什么
+### 这个 skill 在 `forge:subagent-driven-development` 之上加什么
 
 | upstream skill | 本 skill |
 |---|---|
@@ -98,7 +98,7 @@ dispatch 生命周期 3 个集成点:
 
 #### 1. dispatch 前 — invoke 本 skill
 
-controller 即将通过 `superpowers:subagent-driven-development`(或任何等价 3-stage 流程)派 subagent 时,先 invoke `Skill(subagent-driven-discipline)` 加载 taxonomy。
+controller 即将通过 `forge:subagent-driven-development`(或任何等价 3-stage 流程)派 subagent 时,先 invoke `Skill(subagent-driven-discipline)` 加载 taxonomy。
 
 在 slash-command 模板或 orchestrator skill 中加 "Preflight Subagent Discipline" 段:
 
@@ -160,7 +160,7 @@ subagent-driven-discipline-generic/
     └── opencode-tools.md          # Claude Code → OpenCode 工具映射 + 平台 caveat
 ```
 
-`SKILL.md` 自包含:无 script、无外部资源。runtime 依赖只有 controller 调其他 skill 的能力(尤其是 `superpowers:subagent-driven-development` 作为上游 process scaffold)。
+`SKILL.md` 自包含:无 script、无外部资源。runtime 依赖只有 controller 调其他 skill 的能力(尤其是 `forge:subagent-driven-development` 作为上游 process scaffold)。
 
 ### 兼容性 (跨平台 caveat)
 
@@ -176,7 +176,7 @@ MIT(继承自 ForgeUE 原项目)。frontmatter `author: forgeue project (extract
 
 ### 上游 sister skill 指针
 
-`superpowers:subagent-driven-development` 定义 3-stage 流程(implementer → spec_reviewer → code_quality_reviewer → final_reviewer)、prompt 模板、status taxonomy(DONE / DONE_WITH_CONCERNS / BLOCKED / NEEDS_CONTEXT)、red flags 列表。**那 skill 是真源**。本 skill 纯加值 — controller-side 场景判断、model tier 纪律、retrospect 协议。
+`forge:subagent-driven-development` 定义 3-stage 流程(implementer → spec_reviewer → code_quality_reviewer → final_reviewer)、prompt 模板、status taxonomy(DONE / DONE_WITH_CONCERNS / BLOCKED / NEEDS_CONTEXT)、red flags 列表。**那 skill 是真源**。本 skill 纯加值 — controller-side 场景判断、model tier 纪律、retrospect 协议。
 
 冲突时上游 skill 赢。本 skill 只在场景特定的 model 选择 + prompt 元素(§1 / §2)上允许 disagree,**永不**改流程结构本身。
 
@@ -184,7 +184,7 @@ MIT(继承自 ForgeUE 原项目)。frontmatter `author: forgeue project (extract
 
 ## English version
 
-### What this skill adds on top of `superpowers:subagent-driven-development`
+### What this skill adds on top of `forge:subagent-driven-development`
 
 | upstream skill | this skill |
 |---|---|
@@ -272,7 +272,7 @@ Three integration points across a subagent dispatch lifecycle:
 
 #### 1. **Before** dispatching a subagent — invoke this skill
 
-When the controller is about to dispatch a subagent under `superpowers:subagent-driven-development` (or any equivalent 3-stage process), invoke `Skill(subagent-driven-discipline)` first to load the taxonomy.
+When the controller is about to dispatch a subagent under `forge:subagent-driven-development` (or any equivalent 3-stage process), invoke `Skill(subagent-driven-discipline)` first to load the taxonomy.
 
 In a slash-command template or a skill that orchestrates dispatch, add a "Preflight Subagent Discipline" section:
 
@@ -336,7 +336,7 @@ subagent-driven-discipline-generic/
     └── opencode-tools.md          # Claude Code → OpenCode tool mapping + platform caveats
 ```
 
-`SKILL.md` is self-contained: no scripts, no external assets. The only runtime dependency is the controller's ability to invoke other skills (specifically `superpowers:subagent-driven-development` as the upstream process scaffold).
+`SKILL.md` is self-contained: no scripts, no external assets. The only runtime dependency is the controller's ability to invoke other skills (specifically `forge:subagent-driven-development` as the upstream process scaffold).
 
 ### Compatibility (cross-platform caveats)
 
@@ -344,7 +344,7 @@ subagent-driven-discipline-generic/
 - **Codex CLI** ✅ mapped — requires `multi_agent = true` config to enable `spawn_agent` / `wait_agent` / `close_agent`; see `references/codex-tools.md`
 - **OpenCode** ✅ mapped — tool names are lowercase (`skill` / `read` / `bash`); subagents are defined as `.opencode/agents/<name>.md` files with **model fixed at agent definition** (not passed at dispatch time) — meaning each §1 model tier needs its own subagent file; see `references/opencode-tools.md`
 - **§3.4.5 Type 5 (Codex CLI subprocess invoked from a Claude Code parent)** is **out of scope** for this skill — those follow Codex's own review protocol. Note: this differs from "Codex CLI as the controller of this skill" (which is fully in scope).
-- **Other Anthropic SDK harnesses** (Copilot CLI / Gemini CLI / etc.): not validated, but in principle compatible — refer to the upstream `superpowers:using-superpowers` skill's `references/copilot-tools.md` for additional mapping templates.
+- **Other Anthropic SDK harnesses** (Copilot CLI / Gemini CLI / etc.): not validated, but in principle compatible — refer to the harness documentation for tool name mapping templates.
 
 ### License
 
@@ -352,6 +352,6 @@ MIT (inherited from the originating ForgeUE project). Frontmatter `author: forge
 
 ### Pointer to the upstream sister skill
 
-`superpowers:subagent-driven-development` defines the 3-stage process (implementer → spec_reviewer → code_quality_reviewer → final_reviewer), the prompt templates, the status taxonomy (DONE / DONE_WITH_CONCERNS / BLOCKED / NEEDS_CONTEXT), and the red-flags list. **That skill is the source of truth.** This skill is purely additive — controller-side scenario judgment, model tier discipline, retrospect protocol.
+`forge:subagent-driven-development` defines the 3-stage process (implementer → spec_reviewer → code_quality_reviewer → final_reviewer), the prompt templates, the status taxonomy (DONE / DONE_WITH_CONCERNS / BLOCKED / NEEDS_CONTEXT), and the red-flags list. **That skill is the source of truth.** This skill is purely additive — controller-side scenario judgment, model tier discipline, retrospect protocol.
 
 When in doubt, the upstream skill wins. This skill is allowed to disagree only on scenario-specific model choice and prompt elements (§1 / §2), never on the process structure itself.

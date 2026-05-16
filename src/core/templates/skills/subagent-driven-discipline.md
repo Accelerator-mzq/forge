@@ -1,8 +1,8 @@
 ---
 name: forge:subagent-driven-discipline
-description: Subagent task type taxonomy + cheap-model reliability playbook + Trigger Type Matrix retrospect for subagent-driven-development workflows。**重场景轻业务**:按 subagent 任务类型(implementation 5 子类 / spec review 4 子类 / code quality review 5 子类 / test creation / doc / debug / verification)细分 model tier + WHY + 让 cheap model 高质量的具体 prompt patterns。**Design 任务(algorithmic / architectural / arch doc rewrite / complex root cause)绝对原则 Opus only,无 exception**。Cross-scenario discipline(cwd verify / cross-verify / cherry-pick recovery / cost framework)作为 supporting infrastructure。**Living catalog 增长由 §3.4 Trigger Type Matrix retrospect 强制**:5 trigger types(3-stage / parallel / standalone / ad-hoc / codex CLI)各自 retrospect intensity;Type 1+2 Opus mandatory full;Type 3 light;Type 4 skip retrospect 仅 cross-verify;任一 Yes 才加 case study;全 No 不加(避免噪声)。Companion to `superpowers:subagent-driven-development`。
+description: Subagent task type taxonomy + cheap-model reliability playbook + Trigger Type Matrix retrospect for subagent-driven-development workflows。**重场景轻业务**:按 subagent 任务类型(implementation 5 子类 / spec review 4 子类 / code quality review 5 子类 / test creation / doc / debug / verification)细分 model tier + WHY + 让 cheap model 高质量的具体 prompt patterns。**Design 任务(algorithmic / architectural / arch doc rewrite / complex root cause)绝对原则 Opus only,无 exception**。Cross-scenario discipline(cwd verify / cross-verify / cherry-pick recovery / cost framework)作为 supporting infrastructure。**Living catalog 增长由 §3.4 Trigger Type Matrix retrospect 强制**:5 trigger types(3-stage / parallel / standalone / ad-hoc / codex CLI)各自 retrospect intensity;Type 1+2 Opus mandatory full;Type 3 light;Type 4 skip retrospect 仅 cross-verify;任一 Yes 才加 case study;全 No 不加(避免噪声)。Companion to `forge:subagent-driven-development`。
 license: MIT
-compatibility: Claude Code Agent tool + python -m pytest;sister to superpowers:subagent-driven-development(generic 3-stage process)
+compatibility: Claude Code Agent tool + python -m pytest;sister to forge:subagent-driven-development(generic 3-stage process)
 metadata:
   author: forgeue project (extracted to generic)
   version: "1.0-generic"
@@ -11,7 +11,7 @@ metadata:
   retrospect_protocol: trigger-type-matrix(5 types × per-type intensity)
 ---
 
-Universal controller-side discipline for `superpowers:subagent-driven-development` workflows。
+Universal controller-side discipline for `forge:subagent-driven-development` workflows。
 
 ## Platform Note
 
@@ -30,7 +30,7 @@ This skill uses **Claude Code tool names** (PascalCase: `Skill`, `Agent`, `Read`
 - **轻**(§3 § 4 — 支撑):cross-scenario discipline 基础设施(cwd verify / cross-verify / recovery / cost framework)
 - **业务无关**:具体项目用法属于 case studies(§5)增量层,不染入 scenario taxonomy
 
-**何时启用**:任何项目使用 `superpowers:subagent-driven-development` 派 subagent 时,controller 主 session dispatch 前 + return 后 + commit 前全流程参考。
+**何时启用**:任何项目使用 `forge:subagent-driven-development` 派 subagent 时,controller 主 session dispatch 前 + return 后 + commit 前全流程参考。
 
 ---
 
@@ -362,7 +362,7 @@ Task implementer 报 BLOCKED 时,plan author 决策两选项:
 | Trigger Type | 何时 fires | Retrospect Intensity | Actor | Cost |
 |---|---|---|---|---|
 | **Type 1: 3-stage full**(canonical;§1.1 + §1.2 + §1.3)| per-task implementer + spec_reviewer + code_quality_reviewer 全 ✅/⚠️ + 3 evidence committed | **MANDATORY full Q1-Q6** | **Opus**(MANDATORY)| $0.30-1.00 |
-| **Type 2: Parallel dispatch**(`superpowers:dispatching-parallel-agents`)| 多 implementer 并行全 commit + W2 actual diff 验证 + 后续 spec / code_quality reviewer 全 ✅ | **MANDATORY full Q1-Q6 + Q7**(parallel-specific) | **Opus**(MANDATORY)| $0.40-1.20 |
+| **Type 2: Parallel dispatch**(`forge:dispatching-parallel-agents`)| 多 implementer 并行全 commit + W2 actual diff 验证 + 后续 spec / code_quality reviewer 全 ✅ | **MANDATORY full Q1-Q6 + Q7**(parallel-specific) | **Opus**(MANDATORY)| $0.40-1.20 |
 | **Type 3: Standalone Task**(§1.4/§1.5/§1.6/§1.7 单 subagent dispatch,无 3-stage review)| Single Task return DONE / DONE_WITH_CONCERNS | **Light:Q2 + Q3 + Q4**(skip Q1/Q5/Q6 — 单 task scope 不够 trigger broader pattern) | **Opus or Sonnet** | $0.10-0.30 |
 | **Type 4: Ad-hoc research Task**(无 evidence committed;e.g. "summarize files" / "find X usage")| Task return | **Skip full retrospect;仅 §3.2 cross-verify** | Controller(any tier) | ~$0(cross-verify only) |
 | **Type 5: Codex CLI subprocess**(`/codex:adversarial-review` / `/codex:review`)| Codex CLI return | **本 skill 不 cover**(Codex 自家 protocol — 沿 codex-plugin/codex-companion) | N/A | N/A |
@@ -371,7 +371,7 @@ Task implementer 报 BLOCKED 时,plan author 决策两选项:
 
 #### §3.4.1 Type 1: 3-stage Full Retrospect(canonical)
 
-**3-stage 定义**(沿 `superpowers:subagent-driven-development` upstream;per-task 串行):
+**3-stage 定义**(沿 `forge:subagent-driven-development` upstream;per-task 串行):
 
 | Stage | Subagent 角色 | 任务 | 进入下 stage 条件 |
 |---|---|---|---|
@@ -385,7 +385,7 @@ Task implementer 报 BLOCKED 时,plan author 决策两选项:
 
 #### §3.4.2 Type 2: Parallel Dispatch Retrospect
 
-**Trigger**:`superpowers:dispatching-parallel-agents`(或对应 parallel dispatch 命令模板)派多 implementer 并行 → 全 commit → W2 actual diff verified disjoint(若 overlap 检测自动降级 sequential → 改走 Type 1 retrospect)→ 后续 spec / code_quality reviewer 全 ✅。
+**Trigger**:`forge:dispatching-parallel-agents`(或对应 parallel dispatch 命令模板)派多 implementer 并行 → 全 commit → W2 actual diff verified disjoint(若 overlap 检测自动降级 sequential → 改走 Type 1 retrospect)→ 后续 spec / code_quality reviewer 全 ✅。
 
 **Inputs(controller 必读)**:
 1. 全 N implementer evidence files
@@ -1504,11 +1504,11 @@ git update-ref refs/heads/<wrong-branch> <prior-base-sha>
 
 ---
 
-## §9 Relation to superpowers:subagent-driven-development
+## §9 Relation to forge:subagent-driven-development
 
-本 skill 与 `superpowers:subagent-driven-development` 是 **sister skills**:
+本 skill 与 `forge:subagent-driven-development` 是 **sister skills**:
 
-| superpowers:subagent-driven-development | 本 skill |
+| forge:subagent-driven-development | 本 skill |
 |---|---|
 | **Generic process scaffold**(per-task 3-stage:implementer + spec_reviewer + code_quality_reviewer + final_reviewer)| **Scenario-specific judgment**(§1 taxonomy:每 task subtype → model + WHY + cheap-model playbook) |
 | Generic prompt templates(implementer-prompt.md / spec-reviewer-prompt.md / code-quality-reviewer-prompt.md)| §2 strict prompt elements(per scenario:必含元素 + pre-condition + failure mode if skipped) |
@@ -1520,4 +1520,4 @@ git update-ref refs/heads/<wrong-branch> <prior-base-sha>
 | (无 recovery flow)| §4.1 cherry-pick recovery |
 | (无 skip 边界)| §1.5.1 + §1.7.1 显式列 direct/no-subagent 场景 |
 
-**真源**:`superpowers:subagent-driven-development`。本 skill **不复制不重写** 上游 prompt 模板;只补 controller-side scenario judgment。
+**真源**:`forge:subagent-driven-development`。本 skill **不复制不重写** 上游 prompt 模板;只补 controller-side scenario judgment。

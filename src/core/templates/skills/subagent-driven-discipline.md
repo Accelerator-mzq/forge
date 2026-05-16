@@ -320,7 +320,7 @@ If `pwd` 不显示 expected path → **STOP report NEEDS_CONTEXT;不要在错误
 
 | 指标 | 含义 | 触发什么改动? |
 |---|---|---|
-| **rubric 软度** | baseline AI 不失分 → rubric 没收紧到必要程度 | **改评测 scenarios**(收紧 rubric / 提权重) |
+| **rubric 软度** | baseline AI 不失分 → rubric 没收紧到必要程度 | **改评测测试配置**(收紧 rubric / 提权重) |
 | **验证强度**(区分度) | GREEN AI 与 RED AI 差距不显著 → skill 字面未充分对齐 | **改 skill 内容 / bootstrap**(让 GREEN AI 看到更多字面) |
 
 **关键纪律**:两指标混用会导致 rubric 不断收紧到不可达,GREEN AI 也通不过(假性 RED)。若区分度不足,应**改 skill 字面**而非收紧 rubric 凑数字(Goodhart's law 防御)。
@@ -337,7 +337,7 @@ Task implementer 报 BLOCKED 时,plan author 决策两选项:
 - 选 A 的代价:增加 release 时基础设施改动面积 + breaking 现有测试基线 + 跨 sub-plan 影响
 - 选 B 的代价:验证粒度可能变粗(多个 plan 共用一个配置)— 但通过 scenario 分组可缓解
 
-**关键纪律**:优先保持 plan 序列 atomic,避免因一个 BLOCKED task 引发跨边界的基础设施改动。若必须选 A,需明确评估所有受影响的下游 scenarios 与 skill 引用。
+**关键纪律**:优先保持 plan 序列 atomic,避免因一个 BLOCKED task 引发跨边界的基础设施改动。若必须选 A,需明确评估所有受影响的下游测试配置与 skill 引用。
 
 ### §3.4 Post-Phase Quality Retrospect Protocol(Opus-only judgment;skill 增长触发)
 

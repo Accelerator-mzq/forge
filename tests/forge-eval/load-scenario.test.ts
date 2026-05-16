@@ -53,4 +53,11 @@ scenarios:
     const bad: ScenarioFile = { scenarios: [{ id: 'a', turns: [] }] };
     expect(() => validateScenarioFile(bad, 'fake')).toThrow(/缺 skill 字段/);
   });
+
+  it('subagent-driven-discipline.yaml 合法且可加载', async () => {
+    const { loadScenarioFile } = await import('../../forge-eval/load-scenario.js');
+    const file = await loadScenarioFile('subagent-driven-discipline');
+    expect(file.skill).toBe('subagent-driven-discipline');
+    expect(file.scenarios.length).toBeGreaterThan(0);
+  });
 });

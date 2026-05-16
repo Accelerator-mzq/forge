@@ -204,9 +204,9 @@ sed -n '<line>,<line+5>p' <file-path>  # 实际看 line range 内容是否符 pl
 
 **Implementer 兜底**(双层防护):
 
-若 plan 字面与实际路径不符,implementer 第一步 grep 真实路径 verify(沿 `forge:subagent-driven-discipline §2.1.1 External Protocol Assumption Verify 协议`)— 但 implementer commit 字面用真实路径,plan v1 字面错保留 → **plan writer 仍是 root cause 防线**;implementer 兜底不能 substitute plan writer verify。
+若 plan 字面与实际路径不符,implementer 第一步 grep 真实路径 verify(沿 `forge:subagent-driven-discipline §2.1.1 External Protocol Assumption Verify` 协议)— 但 implementer commit 字面用真实路径,plan v1 字面错保留 → **plan writer 仍是 root cause 防线**;implementer 兜底不能 substitute plan writer verify。
 
-**参考 case**:`forge:subagent-driven-discipline §2.1.1 External Protocol Assumption Verify` — 4 处字面错;
+**参考**:`forge:subagent-driven-discipline §2.1.1 External Protocol Assumption Verify`(implementer verify 协议);
 plan-v1.1 Task 0 `docs/plans/2026-05-14-plan-v1.1-polish-leftover.md` §14 v3 起草过程 self-aware retrospect(`.claude/skills/writing-plans/` 假定 prefix 错 → grep verify catch + 修)。
 
 ## Self-Review

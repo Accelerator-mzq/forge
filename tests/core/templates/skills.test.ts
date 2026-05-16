@@ -65,7 +65,7 @@ describe('templates/skills', () => {
 // plan-9i Task 0 + plan-9d Task 0 + plan-9f Task 0 + plan-port-discipline Task 10 — 验证 SKILL_NAMES registry 扩展
 // (9i:writing-skills 第 13 项 + 9d:verifying-three-dimensions 第 14 项 + 9f:exploring 第 15 项 + port-discipline:subagent-driven-discipline 第 16 项)
 // 注:SKILL_NAMES 已由上方 import 引入,无需重复 import
-describe('SKILL_NAMES registry (9i + 9d + 9f)', () => {
+describe('SKILL_NAMES registry (9i + 9d + 9f + port-discipline)', () => {
   it('writing-skills 是 SKILL_NAMES 第 13 项', () => {
     expect(SKILL_NAMES).toContain('writing-skills');
     expect(SKILL_NAMES.indexOf('writing-skills')).toBe(12); // 0-indexed

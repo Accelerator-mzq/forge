@@ -9,7 +9,7 @@ describe('templates registry', () => {
     expect(new Set(SKILL_NAMES).size).toBe(16);
   });
 
-  it('SKILL_NAMES 全量字面量与顺序匹配 spec §2.2 表 + plan-9i + plan-9d + plan-9f', () => {
+  it('SKILL_NAMES 全量字面量与顺序匹配 spec §2.2 表 + plan-9i + plan-9d + plan-9f + plan-port-discipline', () => {
     expect(SKILL_NAMES).toEqual([
       'using-forge',
       'brainstorming',

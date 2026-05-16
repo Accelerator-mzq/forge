@@ -1,4 +1,4 @@
-// 15 个 skill 真实文本的 registry — Plan 4 + plan-9i + plan-9d + plan-9f
+// 16 个 skill 真实文本的 registry — Plan 4 + plan-9i + plan-9d + plan-9f + plan-port-discipline
 // 文件实体 .md 由 Task B 逐个填实
 
 import { readFile, readdir } from 'node:fs/promises';
@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-/** 15 个移植 skill 名(spec §2.2 12 skill 表 + plan-9i writing-skills + plan-9d verifying-three-dimensions + plan-9f exploring) */
+/** 16 个移植 skill 名(spec §2.2 12 skill 表 + plan-9i writing-skills + plan-9d verifying-three-dimensions + plan-9f exploring + plan-port-discipline subagent-driven-discipline) */
 export const SKILL_NAMES = [
   'using-forge',
   'brainstorming',
@@ -25,6 +25,7 @@ export const SKILL_NAMES = [
   'writing-skills', // 9i 新增(沿 design §2.9 协议落地 + plan-9i v7)
   'verifying-three-dimensions', // 9d 新增(沿 design §2.2 协议落地 + plan-9d v15)
   'exploring', // 9f 新增(沿 design §2.5 全节 + plan-9f)
+  'subagent-driven-discipline', // plan-port-discipline 新增(移植 superpowers SDD 的 companion)
 ] as const;
 
 export type SkillName = (typeof SKILL_NAMES)[number];
@@ -39,7 +40,7 @@ export interface LoadedSkill {
   content: string;
 }
 
-/** 全量加载 15 个 skill,失败抛错(说明某个 .md 漏建) */
+/** 全量加载 16 个 skill,失败抛错(说明某个 .md 漏建) */
 export async function loadAllSkills(): Promise<LoadedSkill[]> {
   return Promise.all(SKILL_NAMES.map(async (name) => ({ name, content: await loadSkill(name) })));
 }

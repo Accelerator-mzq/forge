@@ -41,8 +41,8 @@ describe('smoke — top-level public API', () => {
 
   it('exports templates registry + bootstrap skill name (Plan 4)', () => {
     // Plan 4 已用真 registry 替换 placeholder,bootstrap 退化为 USING_FORGE_SKILL_NAME 常量
-    // plan-9i 新增 writing-skills,plan-9d 新增 verifying-three-dimensions,plan-9f 新增 exploring 共 15 个 skill + 7 个 command
-    expect(SKILL_NAMES).toHaveLength(15);
+    // plan-9i 新增 writing-skills,plan-9d 新增 verifying-three-dimensions,plan-9f 新增 exploring,plan-port-discipline 新增 subagent-driven-discipline 共 16 个 skill + 7 个 command
+    expect(SKILL_NAMES).toHaveLength(16);
     expect(COMMAND_NAMES).toHaveLength(7);
     expect(USING_FORGE_SKILL_NAME).toBe('using-forge');
   });

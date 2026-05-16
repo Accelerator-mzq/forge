@@ -1,4 +1,4 @@
-// 15 个 skill markdown 文件的通用结构断言(plan-9i +13 / plan-9d +14 / plan-9f +15)
+// 16 个 skill markdown 文件的通用结构断言(plan-9i +13 / plan-9d +14 / plan-9f +15 / plan-port-discipline +16)
 // 每个 task B# 给本文件追加自己的 it('skill X ...') case
 import { describe, it, expect } from 'vitest';
 import matter from 'gray-matter';
@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 describe('templates/skills', () => {
-  // 通用断言:所有 15 skill frontmatter 必须含 forge:<name> 形式的 name 字段
+  // 通用断言:所有 16 skill frontmatter 必须含 forge:<name> 形式的 name 字段
   it.each(SKILL_NAMES)('%s 有合法 frontmatter 且 name 为 forge:<name>', async (name) => {
     const content = await loadSkill(name);
     const parsed = matter(content);
@@ -33,6 +33,23 @@ describe('templates/skills', () => {
     expect(content).not.toMatch(/docs\/superpowers\/(specs|plans)/);
   });
 
+  // 净化回归锁:移植版 discipline 不得含任何项目锚点(plan-port-discipline Task 3-8 净化结果锁定)
+  it('subagent-driven-discipline 不含项目锚点', async () => {
+    const content = await loadSkill('subagent-driven-discipline');
+    const anchors: RegExp[] = [
+      /forgeue/i, // ForgeUE 项目名
+      /forge-eval\/runner/, // 架空旧路径
+      /IMPL_FILES_JSON/, // 真实变量名
+      /\bplan-9[a-z]/, // plan-9x 内部计划名
+      /\bplan-v1\.1\b/, // plan-v1.1 内部计划名
+      /codex-companion/, // 项目专有 helper
+      /PR #\d+/, // 项目 PR 编号
+    ];
+    for (const re of anchors) {
+      expect(content).not.toMatch(re);
+    }
+  });
+
   // using-forge 专属:必须含 6 个 forge slash 命令清单
   it('using-forge 含 6 个 /forge:* 命令清单', async () => {
     const content = await loadSkill('using-forge');
@@ -45,8 +62,8 @@ describe('templates/skills', () => {
   });
 });
 
-// plan-9i Task 0 + plan-9d Task 0 + plan-9f Task 0 — 验证 SKILL_NAMES registry 扩展
-// (9i:writing-skills 第 13 项 + 9d:verifying-three-dimensions 第 14 项 + 9f:exploring 第 15 项)
+// plan-9i Task 0 + plan-9d Task 0 + plan-9f Task 0 + plan-port-discipline Task 10 — 验证 SKILL_NAMES registry 扩展
+// (9i:writing-skills 第 13 项 + 9d:verifying-three-dimensions 第 14 项 + 9f:exploring 第 15 项 + port-discipline:subagent-driven-discipline 第 16 项)
 // 注:SKILL_NAMES 已由上方 import 引入,无需重复 import
 describe('SKILL_NAMES registry (9i + 9d + 9f)', () => {
   it('writing-skills 是 SKILL_NAMES 第 13 项', () => {
@@ -64,8 +81,13 @@ describe('SKILL_NAMES registry (9i + 9d + 9f)', () => {
     expect(SKILL_NAMES.indexOf('exploring')).toBe(14); // 0-indexed
   });
 
-  it('SKILL_NAMES 总数 15', () => {
-    expect(SKILL_NAMES.length).toBe(15);
+  it('subagent-driven-discipline 是 SKILL_NAMES 第 16 项', () => {
+    expect(SKILL_NAMES).toContain('subagent-driven-discipline');
+    expect(SKILL_NAMES.indexOf('subagent-driven-discipline')).toBe(15); // 0-indexed
+  });
+
+  it('SKILL_NAMES 总数 16', () => {
+    expect(SKILL_NAMES.length).toBe(16);
   });
 });
 

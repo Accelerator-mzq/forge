@@ -171,7 +171,7 @@ subagent-driven-discipline-generic/
 - **Codex CLI** ✅ 已映射 — 需要 `multi_agent = true` config 打开 `spawn_agent` / `wait_agent` / `close_agent`;详见 `references/codex-tools.md`
 - **OpenCode** ✅ 已映射 — 工具名 lowercase(`skill` / `read` / `bash`);subagent 走 `.opencode/agents/<name>.md` 定义文件,**model 选择在 agent 定义里固定**(不是 dispatch 时传参)— 这意味着每个 §1 model tier 你需要定义独立 subagent file;详见 `references/opencode-tools.md`
 - **§3.4.5 Type 5(Codex CLI subprocess invoked from Claude Code parent)**:**out of scope** — 走 Codex 自家 review 协议,本 skill 不 cover。注:这与 "Codex CLI 作为本 skill 的 controller" 不同(后者完全 in scope)
-- **其他 Anthropic SDK harness**(Copilot CLI / Gemini CLI 等):未实测,但理论上兼容 — 自行参考 superpowers 上游的 `references/copilot-tools.md` 做 mapping
+- **其他 Anthropic SDK harness**(Copilot CLI / Gemini CLI 等):未实测,但理论上兼容 — 自行参考该 harness 的官方文档做工具名映射
 
 ### License
 

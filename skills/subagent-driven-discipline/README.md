@@ -4,7 +4,7 @@
 
 `forge:subagent-driven-development` 的 sister skill,在上游 generic 3-stage 流程之上补 **controller-side 场景判断**:任务类型 taxonomy、model tier 矩阵、cheap-model 高质量 playbook、cross-verify 纪律、Trigger Type retrospect 让 skill 从实证增长。
 
-本 bundle 是从 ForgeUE 项目抽出的**通用版本**(已剥离项目锚点),可直接 drop 到任何使用 `forge:subagent-driven-development` 的项目,通过 §5 case study 增长层适配本地实证。
+本 bundle 是 `forge:subagent-driven-development` 的**通用 companion skill**(已剥离项目锚点),可直接 drop 到任何使用 `forge:subagent-driven-development` 的项目,通过 §5 case study 增长层适配本地实证。
 
 ---
 
@@ -141,9 +141,9 @@ retrospect 结果决定是否加 §5 case study(任一 Yes → MANDATORY 加 cas
 
 | 定制点 | 替换内容 |
 |---|---|
-| §1.1.2 prompt 例 "沿 `<existing-project-module>.py` argparse + multi-mode CLI 风格" | 换成你项目的真实 sister-file 路径 |
+| §1.1.2 prompt 例 "沿 `<existing-project-module>` 的代码风格和模式" | 换成你项目的真实 sister-file 路径 |
 | §2.1 "Sister file path: `<e.g. existing project module path>`" | 同上,选一个有代表性的 module |
-| §3.4.2 Type 2 trigger 提到的 "或对应 parallel dispatch 命令模板" | 若你项目有 parallel-dispatch slash command,在这里写它的名 |
+| §3.4.2 Type 2 trigger 提到的 "或对应 parallel dispatch 命令模板" | 若你项目有 parallel-dispatch slash command(`<your-review-command>` 等),在这里写它的名 |
 | §5 case studies | 你项目 retrospect(Q1–Q6 / Q7 / 轻量 Q2–Q4)触发时增长 — 见 §8 增长协议 |
 | frontmatter `case_study_count` | 加 case 时同步 bump(`0 → 1 → 2 → ...`) |
 
@@ -172,7 +172,7 @@ subagent-driven-discipline-generic/
 
 ### License
 
-MIT(继承自 ForgeUE 原项目)。frontmatter `author: forgeue project (extracted to generic)` 保留作署名。
+MIT License。
 
 ### 上游 sister skill 指针
 
@@ -317,9 +317,9 @@ Project-specific customization points:
 
 | Slot | What to customize |
 |---|---|
-| §1.1.2 prompt example "沿 `<existing-project-module>.py` argparse + multi-mode CLI 风格" | Replace with a real sister-file path from your project |
+| §1.1.2 prompt example "following `<existing-project-module>` code style and patterns" | Replace with a real sister-file path from your project |
 | §2.1 "Sister file path: `<e.g. existing project module path>`" | Same — pick a representative module |
-| §3.4.2 Type 2 trigger reference "或对应 parallel dispatch 命令模板" | If your project has a parallel-dispatch slash command, name it here |
+| §3.4.2 Type 2 trigger reference "or equivalent parallel-dispatch command template" | If your project has a parallel-dispatch slash command (e.g., `<your-review-command>`), name it here |
 | §5 case studies | Grow as your project's retrospects fire (Q1–Q6 / Q7 / Light Q2–Q4) — see §8 growth protocol |
 | frontmatter `case_study_count` | Bump as you add cases (`0 → 1 → 2 → ...`) |
 
@@ -348,7 +348,7 @@ subagent-driven-discipline-generic/
 
 ### License
 
-MIT (inherited from the originating ForgeUE project). Frontmatter `author: forgeue project (extracted to generic)` retained as attribution.
+MIT License.
 
 ### Pointer to the upstream sister skill
 

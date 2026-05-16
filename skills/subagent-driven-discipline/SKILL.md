@@ -2,12 +2,12 @@
 name: subagent-driven-discipline
 description: Subagent task type taxonomy + cheap-model reliability playbook + Trigger Type Matrix retrospect for subagent-driven-development workflows。**重场景轻业务**:按 subagent 任务类型(implementation 5 子类 / spec review 4 子类 / code quality review 5 子类 / test creation / doc / debug / verification)细分 model tier + WHY + 让 cheap model 高质量的具体 prompt patterns。**Design 任务(algorithmic / architectural / arch doc rewrite / complex root cause)绝对原则 Opus only,无 exception**。Cross-scenario discipline(cwd verify / cross-verify / cherry-pick recovery / cost framework)作为 supporting infrastructure。**Living catalog 增长由 §3.4 Trigger Type Matrix retrospect 强制**:5 trigger types(3-stage / parallel / standalone / ad-hoc / codex CLI)各自 retrospect intensity;Type 1+2 Opus mandatory full;Type 3 light;Type 4 skip retrospect 仅 cross-verify;任一 Yes 才加 case study;全 No 不加(避免噪声)。Companion to `forge:subagent-driven-development`。
 license: MIT
-compatibility: Claude Code Agent tool + python -m pytest;sister to forge:subagent-driven-development(generic 3-stage process)
+compatibility: Claude Code Agent tool;sister to forge:subagent-driven-development(generic 3-stage process)
 metadata:
-  author: forgeue project (extracted to generic)
+  author: forge (generic skill)
   version: "1.0-generic"
   scenario_subtype_count: 28
-  case_study_count: 10
+  case_study_count: 0
   retrospect_protocol: trigger-type-matrix(5 types × per-type intensity)
 ---
 

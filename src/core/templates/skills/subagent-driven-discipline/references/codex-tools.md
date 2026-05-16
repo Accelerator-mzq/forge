@@ -4,19 +4,19 @@ This skill is written using Claude Code tool names. When running on Codex CLI, u
 
 ## Skill loading
 
-| Skill references                    | Codex equivalent                                                                                                                                                                                |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Skill references | Codex equivalent |
+|---|---|
 | `Skill(subagent-driven-discipline)` | Skills auto-load from `.codex/skills/` and `~/.agents/skills/`. When you see `Skill(name)` in a Claude Code prompt, just follow the instructions — Codex already has the skill content visible. |
 
 ## Subagent dispatch (the central concept of this skill)
 
-| Claude Code                                     | Codex equivalent                                                                                                                          |
-| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `Task` tool / `Agent` tool dispatch             | `spawn_agent`                                                                                                                             |
-| Multiple `Task` calls in one message (parallel) | Multiple `spawn_agent` calls                                                                                                              |
-| Wait for subagent result                        | `wait_agent`                                                                                                                              |
-| Free subagent slot                              | `close_agent`                                                                                                                             |
-| `model:` parameter on Task                      | Codex configures model via the agent profile / config — pass model selection via the spawned-agent profile field, not as a tool parameter |
+| Claude Code | Codex equivalent |
+|---|---|
+| `Task` tool / `Agent` tool dispatch | `spawn_agent` |
+| Multiple `Task` calls in one message (parallel) | Multiple `spawn_agent` calls |
+| Wait for subagent result | `wait_agent` |
+| Free subagent slot | `close_agent` |
+| `model:` parameter on Task | Codex configures model via the agent profile / config — pass model selection via the spawned-agent profile field, not as a tool parameter |
 
 **Required Codex config** (in `~/.codex/config.toml`):
 
@@ -31,12 +31,12 @@ This enables `spawn_agent`, `wait_agent`, `close_agent`. Without it, this skill 
 
 ## Other tool name mapping
 
-| Claude Code                     | Codex equivalent                |
-| ------------------------------- | ------------------------------- |
-| `Read`, `Write`, `Edit` (files) | use Codex's native file tools   |
-| `Bash` (run commands)           | use Codex's native shell tools  |
-| `Grep`, `Glob`                  | use Codex's native search tools |
-| `TodoWrite` (task tracking)     | `update_plan`                   |
+| Claude Code | Codex equivalent |
+|---|---|
+| `Read`, `Write`, `Edit` (files) | use Codex's native file tools |
+| `Bash` (run commands) | use Codex's native shell tools |
+| `Grep`, `Glob` | use Codex's native search tools |
+| `TodoWrite` (task tracking) | `update_plan` |
 
 ## §3.1 STRICT cwd verify (Codex-specific note)
 

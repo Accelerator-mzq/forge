@@ -7,13 +7,11 @@ Tested against [anomalyco/opencode](https://github.com/anomalyco/opencode) (the 
 OpenCode walks up from the current working directory to the git worktree and discovers skills at the following paths (in priority order):
 
 **Project-local:**
-
 - `.opencode/skills/<name>/SKILL.md` (native)
 - `.claude/skills/<name>/SKILL.md` (Claude Code-compatible)
 - `.agents/skills/<name>/SKILL.md` (cross-platform)
 
 **Global:**
-
 - `~/.config/opencode/skills/<name>/SKILL.md` (native)
 - `~/.claude/skills/<name>/SKILL.md` (Claude Code-compatible)
 - `~/.agents/skills/<name>/SKILL.md` (cross-platform)
@@ -22,20 +20,20 @@ OpenCode walks up from the current working directory to the git worktree and dis
 
 ## Skill loading
 
-| Claude Code                         | OpenCode equivalent                                                                          |
-| ----------------------------------- | -------------------------------------------------------------------------------------------- |
+| Claude Code | OpenCode equivalent |
+|---|---|
 | `Skill(subagent-driven-discipline)` | `skill({ name: "subagent-driven-discipline" })` (lowercase tool name; JSON object parameter) |
 
 OpenCode auto-discovers skills and shows the agent the available skill list (name + description from frontmatter); the agent decides when to invoke `skill(...)` to load full content.
 
 ## Subagent dispatch (the central concept of this skill)
 
-| Claude Code                        | OpenCode equivalent                                                                                                                                                                                                                       |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Task` tool dispatch               | The `Task` tool (per opencode docs `permission.task`) — exact case + signature is not fully documented in opencode public docs; consult opencode's runtime tool list when in doubt.                                                       |
-| User-driven `@subagent` invocation | Same in OpenCode — type `@<agent-name>` in chat to invoke a subagent                                                                                                                                                                      |
-| `model:` parameter on Task         | OpenCode subagents are defined as separate `.md` files with `model:` in their frontmatter — the model is picked at agent definition, NOT per-dispatch. To dispatch with different models, define multiple subagents (one per model tier). |
-| `subagent_type:` parameter         | The agent name (filename without `.md`) — e.g. invoke `general` to call the built-in `general` subagent                                                                                                                                   |
+| Claude Code | OpenCode equivalent |
+|---|---|
+| `Task` tool dispatch | The `Task` tool (per opencode docs `permission.task`) — exact case + signature is not fully documented in opencode public docs; consult opencode's runtime tool list when in doubt. |
+| User-driven `@subagent` invocation | Same in OpenCode — type `@<agent-name>` in chat to invoke a subagent |
+| `model:` parameter on Task | OpenCode subagents are defined as separate `.md` files with `model:` in their frontmatter — the model is picked at agent definition, NOT per-dispatch. To dispatch with different models, define multiple subagents (one per model tier). |
+| `subagent_type:` parameter | The agent name (filename without `.md`) — e.g. invoke `general` to call the built-in `general` subagent |
 
 **Subagent definition path** (where you create the implementer / spec-reviewer / code-quality-reviewer agents this skill assumes):
 
@@ -55,7 +53,6 @@ permission:
   edit: allow
   bash: allow
 ---
-
 [system prompt — paste §2.1 Implementation Haiku Reliability Playbook here]
 ```
 
@@ -63,19 +60,19 @@ You will need 3+ such agent files (one per model tier × role: haiku-implementer
 
 ## Other tool name mapping
 
-| Claude Code       | OpenCode equivalent                              |
-| ----------------- | ------------------------------------------------ |
-| `Read`            | `read`                                           |
-| `Write`           | `write`                                          |
-| `Edit`            | `edit`                                           |
-| `Bash`            | `bash`                                           |
-| `Grep`            | `grep`                                           |
-| `Glob`            | `glob`                                           |
-| `TodoWrite`       | `todowrite`                                      |
-| `WebFetch`        | `webfetch`                                       |
-| `WebSearch`       | `websearch` (requires `OPENCODE_ENABLE_EXA` env) |
-| `AskUserQuestion` | `question`                                       |
-| (no equivalent)   | `apply_patch`, `lsp` (OpenCode-specific)         |
+| Claude Code | OpenCode equivalent |
+|---|---|
+| `Read` | `read` |
+| `Write` | `write` |
+| `Edit` | `edit` |
+| `Bash` | `bash` |
+| `Grep` | `grep` |
+| `Glob` | `glob` |
+| `TodoWrite` | `todowrite` |
+| `WebFetch` | `webfetch` |
+| `WebSearch` | `websearch` (requires `OPENCODE_ENABLE_EXA` env) |
+| `AskUserQuestion` | `question` |
+| (no equivalent) | `apply_patch`, `lsp` (OpenCode-specific) |
 
 OpenCode tool names are **lowercase**, in contrast to Claude Code's PascalCase.
 

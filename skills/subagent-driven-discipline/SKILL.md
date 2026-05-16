@@ -145,7 +145,7 @@ This skill uses **Claude Code tool names** (PascalCase: `Skill`, `Agent`, `Read`
 
 | Stack | 必跑命令(全 0 才算 DONE) |
 |---|---|
-| **TypeScript / Node(pnpm)** | `pnpm typecheck` / `pnpm lint` / **`pnpm format:check`**(漏 → CI 双平台 fail)/ `pnpm test --run` / `pnpm build`(若改 src/* 影响 dist) |
+| **TypeScript / Node(pnpm)** | `pnpm typecheck` / `pnpm lint` / **`pnpm format:check`**(漏 → 可能导致 CI 失败,具体看项目 CI 配置)/ `pnpm test --run` / `pnpm build`(若改 src/* 影响 dist) |
 | **Python(pytest)** | `python -m pytest -q` / `ruff check`(若用 ruff)/ `mypy <package>`(若用 mypy) |
 | **Rust(cargo)** | `cargo fmt --check` / `cargo clippy -- -D warnings` / `cargo test` |
 | **Go** | `go vet ./...` / `gofmt -l .`(空输出)/ `go test ./...` |
@@ -155,17 +155,15 @@ This skill uses **Claude Code tool names** (PascalCase: `Skill`, `Agent`, `Read`
 
 **Failure mode if skipped**:implementer 自由 design / hallucinate self-report / 漏 commit / commit 错 branch(see Pattern §3.1 worktree leak)/ stack-mismatch self-review 漏 lint/format 导致 CI fail(see §5 Case 01)/ 照搬 plan inline latent bug 不报 observation。
 
-#### §2.1.1 P-5 — external protocol assumption verify(plan-9z polish;plan-9h Task 4 实证)
+#### §2.1.1 P-5 — external protocol assumption verify
 
 Dispatch implementer 第一步**不是开始实施**,而是 grep / read 实际项目代码验证 plan 字面陈述与外部系统约束是否一致:
 
-- **forge-eval runner 1:1 yaml 约束**(`forge-eval/runner/registry.ts` `SKILL_NAMES` 数组实际 union;runner 不接受 plan 字面虚构的 skill 名)
-- **build script**(`scripts/build.ts` / `scripts/copy-templates.mjs` 实际 stages + reverse-sync 行为)
-- **其他外部协议**(`commands/apply.md` step 顺序 / SKILL.md cross-ref / 现有 fence schema / ack-log action enum 字面)
+- **外部 registry / enum 约束**(`<registry-file>` 实际 union 值;runner 不接受 plan 字面虚构的条目名)
+- **build script**(`<build-sync-script>` 实际 stages + reverse-sync 行为)
+- **其他外部协议**(命令协议文件 step 顺序 / SKILL.md cross-ref / 现有 schema / action enum 字面)
 
 Plan 字面是设计**意图**,外部代码是实施**约束**;前者可能漏拷后者。
-
-**实证**(plan-9h Task 4):implementer 第一步 grep `forge-eval/runner/registry.ts` 发现 `SKILL_NAMES` 实际只接受 `subagent-driven-development` 不接受 `main-agent-stop` — plan v1 字面 "创建 main-agent-stop.yaml" 与 runner 1:1 约束冲突,implementer 报 BLOCKED 而非盲目实施;plan v1.2 修订选项 B(merge 进现有 yaml)消化。若 implementer 默认信 plan 字面跑 baseline,会盲目跑后失败,浪费成本 + 误导后续修订路径。
 
 **Prompt 必含元素**(沿 §2.1 prompt 模板补):
 ```markdown
@@ -179,13 +177,13 @@ Before implementing, grep / read these files and verify plan claims:
 If any verify fails → report BLOCKED with specific verify command + actual vs expected output, DO NOT start implementation。
 ```
 
-### §2.1.2 cross-cutting 状态回写 hook(plan-v1.1 Task 5 加 — Pattern X #1 实证)
+### §2.1.2 cross-cutting 状态回写 hook
 
 **Trigger**:implementer 实施 Task 改动了 master plan / spec / 上游 sub-plan / 当前 sub-plan 自身 引用的 cross-cutting 字段:
 
-- file:line 字面(eg. `src/cli/init.ts:38` 模板字面引用)
+- file:line 字面(eg. `<module-path>:<line>` 模板字面引用)
 - 不变量计数(eg. spec §X.Y "14 green↞HEAD" / "6 子段 7 子段")
-- DoD 状态(eg. master plan §3.X "plan-9g DONE @ commit `7d36c2b`")
+- DoD 状态(eg. master plan §3.X "<sub-plan-name> DONE @ commit `<sha>`")
 - version 字面(eg. package.json / CHANGELOG.md / templates 内 v0.X 引用)
 - release gate / 协议字面(eg. sub-plan 自身 release gate "0 严重 / 0 阻塞 / 0 Major" sync 全 plan)
 
@@ -195,21 +193,12 @@ If any verify fails → report BLOCKED with specific verify command + actual vs 
 2. implementer 实施时:**同 commit** 内回写所有引用方至新值
 3. implementer self-review checklist 加项:"列出本 Task 改动 cross-cutting 字段 → grep 全 plan 验所有引用方已 sync"
 
-**Why**(Pattern X #1 累计实证,REINFORCE Pattern S/T):
-
-- **plan-9g B-7 顺手做** `src/cli/init.ts:38` 模板 v0.4 → v1.2 改动,master plan §3.11 line 410 描述 stale → plan-9z Task 3 第一步 grep 才发现已是 "v1.2"(plan-v1.1 Task 5 协议起点;§5 Case 09 §1273 沉淀)
-- **plan-v1.1 Task 0 sub-plan 起草自身连续两次 self-aware 实证**:
-  - v3.1 → v3.2:release gate 标准升级 "0 Major" 字面只加 §14 retrospect 段未 sync 主流程 Step 7.6 / Step 7.7 / Task 7 DoD / §10 综合 DoD → Codex 五审 F-R5-01 catch
-  - v3.2 → v3.3:cross-cutting sync 主流程 sync 不完整(声称 sync 4 处实际 sync 2 处)→ Codex 六审 F-R6-01 catch
-- **连续两次同源盲点累计强度 ≥ 1 次累计实证** → 协议必要性 self-evident(plan v3.3 §14 v3.3 retrospect 字面记录)
-
 **Controller dispatch prompt 加项**(在 §2.1 任务描述段尾):
 
 ```markdown
 若本 Task 改动 cross-cutting 字段(file:line 字面 / 不变量计数 / DoD 状态 / version 字面 / release gate 协议字面),
 implementer **必 grep** master plan / spec / 上游 sub-plan / 当前 sub-plan 全文,**列出所有引用方位置 list**(不眼测),
 **同 commit** 内回写至新值;不留 stale 引用。
-触发示例:plan-v1.1 自身 v3.1 / v3.2 连续两次踩此盲点 → Codex 五审 / 六审 catch(self-aware retrospect 实证)。
 ```
 
 **verify protocol**(implementer self-review checklist line 末加):
@@ -219,9 +208,6 @@ implementer **必 grep** master plan / spec / 上游 sub-plan / 当前 sub-plan 
 grep -rn "<old-value>" <master-plan-path> <spec-path> <upstream-sub-plan-paths> | wc -l  # 期望 = 0(全 sync)
 grep -rn "<new-value>" <master-plan-path> <spec-path> <upstream-sub-plan-paths> | wc -l  # 期望 ≥ N(新值已替换 N 处)
 ```
-
-参考 case:本 SKILL.md §5 Case 09 §1273(Pattern S REINFORCE + Pattern T new edge);
-plan-v1.1 Task 0 `docs/plans/2026-05-14-plan-v1.1-polish-leftover.md` §14 v3.1 / v3.2 / v3.3 retrospect(self-aware 连续两次实证)。
 
 ### §2.2 Spec / Compliance Reviewer Haiku Reliability Playbook
 

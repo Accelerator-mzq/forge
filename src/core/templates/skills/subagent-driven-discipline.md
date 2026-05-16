@@ -314,30 +314,30 @@ If `pwd` 不显示 expected path → **STOP report NEEDS_CONTEXT;不要在错误
 | Logic 错误(算法 / 数据流 / 控制流)| Round 2 SendMessage 同 implementer subagent(~$0.20-0.50)|
 | Architectural 错误(违 design decision) | 升级 user(controller-only) |
 
-### §3.3.1 P-6 — 区分 rubric 软度 vs 验证强度(plan-9z polish;plan-9h Task 4 实证)
+### §3.3.1 P-6 — 区分 rubric 软度 vs 验证强度
 
-forge-eval 有两个**独立指标**,**不互替**:
+自动评测框架中有两个**独立指标**,**不互替**:
 
-| 指标 | 含义 | 触发改 rubric 还是改 SKILL.md/bootstrap? |
+| 指标 | 含义 | 触发什么改动? |
 |---|---|---|
-| **rubric 软度**(Pattern R) | RED avg > 5 → rubric 没收紧到 baseline AI 必然失分 | **改 scenarios**(收紧 rubric / 提权重) |
-| **验证强度**(pair_pass) | delta ≥ 1.5 失败 → GREEN AI 与 RED AI 差距不显著 | **改 SKILL.md / bootstrap**(让 GREEN AI 看到更多字面) |
+| **rubric 软度** | baseline AI 不失分 → rubric 没收紧到必要程度 | **改评测 scenarios**(收紧 rubric / 提权重) |
+| **验证强度**(区分度) | GREEN AI 与 RED AI 差距不显著 → skill 字面未充分对齐 | **改 skill 内容 / bootstrap**(让 GREEN AI 看到更多字面) |
 
-**实证**(plan-9h Task 4):严格 RED 全 ≤ 5(Pattern R **不触发**)但 2/3 pair_pass=false → **不改 rubric 凑 pair_pass**(Goodhart's law 防御),改 SKILL.md / bootstrap 字面对齐(plan-9z polish P-1/P-2 消化)。把两指标混用会导致 rubric 不断收紧到不可达,GREEN AI 也通不过(假性 RED)。
+**关键纪律**:两指标混用会导致 rubric 不断收紧到不可达,GREEN AI 也通不过(假性 RED)。若区分度不足,应**改 skill 字面**而非收紧 rubric 凑数字(Goodhart's law 防御)。
 
-### §3.3.2 P-8 — Task BLOCKED 修订决策树(plan-9z polish;plan-9h Task 4 v1.2 实证)
+### §3.3.2 P-8 — Task BLOCKED 修订决策树
 
 Task implementer 报 BLOCKED 时,plan author 决策两选项:
 
-- **选项 A — 改架构**:扩 forge-eval `SKILL_NAMES` + 新建独立 skill / 新建独立 yaml file,**侵入基础设施**
-- **选项 B — 复用现有架构**:merge 进现有 yaml,**保 plan-9 序列 atomic**
+- **选项 A — 改架构**:新建独立 skill / 独立配置文件,**侵入基础设施**
+- **选项 B — 复用现有架构**:merge 进现有配置,保持当前 plan 序列 atomic
 
-**默认选 B**(沿 plan-9e2 v3 / plan-9h Task 4 v1.2 修订模式)。
+**默认选 B**。
 
-- 选 A 的代价:增加 release 时基础设施改动面积 + breaking 现有 scenarios 测试基线 + 跨 sub-plan 影响
-- 选 B 的代价:可能 forge-eval 验证粒度变粗(多个 plan 共用一个 yaml)— 但通过 scenario 分组可缓解
+- 选 A 的代价:增加 release 时基础设施改动面积 + breaking 现有测试基线 + 跨 sub-plan 影响
+- 选 B 的代价:验证粒度可能变粗(多个 plan 共用一个配置)— 但通过 scenario 分组可缓解
 
-**实证**(plan-9h Task 4 v1.2):把 "main-agent-stop" 改回沿用现有 `subagent-driven-development` `SKILL_NAMES` 并新建 `forge-eval/scenarios/main-agent-stop.yaml`(scenario-level 分组而非 skill-level),pair_pass 验证粒度保持 + 不动 `SKILL_NAMES` 数组。
+**关键纪律**:优先保持 plan 序列 atomic,避免因一个 BLOCKED task 引发跨边界的基础设施改动。若必须选 A,需明确评估所有受影响的下游 scenarios 与 skill 引用。
 
 ### §3.4 Post-Phase Quality Retrospect Protocol(Opus-only judgment;skill 增长触发)
 
@@ -351,7 +351,7 @@ Task implementer 报 BLOCKED 时,plan author 决策两选项:
 | **Type 2: Parallel dispatch**(`forge:dispatching-parallel-agents`)| 多 implementer 并行全 commit + W2 actual diff 验证 + 后续 spec / code_quality reviewer 全 ✅ | **MANDATORY full Q1-Q6 + Q7**(parallel-specific) | **Opus**(MANDATORY)| $0.40-1.20 |
 | **Type 3: Standalone Task**(§1.4/§1.5/§1.6/§1.7 单 subagent dispatch,无 3-stage review)| Single Task return DONE / DONE_WITH_CONCERNS | **Light:Q2 + Q3 + Q4**(skip Q1/Q5/Q6 — 单 task scope 不够 trigger broader pattern) | **Opus or Sonnet** | $0.10-0.30 |
 | **Type 4: Ad-hoc research Task**(无 evidence committed;e.g. "summarize files" / "find X usage")| Task return | **Skip full retrospect;仅 §3.2 cross-verify** | Controller(any tier) | ~$0(cross-verify only) |
-| **Type 5: Codex CLI subprocess**(`/codex:adversarial-review` / `/codex:review`)| Codex CLI return | **本 skill 不 cover**(Codex 自家 protocol — 沿 codex-plugin/codex-companion) | N/A | N/A |
+| **Type 5: Codex CLI subprocess**(`<external-review-command>` 等外部 CLI review 触发)| Codex CLI return | **本 skill 不 cover**(Codex 自家 protocol — 沿 `<codex-helper-script>` 自家协议) | N/A | N/A |
 
 **判定 trigger type**:看 dispatch 用哪 upstream skill / 哪 dispatch pattern,不看 task 内容本身。
 
@@ -388,7 +388,7 @@ Task implementer 报 BLOCKED 时,plan author 决策两选项:
 | Q1-Q6 | 沿 Type 1 同款 | 同 Type 1 |
 | **Q7a** | Actual file overlap detected post-dispatch?(implementer 间 diff 实际有交) | 必加 §5 case 标 controller declaration vs reality drift |
 | **Q7b** | Race condition / shared state 影响?(implementer 改 shared fixture / global config / import hub)| 必加 §5 case + §6 catalog "parallel race condition" |
-| **Q7c** | IMPL_FILES_JSON 序列化缺 / W2 actual diff Bash glue 错?(silent overlap detection failure)| 必加 §5 case + §1.1.3 multi-file integration playbook 加 prompt 元素 |
+| **Q7c** | JSON 序列化(env var 传递)缺失 / W2 actual diff Bash glue 错?(silent overlap detection failure)| 必加 §5 case + §1.1.3 multi-file integration playbook 加 prompt 元素 |
 | **Q7d** | parallel implementer 数 vs degradation 实际比例?(若 ≥30% 降级 → 该 phase 不该选 parallel)| 必加 §5 case + §1.1.x 加 "适合 parallel vs sequential" 判定准则 |
 
 #### §3.4.3 Type 3: Standalone Task Retrospect(Light)
@@ -442,16 +442,16 @@ Task implementer 报 BLOCKED 时,plan author 决策两选项:
 
 #### §3.4.5 Type 5: Codex CLI Subprocess(out of scope)
 
-**Trigger**:`/codex:adversarial-review` / `/codex:review` / `/codex:rescue` 等 codex-plugin 派的 CLI subprocess。
+**Trigger**:`<external-review-command>` 等外部 CLI review 触发(如 codex-plugin 派的 CLI subprocess)。
 
 **为什么不 cover**:
-- Codex CLI 不是 Claude Code subagent — 是外部 CLI subprocess(`codex-companion.mjs` broker)
+- Codex CLI 不是 Claude Code subagent — 是外部 CLI subprocess(`<codex-helper-script>` broker)
 - Codex 走自家 protocol(Round Counter + Polling Convention + verbatim-first output)
-- Codex 自家有 review 协议(`codex_review_round1.md` / cross-check matrix)
+- Codex 自家有 review 协议(`<review-output-file>` / cross-check matrix)
 
 **Controller 责任**(本 skill 不规约,但提醒):
 - Codex return 后仍需 §3.2 cross-verify(测试 count / file path / commit SHA / URL)
-- 若 codex hallucinate → 是 codex-plugin / codex-companion bug,不是本 skill 范围
+- 若 codex hallucinate → 是 codex-plugin / `<codex-helper-script>` bug,不是本 skill 范围
 
 #### §3.4.6 Trigger Type 共通约束(all types)
 

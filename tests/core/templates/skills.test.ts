@@ -3,6 +3,9 @@
 import { describe, it, expect } from 'vitest';
 import matter from 'gray-matter';
 import { loadSkill, SKILL_NAMES } from '../../../src/core/templates/skills/index.js';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 
 describe('templates/skills', () => {
   // 通用断言:所有 15 skill frontmatter 必须含 forge:<name> 形式的 name 字段
@@ -63,5 +66,17 @@ describe('SKILL_NAMES registry (9i + 9d + 9f)', () => {
 
   it('SKILL_NAMES 总数 15', () => {
     expect(SKILL_NAMES.length).toBe(15);
+  });
+});
+
+describe('skill references/ 同步(copy-templates syncSkillReferences)', () => {
+  it('subagent-driven-discipline references/ 已镜像到 src/core/templates/', () => {
+    const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../..');
+    const refDir = join(
+      repoRoot,
+      'src/core/templates/skills/subagent-driven-discipline/references',
+    );
+    expect(existsSync(join(refDir, 'codex-tools.md'))).toBe(true);
+    expect(existsSync(join(refDir, 'opencode-tools.md'))).toBe(true);
   });
 });

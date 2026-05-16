@@ -30,6 +30,13 @@ digraph when_to_use {
 }
 ```
 
+## Companion Skill
+
+Dispatch 前,检查环境中是否存在 `forge:subagent-driven-discipline`。
+
+- **若存在** → 立即调用(`Skill(forge:subagent-driven-discipline)`)再开始 dispatch。它是本 skill 内联摘要的权威完整版 —— 包含完整的 subagent task-type taxonomy(§1)、cheap-model 可靠性 playbook、cross-verify 协议(§3.2)、inline-fix vs round-2 decision tree(§3.3)、以及 Trigger Type Matrix retrospect。以其 taxonomy / playbook 驱动 model-tier 选型和 review discipline。
+- **若不存在** → 本 skill 内联的 model 选型 matrix / cross-verify 五类 / decision tree 已自足;仅凭本 skill 继续执行即可。
+
 ## The Process
 
 ```dot

@@ -3,7 +3,7 @@
 // 然后写入 src/core/templates/{skills,commands}/(legacy `forge init` 仍读这,v0.4 移除)
 // 然后写入 dist/core/templates/(npm package 运行时读这)
 
-import { mkdir, readdir, readFile, writeFile, unlink } from 'node:fs/promises';
+import { mkdir, readdir, readFile, writeFile, unlink, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -130,6 +130,46 @@ async function syncCommands() {
   return cmdFiles;
 }
 
+// 同步 skill 自带的 references/ 子目录:skills/<name>/references/*.md
+// → src/core/templates/skills/<name>/references/ → dist/core/templates/skills/<name>/references/
+// syncSkills() 只同步 <name>/SKILL.md 忽略子目录;带 references/ 的 skill 需此函数
+// 补同步 per-skill references/ 子目录(注:templates 非 skills/ 的逐文件完整镜像)。
+async function syncSkillReferences() {
+  const skillsDir = join(REPO_ROOT, 'skills');
+  const templateRoots = [
+    join(REPO_ROOT, 'src', 'core', 'templates', 'skills'),
+    join(REPO_ROOT, 'dist', 'core', 'templates', 'skills'),
+  ];
+  // 真镜像第一步:删两个目标根下所有已存在的 per-skill references/ 子目录,
+  // 防止源 skill 删掉/清空 references/ 后,目标残留 stale 文件。
+  for (const root of templateRoots) {
+    if (!existsSync(root)) continue;
+    for (const name of await readdir(root)) {
+      const staleRefDir = join(root, name, 'references');
+      if (existsSync(staleRefDir)) await rm(staleRefDir, { recursive: true, force: true });
+    }
+  }
+  // 真镜像第二步:从源逐个 skill 重建 references/
+  let count = 0;
+  for (const name of await readdir(skillsDir)) {
+    const refDir = join(skillsDir, name, 'references');
+    if (!existsSync(refDir)) continue;
+    const mdFiles = (await readdir(refDir)).filter((n) => n.endsWith('.md'));
+    if (mdFiles.length === 0) continue;
+    for (const root of templateRoots) {
+      const target = join(root, name, 'references');
+      await mkdir(target, { recursive: true });
+      for (const f of mdFiles) {
+        await writeFile(join(target, f), await readFile(join(refDir, f), 'utf8'), 'utf8');
+      }
+    }
+    count += mdFiles.length;
+  }
+  console.log(
+    `✓ synced ${count} skill reference docs (skills/<name>/references/ → src/core/templates/ + dist/)`,
+  );
+}
+
 // 同步 backlog assets:src/core/backlog/assets/*.md → dist/core/backlog/assets/
 async function syncBacklogAssets() {
   const srcDir = join(REPO_ROOT, 'src', 'core', 'backlog', 'assets');
@@ -144,6 +184,7 @@ async function syncBacklogAssets() {
 }
 
 await syncSkills();
+await syncSkillReferences(); // skill 自带 references/ 子目录(plan-port-discipline)
 await syncSharedSkillDocs(); // plan-9b §2.6.8(v2 修订:fail-fast)
 await syncCommands();
 await syncBacklogAssets(); // plan-backlog-registry

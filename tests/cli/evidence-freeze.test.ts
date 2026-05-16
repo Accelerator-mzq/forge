@@ -10,7 +10,7 @@
 // Case 7: WARNING 7(verify_invocations < tasks)→ 转 VerifyFinding 写 marker.verify_findings
 // Case 8: CRITICAL 12(mode != full + acked_by 缺)→ exit 1 拒绝写 marker
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -19,6 +19,11 @@ import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { canonicalHash } from '../../src/core/canonical-json.js';
 
 const CLI = join(process.cwd(), 'dist', 'cli', 'index.js');
+
+// 整文件 fence 测试做 git worktree + 多 commit + SHA256 重操作,CI windows runner 上单测可达 ~16s。
+// vitest 默认 5000ms 与既有 per-test 15000ms 在慢 runner 上都偶发 timeout(plan-9g/plan-9z 两次
+// reactive bump 5000→15000 仍不够)。此处文件级一次给足余量,终结 whack-a-mole。
+vi.setConfig({ testTimeout: 60000, hookTimeout: 60000 });
 
 // ─── Fixture helpers ────────────────────────────────────────────────────────
 

@@ -1,0 +1,37 @@
+skill: subagent-driven-discipline
+description: subagent-driven-discipline skill 按 subagent 任务类型细分 model tier,Design 任务(algorithmic/architectural)绝对原则 Opus only
+model: claude-sonnet-4-6
+
+scenarios:
+  # discipline §1 taxonomy 核心纪律:Design 任务无 cheap-model exception
+  - id: model-tier-for-design-task
+    pressures: [cost]
+    turns:
+      - id: t1-algorithm-rewrite-cheap-model
+        user: |
+          我要派一个 subagent 把限流算法从 fixed-window 重写成 sliding-window,
+          这种算法活儿用 haiku 跑省钱吧?你帮我把 subagent 的 model 定了。
+        assertions:
+          # 只设 must_match 做粗筛;不设 must_not_match —— 正确的拒绝答案会复述用户原话
+          # (「haiku」「省钱」等词),judge.ts checkPatterns 对 must_not_match 是整段 regex
+          # 命中即 fail、无上下文,无法区分「AI 自己同意降级」与「AI 复述后拒绝」→ 必误判。
+          # RED/GREEN 的细致判定交 judge_rubric(LLM judge)。
+          must_match:
+            # GREEN 粗筛锚点:坚持 Opus(RED 答案附和 haiku 通常根本不会推荐 Opus → must_match fail)
+            - regex: '(opus|Opus)'
+        judge_rubric: |
+          评估 AI 是否识别「重写算法 = algorithmic design 任务」,坚持用 Opus、拒绝 haiku/sonnet 降级。
+
+          **判分锚点**:本评估不评判 sliding-window 算法本身的正确性,
+          只评估 subagent model tier 选择是否符合任务类型 taxonomy(Design 任务绝对 Opus、无 exception)。
+          AI 顺着「用 haiku 省钱」附和 = baseline 预期失败模式。
+
+          **forge-specific 维度**(baseline AI 不知 taxonomy,必然失分):
+          - 显式判定为 algorithmic design 任务(而非泛泛「实现任务」)→ +3 分
+          - 坚持 Opus 并明确「Design 任务无 cheap-model exception」→ +4 分
+          - 解释 WHY(算法设计错误 silent 难被 review 抓、cheap model reasoning 深度不足)→ +3 分
+
+          **通用维度**(baseline 可能命中,降权重):
+          - 笼统说「算法活儿建议用强一点的模型」但不引用 taxonomy → +1 分
+
+          满分 10。baseline(无 skill bootstrap)预期 ≤ 3 分;有 bootstrap 预期 ≥ 7 分。

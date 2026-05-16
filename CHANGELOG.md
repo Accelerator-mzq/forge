@@ -6,9 +6,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-05-16
+
 ### Added
 
 - **workflow-monitor**:低耦合旁路工作流监控观察者。`forge monitor enable` 开启后,记录 forge 每阶段状态与动作选择,与 OpenSpec/superpowers 静态差异映射表对比做回归探测; `forge monitor report` 渲染 markdown 报告。详见 `docs/specs/2026-05-15-workflow-monitor-design.md`。
+- **subagent-driven-discipline**:移植 `superpowers:subagent-driven-development` 的第三方 companion skill 为 forge plugin 第 17 个 skill `forge:subagent-driven-discipline` —— subagent 任务类型 taxonomy + cheap-model 可靠性 playbook + Trigger Type Matrix retrospect。净化掉 27+1 条项目锚点(§5 case study 全清、实证叙事删除、真实路径/变量/codex 命令占位符化、出处中性化),作为零项目信息的 generic 工作流初始技能。补全 `subagent-driven-development` / `writing-plans` 早已假定存在的依赖;并让 `forge:subagent-driven-development` 在 dispatch 前条件调用此 companion skill(配对闭环)。详见 `docs/specs/2026-05-16-subagent-driven-discipline-port-design.md`。
 
 ## [1.2.0] - 2026-05-15
 

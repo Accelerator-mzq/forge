@@ -172,15 +172,15 @@ Every step must contain the actual content an engineer needs. These are **plan f
 
 **Why**(Pattern X #2/#3/#4 累计实证 — REINFORCE Pattern S):
 
-- **plan-9z plan v1 起草字面错 4 处**(`.claude/skills/subagent-driven-discipline/SKILL.md` §5 Case 09 §1264 沉淀):
+- **plan-9z plan v1 起草字面错 4 处**:
   - 假定 `.claude/skills/writing-skills/` prefix(**实际** `skills/writing-skills/` 无 prefix — 顶层 skills/)
   - 假定 `main-agent-stop.yaml` 名(**实际** merge 进 SDD yaml `subagent-driven-development.yaml`)
-  - 假定 `subagent-driven-discipline/SKILL.md` §"STOP Triggers"(**实际** 段在 `subagent-driven-development/SKILL.md`)
+  - 假定 `forge:subagent-driven-discipline` §"STOP Triggers"(**实际** 段在 `forge:subagent-driven-development`)
   - plan-9z Task 4/5 实施第一步 grep 真实路径才发现(implementer commit 字面用真实路径,但 plan v1 字面错保留)
 - **plan-v1.1 Task 0 起草自身同款实证**:
   - v1 假定 `.claude/skills/writing-plans/` prefix(**实际** `skills/writing-plans/SKILL.md` 顶层 skills/ 无 prefix)
   - v3 起草时 plan writer 自身 grep verify 才 catch + 修(plan-v1.1 §14 v3 起草过程 self-aware retrospect)
-- **root cause** 是 plan writer 同源审查盲点(Pattern S),不是 implementer 错;Codex external review 也兜底找到字面错(Case 09 §1264 Pattern S REINFORCE)
+- **root cause** 是 plan writer 同源审查盲点(Pattern S),不是 implementer 错;Codex external review 也兜底找到字面错
 
 **Plan writer checklist(起草 plan 前 — 不眼测,跑 grep)**:
 
@@ -204,9 +204,9 @@ sed -n '<line>,<line+5>p' <file-path>  # 实际看 line range 内容是否符 pl
 
 **Implementer 兜底**(双层防护):
 
-若 plan 字面与实际路径不符,implementer 第一步 grep 真实路径 verify(沿 `.claude/skills/subagent-driven-discipline/SKILL.md` §2.1.1 external protocol assumption verify P-5 协议)— 但 implementer commit 字面用真实路径,plan v1 字面错保留 → **plan writer 仍是 root cause 防线**;implementer 兜底不能 substitute plan writer verify。
+若 plan 字面与实际路径不符,implementer 第一步 grep 真实路径 verify(沿 `forge:subagent-driven-discipline §2.1.1 External Protocol Assumption Verify` 协议)— 但 implementer commit 字面用真实路径,plan v1 字面错保留 → **plan writer 仍是 root cause 防线**;implementer 兜底不能 substitute plan writer verify。
 
-**参考 case**:`.claude/skills/subagent-driven-discipline/SKILL.md` §5 Case 09 §1264 Pattern S REINFORCE — 4 处字面错;
+**参考**:`forge:subagent-driven-discipline §2.1.1 External Protocol Assumption Verify`(implementer verify 协议);
 plan-v1.1 Task 0 `docs/plans/2026-05-14-plan-v1.1-polish-leftover.md` §14 v3 起草过程 self-aware retrospect(`.claude/skills/writing-plans/` 假定 prefix 错 → grep verify catch + 修)。
 
 ## Self-Review
@@ -215,7 +215,7 @@ After writing the complete plan, look at the spec with fresh eyes and check the 
 
 **1. Path verify(plan-v1.1 Task 6 加 — Pattern S REINFORCE)**:
 
-引用的每个 file path / yaml 名 / skill 名 / SKILL.md §X.Y 是否真实存在?跑 `ls <path>` / `grep -n "<section>" <file>` / `sed -n '<line>p' <file>` verify;若 verify 失败 → 改 plan 字面;**不假定 prefix**(沿 Case 09 §1264 + plan-v1.1 §14 v3 自身实证)。
+引用的每个 file path / yaml 名 / skill 名 / SKILL.md §X.Y 是否真实存在?跑 `ls <path>` / `grep -n "<section>" <file>` / `sed -n '<line>p' <file>` verify;若 verify 失败 → 改 plan 字面;**不假定 prefix**(沿 plan-v1.1 §14 v3 自身实证)。
 
 **2. Spec coverage:** Skim each section/requirement in the spec. Can you point to a task that implements it? List any gaps.
 

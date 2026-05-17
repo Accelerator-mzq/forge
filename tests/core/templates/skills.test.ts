@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import matter from 'gray-matter';
 import { loadSkill, SKILL_NAMES } from '../../../src/core/templates/skills/index.js';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -100,5 +100,47 @@ describe('skill references/ 同步(copy-templates syncSkillReferences)', () => {
     );
     expect(existsSync(join(refDir, 'codex-tools.md'))).toBe(true);
     expect(existsSync(join(refDir, 'opencode-tools.md'))).toBe(true);
+  });
+});
+
+describe('Model Tier 映射 —— discipline 两副本 parity', () => {
+  const repoRoot = join(__dirname, '../../../skills/subagent-driven-discipline/SKILL.md');
+  const dogfood = join(__dirname, '../../../.claude/skills/subagent-driven-discipline/SKILL.md');
+
+  // 抽取 `## Model Tier 映射` 段:从该二级标题行(含)起,到下一个二级标题(`## `)或文件末尾止
+  function extractGovernanceSection(filePath: string): string {
+    const lines = readFileSync(filePath, 'utf8').split(/\r?\n/);
+    const start = lines.findIndex((l) => l.startsWith('## Model Tier 映射'));
+    if (start === -1) return ''; // 抽不到 → 空串,断言必失败(预期的 drift 告警)
+    let end = lines.length;
+    for (let i = start + 1; i < lines.length; i++) {
+      if (lines[i].startsWith('## ')) {
+        end = i;
+        break;
+      }
+    }
+    return lines.slice(start, end).join('\n').trimEnd();
+  }
+
+  // 抽取 Platform Note 里以 "§1 28-subtype taxonomy" 开头的那一行(修正前后都以此开头)
+  function extractPlatformNoteLine(filePath: string): string {
+    const lines = readFileSync(filePath, 'utf8').split(/\r?\n/);
+    return lines.find((l) => l.startsWith('§1 28-subtype taxonomy')) ?? '';
+  }
+
+  it('两副本的 `## Model Tier 映射` 治理段逐字一致', () => {
+    const a = extractGovernanceSection(repoRoot);
+    const b = extractGovernanceSection(dogfood);
+    expect(a.length).toBeGreaterThan(0); // repo-root 必须含治理段
+    expect(b).toBe(a); // .claude/ 副本逐字一致
+  });
+
+  it('两副本的 Platform Note 修正句逐字一致、且确为修正后的新句', () => {
+    const a = extractPlatformNoteLine(repoRoot);
+    const b = extractPlatformNoteLine(dogfood);
+    expect(a.length).toBeGreaterThan(0); // repo-root 必须含该句
+    expect(a).toContain('per-harness/per-config');
+    expect(a).not.toContain('Only the dispatch / file / shell tool names differ');
+    expect(b).toBe(a); // .claude/ 副本逐字一致
   });
 });

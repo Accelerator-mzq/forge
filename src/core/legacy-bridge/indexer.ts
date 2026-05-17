@@ -191,7 +191,8 @@ export function applyIndexResult(
   let summaries: Record<string, string> = {};
   try {
     const parsed = JSON.parse(llmText.trim()) as Record<string, string>;
-    if (parsed && typeof parsed === 'object') summaries = parsed;
+    // 排除 JSON 数组:typeof [] === 'object' 亦为 true,放行会产 numeric-key 垃圾条目
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) summaries = parsed;
   } catch {
     // 解析失败:LLM 摘要全空,prebuilt 仍渲染
   }

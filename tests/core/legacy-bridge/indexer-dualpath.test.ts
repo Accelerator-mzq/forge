@@ -32,4 +32,32 @@ describe('applyIndexResult', () => {
     expect(md).toContain('这是需求摘要');
     expect(md).toContain('docs/UAT.md');
   });
+
+  it('LLM 错形返回 JSON 数组 → 降级,只渲染 prebuilt(不产 numeric-key 垃圾)', () => {
+    const prebuilt = [
+      { path: 'docs/UAT.md', role: 'acceptance-report', summary: '(metadata-only)', inputBytes: 0 },
+    ];
+    const md = applyIndexResult(JSON.stringify(['docs/SRS.md', 'x']), file, prebuilt);
+    expect(md).toContain('docs/UAT.md'); // prebuilt 仍渲染
+    expect(md).not.toContain('docs/SRS.md'); // 数组被拒,SRS.md 无 summary 条目、未渲染
+  });
+
+  it('LLM 摘要含 anchors 之外的幻觉路径 → 仍渲染,role 落 unmatched', () => {
+    const md = applyIndexResult(JSON.stringify({ 'docs/GHOST.md': '幻觉摘要' }), file, []);
+    expect(md).toContain('docs/GHOST.md');
+    expect(md).toContain('幻觉摘要');
+    expect(md).toContain('unmatched');
+  });
+});
+
+describe('buildIndexTask task===null 分支', () => {
+  it('全部 anchor 是 metadata-only → task 为 null,prebuilt 非空', async () => {
+    const onlyMeta: LegacyAnchorsFile = {
+      schema: 'forge-legacy-anchor/v1',
+      anchors: [{ role: 'acceptance-report', path: 'docs/UAT.md', authoritative: true }],
+    };
+    const { task, prebuilt } = await buildIndexTask(onlyMeta, async () => 'x');
+    expect(task).toBeNull();
+    expect(prebuilt).toHaveLength(1);
+  });
 });

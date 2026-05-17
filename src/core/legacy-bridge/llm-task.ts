@@ -1,6 +1,9 @@
 // src/core/legacy-bridge/llm-task.ts
 // 双路径执行模型核心:LlmTask + TaskManifest 信封 + canonical hash
 import { createHash } from 'node:crypto';
+import { mkdir, readFile, writeFile, rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 
 /** 可走双路径的 LLM 操作类型 */
 export type LlmOp =
@@ -88,4 +91,30 @@ export function verifyManifest(m: TaskManifest): { ok: true } | { ok: false; rea
     };
   }
   return { ok: true };
+}
+
+/** manifest 文件路径:forge/.cache/legacy-bridge-task-<op>.json */
+export function manifestPath(forgeRoot: string, op: LlmOp): string {
+  return join(forgeRoot, '.cache', `legacy-bridge-task-${op}.json`);
+}
+
+/** 写 manifest(创建 .cache 目录) */
+export async function writeManifest(forgeRoot: string, m: TaskManifest): Promise<void> {
+  await mkdir(join(forgeRoot, '.cache'), { recursive: true });
+  await writeFile(manifestPath(forgeRoot, m.op), JSON.stringify(m, null, 2), 'utf8');
+}
+
+/** 读 manifest;不存在返回 null;hash 校验失败抛错 */
+export async function readManifest(forgeRoot: string, op: LlmOp): Promise<TaskManifest | null> {
+  const p = manifestPath(forgeRoot, op);
+  if (!existsSync(p)) return null;
+  const m = JSON.parse(await readFile(p, 'utf8')) as TaskManifest;
+  const v = verifyManifest(m);
+  if (!v.ok) throw new Error(`manifest ${p} 校验失败:${v.reason}`);
+  return m;
+}
+
+/** 消费(移除)manifest —— --apply 成功后调用 */
+export async function consumeManifest(forgeRoot: string, op: LlmOp): Promise<void> {
+  await rm(manifestPath(forgeRoot, op), { force: true });
 }

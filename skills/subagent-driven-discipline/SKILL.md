@@ -5,7 +5,7 @@ license: MIT
 compatibility: Claude Code Agent tool;sister to forge:subagent-driven-development(generic 3-stage process)
 metadata:
   author: forge (generic skill)
-  version: '1.0-generic'
+  version: '1.1-generic'
   scenario_subtype_count: 28
   case_study_count: 0
   retrospect_protocol: trigger-type-matrix(5 types × per-type intensity)
@@ -23,7 +23,7 @@ This skill uses **Claude Code tool names** (PascalCase: `Skill`, `Agent`, `Read`
 | Codex CLI   | `references/codex-tools.md` (`spawn_agent` / `wait_agent` / `update_plan`; `multi_agent = true` config required)           |
 | OpenCode    | `references/opencode-tools.md` (lowercase `skill` / `read` / `bash`; subagent definitions in `.opencode/agents/<name>.md`) |
 
-§1 28-subtype taxonomy, §3.2 cross-verify, §4 recovery, §5 case studies, §6 pattern catalog are **platform-independent** and apply verbatim on every harness. Only the dispatch / file / shell tool names differ.
+§1 28-subtype taxonomy, §3.2 cross-verify, §4 recovery, §5 case studies, §6 pattern catalog 的**任务分类结构与 prompt 纪律**跨 harness、跨模型 provider 通用,apply verbatim on every harness —— 只有 dispatch / file / shell 工具名不同。**注**:§1 的 model tier 列 `haiku`/`sonnet`/`opus` 是 **tier 标签**(默认对应同名 Claude 模型),标签到具体模型的解析按 harness / `model_tiers` 配置不同 —— 详见 `## Model Tier 映射` 段。即:tier _分类结构_ 跨 harness 跨 provider 通用,tier _标签→具体模型_ 的对应才是 per-harness/per-config 的。
 
 **核心立场**:**重场景轻业务**。
 
@@ -32,6 +32,36 @@ This skill uses **Claude Code tool names** (PascalCase: `Skill`, `Agent`, `Read`
 - **业务无关**:具体项目用法属于 case studies(§5)增量层,不染入 scenario taxonomy
 
 **何时启用**:任何项目使用 `forge:subagent-driven-development` 派 subagent 时,controller 主 session dispatch 前 + return 后 + commit 前全流程参考。
+
+---
+
+## Model Tier 映射(`haiku`/`sonnet`/`opus` 是 tier 标签)
+
+本 skill §1 taxonomy 与 §2 playbook 用 `haiku` / `sonnet` / `opus` 标注每个 task 子类的 model tier。**这三个词是 tier 标签**(cheap / standard / most-capable 三档),默认对应同名 Claude 模型,但 `haiku` / `sonnet` 两档实际派发哪个模型可被项目配置重映射。
+
+**实际模型的解析(controller 在 dispatch subagent 前必做)**:
+
+- 读取项目 `forge/config.yaml` 的 `model_tiers` 段:
+  ```yaml
+  model_tiers:
+    haiku: sonnet # haiku 档改用 sonnet 模型派发
+  ```
+- §1 标 `haiku` / `sonnet` 的子类 → 实际传 `model_tiers` 解析后的模型;§1 标 `opus` 的子类**恒派 `opus`**(`opus` 不可重映射)。
+- **单次查表**:`model_tiers.haiku` 的值是要派发的*具体模型*,不再二次解析(`{haiku: sonnet}` → haiku 档派 `sonnet` 模型)。
+- `model_tiers` 整段缺失、某键缺失、`forge/config.yaml` 不存在或无法解析 → 该 tier **恒等**(标签即模型,等于现状)。
+- **遇非法值、降级映射(如 `sonnet: haiku`)、或 malformed `model_tiers`** → 该 tier **回退恒等派发**,并在回复里**明确提示用户该配置项无效**(否则用户会以为生效、难以排查)。
+- 「把 cheap 档统一抬到 standard」(成本换质量的常见诉求)→ `model_tiers: { haiku: sonnet }`。
+
+**操作化 4 步**(dispatch 前):① 读 `forge/config.yaml` 的 `model_tiers`;② §1 标 `haiku`/`sonnet` 的子类查表得实际模型,§1 标 `opus` 的子类恒 `opus`;③ 配置项无效 / 降级 / malformed / 文件不存在或无法解析 → 用 identity 并向用户提示;④ dispatch 时把解析出的模型传给 `model` 参数。
+
+**按 harness 的差异**:
+
+- **Claude Code** 等直接给 Task/Agent 工具传 `model` 参数的 harness —— `model_tiers` 在此生效;取值限 `haiku`/`sonnet`/`opus`(该工具仅这三个 Claude 模型)。
+- **OpenCode / Codex** 等 subagent 由独立 agent 定义携带 `model:` 的 harness —— controller 不传 model 参数,`model_tiers` config 在此**不生效**;重映射直接在 agent 定义文件里改 `model:`。
+
+**约束**:`opus`(§1.1.4 / §1.1.5 等 design 类的 MANDATORY tier)**不可重映射,恒派 `opus`** —— design 任务不可降级是 §1 绝对原则。`haiku` / `sonnet` 的重映射**只允许 identity 或升级**(保持原档,或 `haiku`→更强档、`sonnet`→`opus`),不允许降级(`sonnet`→`haiku` 会让 §1.3.4 等 MANDATORY-sonnet 子类失守)。§2「Haiku Reliability Playbook」各节的严格 prompt 纪律,对 tier 解析后的实际模型继续适用。
+
+recovery / case study / catalog 等历史记录章节里出现的模型名是过去实际跑过的事实档案,不受 `model_tiers` 影响、不改写。
 
 ---
 

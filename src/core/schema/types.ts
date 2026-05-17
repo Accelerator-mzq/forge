@@ -1,5 +1,8 @@
 // spec-driven schema 类型定义 — 对应 forge/config.yaml + 默认 schema
 
+/** 三个 model tier 标签 / 合法模型值 */
+export type ModelTier = 'haiku' | 'sonnet' | 'opus';
+
 /**
  * forge/config.yaml 的解析结果类型。
  * 详见 spec §2.2.1。
@@ -121,6 +124,16 @@ export interface ForgeConfig {
   monitor?: {
     enabled?: boolean;
   };
+
+  /**
+   * model tier 标签 → 实际派发模型的重映射(详见 model-tiers-config.ts)。
+   * 只有 haiku / sonnet 两个可重映射键;opus 是 design MANDATORY tier,不设键、恒派 opus。
+   * 缺失 / 缺键 = 该 tier 恒等。
+   */
+  model_tiers?: {
+    haiku?: ModelTier;
+    sonnet?: ModelTier;
+  };
 }
 
 /**
@@ -128,6 +141,13 @@ export interface ForgeConfig {
  * 详见 spec §2.3 + Plan 2 Task 2.2。
  */
 export const DEFAULT_LIGHT_THRESHOLD = 200;
+
+/** model_tiers 缺失时的恒等默认(resolveModelTiers fallback 用) */
+export const DEFAULT_MODEL_TIERS: { haiku: ModelTier; sonnet: ModelTier; opus: ModelTier } = {
+  haiku: 'haiku',
+  sonnet: 'sonnet',
+  opus: 'opus',
+};
 
 /**
  * 默认 process_verification 配置(plan-9g §6;调用方 fallback 用)

@@ -3,10 +3,11 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import matter from 'gray-matter';
-import type { LegacyAnchor, LegacyAnchorRole, LegacyAnchorsFile } from './types.js';
+import type { KeyFact, LegacyAnchor, LegacyAnchorRole, LegacyAnchorsFile } from './types.js';
 import { redact, type RedactReport } from './redact.js';
 import { readAnchorAsText } from './encoding.js';
-import type { LlmTask } from './llm-task.js';
+import type { LlmTask, LlmTaskInput } from './llm-task.js';
+import { stratifiedSample, type SamplingOutput } from './quality-judge.js';
 
 /** 复写参数 */
 export interface RegenerateInput {
@@ -276,6 +277,64 @@ function mergeHits(a: Record<string, number>, b: Record<string, number>): Record
     merged[name] = (merged[name] ?? 0) + count;
   }
   return merged;
+}
+
+/** 轮1 校验后处理:解析 facts(KeyFact)→ 确定性分层抽样 → 产轮2 quality-judge LlmTask + SamplingOutput */
+export function applyRound1AndBuildRound2(
+  regenBody: string,
+  extractFactsText: string,
+  role: LegacyAnchorRole,
+): { task: LlmTask; sampling: SamplingOutput } {
+  // 复用既有 markdown 合法性校验
+  validateRegenOutput(regenBody, role);
+  let facts: KeyFact[] = [];
+  try {
+    const parsed = JSON.parse(extractFactsText.trim());
+    if (Array.isArray(parsed)) {
+      facts = (parsed as Array<Partial<KeyFact>>)
+        .map((o) => ({
+          text: typeof o.text === 'string' ? o.text : '',
+          section: typeof o.section === 'string' ? o.section : '(unstructured)',
+          critical: typeof o.critical === 'boolean' ? o.critical : false,
+        }))
+        .filter((f) => f.text.trim().length > 0);
+    }
+  } catch {
+    // JSON.parse 失败 → facts 保持空数组,后续统一走 facts.length === 0 错误路径
+    facts = [];
+  }
+  // extract-facts 失败 / 空 → 无法验证保真率;不静默走「空抽样=passed」,显式抛错(下游写 .partial)
+  if (facts.length === 0) {
+    throw new RegenOutputError(
+      'extract-facts 未抽出任何 fact(LLM 输出非法或为空);无法验证保真率',
+      role,
+    );
+  }
+  // 确定性分层抽样,留 CLI 侧
+  const sampling = stratifiedSample({ allFacts: facts });
+  // 将抽样 fact 编号排列,供 LLM 三态判定
+  const numbered = sampling.sampled
+    .map((f, i) => `${i + 1}. [${f.section}${f.critical ? ',critical' : ''}] ${f.text}`)
+    .join('\n');
+  const prompt =
+    `下面是一份「复写产物」和一组「原文 fact」。对每个 fact 三态判定它是否在复写产物里被保留:\n` +
+    `- preserved:字面/数值完全一致\n` +
+    `- paraphrased:同义改写但语义+数值+约束完全等价\n` +
+    `- lost:漏掉 / 数值错 / 约束丢\n\n` +
+    `严格输出 JSON 数组,**顺序与 fact 编号一一对应**,每项 { "state": "preserved"|"paraphrased"|"lost" }。不加 preamble。\n\n` +
+    `# 复写产物\n${regenBody}\n\n# 待判 fact\n${numbered}`;
+  const inputs: LlmTaskInput[] = [{ source: 'regen-body', content: regenBody }];
+  return {
+    task: {
+      op: 'quality-judge',
+      inputs,
+      prompt,
+      model: DEFAULT_MODEL,
+      outputSchema: '[{ "state": "preserved"|"paraphrased"|"lost" }](顺序对应 fact 编号)',
+      outputPath: '.cache/legacy-bridge-result-quality-judge.json',
+    },
+    sampling,
+  };
 }
 
 /** 轮1:产 regenerate + extract-facts 两个 LlmTask */

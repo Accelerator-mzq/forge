@@ -1,6 +1,9 @@
 // tests/core/legacy-bridge/regenerator-dualpath.test.ts
 import { describe, it, expect } from 'vitest';
-import { buildRegenerateRound1Tasks } from '../../../src/core/legacy-bridge/regenerator.js';
+import {
+  buildRegenerateRound1Tasks,
+  applyRound1AndBuildRound2,
+} from '../../../src/core/legacy-bridge/regenerator.js';
 import type { LegacyAnchor } from '../../../src/core/legacy-bridge/types.js';
 
 const auth: LegacyAnchor = { role: 'requirements', path: 'docs/SRS.md', authoritative: true };
@@ -36,5 +39,28 @@ describe('buildRegenerateRound1Tasks', () => {
         async () => 'x',
       ),
     ).rejects.toThrow(/metadata-only/);
+  });
+});
+
+describe('applyRound1AndBuildRound2', () => {
+  it('轮1 产物 → stratifiedSample → 产 quality-judge LlmTask + SamplingOutput', () => {
+    const regenBody = '## 复写后的 SRS\n字段 X 必须非空。' + 'x'.repeat(200);
+    const facts = JSON.stringify([
+      { text: '字段 X 必须非空', section: '§4', critical: true },
+      { text: 'fact2', section: '§4', critical: false },
+      { text: 'fact3', section: '§5', critical: false },
+    ]);
+    const { task, sampling } = applyRound1AndBuildRound2(regenBody, facts, 'requirements');
+    expect(task.op).toBe('quality-judge');
+    expect(task.prompt).toContain('字段 X 必须非空'); // 抽样 fact 进 prompt
+    expect(sampling.sampled.length).toBeGreaterThan(0);
+  });
+
+  it('extract-facts 空 / 非法 → 抛 RegenOutputError(不静默走「空抽样=passed」)', () => {
+    const regenBody = '## SRS\n' + 'x'.repeat(200);
+    expect(() => applyRound1AndBuildRound2(regenBody, 'not json', 'requirements')).toThrow(
+      /extract-facts/,
+    );
+    expect(() => applyRound1AndBuildRound2(regenBody, '[]', 'requirements')).toThrow(/保真率/);
   });
 });

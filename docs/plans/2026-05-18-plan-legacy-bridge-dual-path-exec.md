@@ -29,8 +29,8 @@
 | `src/core/legacy-bridge/mapper.ts` | 剥出 `buildMapTask` / `applyMapResult`;LLM 步骤产 `LlmTask` |
 | `src/core/legacy-bridge/indexer.ts` | 剥出 `buildIndexTask` / `applyIndexResult` |
 | `src/core/legacy-bridge/sync-check.ts` | 剥出 `buildSyncCheckTask` / `applySyncCheckResult`;redact 扩到 `changeContext`;`produced_from` |
-| `src/core/legacy-bridge/regenerator.ts` | 剥出 `buildRegenerateTask` / `applyRegenerateRound1`;2 轮流 |
-| `src/core/legacy-bridge/quality-judge.ts` | `extract-facts` / `quality-judge` 成 `LlmTask`;`stratifiedSample` + 算分留确定性 |
+| `src/core/legacy-bridge/regenerator.ts` | 剥出 `buildRegenerateRound1Tasks` / `applyRound1AndBuildRound2` / `applyRound2`;2 轮流 |
+| `src/core/legacy-bridge/quality-judge.ts` | 抽出 `computeQualityResult` 纯函数(`judgeAllFacts` 复用);`stratifiedSample` / `SamplingOutput` 维持 export |
 | `src/cli/commands/legacy-bridge.ts` | 四子命令加 `--apply` / `--api`;manifest 接线;默认翻转 agent |
 | `src/cli/commands/archive.ts` | sync-check 改 emit manifest;加 `--api` / `--resume`;暂停态文件 |
 | `commands/archive.md` | sync-check manifest 编排步 |
@@ -872,10 +872,15 @@ export async function buildSyncCheckTask(
     let masked: string;
     try {
       masked = redact(await readAnchorText(anchor.path), redactRules).redactedText;
-    } catch { continue; } // 缺失锚点不阻塞(对齐现 runSyncCheck P7-10)
+    } catch (err) {
+      console.warn(`⚠ anchor ${anchor.path} 读取失败:${(err as Error).message};跳过该项继续`);
+      continue; // 缺失锚点不阻塞(对齐现 runSyncCheck P7-10)
+    }
     blocks.push(`# 锚点 role=${anchor.role} path=${anchor.path}\n${masked}`);
     inputs.push({ source: anchor.path, content: masked });
   }
+  // affected 存在但全部读取失败 → 无锚点内容,不 emit 空 sync-check task
+  if (blocks.length === 0) return null;
   const prompt = `你是 brownfield sync 审计员。判断"本次 change"是否要求更新各"老文档锚点"。\n\n# 本次 change 上下文\n${maskedContext}\n\n${blocks.join('\n\n')}\n\n# 输出\n严格 JSON 数组,每项 { "anchor_path": string, "severity": "critical|major|minor|style|info", "section": string, "description": string }。无更新输出 []。`;
   return {
     op: 'sync-check', inputs, prompt, model: DEFAULT_MODEL,
@@ -1092,6 +1097,12 @@ describe('applyRound1AndBuildRound2', () => {
     expect(task.prompt).toContain('字段 X 必须非空'); // 抽样 fact 进 prompt
     expect(sampling.sampled.length).toBeGreaterThan(0);
   });
+
+  it('extract-facts 空 / 非法 → 抛 RegenOutputError(不静默走「空抽样=passed」)', () => {
+    const regenBody = '## SRS\n' + 'x'.repeat(200);
+    expect(() => applyRound1AndBuildRound2(regenBody, 'not json', 'requirements')).toThrow(/extract-facts/);
+    expect(() => applyRound1AndBuildRound2(regenBody, '[]', 'requirements')).toThrow(/保真率/);
+  });
 });
 ```
 
@@ -1129,6 +1140,10 @@ export function applyRound1AndBuildRound2(
         .filter((f) => f.text.trim().length > 0);
     }
   } catch { facts = []; }
+  // extract-facts 失败 / 空 → 无法验证保真率;不静默走「空抽样=passed」,显式抛错(下游写 .partial)
+  if (facts.length === 0) {
+    throw new RegenOutputError('extract-facts 未抽出任何 fact(LLM 输出非法或为空);无法验证保真率', role);
+  }
   const sampling = stratifiedSample({ allFacts: facts }); // 确定性分层抽样,留 CLI 侧
   const numbered = sampling.sampled
     .map((f, i) => `${i + 1}. [${f.section}${f.critical ? ',critical' : ''}] ${f.text}`)
@@ -1491,7 +1506,7 @@ export async function runMapCommand(opts: MapCommandOpts): Promise<number> {
 
 commander 注册处把 `map` 子命令改为 `.option('--apply', ...)`.`.option('--api', ...)`,action 调 `runMapCommand` 后 `process.exit(code)`。`makeApiClient()` 抽出现有 `loadEnv()` + `new Anthropic(...)` 逻辑(`legacy-bridge.ts:610-618`)成一个 helper。
 
-> `index` / `regenerate` / `sync-check` 三子命令同构,各加 `runIndexCommand` / `runRegenerateCommand` / `runSyncCheckCommand`,emit 分支同样用 `AgentHandoffRunner`。`regenerate` 的 `--apply` 读 `manifest.round`:`round===1` → `applyRound1AndBuildRound2` 得 `{task, sampling}` → emit 轮2 manifest(`round:2`、`meta:{sampling}`);`round===2` → 从 `manifest.meta.sampling` 取回 `SamplingOutput` → `applyRound2(judgeText, sampling, threshold)` → 按 `QualityResult.passed` 写产物 / `.partial`。
+> `index` / `regenerate` / `sync-check` 三子命令同构,各加 `runIndexCommand` / `runRegenerateCommand` / `runSyncCheckCommand`,emit 分支同样用 `AgentHandoffRunner`。`regenerate` 的 `--apply` 读 `manifest.round`:`round===1` → `applyRound1AndBuildRound2`(若抛 `RegenOutputError` —— extract-facts 空/非法 —— **不 emit 轮2,直接写 `.partial` + exit 3**)得 `{task, sampling}` → emit 轮2 manifest(`round:2`、`meta:{sampling}`);`round===2` → 从 `manifest.meta.sampling` 取回 `SamplingOutput` → `applyRound2(judgeText, sampling, threshold)` → 按 `QualityResult.passed` 写产物 / `.partial`。
 
 - [ ] **Step 4: 跑测试确认通过**
 
@@ -1858,3 +1873,11 @@ pnpm format:check && pnpm lint && pnpm typecheck && pnpm build && pnpm test
 | F3 | MEDIUM   | 真 —— Task 6.1 测试 fixture 未建 config/ack,`runMapCommand` 经 `assertLlmOptIn` 必失败                  | Task 6.1 `beforeEach` 加 `config.yaml` + `writeAck` 写匹配 ack                                |
 | F4 | MEDIUM   | 真 —— spec 提「Tier2/3 archive skill」,但 `forge-repo/skills/` 下无此 skill                            | Phase 0 加注:无独立 archive skill,`legacy-bridge-fulfillment`(tier-agnostic)覆盖 Tier2/3   |
 | F5 | MEDIUM   | 真 —— spec D3/§2.2 要 `AgentHandoffRunner` 类,plan 只有散函数                                          | Task 1.3 加 `AgentHandoffRunner` 类;Phase 0 / Task 6.1 同步                                   |
+
+### Round 2:1 HIGH + 1 MEDIUM + 1 LOW,均独立对照代码核实为真,全处置
+
+| #  | severity | 核实结论                                                                                              | 处置                                                                                          |
+| -- | -------- | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| F6 | HIGH     | 真 —— `computeQualityResult` 遇空 `judged` → `criticalRate=totalRate=1.0` → `passed=true`;extract-facts 失败时质量 gate 反判「完美」 | Task 5.2:`facts.length===0` 抛 `RegenOutputError`,regenerate `--apply` 转 `.partial`,不走「空抽样=passed」 |
+| F7 | MEDIUM   | 真 —— `buildSyncCheckTask` 在 anchor 全部读取失败时 `blocks` 空,仍 return 只含 changeContext 的空 task | Task 4.1:catch 加 `console.warn`;循环后 `if (blocks.length===0) return null`               |
+| F8 | LOW      | 真 —— Phase 0 写 `buildRegenerateTask`/`applyRegenerateRound1`,与实际任务名不符                        | Phase 0 regenerator.ts / quality-judge.ts 两行更正为实际函数名                                |

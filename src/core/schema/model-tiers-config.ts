@@ -26,13 +26,25 @@ export type ModelTierAssignmentResult =
 /** 可重映射的 tier 键(opus 不可重映射,不在内) */
 const REMAPPABLE_TIERS = ['haiku', 'sonnet'] as const;
 
+/** 可重映射 tier 键的联合类型(REMAPPABLE_TIERS 元素;resolver / validator 共用) */
+type RemappableTier = (typeof REMAPPABLE_TIERS)[number];
+
 function isModelTier(v: unknown): v is ModelTier {
   return typeof v === 'string' && (MODEL_TIER_VALUES as readonly string[]).includes(v);
+}
+
+/** tier 是否落在可重映射集合(单一来源 REMAPPABLE_TIERS;同款 includes 写法) */
+function isRemappableTier(v: string): v is RemappableTier {
+  return (REMAPPABLE_TIERS as readonly string[]).includes(v);
 }
 
 /**
  * 读取侧:把 ForgeConfig.model_tiers 解析成填满的 { haiku, sonnet, opus }。
  * 永远返回合法值、永不抛异常(配置层 graceful degradation)。
+ *
+ * @param config — forge/config.yaml 解析结果(可缺 model_tiers 段)
+ * @param warn — 注入 console.warn 用于测试 / 自定义 logger;默认 console.warn
+ * @returns 填满三档的 ResolvedModelTiers;缺失 / malformed / 非法值 / 降级均回退 identity,opus 恒为 'opus'
  */
 export function resolveModelTiers(
   config: ForgeConfig | undefined,
@@ -80,12 +92,17 @@ export function resolveModelTiers(
 /**
  * 写入侧:校验一次 `forge config set model_tiers.<tier> <value>` 赋值。
  * fail-fast —— 不 sanitize。reason 优先级固定:invalid-field → invalid-value → downgrade。
+ *
+ * @param tier — 待写入的 tier 键;非可重映射(haiku/sonnet)即 invalid-field
+ * @param value — 待写入的模型值;非 MODEL_TIER_VALUES 枚举即 invalid-value
+ * @returns `{ ok: true }` 合法(identity / 升级);否则 `{ ok: false, reason }`,reason 取首个命中
  */
 export function validateModelTierAssignment(
   tier: string,
   value: string,
 ): ModelTierAssignmentResult {
-  if (tier !== 'haiku' && tier !== 'sonnet') {
+  // 复用 REMAPPABLE_TIERS 单一来源 —— tier 非 haiku/sonnet → invalid-field
+  if (!isRemappableTier(tier)) {
     return { ok: false, reason: 'invalid-field' };
   }
   if (!isModelTier(value)) {

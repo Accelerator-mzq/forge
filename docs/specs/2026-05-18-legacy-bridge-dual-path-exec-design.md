@@ -139,7 +139,7 @@ api 模式    forge legacy-bridge <op> --api    → 建 LlmTask[] → ApiRunner 
 `sync-check` 现被 `forge archive` 进程内同步调用 —— 两个函数 `runArchivePreflight`(`enforce_sync=true`)与 `runArchivePostHook`(`enforce_sync=false`,默认)各自 `new Anthropic(...)` 后调 `runSyncCheck`(均在 `src/cli/commands/archive.ts`)。**关键:两条路径阻塞语义不同** —— preflight 发现 critical pending 时返回 `critical-pending`、让 archive 命令 abort(exit 2);post-hook 只产报告、不阻塞。而**独立命令 `forge legacy-bridge sync-check` 永远 exit 0**(critical pending 仅打 warning)。所以「阻塞」从来不在 sync-check 自身,而在 archive preflight。agent 路径下 CLI 进程内不再跑 LLM 步骤,改由 slash/skill 编排。
 
 1. **CLI `forge archive` 只 emit manifest**。到 sync-check 点时按 `enforce_sync` 决定时机:`true` → preflight 点 emit;`false` → post-archive 点 emit。不进程内调 LLM。
-2. **archive 命令/skill 加编排步**。`commands/archive.md` 与 Tier2/3 archive skill 各加一步:检测到 `forge/.cache/legacy-bridge-task-sync-check.json` → 指挥 agent fulfill → 跑 `forge legacy-bridge sync-check --apply`。
+2. **archive 命令加编排步**。`commands/archive.md`(Tier 1 slash)加一步:检测到 `forge/.cache/legacy-bridge-task-sync-check.json` → 指挥 agent fulfill → 跑 `forge legacy-bridge sync-check --apply`。**forge 不存在独立 archive skill**;Tier 2/3 的 sync-check manifest 编排由 §6 的 `legacy-bridge-fulfillment` skill(tier-agnostic,description 覆盖 `forge archive` emit manifest 场景)+ CLI 的 halt/resume stdout 提示承载。
 3. **硬 gate 不软化,但 `--apply` 必须知道自己的 gate 语义**。双路径化后阻塞性不再靠「两条独立代码路径」区分,只有一个 `sync-check --apply`。故 sync-check 的 manifest 在 `meta` 里带一个 **`gate_context`** 字段(枚举 `archive-preflight` / `archive-posthook` / `standalone`)。`--apply` 据此:`archive-preflight` + critical pending → **确定性 exit 2**(等价现 `runArchivePreflight` 的 `critical-pending` abort);`archive-posthook` / `standalone` → 只产报告、exit 0(等价现 post-hook 与独立命令)。**这是把隐含上下文显式化,不是「保留」现状** —— 现状里 exit 2 本就不在 sync-check 命令、而在 archive preflight。判定权仍全在 CLI 确定性逻辑(`--apply` 按 `gate_context` + critical pending 算),agent 只 relay 退出码。archive 在 preflight gate 处可中断/恢复(见点 4)。
 4. **`forge archive` 不检测「谁在调用」**。CLI 行为只由 `enforce_sync`(config)与 `--api` flag 决定,不区分 slash command 还是裸用户:
    - `enforce_sync=true`(默认 agent 模式)→ archive 走到 preflight 点 emit manifest(`gate_context: archive-preflight`)后**停在 gate**(archive 越不过一个自己评不了的 gate)。经 `/forge:archive` 时由 slash/skill 自动 fulfill + `forge archive --resume`;裸 CLI 用户看到提示「fulfill manifest 后 `forge archive --resume`」。**同一个 emit+halt,无 agent 检测机制**。
@@ -196,8 +196,7 @@ manifest 设计天然可测,三层各自独立测,不需真调 API:
 | `src/cli/commands/legacy-bridge.ts`(改)        | 加 `--apply` / `--api` flag;manifest 接线;默认翻转为 agent                                |
 | `src/cli/commands/archive.ts`(改)              | sync-check 改为 emit manifest;加 `--api` / `--resume`;preflight gate emit+halt;暂停态文件 `archive-pause-<changeId>.json` |
 | `commands/archive.md`(改)                      | 加 sync-check manifest 编排步(改后必 `pnpm build`)                                        |
-| `skills/legacy-bridge-fulfillment/SKILL.md`(新) | agent-driver 契约 + 反偷懒约束(改后必 `pnpm build`)                                       |
-| Tier2/3 archive skill(改)                      | 加等价 sync-check 编排步                                                                   |
+| `skills/legacy-bridge-fulfillment/SKILL.md`(新) | agent-driver 契约 + 反偷懒约束;tier-agnostic,兼作 Tier 2/3 的 archive sync-check 编排入口(改后必 `pnpm build`)|
 | `docs/legacy-bridge.md`(改)                    | 文档化双路径 + 标 breaking                                                                 |
 | `CHANGELOG.md`(改)                             | breaking note:四命令默认从 API 翻为 agent                                                 |
 
@@ -254,3 +253,7 @@ finding 数趋势:4 → 4 → 3 → 2,单调收敛。
 第 4 轮遗留的 1 MEDIUM + 1 LOW 均已处置,本轮未发现新 finding。`produced_from` 的固有限制已作诚实边界声明(§4.5),并以 §6 skill 反偷懒约束 + `--api` 高保证路径分层。
 
 **收敛声明**:文档经 5 轮 Codex 对抗性审查,finding 趋势 **4 → 4 → 3 → 2 → 0**,单调收敛。自 v5 起视为收敛,可进入 writing-plans 阶段。
+
+### v6 修订(2026-05-18,实施计划审查期间发现)
+
+writing-plans 产物的 Codex 审查(Round 1 F4)发现:本文档 §4 点2 / §8 误列「Tier2/3 archive skill」—— `forge-repo/skills/` 下并无 archive skill,archive 对所有 tier 是 `commands/archive.md`(slash)+ `forge archive` CLI。已修:§4 点2 改为「archive 命令加编排步」+ 说明 Tier 2/3 由 `legacy-bridge-fulfillment` skill 承载;§8 删去「Tier2/3 archive skill(改)」行,该 skill 行注明 tier-agnostic。属事实勘误,不影响设计决策。

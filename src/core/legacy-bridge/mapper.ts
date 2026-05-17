@@ -182,60 +182,14 @@ export async function buildMapTask(input: MapperInput): Promise<LlmTask> {
   };
 }
 
-/** 跑 mapping(LLM 推测) */
-export async function runMapper(client: MapperClient, input: MapperInput): Promise<MapperOutput> {
-  const { projectRoot } = input;
-  const docsPaths = input.docsPaths ?? DEFAULT_DOCS_PATHS;
-
-  // 收集文件
-  const allFiles: string[] = [];
-  for (const docDir of docsPaths) {
-    const full = join(projectRoot, docDir);
-    if (!existsSync(full)) continue;
-    for await (const f of walk(full, projectRoot)) {
-      allFiles.push(f);
-    }
-  }
-  // 决策 #3a 全自动扫:也扫 src/ 找测试用例(.test / .spec / 测试文件名)
-  if (input.scanSrc) {
-    const srcRoot = join(projectRoot, 'src');
-    if (existsSync(srcRoot)) {
-      for await (const f of walk(srcRoot, projectRoot)) {
-        if (f.includes('test') || f.includes('spec')) allFiles.push(f);
-      }
-    }
-  }
-
-  // 读 preview;用 redact mask 敏感数据
-  const entries: Array<{ path: string; preview: string }> = [];
-  for (const f of allFiles) {
-    const preview = redact(await readPreview(join(projectRoot, f))).redactedText;
-    entries.push({ path: f, preview });
-  }
-
-  // 调 LLM
-  let classifications: Array<{
-    path: string;
-    role: LegacyAnchorRole | 'unmatched';
-    modules?: string[];
-  }>;
-  if (entries.length === 0) {
-    classifications = [];
-  } else {
-    const mapPrompt = buildMapperPrompt(entries);
-    // P7-07 修复:LLM 调用前数据传输声明
-    console.log(
-      `→ sending ${Buffer.byteLength(mapPrompt, 'utf8')} bytes to Anthropic API (provider=anthropic, region: auto, model=${DEFAULT_MODEL}, op=map ${entries.length} files)`,
-    );
-    const result = await client.messages.create({
-      model: DEFAULT_MODEL,
-      max_tokens: 4096,
-      messages: [{ role: 'user', content: mapPrompt }],
-    });
-    const block = result.content.find((b): b is Anthropic.Messages.TextBlock => b.type === 'text');
-    classifications = parseMapperResponse(block?.text ?? '', allFiles);
-  }
-
+/** 确定性后处理:LLM 分类结果文本 → draft yaml/md + anchors */
+export function applyMapResult(
+  llmText: string,
+  allFiles: string[],
+  input: { mode: 'merge' | 'overwrite'; existing?: LegacyAnchorsFile },
+): MapperOutput {
+  // 解析 LLM 返回文本;解析失败则全 fallback 为 unmatched
+  const classifications = parseMapperResponse(llmText, allFiles);
   const newAnchors: LegacyAnchor[] = [];
   const unmatched: string[] = [];
   // 同 role 第一个标 authoritative=true(简化策略;用户后审)
@@ -247,41 +201,49 @@ export async function runMapper(client: MapperClient, input: MapperInput): Promi
     }
     const isFirst = !roleSeen.has(c.role);
     roleSeen.add(c.role);
-    newAnchors.push({
-      role: c.role,
-      path: c.path,
-      authoritative: isFirst,
-      modules: c.modules,
-    });
+    newAnchors.push({ role: c.role, path: c.path, authoritative: isFirst, modules: c.modules });
   }
-
-  // merge 模式:保留 existing 中的 anchor(用户审过部分)
+  // merge 模式:保留 existing 中已审过的 anchor
   let preservedAnchors: LegacyAnchor[] = [];
   if (input.mode === 'merge' && input.existing) {
     const existingPaths = new Set(input.existing.anchors.map((a) => a.path));
     preservedAnchors = input.existing.anchors;
-    // 新增的 anchor 中,如果 path 已在 existing,跳过(避免重复)
-    const filteredNew = newAnchors.filter((a) => !existingPaths.has(a.path));
+    // 新增中 path 已在 existing 的跳过(避免重复)
+    const filtered = newAnchors.filter((a) => !existingPaths.has(a.path));
     newAnchors.length = 0;
-    newAnchors.push(...filteredNew);
+    newAnchors.push(...filtered);
   }
-
   const finalFile: LegacyAnchorsFile = {
     schema: 'forge-legacy-anchor/v1',
     anchors: [...preservedAnchors, ...newAnchors],
     redact: input.existing?.redact,
   };
-
-  const draftYaml = stringifyYaml(finalFile);
-  const draftMarkdown = renderMapperOverview(finalFile, unmatched);
-
   return {
-    draftYaml,
-    draftMarkdown,
+    draftYaml: stringifyYaml(finalFile),
+    draftMarkdown: renderMapperOverview(finalFile, unmatched),
     newAnchors,
     preservedAnchors,
     unmatched,
   };
+}
+
+/** 跑 mapping(LLM 推测)—— 内部复用 buildMapTask + applyMapResult */
+export async function runMapper(client: MapperClient, input: MapperInput): Promise<MapperOutput> {
+  const task = await buildMapTask(input);
+  const allFiles = task.inputs.map((i) => i.source);
+  // 无文件时直接返回空结果
+  if (task.inputs.length === 0) return applyMapResult('[]', [], input);
+  // P7-07 修复:LLM 调用前数据传输声明
+  console.log(
+    `→ sending ${Buffer.byteLength(task.prompt, 'utf8')} bytes to Anthropic API (provider=anthropic, region: auto, model=${DEFAULT_MODEL}, op=map ${task.inputs.length} files)`,
+  );
+  const result = await client.messages.create({
+    model: DEFAULT_MODEL,
+    max_tokens: 4096,
+    messages: [{ role: 'user', content: task.prompt }],
+  });
+  const block = result.content.find((b): b is Anthropic.Messages.TextBlock => b.type === 'text');
+  return applyMapResult(block?.text ?? '', allFiles, input);
 }
 
 /** 渲染概览 markdown(给用户审) */

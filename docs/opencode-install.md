@@ -45,7 +45,7 @@ ln -s /path/to/forge/.opencode/plugins/forge.js ~/.config/opencode/plugins/forge
 ## 全局 forge CLI(仅推荐 Path A)
 
 ```bash
-npm i -g @accelerator-mzq/forge@0.3.0
+npm i -g @accelerator-mzq/forge
 ```
 
 OpenCode 路径下 `/forge:*` slash commands **不可用**,但 forge skills 内嵌 `node "$FORGE_HELPER" validate <id>` 自动跑(skill 文本指示 AI 主动跑 PowerShell/bash,Plan 0a.3 实测 Variant B/C PASS)。`$FORGE_HELPER` 解析:`<plugin_dir>/scripts/run-forge.mjs`,plugin loader 自动可达。
@@ -95,7 +95,7 @@ opencode run --print-logs "hello" 2>&1 | grep -i forge
 
 ### skill 触发但 helper 调用失败
 
-OpenCode skill 内嵌 `${FORGE_HELPER}` 变量,plugin loader 应解析为 `<plugin_dir>/scripts/run-forge.mjs`。如果失败,fallback 直接 `npx -y --package @accelerator-mzq/forge@^0.3 -- forge <subcmd>`(同 Tier 1 行为)。
+OpenCode skill 内嵌 `${FORGE_HELPER}` 变量,plugin loader 应解析为 `<plugin_dir>/scripts/run-forge.mjs`。如果失败,fallback 直接 `npx -y --package @accelerator-mzq/forge@^1.4.0 -- forge <subcmd>`(同 Tier 1 行为)。
 
 ### Cross-plugin 同名(superpowers + forge brainstorming)
 

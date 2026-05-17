@@ -53,6 +53,18 @@ claude                          # 启动 Claude Code 会话
 
 > 注:legacy projects 仍可用 `pnpm dlx @accelerator-mzq/forge init --harness claude`,v1.2 移除(沿 `src/cli/commands/init.ts:28-38`)。
 
+> ⚠️ **装 plugin ≠ shell 里能敲 `forge`**:plugin 只投递 skill / slash 命令。`/forge:*` 命令内部要用的 CLI 子命令(`forge validate` / `evidence` / `archive`…)由 plugin 自带的 `run-forge.mjs` helper 自动 `npx` 拉(沿 `claude-install.md:64` + `scripts/run-forge.mjs:6-7`「forge CLI 不在用户全局 PATH」),你不用管。
+>
+> 但**第 3 步 preflight 要你在裸 shell 里手敲 `forge preflight branch-check`** —— 这条不经 slash 命令,没有 helper 替你拉;而 plugin 安装不会把 `forge` 放进系统 PATH(`.claude-plugin/plugin.json` 无 `bin` 字段)。两个办法二选一:
+>
+> ```bash
+> # 办法 A:不全局装,第 3 步那条命令改用 pnpm dlx 临时拉起
+> pnpm dlx @accelerator-mzq/forge preflight branch-check
+>
+> # 办法 B:全局装,得到常驻 forge 命令(下文 forge preflight 直接可用)
+> npm i -g @accelerator-mzq/forge
+> ```
+
 ### 期望发生(✅ 表示 forge 工作正常)
 
 - ✅ `/plugin marketplace add` 报 "Marketplace added: accelerator-mzq-forge"
@@ -181,7 +193,7 @@ ls forge/drafts/.consumed/         # 期望:原 draft 文件已移到这里
 
 ### 准确操作
 
-**先 preflight**(在 shell 里跑,不在 Claude Code 会话):
+**先 preflight**(在 shell 里跑,不在 Claude Code 会话;`forge` 命令需 [§0](#第-0-步--安装) 用 `npm i -g` 或 `pnpm dlx` 拉好 CLI):
 
 ```bash
 cd /path/to/my-todo-app

@@ -6,7 +6,7 @@
     {
       "name": "forge",
       "description": "Spec-driven workflow + 12 behavior-shaping skills",
-      "version": "0.3.0",
+      "version": "1.4.0",
       "source": "./",
       "author": { "name": "msc" }
     }

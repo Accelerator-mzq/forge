@@ -3,11 +3,23 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import matter from 'gray-matter';
-import type { KeyFact, LegacyAnchor, LegacyAnchorRole, LegacyAnchorsFile } from './types.js';
+import type {
+  KeyFact,
+  LegacyAnchor,
+  LegacyAnchorRole,
+  LegacyAnchorsFile,
+  QualityResult,
+} from './types.js';
 import { redact, type RedactReport } from './redact.js';
 import { readAnchorAsText } from './encoding.js';
 import type { LlmTask, LlmTaskInput } from './llm-task.js';
-import { stratifiedSample, type SamplingOutput } from './quality-judge.js';
+import {
+  stratifiedSample,
+  computeQualityResult,
+  type SamplingOutput,
+  type FactState,
+  type FactJudgeResult,
+} from './quality-judge.js';
 
 /** 复写参数 */
 export interface RegenerateInput {
@@ -389,4 +401,37 @@ export async function buildRegenerateRound1Tasks(
       outputPath: `.cache/legacy-bridge-result-extract-facts.json`,
     },
   ];
+}
+
+/** 轮2 后处理:agent 三态 judge 结果(JSON 字符串) + 轮1 抽样 → QualityResult。
+ *  critical 必须 100% 的 gate 在 computeQualityResult 内,不因走 agent 路径软化。
+ *  agent 漏判的 fact(数组越界)保守视为 lost。
+ */
+export function applyRound2(
+  judgeText: string,
+  sampling: SamplingOutput,
+  threshold: number,
+): QualityResult {
+  // 解析 agent 输出的三态 JSON 数组;解析失败 → 所有 fact 保守视为 lost
+  let states: FactState[] = [];
+  try {
+    const parsed = JSON.parse(judgeText.trim());
+    if (Array.isArray(parsed)) {
+      states = (parsed as Array<{ state?: string }>).map((o) =>
+        o.state === 'preserved' || o.state === 'paraphrased' || o.state === 'lost'
+          ? o.state
+          : 'lost',
+      );
+    }
+  } catch {
+    // JSON 解析失败 → states 保持空数组,下面逐条 fallback 为 lost
+    states = [];
+  }
+  // 按编号与轮1 抽样 fact 一一对应;agent 漏判的 fact 保守视为 lost
+  const judged: FactJudgeResult[] = sampling.sampled.map((fact, i) => ({
+    fact,
+    state: states[i] ?? 'lost',
+  }));
+  // 复用纯函数算分 gate,行为与 LLM 路径完全一致
+  return computeQualityResult(judged, sampling, threshold);
 }

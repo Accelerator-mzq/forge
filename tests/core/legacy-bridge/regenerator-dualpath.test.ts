@@ -3,10 +3,22 @@ import { describe, it, expect } from 'vitest';
 import {
   buildRegenerateRound1Tasks,
   applyRound1AndBuildRound2,
+  applyRound2,
 } from '../../../src/core/legacy-bridge/regenerator.js';
 import type { LegacyAnchor } from '../../../src/core/legacy-bridge/types.js';
+import type { SamplingOutput } from '../../../src/core/legacy-bridge/quality-judge.js';
 
 const auth: LegacyAnchor = { role: 'requirements', path: 'docs/SRS.md', authoritative: true };
+
+// applyRound2 测试用抽样数据:§1 节含 1 critical + 1 non-critical fact
+const sampling: SamplingOutput = {
+  sampled: [
+    { text: 'a', section: '§1', critical: true },
+    { text: 'b', section: '§1', critical: false },
+  ],
+  perSectionSampled: { '§1': 2 },
+  uncoveredSections: [],
+};
 
 describe('buildRegenerateRound1Tasks', () => {
   it('产 2 个 LlmTask:regenerate + extract-facts', async () => {
@@ -73,5 +85,31 @@ describe('applyRound1AndBuildRound2', () => {
     const { task } = applyRound1AndBuildRound2(regenBody, fenced, 'requirements');
     expect(task.op).toBe('quality-judge');
     expect(task.prompt).toContain('字段 X 必须非空');
+  });
+});
+
+describe('applyRound2 三态保真率 gate', () => {
+  it('全 preserved → critical_rate=1 total_rate=1 → passed', () => {
+    // 两条 fact 均 preserved,critical 全量保留,total=1,threshold=0.9 → passed
+    const judge = JSON.stringify([{ state: 'preserved' }, { state: 'preserved' }]);
+    const r = applyRound2(judge, sampling, 0.9);
+    expect(r.critical_rate).toBe(1);
+    expect(r.passed).toBe(true);
+  });
+
+  it('critical fact lost → critical_rate<1 → 不 passed(critical 必须 100%,即便 total 达标)', () => {
+    // 第 1 条是 critical 且 lost;第 2 条 non-critical preserved → total_rate=0.5(达不到 0.4)
+    // critical_rate=0 → 不管 threshold 如何都 passed=false
+    const judge = JSON.stringify([{ state: 'lost' }, { state: 'preserved' }]);
+    const r = applyRound2(judge, sampling, 0.4);
+    expect(r.critical_rate).toBe(0);
+    expect(r.passed).toBe(false);
+  });
+
+  it('paraphrased 视为保留(state !== lost)', () => {
+    // 两条均 paraphrased → critical_rate=1,total_rate=1 → passed
+    const judge = JSON.stringify([{ state: 'paraphrased' }, { state: 'paraphrased' }]);
+    const r = applyRound2(judge, sampling, 0.9);
+    expect(r.passed).toBe(true);
   });
 });

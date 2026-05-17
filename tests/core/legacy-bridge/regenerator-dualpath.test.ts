@@ -98,12 +98,25 @@ describe('applyRound2 三态保真率 gate', () => {
   });
 
   it('critical fact lost → critical_rate<1 → 不 passed(critical 必须 100%,即便 total 达标)', () => {
-    // 第 1 条是 critical 且 lost;第 2 条 non-critical preserved → total_rate=0.5(达不到 0.4)
-    // critical_rate=0 → 不管 threshold 如何都 passed=false
+    // 第 1 条 critical 且 lost;第 2 条 non-critical preserved → total_rate=0.5(≥ threshold 0.4,达标)
+    // critical_rate=0 → 即便 total 达标,passed 仍 false(critical 100% 是硬门槛)
     const judge = JSON.stringify([{ state: 'lost' }, { state: 'preserved' }]);
     const r = applyRound2(judge, sampling, 0.4);
     expect(r.critical_rate).toBe(0);
+    expect(r.total_rate).toBe(0.5); // total 达标
+    expect(r.passed).toBe(false); // 但 critical 门槛未过
+  });
+
+  it('agent judge 输出非法 JSON → fail-closed(全 lost,不 passed)', () => {
+    const r = applyRound2('not json', sampling, 0.9);
     expect(r.passed).toBe(false);
+    expect(r.critical_rate).toBe(0);
+  });
+
+  it('agent judge 输出合法 JSON 但非数组 → fail-closed(全 lost,不 passed)', () => {
+    const r = applyRound2(JSON.stringify({ unexpected: true }), sampling, 0.9);
+    expect(r.passed).toBe(false);
+    expect(r.critical_rate).toBe(0);
   });
 
   it('paraphrased 视为保留(state !== lost)', () => {

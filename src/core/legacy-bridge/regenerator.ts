@@ -422,9 +422,17 @@ export function applyRound2(
           ? o.state
           : 'lost',
       );
+    } else {
+      // 合法 JSON 但非数组 → 无法逐 fact 对应,所有 fact 保守视为 lost(fail-closed)
+      console.warn(
+        `[applyRound2] agent judge 输出非 JSON 数组(type=${typeof parsed});所有 fact 保守视为 lost`,
+      );
     }
   } catch {
-    // JSON 解析失败 → states 保持空数组,下面逐条 fallback 为 lost
+    // JSON 解析失败 → states 保持空数组,下面逐条 fallback 为 lost(fail-closed)
+    console.warn(
+      `[applyRound2] agent judge 输出非合法 JSON;所有 fact 保守视为 lost。原文(head 200):\n${judgeText.slice(0, 200)}`,
+    );
     states = [];
   }
   // 按编号与轮1 抽样 fact 一一对应;agent 漏判的 fact 保守视为 lost

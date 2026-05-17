@@ -27,7 +27,7 @@
 | `skills/subagent-driven-discipline/references/opencode-tools.md` | OpenCode harness 映射 | 修改:补一句澄清注 |
 | `skills/subagent-driven-development/SKILL.md` | SDD skill | 修改:matrix→指针 等三处 |
 | `.claude/skills/subagent-driven-discipline/SKILL.md` | forge-repo 自身 dogfood 副本 | 修改:同步治理段 + Platform Note |
-| `tests/core/templates/skills.test.ts` | skill 模板测试 | 修改:加治理段 parity test |
+| `tests/core/templates/skills.test.ts` | skill 模板测试 | 修改:加治理段 + Platform Note 修正句 parity test |
 | `CHANGELOG.md` | 变更日志 | 修改:加 Added + Changed 条目 |
 | `src/core/templates/` | `pnpm build` 反向同步产物 | 由 build 自动生成,随 commit |
 
@@ -109,8 +109,11 @@ describe('resolveModelTiers — spec §2.1 六条规则', () => {
     });
   });
 
-  it('规则1 单次查表:{haiku: sonnet} → haiku=sonnet,不递归追到 opus', () => {
-    expect(resolveModelTiers(cfg({ haiku: 'sonnet' }), noop).haiku).toBe('sonnet');
+  it('规则1 单次查表:{haiku:sonnet, sonnet:opus} → haiku=sonnet(非递归)', () => {
+    // 关键用例:同时设 sonnet → 递归实现会把 haiku 错误地追成 opus
+    const r = resolveModelTiers(cfg({ haiku: 'sonnet', sonnet: 'opus' }), noop);
+    expect(r.haiku).toBe('sonnet'); // 单次查表 = sonnet;递归会得 opus
+    expect(r.sonnet).toBe('opus');
   });
 
   it('规则3 malformed:model_tiers 非对象 → 全 identity + warn', () => {
@@ -346,16 +349,31 @@ git commit -m "feat(schema): add model_tiers resolver + validator"
 
 - [ ] **Step 1: 给 `tests/cli/config.test.ts` 追加 model_tiers 用例**
 
-在 `tests/cli/config.test.ts` 的 `describe('forge config', ...)` 块内、最后一个 `it` 之后追加:
+先把文件顶部的 import 补全(`tests/cli/config.test.ts` 现有 import 只有 `mkdtempSync, rmSync` from `node:fs`),改为:
 
 ```ts
-  // Test 4: 点分键 set/get model_tiers.haiku
-  it('forge config set/get model_tiers.haiku 点分键生效', () => {
+import { mkdtempSync, rmSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { parse as parseYAML } from 'yaml';
+```
+
+然后在 `describe('forge config', ...)` 块内、最后一个 `it` 之后追加 Test 4–7:
+
+```ts
+  // Test 4: set model_tiers.haiku 写成嵌套结构(不是 flat key)
+  it('set model_tiers.haiku 写成嵌套 YAML,get 嵌套读取', () => {
     const d = mkdtempSync(join(tmpdir(), 'forge-config-'));
     try {
       const s = runCli(['config', 'set', 'model_tiers.haiku', 'sonnet'], d);
       expect(s.exitCode).toBe(0);
       expect(s.stdout).toContain('model_tiers 仅对'); // CC-only 固定提示 substring
+      // 关键:验 YAML 是嵌套对象,不是 flat key "model_tiers.haiku"
+      // —— 旧 flat 实现会写成 flat key,此断言在 RED 阶段失败
+      const parsed = parseYAML(readFileSync(join(d, 'forge', 'config.yaml'), 'utf8')) as Record<
+        string,
+        unknown
+      >;
+      expect((parsed.model_tiers as Record<string, unknown> | undefined)?.haiku).toBe('sonnet');
+      expect(parsed['model_tiers.haiku']).toBeUndefined();
       const g = runCli(['config', 'get', 'model_tiers.haiku'], d);
       expect(g.exitCode).toBe(0);
       expect(g.stdout).toContain('sonnet');
@@ -364,21 +382,22 @@ git commit -m "feat(schema): add model_tiers resolver + validator"
     }
   });
 
-  // Test 5: 三类非法 set —— exit≠0 且 config 文件不被改动
-  it('forge config set model_tiers 非法值 fail-fast,文件 byte-for-byte 不变', () => {
+  // Test 5: 三类非法 set —— exit≠0、stderr 含对应 reason、config 文件不变
+  it('set model_tiers 非法值 fail-fast(stderr 含 reason、文件 byte-for-byte 不变)', () => {
     const d = mkdtempSync(join(tmpdir(), 'forge-config-'));
     try {
-      // 先建一个合法 config.yaml
       runCli(['config', 'set', 'schema', 'forge-spec-driven/v1'], d);
       const cfgPath = join(d, 'forge', 'config.yaml');
       const before = readFileSync(cfgPath);
-      for (const [field, value] of [
-        ['model_tiers.opus', 'sonnet'], // invalid-field
-        ['model_tiers.haiku', 'gpt4'], // invalid-value
-        ['model_tiers.sonnet', 'haiku'], // downgrade
-      ] as const) {
+      const cases: Array<[string, string, string]> = [
+        ['model_tiers.opus', 'sonnet', 'invalid-field'],
+        ['model_tiers.haiku', 'gpt4', 'invalid-value'],
+        ['model_tiers.sonnet', 'haiku', 'downgrade'],
+      ];
+      for (const [field, value, reason] of cases) {
         const r = runCli(['config', 'set', field, value], d);
         expect(r.exitCode).not.toBe(0);
+        expect(r.stderr).toContain(reason); // reason 枚举进 stderr,稳定可断言
       }
       expect(readFileSync(cfgPath).equals(before)).toBe(true);
     } finally {
@@ -386,35 +405,62 @@ git commit -m "feat(schema): add model_tiers resolver + validator"
     }
   });
 
-  // Test 6: config.yaml 损坏时 set fail-fast,文件 byte-for-byte 不变
-  it('config.yaml 损坏时 set 拒写、文件不变', () => {
+  // Test 6: config.yaml 三类 ConfigParseError 下 set 拒写、文件 byte-for-byte 不变
+  it('config.yaml 各类 ConfigParseError 下 set 拒写、文件不变', () => {
     const d = mkdtempSync(join(tmpdir(), 'forge-config-'));
     try {
       const dir = join(d, 'forge');
       mkdirSync(dir, { recursive: true });
       const cfgPath = join(dir, 'config.yaml');
-      const corrupt = 'schema: [unclosed\n  : :\n';
-      writeFileSync(cfgPath, corrupt);
+      // parseConfig 抛 ConfigParseError 的三种情形(见 src/core/parse/yaml.ts)
+      const corruptCases = [
+        'schema: [unclosed\n  : :\n', // ① YAML 语法错
+        'just a scalar string\n', // ② root 非 mapping
+        'model_tiers:\n  haiku: sonnet\n', // ③ 缺 schema 字段
+      ];
+      for (const content of corruptCases) {
+        writeFileSync(cfgPath, content);
+        const before = readFileSync(cfgPath);
+        const r = runCli(['config', 'set', 'model_tiers.haiku', 'sonnet'], d);
+        expect(r.exitCode).not.toBe(0);
+        expect(readFileSync(cfgPath).equals(before)).toBe(true);
+      }
+    } finally {
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  // Test 7: get 缺键 → null;损坏 config get 报错;超层/空段点分键 set 拒绝且文件不变
+  it('get 缺键 → null;损坏 config get 报错;超层/空段点分键 set 拒绝且文件不变', () => {
+    const d = mkdtempSync(join(tmpdir(), 'forge-config-'));
+    try {
+      runCli(['config', 'set', 'schema', 'forge-spec-driven/v1'], d);
+      const cfgPath = join(d, 'forge', 'config.yaml');
+      const miss = runCli(['config', 'get', 'model_tiers.haiku'], d);
+      expect(miss.exitCode).toBe(0);
+      expect(miss.stdout.trim()).toBe('null'); // 缺键 → raw null
+      // 超层 / 空段点分键 set 一律拒绝,且 config 文件 byte-for-byte 不变
       const before = readFileSync(cfgPath);
-      const r = runCli(['config', 'set', 'model_tiers.haiku', 'sonnet'], d);
-      expect(r.exitCode).not.toBe(0);
+      for (const bad of ['model_tiers.haiku.x', '.haiku', 'model_tiers.']) {
+        const r = runCli(['config', 'set', bad, 'sonnet'], d);
+        expect(r.exitCode).not.toBe(0);
+      }
       expect(readFileSync(cfgPath).equals(before)).toBe(true);
+      // 损坏 config → get 照常报错
+      writeFileSync(cfgPath, 'schema: [unclosed\n');
+      const g = runCli(['config', 'get', 'schema'], d);
+      expect(g.exitCode).not.toBe(0);
     } finally {
       rmSync(d, { recursive: true, force: true });
     }
   });
 ```
 
-并把文件顶部的 import 补全(`tests/cli/config.test.ts` 现有 import 只有 `mkdtempSync, rmSync`):
-
-```ts
-import { mkdtempSync, rmSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-```
-
 - [ ] **Step 2: 构建并跑测试,确认失败**
 
 Run: `pnpm build && pnpm vitest run tests/cli/config.test.ts`
-Expected: FAIL —— Test 4 的点分 `get` 返回 `null`(旧 `config.ts` flat 读取拿不到 `model_tiers.haiku`);Test 5 的非法值未被拒(旧 `set` 无校验,会把 `model_tiers.opus` 当 flat key 写进去)。
+Expected: FAIL —— 旧 `config.ts` 是 flat set/get,以下用例在 RED 阶段失败:**Test 4**(旧 `set` 把 `model_tiers.haiku` 写成 flat key → `parsed.model_tiers` 为 `undefined`,且无 CC-only 提示);**Test 5**(旧 `set` 无校验 → 非法值不被拒、stderr 无 reason);**Test 7 的「超层/空段点分键 set 应拒绝」**(旧 flat `set` 把它们当 flat key 写入、exit 0)。
+> 注:**Test 6**(三类 `ConfigParseError` 下 `set` 拒写)与 **Test 7 的「缺键→null」「损坏 config→get 报错」**在旧实现下**本就通过**(旧 `set`/`get` 已先调 `parseConfig`)—— 它们是**回归守护**用例,不作为 RED 驱动。
 
 - [ ] **Step 3: 重写 `src/cli/commands/config.ts`**
 
@@ -422,7 +468,7 @@ Expected: FAIL —— Test 4 的点分 `get` 返回 `null`(旧 `config.ts` flat 
 
 ```ts
 // forge config 子命令 — 管理 forge/config.yaml
-// 支持 get/set;支持点分嵌套键(如 model_tiers.haiku);model_tiers.* 走 fail-fast 校验
+// 支持 get/set;支持一层点分嵌套键(如 model_tiers.haiku);model_tiers.* 走 fail-fast 校验
 
 import { Command } from 'commander';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
@@ -432,18 +478,37 @@ import { parseConfig } from '../../core/parse/index.js';
 import { validateModelTierAssignment } from '../../core/schema/index.js';
 import { stringify as stringifyYAML } from 'yaml';
 
-/** 把可能含点的 field 拆成路径段(`model_tiers.haiku` → ['model_tiers','haiku']) */
-function splitField(field: string): string[] {
-  return field.split('.');
+type FieldPath = { kind: 'flat'; key: string } | { kind: 'nested'; ns: string; leaf: string };
+
+/**
+ * 把 field 解析为 flat 或一层嵌套键。
+ * 用 indexOf/slice(而非 split)—— slice 返回 string,规避 tsconfig 的 noUncheckedIndexedAccess。
+ * 超过一层(`a.b.c`)、空段(`.haiku` / `model_tiers.` / `model_tiers..x`)、空 field → 抛错 fail-fast。
+ */
+function parseField(field: string): FieldPath {
+  const dot = field.indexOf('.');
+  if (dot === -1) {
+    if (field.length === 0) throw new Error('forge config: field 不能为空');
+    return { kind: 'flat', key: field };
+  }
+  const ns = field.slice(0, dot);
+  const leaf = field.slice(dot + 1);
+  if (ns.length === 0 || leaf.length === 0 || leaf.includes('.')) {
+    throw new Error(`forge config: 非法的点分键 (${field}) —— 只支持一层、且段不可为空`);
+  }
+  return { kind: 'nested', ns, leaf };
 }
 
 export function buildConfigCommand(): Command {
   const cmd = new Command('config').description('Manage forge/config.yaml');
 
-  // forge config get <field> —— 支持点分嵌套键的 raw 读取
+  // forge config get <field> —— 支持一层点分嵌套键的 raw 读取
   cmd
     .command('get <field>')
-    .description('Read a config field (supports dotted keys, e.g. model_tiers.haiku)')
+    .description(
+      'Read a config field (supports one-level dotted keys, e.g. model_tiers.haiku). ' +
+        'A missing key prints null; null means unset/identity.',
+    )
     .action(async (field: string) => {
       const path = join(process.cwd(), 'forge', 'config.yaml');
       if (!existsSync(path)) throw new Error(`forge/config.yaml not found at ${path}`);
@@ -452,26 +517,30 @@ export function buildConfigCommand(): Command {
         string,
         unknown
       >;
-      let value: unknown = config;
-      for (const seg of splitField(field)) {
+      const fp = parseField(field);
+      let value: unknown;
+      if (fp.kind === 'flat') {
+        value = config[fp.key];
+      } else {
+        const ns = config[fp.ns];
         value =
-          value && typeof value === 'object' && !Array.isArray(value)
-            ? (value as Record<string, unknown>)[seg]
+          ns && typeof ns === 'object' && !Array.isArray(ns)
+            ? (ns as Record<string, unknown>)[fp.leaf]
             : undefined;
       }
       console.log(JSON.stringify(value ?? null, null, 2));
     });
 
-  // forge config set <field> <value> —— 支持点分嵌套键;model_tiers.* 走 fail-fast 校验
+  // forge config set <field> <value> —— 一层点分嵌套键;model_tiers.* 走 fail-fast 校验
   cmd
     .command('set <field> <value>')
-    .description('Write a config field (supports dotted keys)')
+    .description('Write a config field (supports one-level dotted keys, e.g. model_tiers.haiku)')
     .action(async (field: string, value: string) => {
-      const segments = splitField(field);
       const dir = join(process.cwd(), 'forge');
       const path = join(dir, 'config.yaml');
 
       // 阶段①:先 parse 现有 config —— parse 失败 → ConfigParseError 抛出 → fail-fast,文件不动
+      // (spec §2.1:config parse 优先于 field 校验)
       let config: Record<string, unknown>;
       if (existsSync(path)) {
         config = parseConfig(await readFile(path, 'utf8')) as unknown as Record<string, unknown>;
@@ -479,29 +548,37 @@ export function buildConfigCommand(): Command {
         config = { schema: 'forge-spec-driven/v1' };
       }
 
-      // 阶段②:model_tiers.<leaf> 赋值 → 写入侧 fail-fast 校验(非法 → 抛错、不写文件)
-      const isModelTierKey = segments.length === 2 && segments[0] === 'model_tiers';
-      if (isModelTierKey) {
-        const check = validateModelTierAssignment(segments[1], value);
+      // 阶段②:parse 成功后才解析 field(空段 / 超过一层 → 抛错 fail-fast)
+      const fp = parseField(field);
+
+      // model_tiers 必须用 model_tiers.<tier> 二段形式;作 flat key → 拒绝
+      if (fp.kind === 'flat' && fp.key === 'model_tiers') {
+        throw new Error('forge config set: model_tiers 必须用 model_tiers.<tier> 形式');
+      }
+      // 阶段②:model_tiers.<leaf> 赋值 → 写入侧 fail-fast 校验
+      let isModelTierKey = false;
+      if (fp.kind === 'nested' && fp.ns === 'model_tiers') {
+        isModelTierKey = true;
+        const check = validateModelTierAssignment(fp.leaf, value);
         if (!check.ok) {
           throw new Error(
-            `forge config set: model_tiers.${segments[1]} = ${value} 非法 (${check.reason})`,
+            `forge config set: model_tiers.${fp.leaf} = ${value} 非法 (${check.reason})`,
           );
         }
       }
 
-      // 写入(支持单层点分嵌套)
+      // 写入
       await mkdir(dir, { recursive: true });
-      if (segments.length === 2) {
-        const [ns, leaf] = segments;
+      if (fp.kind === 'nested') {
+        const cur = config[fp.ns];
         const nsObj =
-          config[ns] && typeof config[ns] === 'object' && !Array.isArray(config[ns])
-            ? (config[ns] as Record<string, unknown>)
+          cur && typeof cur === 'object' && !Array.isArray(cur)
+            ? (cur as Record<string, unknown>)
             : {};
-        nsObj[leaf] = value;
-        config[ns] = nsObj;
+        nsObj[fp.leaf] = value;
+        config[fp.ns] = nsObj;
       } else {
-        config[field] = value;
+        config[fp.key] = value;
       }
       await writeFile(path, stringifyYAML(config), 'utf8');
       console.log(`set ${field} = ${value}`);
@@ -516,15 +593,15 @@ export function buildConfigCommand(): Command {
 }
 ```
 
-> 校验顺序符合 spec §2.1:先 parse(`config.yaml` 损坏 → `parseConfig` 抛错 → 在 `writeFile` 之前 fail-fast,文件不动),再 `validateModelTierAssignment` 校验赋值。`throw new Error` 在 commander action 里 → exit 非 0 + stderr(沿现有 `get` 报「not found」的同款行为)。
+> 设计要点:① `parseField` 用 `indexOf`/`slice` 而非 `split` —— `slice` 返回 `string`,不触发 `noUncheckedIndexedAccess`(`tsconfig.json` 已开)的 `string|undefined`;② `parseField` 对超过一层(`a.b.c`)、空段(`.x` / `model_tiers.` / `model_tiers..x`)、空 `field` 一律 fail-fast 抛错;`model_tiers` 当 flat key 也拒绝;合法的 `model_tiers.<tier>` 才拆 leaf 交 `validateModelTierAssignment`(`tier` 非 `haiku`/`sonnet` → `invalid-field`),错误来源单一;③ **`set` 严格两阶段(spec §2.1):先 `parseConfig`(`config.yaml` 损坏 → 抛 `ConfigParseError` → fail-fast,文件不动),parse 成功后才 `parseField` + `validateModelTierAssignment`** —— 全部在 `writeFile` 之前;④ `throw new Error` 在 commander action 里 → exit 非 0 + stderr 含错误信息(其中含 `reason`;沿现有 `get` 报「not found」同款行为)。
 
 - [ ] **Step 4: 构建并跑测试,确认通过**
 
 Run: `pnpm build && pnpm vitest run tests/cli/config.test.ts`
-Expected: PASS(Test 1-6 全绿)。
+Expected: PASS(Test 1–7 全绿)。
 
 Run: `pnpm typecheck`
-Expected: PASS。
+Expected: PASS(`parseField` 用 `slice` 取值,无 `noUncheckedIndexedAccess` 报错)。
 
 - [ ] **Step 5: Commit**
 
@@ -576,7 +653,7 @@ git commit -m "feat(cli): forge config 支持点分键 + model_tiers 校验"
 recovery / case study / catalog 等历史记录章节里出现的模型名是过去实际跑过的事实档案,不受 `model_tiers` 影响、不改写。
 ````
 
-> 实现者:上面 ````markdown ... ```` 之间的内容是要插入的最终文本(从 `## Model Tier 映射` 标题行起,到末尾 `不改写。` 句止)。该段须与 Task 4 Step 1 插入 `.claude/` 副本的文本**逐字一致**。
+> 实现者:上面 ````markdown ... ```` 之间的内容是要插入的最终文本(从 `## Model Tier 映射` 标题行起,到末尾 `不改写。` 句止)。该段须与 **Task 5 Step 3** 插入 `.claude/` 副本的文本**逐字一致**(Task 5 的 parity test 会自动校验)。
 
 - [ ] **Step 2: 修正 `## Platform Note`**
 
@@ -594,11 +671,15 @@ recovery / case study / catalog 等历史记录章节里出现的模型名是过
 
 - [ ] **Step 3: 给两个 references 文件补澄清注**
 
-`skills/subagent-driven-discipline/references/codex-tools.md` 与 `skills/subagent-driven-discipline/references/opencode-tools.md` 各有一段标题为 `## What still works exactly as written` 的内容,正文称 §1 等「platform-independent ... apply verbatim」。在**两个文件**该段正文末尾各追加一句:
+两个 references 文件都有一段 `## What still works exactly as written`,正文是一个段落、以 `... apply verbatim.`(codex-tools.md)/ `... apply verbatim on OpenCode.`(opencode-tools.md)结尾。在**每个文件**那个段落之后(下一个 `## ` 标题之前;codex-tools.md 中该段落是文件最后内容)**另起一行**插入同一句澄清注:
 
 ```
 > 注:此处「platform-independent」指跨 *harness* 通用;§1 的 model tier 列 `haiku`/`sonnet`/`opus` 是 tier 标签,默认对应同名 Claude 模型,实际派发模型按 harness / `forge/config.yaml#model_tiers` 解析(见 SKILL.md `## Model Tier 映射` 段)。
 ```
+
+具体锚点:
+- `codex-tools.md` —— 追加在 `... and apply verbatim.` 这一行之后(该行是文件正文末行)。
+- `opencode-tools.md` —— 追加在 `... and apply verbatim on OpenCode.` 这一行之后、`## OpenCode-specific advantages this skill exploits` 标题之前。
 
 - [ ] **Step 4: 升 discipline frontmatter version**
 
@@ -619,13 +700,30 @@ recovery / case study / catalog 等历史记录章节里出现的模型名是过
 Run: `pnpm build`
 Expected: 成功;`scripts/copy-templates.mjs` 把 `skills/subagent-driven-discipline/` 反向同步到 `src/core/templates/skills/` 与 `dist/`。
 
-- [ ] **Step 6: 跑模板测试 + format,确认无回归**
+- [ ] **Step 6: 验证治理段 / Platform Note / references 改动都已落地 + 模板测试 + format**
+
+用 `rg` 核验(`grep` 在 Win/PowerShell 不一定可用 —— forge 生态默认 `rg`):
+
+```bash
+# ① 治理段在源 + build 同步后的模板里都在
+rg "## Model Tier 映射" skills/subagent-driven-discipline/SKILL.md src/core/templates/skills/subagent-driven-discipline.md
+# ② Platform Note 已改成新句
+rg "per-harness/per-config" skills/subagent-driven-discipline/SKILL.md
+# ③ 旧 Platform Note 句已消失(下面这条应无任何输出)
+rg "Only the dispatch / file / shell tool names differ" skills/subagent-driven-discipline/SKILL.md
+# ④ 两个 references 文件都插入了澄清注
+rg "forge/config.yaml#model_tiers" skills/subagent-driven-discipline/references/codex-tools.md skills/subagent-driven-discipline/references/opencode-tools.md
+```
+
+Expected:① 两文件各有匹配行;② 有匹配;③ **无输出**(旧句已被替换);④ 两个 references 文件各有匹配。任一不符 → 对应改动漏做或漏 build。
 
 Run: `pnpm vitest run tests/core/templates/skills.test.ts`
 Expected: PASS(frontmatter / references 镜像校验通过)。
 
-Run: `pnpm format` 然后 `pnpm format:check`
-Expected: `format:check` PASS(prettier;CI 硬门槛)。
+Run: `pnpm format:check`
+Expected: PASS(prettier;CI 硬门槛)。若失败:**只**对本 task 改的源文件跑
+`pnpm exec prettier --write skills/subagent-driven-discipline/SKILL.md skills/subagent-driven-discipline/references/codex-tools.md skills/subagent-driven-discipline/references/opencode-tools.md`
+(**不要**跑全仓 `pnpm format`,以免把本 task 范围外的文件格式化改动卷进 commit),然后**重跑 `pnpm build`**(让模板反映格式化后的源),再 `pnpm format:check`。
 
 - [ ] **Step 7: Commit**
 
@@ -691,16 +789,27 @@ git commit -m "feat(discipline): 加 Model Tier 映射治理段 + 修 Platform N
 
 > SDD frontmatter 无 `version` 字段(只有 `name` + `description`)—— 不新增、不动。spec §3 提到的 version 升级仅适用于有该字段的 discipline(Task 3 已做)。
 
-- [ ] **Step 4: `pnpm build` 同步模板 + 测试 + format**
+- [ ] **Step 4: `pnpm build` 同步模板 + 验证文案改动 + 测试 + format**
 
 Run: `pnpm build`
-Expected: 成功(`skills/subagent-driven-development/` 同步到 `src/core/templates/`)。
+Expected: 成功(`skills/subagent-driven-development/SKILL.md` 同步到 `src/core/templates/skills/subagent-driven-development.md`)。
+
+用 `rg` 核验改动落地(模板结构测试不会抓 SDD 文案删改,须显式核验):
+
+```bash
+# 指针已替换 matrix(新句在)
+rg "本 skill 不单列 model tier 摘要" skills/subagent-driven-development/SKILL.md
+# 旧的 model 选型 matrix 标题已消失(下面这条应无输出)
+rg "model 选型 matrix" skills/subagent-driven-development/SKILL.md
+```
+
+Expected:第一条有匹配;第二条**无输出**(`model 选型 matrix` 段已被指针替换)。
 
 Run: `pnpm vitest run tests/core/templates/skills.test.ts`
 Expected: PASS。
 
-Run: `pnpm format` 然后 `pnpm format:check`
-Expected: `format:check` PASS。
+Run: `pnpm format:check`
+Expected: PASS。若失败:只对 `skills/subagent-driven-development/SKILL.md` 跑 `pnpm exec prettier --write skills/subagent-driven-development/SKILL.md`,然后重跑 `pnpm build`,再 `pnpm format:check`。
 
 - [ ] **Step 5: Commit**
 
@@ -719,15 +828,18 @@ git commit -m "refactor(sdd): model 选型 matrix 改为指向 discipline §1"
 
 - [ ] **Step 1: 在 `skills.test.ts` 加 parity test**
 
-在 `tests/core/templates/skills.test.ts` 末尾(最后一个 `describe` 之后)追加。先确认文件顶部已 import `readFileSync`、`join`、`existsSync`(若缺则补);然后加:
+在 `tests/core/templates/skills.test.ts` 末尾(最后一个 `describe` 之后)追加。先确认文件顶部已 import `readFileSync`(from `node:fs`)、`join`(from `node:path`)(若缺则补);然后加:
 
 ```ts
-describe('Model Tier 映射 治理段 —— 两副本 parity', () => {
-  // 抽取 SKILL.md 里 `## Model Tier 映射` 段:从该二级标题行(含)起,到下一个二级标题(`## `)或文件末尾止
+describe('Model Tier 映射 —— discipline 两副本 parity', () => {
+  const repoRoot = join(__dirname, '../../../skills/subagent-driven-discipline/SKILL.md');
+  const dogfood = join(__dirname, '../../../.claude/skills/subagent-driven-discipline/SKILL.md');
+
+  // 抽取 `## Model Tier 映射` 段:从该二级标题行(含)起,到下一个二级标题(`## `)或文件末尾止
   function extractGovernanceSection(filePath: string): string {
     const lines = readFileSync(filePath, 'utf8').split(/\r?\n/);
     const start = lines.findIndex((l) => l.startsWith('## Model Tier 映射'));
-    if (start === -1) return ''; // 抽取不到 → 返回空串,parity 断言必失败(预期的 drift 告警)
+    if (start === -1) return ''; // 抽不到 → 空串,断言必失败(预期的 drift 告警)
     let end = lines.length;
     for (let i = start + 1; i < lines.length; i++) {
       if (lines[i].startsWith('## ')) {
@@ -738,36 +850,54 @@ describe('Model Tier 映射 治理段 —— 两副本 parity', () => {
     return lines.slice(start, end).join('\n').trimEnd();
   }
 
-  it('repo-root 与 .claude/ 两份 discipline SKILL.md 的治理段逐字一致', () => {
-    const repoRoot = join(__dirname, '../../../skills/subagent-driven-discipline/SKILL.md');
-    const dogfood = join(
-      __dirname,
-      '../../../.claude/skills/subagent-driven-discipline/SKILL.md',
-    );
+  // 抽取 Platform Note 里以 "§1 28-subtype taxonomy" 开头的那一行(修正前后都以此开头)
+  function extractPlatformNoteLine(filePath: string): string {
+    const lines = readFileSync(filePath, 'utf8').split(/\r?\n/);
+    return lines.find((l) => l.startsWith('§1 28-subtype taxonomy')) ?? '';
+  }
+
+  it('两副本的 `## Model Tier 映射` 治理段逐字一致', () => {
     // 标题层级 / 重命名导致抽取不到 → 测试硬失败,即预期的 drift 告警,须人工对齐
     const a = extractGovernanceSection(repoRoot);
     const b = extractGovernanceSection(dogfood);
-    expect(a.length).toBeGreaterThan(0); // repo-root 必须含该段
+    expect(a.length).toBeGreaterThan(0); // repo-root 必须含治理段
+    expect(b).toBe(a); // .claude/ 副本逐字一致
+  });
+
+  it('两副本的 Platform Note 修正句逐字一致、且确为修正后的新句', () => {
+    const a = extractPlatformNoteLine(repoRoot);
+    const b = extractPlatformNoteLine(dogfood);
+    expect(a.length).toBeGreaterThan(0); // repo-root 必须含该句
+    // 确认 repo-root 确为修正后的新句 —— 否则两副本同为旧句时 b===a 也会误绿
+    expect(a).toContain('per-harness/per-config');
+    expect(a).not.toContain('Only the dispatch / file / shell tool names differ');
     expect(b).toBe(a); // .claude/ 副本逐字一致
   });
 });
 ```
 
-> `__dirname` 在 `tests/core/templates/` 下;`../../../` 回到仓库根。若该测试文件用 ESM `import.meta` 而非 `__dirname`,沿文件现有写法取仓库根路径。
+> `__dirname` 在 `tests/core/templates/` 下,`../../../` 回到仓库根 —— `tests/cli/helpers.ts` 已证实 forge 测试文件可直接用 `__dirname`。
+> Platform Note 那一行修正前在两副本里本就 byte-identical(已核实);故 Task 3 修了 repo-root、Task 5 Step 3 未修 `.claude/` 之间,该 parity `it` 会失败 —— 正是 Task 5 的 RED。
 
 - [ ] **Step 2: 跑 parity test,确认失败**
 
-Run: `pnpm vitest run tests/core/templates/skills.test.ts -t "两份 discipline SKILL.md 的治理段逐字一致"`
-Expected: FAIL —— `.claude/` 副本尚未同步治理段,`extractGovernanceSection` 返回空串,`expect(b).toBe(a)` 失败。
+Run: `pnpm vitest run tests/core/templates/skills.test.ts -t "discipline 两副本 parity"`
+Expected: 两个 `it` 都 FAIL —— 治理段:`.claude/` 副本尚无 `## Model Tier 映射`,`extractGovernanceSection` 返回空串;Platform Note:Task 3 已把 repo-root 的修正句改成新句,`.claude/` 仍是旧句,`expect(b).toBe(a)` 失败。
 
 - [ ] **Step 3: 把治理段 + Platform Note 修正同步进 `.claude/` 副本**
 
 `.claude/skills/subagent-driven-discipline/SKILL.md` 是 forge-repo 自身 dogfood 工作副本(与 generic 版有意分叉,不在 `pnpm build` 管线内)。对它做**且仅做**两处改动:
 
-1. 插入 `## Model Tier 映射` 治理段 —— 文本与 Task 3 Step 1 的 ````markdown```` 块**逐字一致**。插入位置同理:在「核心立场 / 何时启用」段之后那条 `---` 与 `## §1` 之间(若该副本结构与 repo-root 有细微差异,以「§1 之前、核心立场之后」为准)。
-2. 修正 `## Platform Note` —— 同 Task 3 Step 2(若该副本 Platform Note 文字与 repo-root 不完全相同,只把「§1 ... platform-independent ... apply verbatim」那句按 Task 3 Step 2 的语义改写;不调和两副本其它既有差异)。
+1. **插入 `## Model Tier 映射` 治理段** —— 文本与 Task 3 Step 1 的 ````markdown```` 块**逐字一致**。插入位置:在「核心立场 / 何时启用」段之后那条 `---` 与 `## §1` 之间。
+2. **修正 `## Platform Note`** —— 该副本里待改的那一行与 repo-root **byte-identical**(已核实,原文为):
 
-其 §1 表格、§5 case study 等其它内容**一律不动**;该副本无 SDD 配套,不涉及 Task 4 的改动。
+   ```
+   §1 28-subtype taxonomy, §3.2 cross-verify, §4 recovery, §5 case studies, §6 pattern catalog are **platform-independent** and apply verbatim on every harness. Only the dispatch / file / shell tool names differ.
+   ```
+
+   **应用与 Task 3 Step 2 完全相同的替换** —— 把上面这行换成 Task 3 Step 2 给出的同一条新句(逐字相同)。
+
+其 §1 表格、§5 case study 等其它内容**一律不动**;该副本无 SDD 配套,不涉及 Task 4 的改动。两处改动后,Task 5 Step 1 的两个 parity `it` 都应转绿。
 
 - [ ] **Step 4: 跑 parity test,确认通过**
 
@@ -831,8 +961,8 @@ git commit -m "docs(changelog): 记录 model_tiers 配置"
 
 按 spec §5 步骤 7,验收报告附:
 - `resolveModelTiers` / `validateModelTierAssignment` 测试输出;
-- `tests/cli` model_tiers 用例结果摘录(含「损坏 config → set 文件不变」);
-- 两副本治理段 parity test 结果;
-- discipline 治理段最终文本、Platform Note diff、SDD 指针 diff、`.claude/` 副本治理段 diff;
+- `tests/cli` model_tiers 用例结果摘录(Test 4 nested 结构 / Test 5 三类 reason / Test 6 三类 `ConfigParseError`(YAML 语法错 / root 非 mapping / 缺 schema)下 set 文件不变 / Test 7 缺键 null);
+- 两副本 parity test 结果(治理段 + Platform Note 修正句各一个 `it`);
+- discipline 治理段最终文本、Platform Note diff(repo-root **与** `.claude/` 副本各一份,人工确认两份修正一致)、SDD 指针 diff、`.claude/` 副本治理段 diff;
 - `pnpm build` 与 `pnpm test` 输出。
 - **负面证据(必写)**:本次未做「controller 在某 `model_tiers` 配置下实际派对模型」的自动化行为验证 —— 这是 advisory skill 的固有边界(spec §5 步骤 6 / §6),不得让「`pnpm test` 全绿」被误读为端到端功能已验证。

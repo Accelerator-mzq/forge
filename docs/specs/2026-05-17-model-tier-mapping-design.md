@@ -166,7 +166,7 @@ source of truth 是仓库根 `skills/`(见 `CLAUDE.md` 关键约束 #1)。改完
 | #   | 文件                                                              | 改动                                                                                                  |
 | --- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
 | 1   | `skills/subagent-driven-discipline/SKILL.md`                      | 新增 §2.2 治理段;修正 §2.4 Platform Note;§1 表格不动;frontmatter `version` 升一档                    |
-| 2   | `skills/subagent-driven-development/SKILL.md`                      | §2.3:`model 选型 matrix`→指针、`## Companion Skill` 若不存在分支更新、代码块注释补一句;`version` 升一档 |
+| 2   | `skills/subagent-driven-development/SKILL.md`                      | §2.3:`model 选型 matrix`→指针、`## Companion Skill` 若不存在分支更新、代码块注释补一句。**注**:SDD frontmatter 只有 `name` + `description`、**无 `version` 字段** —— 不新增、不动(version 升级仅适用于有该字段的 discipline,见行 #1) |
 | 3   | `skills/subagent-driven-discipline/references/codex-tools.md`      | §2.4:「What still works」段补一句 tier 标签澄清注                                                     |
 | 4   | `skills/subagent-driven-discipline/references/opencode-tools.md`   | §2.4:同上                                                                                            |
 | 5   | `src/core/schema/types.ts`                                        | `ForgeConfig` 加 `model_tiers?`(**只 `haiku` / `sonnet` 键**);加 `ModelTier` 类型 + `DEFAULT_MODEL_TIERS` 常量 |
@@ -176,7 +176,7 @@ source of truth 是仓库根 `skills/`(见 `CLAUDE.md` 关键约束 #1)。改完
 | 9   | `src/cli/commands/config.ts`                                      | **增强 `forge config` 的 `set`/`get` 支持点分嵌套键**。`set` 两阶段:**先 parse `config.yaml`**(解析失败 → fail-fast 拒写、不改文件),parse 成功后用 `validateModelTierAssignment()` 校验,非法 → exit 非 0、不改文件;`set model_tiers.*` 成功附一行 CC-only 静态提示。`get` 为 raw 读取(缺键 → `null`;CLI help 须说明 raw `null` = 未设 = identity;解析失败照常报错)。方案见决策 #14 |
 | 10  | `CHANGELOG.md`                                                    | Keep a Changelog:`Added` 一条(`model_tiers` 配置 —— 须注明**仅对 CC 等直接传 model 的 harness 生效**、重映射会抬高成本)+ `Changed` 一条(SDD model 选型改指向 discipline) |
 | 11  | `.claude/skills/subagent-driven-discipline/SKILL.md`              | forge-repo dogfood 工作副本(git-tracked,与 generic 版有意分叉、非 build 镜像)。**仅同步 §2.2 治理段 + §2.4 Platform Note 修正**,其 §1 表格与 case study 不动;此副本无 SDD 配套 |
-| 12  | `tests/core/templates/skills.test.ts`                             | **新增 parity test**:抽取 repo-root 与 `.claude/` 两份 discipline SKILL.md 的 `## Model Tier 映射` 段,断言逐字一致(防两副本治理段漂移)。段边界 = 从 `## Model Tier 映射` 标题行(含)起、到下一个二级标题(`## `)或文件末尾前止。该二级标题字面固定 —— 某副本若改标题层级 / 重命名导致抽取不到,**测试硬失败即预期的 drift 告警**,须人工对齐;测试描述里写明这一点 |
+| 12  | `tests/core/templates/skills.test.ts`                             | **新增 parity test**:抽取 repo-root 与 `.claude/` 两份 discipline SKILL.md 的 ① `## Model Tier 映射` 治理段、② Platform Note 修正句(以 `§1 28-subtype taxonomy` 开头的行),各断言逐字一致(防两副本漂移)。治理段边界 = 从 `## Model Tier 映射` 标题行(含)起、到下一个二级标题(`## `)或文件末尾前止。Platform Note 那个 `it` 还须断言 repo-root 行确为修正后新句(含 `per-harness/per-config`、不含旧句),否则两副本同为旧句时会误绿。标题层级 / 重命名导致抽取不到 → **测试硬失败即预期的 drift 告警** |
 | 13  | `tests/cli/`(新建或扩展现有 config 测试)                          | **`forge config` CLI 测试**:点分 `set`/`get` 生效;`set` 非法值(三类 reason)exit≠0;**`config.yaml` 损坏(YAML 语法错 / root 非 mapping / 缺 schema 等各类 `ConfigParseError`)时 `set` exit≠0 且文件 byte-for-byte 不变**;`get` 缺键 → `null`、损坏 → 报错;`set model_tiers.*` 输出含 CC-only 提示 |
 | 14  | `pnpm build` 产物                                                 | `src/core/templates/` + `dist/core/templates/` 由 build 自动反向同步,不手改                          |
 
@@ -203,13 +203,13 @@ source of truth 是仓库根 `skills/`(见 `CLAUDE.md` 关键约束 #1)。改完
    - `resolveModelTiers()`(读取侧)覆盖 §2.1 六条规则 —— (a) `config` undefined / `model_tiers` 缺失 → 全 identity;(b) 单次查表(`{haiku: sonnet}` → haiku=`sonnet`,不递归);(c) malformed `model_tiers`(`null` / 字符串 / 数组 / 未知键 `opus`·`max`·`Haiku`)→ 全 identity 或忽略该键 + warn,**不抛异常**;(d) 非法值 → warn + 该 tier identity;(e) 升级正确(`haiku→opus`、`sonnet→opus`)、降级被拒(`sonnet→haiku` → warn + identity);(f) 输出 `opus` 字段恒为 `'opus'`。
    - `validateModelTierAssignment()`(写入侧)覆盖 —— 合法赋值 `ok: true`(identity 与升级);`ok: false` 的三类 `reason` 各覆盖:非法 tier → `invalid-field`、非枚举 value → `invalid-value`、降级 value → `downgrade`;**多重非法走优先级**(`model_tiers.opus bogus` → `invalid-field`)。
    - **共享常量一致性**:`Object.keys(MODEL_TIER_RANK).sort()` 与 `[...MODEL_TIER_VALUES].sort()` 相等。
-   - `tests/core/templates/skills.test.ts` 的 parity test:两份 discipline SKILL.md 的 `## Model Tier 映射` 段逐字一致。
+   - `tests/core/templates/skills.test.ts` 的 parity test:两份 discipline SKILL.md 的 `## Model Tier 映射` 治理段、与 Platform Note 修正句,各自逐字一致(后者还断言 repo-root 确为修正后新句)。
 2. **CLI 测试**(`tests/cli/`):点分 `set`/`get` 生效;`set` 三类非法值 exit≠0 **且 config 文件 byte-for-byte 不变**;**`config.yaml` 各类 `ConfigParseError`(YAML 语法错 / root 非 mapping / 缺 schema)下 `set` exit≠0 且文件 byte-for-byte 不变**;`get` 缺键 → `null`、文件损坏 → 报错;`set model_tiers.*` 输出含 CC-only 提示(断言一段**固定最小 substring**,使提示文案稳定可测)。
 3. **`pnpm build` 成功** —— `copy-templates.mjs` 把 `skills/` 同步到 `src/core/templates/` 与 `dist/`;`tests/core/templates/skills.test.ts` 校验同步后模板 frontmatter 与 `references/` 镜像。**注**:该 test 不对 SKILL.md 正文做 hash 比对,正文一致性由 build 拷贝保证 —— 验收硬依赖「改完必跑 build」。
 4. **本地按 CI 顺序跑五步全绿**:`pnpm lint` → `pnpm format:check` → `pnpm typecheck` → `pnpm build` → `pnpm test`(`format:check` 是 CI 硬门槛)。
 5. **`.claude/` 副本独立核对**(不在 build 管线内):`.claude/skills/subagent-driven-discipline/SKILL.md` 已同步治理段 + Platform Note 修正,且治理段与 repo-root 版逐字一致(`git diff` / grep 比对)。
 6. **语义正确性由 reviewer 审读确认**:治理段准确表达 tier 标签语义 + `model_tiers` 解析规则 + 按 harness 差异 + opus 不降级约束;SDD 指针准确、`## Companion Skill` 若不存在分支已更新;Platform Note 修正到位。**验证边界(诚实声明)**:本设计**不含**「controller 在某 `model_tiers` 配置下实际派对模型」的自动化行为验证 —— 该行为正确性依赖 controller 遵循 advisory 指令,与 §1 taxonomy 本身的行为正确性同理(skill 是 controller 读取并自觉遵循的 advisory markdown)。
-7. **证据**:附治理段最终文本、Platform Note diff、SDD 指针 diff、`.claude/` 副本治理段 diff、`resolveModelTiers` / `validateModelTierAssignment` 测试输出、`tests/cli` model_tiers 用例结果摘录、`pnpm build` 与 `pnpm test` 输出。验收报告须**显式记录负面证据** —— 写明本次未做「controller 在某配置下实际派对模型」的行为验证(advisory 边界,步骤 6),不得让「`pnpm test` 全绿」被误读为端到端功能已验证。
+7. **证据**:附治理段最终文本、Platform Note diff(repo-root 与 `.claude/` 副本各一份,人工确认两份修正一致)、SDD 指针 diff、`.claude/` 副本治理段 diff、`resolveModelTiers` / `validateModelTierAssignment` 测试输出、`tests/cli` model_tiers 用例结果摘录、`pnpm build` 与 `pnpm test` 输出。验收报告须**显式记录负面证据** —— 写明本次未做「controller 在某配置下实际派对模型」的行为验证(advisory 边界,步骤 6),不得让「`pnpm test` 全绿」被误读为端到端功能已验证。
 
 ---
 

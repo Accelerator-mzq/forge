@@ -145,7 +145,9 @@ api 模式    forge legacy-bridge <op> --api    → 建 LlmTask[] → ApiRunner 
    - `enforce_sync=true`(默认 agent 模式)→ archive 走到 preflight 点 emit manifest(`gate_context: archive-preflight`)后**停在 gate**(archive 越不过一个自己评不了的 gate)。经 `/forge:archive` 时由 slash/skill 自动 fulfill + `forge archive --resume`;裸 CLI 用户看到提示「fulfill manifest 后 `forge archive --resume`」。**同一个 emit+halt,无 agent 检测机制**。
    - `forge archive --api` → sync-check 步骤改由 `ApiRunner` 在本进程内联跑(不 emit manifest、不 halt),供 CI / 无 agent 场景;`--api` 是 archive 命令侧的 flag,对应 §2.3 的 `forge legacy-bridge <op> --api`。
    - `enforce_sync=false` → archive 正常完成,post-archive 点 emit manifest(`gate_context: archive-posthook`,非阻塞);裸 CLI 下不 fulfill 也不影响 archive(本就非阻塞)。
-5. **`forge archive --resume` 的暂停态、产物绑定与 gate 复核**。archive 停在 preflight gate 时写暂停态文件 `forge/.cache/archive-pause-<changeId>.json`,记 changeId + 暂停的 archive 步骤 + **本次 preflight emit 的 sync-check manifest 的 `manifest_hash`**。`sync-check --apply` 产 `forge/legacy-sync-state/<changeId>.yaml` 时,把它消费的 manifest 的 `manifest_hash` 一并写进 sync-state 的 `produced_from` 字段。`forge archive --resume` 复核两件事,**缺一即拒绝**:① sync-state 的 `produced_from` == 暂停态记录的 `manifest_hash`(**证明 sync-state 确实由本次 preflight 的 `--apply` 产生,堵掉手写一份干净 sync-state 绕过 `--apply` 的偷懒**);② 对 sync-state 重跑确定性 `hasCriticalPending` —— 仍有 critical pending → 拒绝(等价 preflight exit 2)。两项都过才续跑 archive 余下步骤。gate 在 resume 处**幂等重评**且**绑定产物来源**。(`--resume-summary` 是既有的另一个独立 flag,与本机制不冲突。)
+5. **`forge archive --resume` 的暂停态、产物绑定与 gate 复核**。archive 停在 preflight gate 时写暂停态文件 `forge/.cache/archive-pause-<changeId>.json`,记 changeId + 暂停的 archive 步骤 + **本次 preflight emit 的 sync-check manifest 的 `manifest_hash`**。`sync-check --apply` 产 `forge/legacy-sync-state/<changeId>.yaml` 时,把它消费的 manifest 的 `manifest_hash` 一并写进 sync-state 的 `produced_from` 字段。`forge archive --resume` 复核两件事,**缺一即拒绝**:① sync-state 的 `produced_from` == 暂停态记录的 `manifest_hash`;② 对 sync-state 重跑确定性 `hasCriticalPending` —— 仍有 critical pending → 拒绝(等价 preflight exit 2)。两项都过才续跑 archive 余下步骤。
+
+   **`produced_from` 绑定的边界(诚实声明)**:`manifest_hash` 是 manifest 里的公开字段,`produced_from` 校验**只能**保证 sync-state 绑定到「本次 archive run 的这份 manifest」—— 它防的是**误用陈旧 / 跨 run 的 sync-state**(真实可达的保证)。它**不能**防一个蓄意偷懒的 agent:agent 完全可以手写一份空 sync-state 并抄入正确的 `manifest_hash`。这与「agent 伪造任何 LLM 判定产物」是同一类**文件方案无法加密关闭**的问题 —— 没有 marker / sidecar 能证明「judgment 真做过」。本设计对它的防御是:(a) §6 skill 的反偷懒行为约束(sync-check fulfillment 必须真判定);(b) `--api` 模式是**不可伪造**的高保证路径(CLI 直连 API,agent 碰不到 LLM 结果)。(`--resume-summary` 是既有的另一个独立 flag,与本机制不冲突。)
 6. **`allow_llm_calls=false`** → 两模式都 graceful skip(不变)。
 
 ---
@@ -170,7 +172,7 @@ api 模式    forge legacy-bridge <op> --api    → 建 LlmTask[] → ApiRunner 
 
 manifest 设计天然可测,三层各自独立测,不需真调 API:
 
-- **命令 prep(确定性)** → 断言 emit 的 manifest 内容(文件清单 / prompt / 输入 hash)。
+- **命令 prep(确定性)** → 断言 emit 的 manifest 内容(文件清单 / prompt / `manifest_hash`)。
 - **`--apply`** → 喂 fixture 结果文件 → 断言最终产物;含 `manifest_hash` 不匹配的篡改检测用例。
 - **`ApiRunner`** → 复用现有注入式 client 做 mock(`tests/core/legacy-bridge/` 既有 fixture 模式)。
 - **§3.1 regenerate 2 轮** → 测轮1 `--apply` 正确 emit 轮2 manifest;轮2 `--apply` 保真率阈值 gate 的达标 / 不达标 / `.partial` 三分支。
@@ -237,3 +239,12 @@ manifest 设计天然可测,三层各自独立测,不需真调 API:
 | 1   | HIGH     | 真 —— §5 称「api 模式调 SDK 前 redact(现状)」,但 `sync-check.ts:71/104` 实测 `changeContext` 原样进 prompt、未 redact | §5 改写:点明 redact 现状不一致(sync-check 未覆盖 `changeContext`),双路径化统一对全部输入 redact、补此盲区 |
 | 2   | MEDIUM   | 真 —— §4.5 resume 只重跑 `hasCriticalPending`,未绑定 sync-state 由本次 `--apply` 产生;手写干净 sync-state 可绕过       | §4 点5:sync-state 写 `produced_from`(manifest_hash),`--resume` 复核它 == 暂停态记录的 hash 才放行        |
 | 3   | LOW      | 真 —— §2.2 已改名 `manifest_hash`,§2.3 / §7 仍残留「输入 hash」措辞                                                    | §2.3 / §7 统一为 `manifest_hash`                                                                          |
+
+### Round 4(v4 → v5):0 HIGH + 1 MEDIUM + 1 LOW,均独立核实为真,全处置
+
+| #   | severity | 核实结论                                                                                                                | 处置                                                                                                          |
+| --- | -------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| 1   | MEDIUM   | 真 —— `manifest_hash` 是公开字段,手写 sync-state 可抄入正确 `produced_from`;§4.5「证明由 `--apply` 产生」是 overclaim     | §4.5 降级措辞 + 诚实声明:`produced_from` 只防陈旧/跨 run 误用,防不了蓄意伪造;后者靠 §6 skill 约束 + `--api` 不可伪造路径 |
+| 2   | LOW      | 真 —— §7 prep 测试条目仍残留「输入 hash」(第 3 轮只改了 `--apply` 条目)                                                  | §7 prep 条目统一为 `manifest_hash`                                                                            |
+
+finding 数趋势:4 → 4 → 3 → 2,单调收敛。

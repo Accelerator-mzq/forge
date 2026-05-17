@@ -149,7 +149,7 @@ forge update [--harness <list>] [--force]
 
 ## `forge config`
 
-读 / 写 `forge/config.yaml` 的字段。
+读 / 写 `forge/config.yaml` 的字段。`<key>` 支持一层点分嵌套键(如 `model_tiers.haiku`)。
 
 ```
 forge config get <key>
@@ -160,9 +160,12 @@ forge config profile          # (v0.2)
 ### 例子
 
 ```bash
-forge config get harness        # 输出:claude,codex
-forge config set harness codex  # 改为只用 Codex
+forge config get harness                   # 输出:claude,codex
+forge config set harness codex              # 改为只用 Codex
+forge config set model_tiers.haiku sonnet   # 把 haiku tier 重映射到 sonnet 模型
 ```
+
+`model_tiers` 的完整用法、规则与按 harness 差异见 [`docs/model-tiers.md`](model-tiers.md)。`set` 对非法的 `model_tiers` 赋值(非法键 / 非法值 / 降级)会 fail-fast 拒写、不触碰 `config.yaml`。
 
 ## `forge validate`
 

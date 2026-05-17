@@ -289,7 +289,13 @@ export function applyRound1AndBuildRound2(
   validateRegenOutput(regenBody, role);
   let facts: KeyFact[] = [];
   try {
-    const parsed = JSON.parse(extractFactsText.trim());
+    // LLM 偶尔违反 prompt 输出 ```json ... ``` fence;先剥再 parse(对齐 quality-judge.ts I-3 修)
+    const cleanText = extractFactsText
+      .trim()
+      .replace(/^```(?:json|JSON)?\r?\n/, '')
+      .replace(/\r?\n```\s*$/, '')
+      .trim();
+    const parsed = JSON.parse(cleanText);
     if (Array.isArray(parsed)) {
       facts = (parsed as Array<Partial<KeyFact>>)
         .map((o) => ({

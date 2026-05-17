@@ -63,4 +63,15 @@ describe('applyRound1AndBuildRound2', () => {
     );
     expect(() => applyRound1AndBuildRound2(regenBody, '[]', 'requirements')).toThrow(/保真率/);
   });
+
+  it('extract-facts 被 ```json fence 包裹 → 剥 fence 后仍能解析', () => {
+    const regenBody = '## 复写后的 SRS\n字段 X 必须非空。' + 'x'.repeat(200);
+    const fenced =
+      '```json\n' +
+      JSON.stringify([{ text: '字段 X 必须非空', section: '§4', critical: true }]) +
+      '\n```';
+    const { task } = applyRound1AndBuildRound2(regenBody, fenced, 'requirements');
+    expect(task.op).toBe('quality-judge');
+    expect(task.prompt).toContain('字段 X 必须非空');
+  });
 });

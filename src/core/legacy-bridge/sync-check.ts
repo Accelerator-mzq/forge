@@ -270,6 +270,29 @@ function extractText(result: Anthropic.Messages.Message): string {
   return block?.text ?? '';
 }
 
+/** 确定性后处理:LLM diff 数组文本 → SyncStateFile(带 produced_from) */
+export function applySyncCheckResult(
+  llmText: string,
+  changeId: string,
+  producedFromHash: string,
+): SyncStateFile {
+  let raw: Array<Partial<SyncStateDiff>> = [];
+  try {
+    const parsed = JSON.parse(llmText.trim());
+    if (Array.isArray(parsed)) raw = parsed as Array<Partial<SyncStateDiff>>;
+  } catch {
+    raw = [{ severity: 'info', description: `LLM 输出非合法 JSON:${llmText.slice(0, 200)}` }];
+  }
+  const diffs: SyncStateDiff[] = normalizeDiffsFromLlm(raw).map((d, i) => ({ ...d, id: i + 1 }));
+  return {
+    schema: 'forge-legacy-sync/v1',
+    change_id: changeId,
+    generated_at: new Date().toISOString(),
+    diffs,
+    produced_from: producedFromHash,
+  };
+}
+
 /** 确定性 prep:findAffectedAnchors + redact(含 changeContext,补盲区)→ 一个 LlmTask */
 export async function buildSyncCheckTask(
   input: SyncCheckInput,

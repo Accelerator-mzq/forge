@@ -77,6 +77,8 @@ export interface SyncStateFile {
   diffs: SyncStateDiff[];
   /** 跨 anchor 冲突默认入 diff(决策 #18 修订);auto_resolve_cross_anchor=true 时此字段为空 */
   cross_anchor_conflicts?: SyncStateDiff[];
+  /** 产生此 sync-state 的 sync-check manifest 的 manifest_hash(双路径 resume gate 复核用,Spec A §4.5) */
+  produced_from?: string;
 }
 
 /** llm-ack.yaml 顶层结构(决策 #22) */

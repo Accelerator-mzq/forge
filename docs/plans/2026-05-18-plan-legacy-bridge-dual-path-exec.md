@@ -19,7 +19,7 @@
 | 文件 | 职责 |
 |---|---|
 | `src/core/legacy-bridge/llm-task.ts` | `LlmTask` / `TaskManifest` 类型 + `canonicalize` + `computeManifestHash` + `buildManifest` / `verifyManifest` + manifest 读写 |
-| `src/core/legacy-bridge/runners.ts` | `ApiRunner`(SDK 调用)+ `emitManifest` / `readManifestResults`(agent 路径) |
+| `src/core/legacy-bridge/runners.ts` | `ApiRunner`(`--api` SDK 调用)+ `AgentHandoffRunner`(默认,emit manifest)+ `readTaskResults`(读 agent 产物) |
 | `skills/legacy-bridge-fulfillment/SKILL.md` | agent-driver 契约 + 反偷懒约束 |
 
 **修改:**
@@ -36,6 +36,8 @@
 | `commands/archive.md` | sync-check manifest 编排步 |
 | `docs/legacy-bridge.md` | 文档化双路径 + 标 breaking |
 | `CHANGELOG.md` | breaking note |
+
+> **关于 Tier2/3 archive skill**:spec §4/§8 提到「Tier2/3 archive skill(改)」,但 `forge-repo/skills/` 下**不存在** archive skill —— archive 对所有 tier 是 `commands/archive.md`(slash)+ `forge archive` CLI。Tier2/3 的 sync-check manifest 编排由 Task 7.1 的 `legacy-bridge-fulfillment` skill(tier-agnostic,description 覆盖 `forge archive` emit manifest 场景)+ CLI 的 halt/resume stdout 提示承载,无需独立 archive skill。
 
 **测试目录:** `tests/core/legacy-bridge/`、`tests/cli/legacy-bridge/`(均已存在,沿用 fixture 模式)。
 
@@ -296,7 +298,7 @@ git add src/core/legacy-bridge/llm-task.ts tests/core/legacy-bridge/llm-task-io.
 git commit -m "feat(legacy-bridge): 加 manifest 读写 + 防漂移校验"
 ```
 
-### Task 1.3:`ApiRunner` 与 agent 结果读取
+### Task 1.3:`ApiRunner` / `AgentHandoffRunner` 与 agent 结果读取
 
 **Files:**
 - Create: `src/core/legacy-bridge/runners.ts`
@@ -308,9 +310,10 @@ git commit -m "feat(legacy-bridge): 加 manifest 读写 + 防漂移校验"
 // tests/core/legacy-bridge/runners.test.ts
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ApiRunner, readTaskResults } from '../../../src/core/legacy-bridge/runners.js';
+import { ApiRunner, AgentHandoffRunner, readTaskResults } from '../../../src/core/legacy-bridge/runners.js';
 import type { LlmTask } from '../../../src/core/legacy-bridge/llm-task.js';
 
 const task: LlmTask = {
@@ -340,6 +343,16 @@ describe('ApiRunner', () => {
   });
 });
 
+describe('AgentHandoffRunner', () => {
+  it('emit 把 LlmTask[] 包成 manifest 信封写盘', async () => {
+    const manifest = await new AgentHandoffRunner(dir, '1.4.0').emit('map', 1, [task], { k: 'v' });
+    expect(manifest.op).toBe('map');
+    expect(manifest.round).toBe(1);
+    expect(manifest.meta).toEqual({ k: 'v' });
+    expect(existsSync(join(dir, '.cache', 'legacy-bridge-task-map.json'))).toBe(true);
+  });
+});
+
 describe('readTaskResults', () => {
   it('读 agent 写在 outputPath 的结果文件', async () => {
     await mkdir(join(dir, '.cache'), { recursive: true });
@@ -365,12 +378,13 @@ Expected: FAIL —— `Cannot find module '.../runners.js'`
 
 ```ts
 // src/core/legacy-bridge/runners.ts
-// 双路径的两种执行:ApiRunner(进程内调 SDK)+ readTaskResults(读 agent 产物)
+// 双路径的两种执行:ApiRunner(--api 进程内调 SDK)/ AgentHandoffRunner(默认 emit manifest)+ readTaskResults
 import Anthropic from '@anthropic-ai/sdk';
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
-import type { LlmTask, LlmOp } from './llm-task.js';
+import { buildManifest, writeManifest } from './llm-task.js';
+import type { LlmTask, LlmOp, TaskManifest } from './llm-task.js';
 
 /** 一个 task 的 LLM 原始文本结果 */
 export interface LlmTaskResult {
@@ -406,6 +420,26 @@ export class ApiRunner {
   }
 }
 
+/** 默认模式:把当前轮 LlmTask[] 包进 manifest 信封写盘(命令随后退出,等 agent fulfill) */
+export class AgentHandoffRunner {
+  constructor(
+    private readonly forgeRoot: string,
+    private readonly forgeVersion: string,
+  ) {}
+
+  /** emit 当前轮 manifest;返回 manifest(调用方可读 manifest_hash,如 archive 暂停态) */
+  async emit(
+    op: LlmOp,
+    round: number,
+    tasks: LlmTask[],
+    meta?: Record<string, unknown>,
+  ): Promise<TaskManifest> {
+    const manifest = buildManifest({ op, round, tasks, forgeVersion: this.forgeVersion, meta });
+    await writeManifest(this.forgeRoot, manifest);
+    return manifest;
+  }
+}
+
 /** agent 路径:读 agent 写在各 task.outputPath 的结果文件 */
 export async function readTaskResults(forgeRoot: string, tasks: LlmTask[]): Promise<LlmTaskResult[]> {
   const out: LlmTaskResult[] = [];
@@ -424,7 +458,7 @@ export async function readTaskResults(forgeRoot: string, tasks: LlmTask[]): Prom
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `pnpm vitest run tests/core/legacy-bridge/runners.test.ts`
-Expected: PASS(3 个用例)
+Expected: PASS(4 个用例)
 
 - [ ] **Step 5: Phase 1 收尾 —— typecheck + 全测 + 提交**
 
@@ -1012,11 +1046,11 @@ export async function buildRegenerateRound1Tasks(
   const redactRules = [...(input.globalRedactRules ?? []), ...(input.authoritative.redact ?? [])];
   const maskedAuth = redact(await readText(input.authoritative), redactRules).redactedText;
   const regeneratePrompt = buildRegeneratePrompt(input, maskedAuth);
-  const extractFactsPrompt = `从下列老文档抽取所有可验证 fact(数字 / 字段约束 / 合规条款 / 设计决策)。\n严格输出 JSON 数组 ["fact1", "fact2", ...],不加 preamble。\n\n# 老文档\n${maskedAuth}`;
+  const extractFactsPrompt = `从下列老文档抽取关键事实(数字 / 字段约束 / 业务规则 / 合规条款 / 设计决策)。\n严格输出 JSON 数组,每项含 { "text": string(<=80 字单句), "section": string(章节锚如 "§4.5",无则 "(unstructured)"), "critical": boolean(合规/安全/业务硬约束=true) }。不加 preamble、不带 code fence。\n\n# 老文档\n${maskedAuth}`;
   const common = { model: DEFAULT_MODEL, inputs: [{ source: input.authoritative.path, content: maskedAuth }] };
   return [
     { ...common, op: 'regenerate', prompt: regeneratePrompt, outputSchema: 'markdown 正文', outputPath: `.cache/legacy-bridge-result-regenerate.json` },
-    { ...common, op: 'extract-facts', prompt: extractFactsPrompt, outputSchema: '["fact", ...]', outputPath: `.cache/legacy-bridge-result-extract-facts.json` },
+    { ...common, op: 'extract-facts', prompt: extractFactsPrompt, outputSchema: '[{ "text": string, "section": string, "critical": boolean }]', outputPath: `.cache/legacy-bridge-result-extract-facts.json` },
   ];
 }
 ```
@@ -1046,12 +1080,17 @@ git commit -m "refactor(legacy-bridge): regenerate 轮1 双路径化(buildRegene
 import { applyRound1AndBuildRound2 } from '../../../src/core/legacy-bridge/regenerator.js';
 
 describe('applyRound1AndBuildRound2', () => {
-  it('轮1 产物 → 跑 stratifiedSample → 产 1 个 quality-judge LlmTask', () => {
+  it('轮1 产物 → stratifiedSample → 产 quality-judge LlmTask + SamplingOutput', () => {
     const regenBody = '## 复写后的 SRS\n字段 X 必须非空。' + 'x'.repeat(200);
-    const facts = JSON.stringify(['字段 X 必须非空', 'fact2', 'fact3', 'fact4', 'fact5', 'fact6']);
-    const judgeTask = applyRound1AndBuildRound2(regenBody, facts, 'requirements');
-    expect(judgeTask.op).toBe('quality-judge');
-    expect(judgeTask.prompt).toContain('字段 X 必须非空'); // 抽样 fact 进 prompt
+    const facts = JSON.stringify([
+      { text: '字段 X 必须非空', section: '§4', critical: true },
+      { text: 'fact2', section: '§4', critical: false },
+      { text: 'fact3', section: '§5', critical: false },
+    ]);
+    const { task, sampling } = applyRound1AndBuildRound2(regenBody, facts, 'requirements');
+    expect(task.op).toBe('quality-judge');
+    expect(task.prompt).toContain('字段 X 必须非空'); // 抽样 fact 进 prompt
+    expect(sampling.sampled.length).toBeGreaterThan(0);
   });
 });
 ```
@@ -1066,33 +1105,48 @@ Expected: FAIL —— `applyRound1AndBuildRound2 is not a function`
 复用 `quality-judge.ts` 既有的 `stratifiedSample`(确定性抽样)。在 `regenerator.ts`:
 
 ```ts
-import { stratifiedSample } from './quality-judge.js';
+import { stratifiedSample, type SamplingOutput } from './quality-judge.js';
+import type { KeyFact } from './types.js';
 import type { LlmTask, LlmTaskInput } from './llm-task.js';
 
-/** 轮1 校验后处理:对 extract-facts 结果跑确定性抽样 → 产轮2 quality-judge LlmTask */
+/** 轮1 校验后处理:解析 facts(KeyFact)→ 确定性分层抽样 → 产轮2 quality-judge LlmTask + SamplingOutput */
 export function applyRound1AndBuildRound2(
   regenBody: string,
   extractFactsText: string,
   role: LegacyAnchorRole,
-): LlmTask {
+): { task: LlmTask; sampling: SamplingOutput } {
   validateRegenOutput(regenBody, role); // 复用既有 markdown 合法性校验
-  let facts: string[] = [];
+  let facts: KeyFact[] = [];
   try {
     const parsed = JSON.parse(extractFactsText.trim());
-    if (Array.isArray(parsed)) facts = parsed.map(String);
+    if (Array.isArray(parsed)) {
+      facts = (parsed as Array<Partial<KeyFact>>)
+        .map((o) => ({
+          text: typeof o.text === 'string' ? o.text : '',
+          section: typeof o.section === 'string' ? o.section : '(unstructured)',
+          critical: typeof o.critical === 'boolean' ? o.critical : false,
+        }))
+        .filter((f) => f.text.trim().length > 0);
+    }
   } catch { facts = []; }
-  const sampled = stratifiedSample(facts); // 确定性抽样,留在 CLI 侧
-  const prompt = `下面是一组「原文 fact」与一份「复写产物」。逐条判断每个 fact 是否在复写产物里被保留(语义等价即可)。\n严格输出 JSON 数组 [{ "fact": string, "preserved": boolean }],不加 preamble。\n\n# 复写产物\n${regenBody}\n\n# 待判 fact\n${sampled.map((f, i) => `${i + 1}. ${f}`).join('\n')}`;
+  const sampling = stratifiedSample({ allFacts: facts }); // 确定性分层抽样,留 CLI 侧
+  const numbered = sampling.sampled
+    .map((f, i) => `${i + 1}. [${f.section}${f.critical ? ',critical' : ''}] ${f.text}`)
+    .join('\n');
+  const prompt = `下面是一份「复写产物」和一组「原文 fact」。对每个 fact 三态判定它是否在复写产物里被保留:\n- preserved:字面/数值完全一致\n- paraphrased:同义改写但语义+数值+约束完全等价\n- lost:漏掉 / 数值错 / 约束丢\n\n严格输出 JSON 数组,**顺序与 fact 编号一一对应**,每项 { "state": "preserved"|"paraphrased"|"lost" }。不加 preamble。\n\n# 复写产物\n${regenBody}\n\n# 待判 fact\n${numbered}`;
   const inputs: LlmTaskInput[] = [{ source: 'regen-body', content: regenBody }];
   return {
-    op: 'quality-judge', inputs, prompt, model: DEFAULT_MODEL,
-    outputSchema: '[{ "fact": string, "preserved": boolean }]',
-    outputPath: '.cache/legacy-bridge-result-quality-judge.json',
+    task: {
+      op: 'quality-judge', inputs, prompt, model: DEFAULT_MODEL,
+      outputSchema: '[{ "state": "preserved"|"paraphrased"|"lost" }](顺序对应 fact 编号)',
+      outputPath: '.cache/legacy-bridge-result-quality-judge.json',
+    },
+    sampling,
   };
 }
 ```
 
-> 若 `stratifiedSample` 当前非 export,在 `quality-judge.ts` 给它加 `export`(它已是纯函数,导出无副作用)。
+> `stratifiedSample` / `SamplingOutput` 已是 `quality-judge.ts` 的 export(`:39` / `:22`),`KeyFact` 是 `types.ts` 的 export,直接 import。`computeQualityResult` 在 Task 5.3 新增。
 
 - [ ] **Step 4: 跑测试确认通过**
 
@@ -1106,10 +1160,12 @@ git add src/core/legacy-bridge/regenerator.ts src/core/legacy-bridge/quality-jud
 git commit -m "refactor(legacy-bridge): regenerate 轮1→轮2 衔接(stratifiedSample + quality-judge task)"
 ```
 
-### Task 5.3:轮2 —— `applyRound2`(保真率阈值 gate)
+### Task 5.3:轮2 —— `computeQualityResult` 抽取 + `applyRound2`(三态保真率 gate)
+
+`judgeAllFacts`(`quality-judge.ts:272-318`)把「调 LLM」与「算分」混在一起。双路径化:把算分段抽成纯函数 `computeQualityResult`(含 critical 必须 100% 的 gate),`applyRound2` 复用它 —— **不因走 agent 路径软化质量模型**(F2)。
 
 **Files:**
-- Modify: `src/core/legacy-bridge/regenerator.ts`
+- Modify: `src/core/legacy-bridge/quality-judge.ts`、`src/core/legacy-bridge/regenerator.ts`
 - Test: `tests/core/legacy-bridge/regenerator-dualpath.test.ts`(追加)
 
 - [ ] **Step 1: 追加失败测试**
@@ -1117,20 +1173,36 @@ git commit -m "refactor(legacy-bridge): regenerate 轮1→轮2 衔接(stratified
 ```ts
 // 追加到 regenerator-dualpath.test.ts
 import { applyRound2 } from '../../../src/core/legacy-bridge/regenerator.js';
+import type { SamplingOutput } from '../../../src/core/legacy-bridge/quality-judge.js';
 
-describe('applyRound2 保真率阈值 gate', () => {
-  it('全 preserved → fidelity=1.0 → passed', () => {
-    const judge = JSON.stringify([{ fact: 'a', preserved: true }, { fact: 'b', preserved: true }]);
-    const r = applyRound2(judge, 0.9);
-    expect(r.fidelity).toBe(1);
+const sampling: SamplingOutput = {
+  sampled: [
+    { text: 'a', section: '§1', critical: true },
+    { text: 'b', section: '§1', critical: false },
+  ],
+  perSectionSampled: { '§1': 2 },
+  uncoveredSections: [],
+};
+
+describe('applyRound2 三态保真率 gate', () => {
+  it('全 preserved → critical_rate=1 total_rate=1 → passed', () => {
+    const judge = JSON.stringify([{ state: 'preserved' }, { state: 'preserved' }]);
+    const r = applyRound2(judge, sampling, 0.9);
+    expect(r.critical_rate).toBe(1);
     expect(r.passed).toBe(true);
   });
 
-  it('保真率低于阈值 → 不 passed(产 .partial)', () => {
-    const judge = JSON.stringify([{ fact: 'a', preserved: true }, { fact: 'b', preserved: false }]);
-    const r = applyRound2(judge, 0.9);
-    expect(r.fidelity).toBe(0.5);
+  it('critical fact lost → critical_rate<1 → 不 passed(critical 必须 100%,即便 total 达标)', () => {
+    const judge = JSON.stringify([{ state: 'lost' }, { state: 'preserved' }]);
+    const r = applyRound2(judge, sampling, 0.4);
+    expect(r.critical_rate).toBe(0);
     expect(r.passed).toBe(false);
+  });
+
+  it('paraphrased 视为保留(state !== lost)', () => {
+    const judge = JSON.stringify([{ state: 'paraphrased' }, { state: 'paraphrased' }]);
+    const r = applyRound2(judge, sampling, 0.9);
+    expect(r.passed).toBe(true);
   });
 });
 ```
@@ -1140,37 +1212,84 @@ describe('applyRound2 保真率阈值 gate', () => {
 Run: `pnpm vitest run tests/core/legacy-bridge/regenerator-dualpath.test.ts -t applyRound2`
 Expected: FAIL —— `applyRound2 is not a function`
 
-- [ ] **Step 3: 在 `regenerator.ts` 加 `applyRound2`**
+- [ ] **Step 3a: 在 `quality-judge.ts` 抽出 `computeQualityResult`**
+
+把 `judgeAllFacts`(`quality-judge.ts:285-317`)的「算分」段抽成纯函数并 export,`judgeAllFacts` 改为调它(DRY,行为不变):
 
 ```ts
-/** 轮2 后处理:judge 结果 → 保真率 + 阈值 gate(判定权在 CLI,agent 只产 raw judge) */
-export function applyRound2(
-  judgeText: string,
-  threshold: number,
-): { fidelity: number; passed: boolean; judged: number } {
-  let judged: Array<{ fact: string; preserved: boolean }> = [];
-  try {
-    const parsed = JSON.parse(judgeText.trim());
-    if (Array.isArray(parsed)) judged = parsed as Array<{ fact: string; preserved: boolean }>;
-  } catch { judged = []; }
-  if (judged.length === 0) return { fidelity: 0, passed: false, judged: 0 };
-  const preserved = judged.filter((j) => j.preserved).length;
-  const fidelity = preserved / judged.length;
-  return { fidelity, passed: fidelity >= threshold, judged: judged.length };
+/** 纯函数:三态 judge 结果 + 抽样 → QualityResult。critical 必须 100% 的 gate 在此。 */
+export function computeQualityResult(
+  judged: FactJudgeResult[],
+  sampling: SamplingOutput,
+  threshold: number = DEFAULT_FIDELITY_THRESHOLD,
+): QualityResult {
+  const critical = judged.filter((r) => r.fact.critical);
+  const nonCritical = judged.filter((r) => !r.fact.critical);
+  const criticalRate =
+    critical.length === 0 ? 1.0 : critical.filter((r) => r.state !== 'lost').length / critical.length;
+  const totalRate =
+    judged.length === 0 ? 1.0 : judged.filter((r) => r.state !== 'lost').length / judged.length;
+  const perSectionRates: Record<string, number> = {};
+  for (const [section, totalInSection] of Object.entries(sampling.perSectionSampled)) {
+    const preserved = judged.filter((r) => r.fact.section === section && r.state !== 'lost').length;
+    perSectionRates[section] = totalInSection === 0 ? 1.0 : preserved / totalInSection;
+  }
+  return {
+    total_rate: totalRate,
+    critical_rate: criticalRate,
+    per_section_rates: perSectionRates,
+    lost_critical: critical.filter((r) => r.state === 'lost').map((r) => r.fact),
+    lost_non_critical: nonCritical.filter((r) => r.state === 'lost').map((r) => r.fact),
+    uncovered_sections: sampling.uncoveredSections,
+    passed: criticalRate >= 1.0 && totalRate >= threshold,
+  };
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+`judgeAllFacts` 末尾 `const critical = ...` 到 `return {...}` 整段(`:285-317`)替换为:`return computeQualityResult(judged, sampling, threshold);`。
 
-Run: `pnpm vitest run tests/core/legacy-bridge/regenerator-dualpath.test.ts`
-Expected: PASS
+- [ ] **Step 3b: 在 `regenerator.ts` 加 `applyRound2`**
+
+```ts
+import { computeQualityResult } from './quality-judge.js';
+import type { FactState, FactJudgeResult, SamplingOutput } from './quality-judge.js';
+import type { QualityResult } from './types.js';
+
+/** 轮2 后处理:agent 三态 judge 结果 + 轮1 抽样 → QualityResult。
+ *  critical 必须 100% 的 gate 在 computeQualityResult 内,不因走 agent 路径软化。 */
+export function applyRound2(
+  judgeText: string,
+  sampling: SamplingOutput,
+  threshold: number,
+): QualityResult {
+  let states: FactState[] = [];
+  try {
+    const parsed = JSON.parse(judgeText.trim());
+    if (Array.isArray(parsed)) {
+      states = (parsed as Array<{ state?: string }>).map((o) =>
+        o.state === 'preserved' || o.state === 'paraphrased' || o.state === 'lost' ? o.state : 'lost',
+      );
+    }
+  } catch { states = []; }
+  // 按编号与轮1 抽样 fact 一一对应;agent 漏判的 fact 保守视为 lost
+  const judged: FactJudgeResult[] = sampling.sampled.map((fact, i) => ({ fact, state: states[i] ?? 'lost' }));
+  return computeQualityResult(judged, sampling, threshold);
+}
+```
+
+> `FactState` / `FactJudgeResult` / `SamplingOutput` 均已是 `quality-judge.ts` 的 export(`:137` / `:140` / `:22`);`QualityResult` 是 `types.ts` 的 export。
+
+- [ ] **Step 4: 跑测试确认通过 + 回归**
+
+Run: `pnpm vitest run tests/core/legacy-bridge/regenerator-dualpath.test.ts tests/core/legacy-bridge/quality-judge.test.ts`
+Expected: 新用例 PASS;`quality-judge.test.ts` 既有用例仍 PASS(`judgeAllFacts` 经 `computeQualityResult` 重构,行为不变)。
 
 - [ ] **Step 5: Phase 5 收尾 —— 提交**
 
 ```bash
 pnpm typecheck && pnpm vitest run tests/core/legacy-bridge/
-git add src/core/legacy-bridge/regenerator.ts tests/core/legacy-bridge/regenerator-dualpath.test.ts
-git commit -m "feat(legacy-bridge): regenerate 轮2 保真率阈值 gate(applyRound2)"
+git add src/core/legacy-bridge/regenerator.ts src/core/legacy-bridge/quality-judge.ts tests/core/legacy-bridge/regenerator-dualpath.test.ts
+git commit -m "feat(legacy-bridge): regenerate 轮2 三态保真率 gate(computeQualityResult + applyRound2)"
 ```
 
 ---
@@ -1273,13 +1392,22 @@ import { mkdtemp, rm, mkdir, writeFile, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { parse as parseYaml } from 'yaml';
 import { runMapCommand } from '../../../src/cli/commands/legacy-bridge.js';
+import { writeAck } from '../../../src/core/legacy-bridge/ack.js';
+import type { ForgeConfig } from '../../../src/core/schema/types.js';
+
+const CONFIG_YAML = 'legacy_bridge:\n  allow_llm_calls: true\n';
 
 let dir: string;
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'lb-cli-'));
   await mkdir(join(dir, 'docs'), { recursive: true });
   await writeFile(join(dir, 'docs', 'SRS.md'), '# 需求', 'utf8');
+  // opt-in gate fixture(Task 6.0):config + writeAck 写匹配 config_hash 的 ack 文件
+  await mkdir(join(dir, 'forge'), { recursive: true });
+  await writeFile(join(dir, 'forge', 'config.yaml'), CONFIG_YAML, 'utf8');
+  await writeAck(join(dir, 'forge'), parseYaml(CONFIG_YAML) as ForgeConfig);
 });
 afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
 
@@ -1315,8 +1443,8 @@ Expected: FAIL —— `runMapCommand is not a function`
 
 ```ts
 // src/cli/commands/legacy-bridge.ts —— 新增导出
-import { buildManifest, writeManifest, readManifest, consumeManifest, manifestPath } from '../../core/legacy-bridge/llm-task.js';
-import { ApiRunner, readTaskResults, type RunnerClient } from '../../core/legacy-bridge/runners.js';
+import { readManifest, consumeManifest, manifestPath } from '../../core/legacy-bridge/llm-task.js';
+import { ApiRunner, AgentHandoffRunner, readTaskResults, type RunnerClient } from '../../core/legacy-bridge/runners.js';
 import { buildMapTask, applyMapResult, writeMapperDraft } from '../../core/legacy-bridge/mapper.js';
 
 export interface MapCommandOpts {
@@ -1354,9 +1482,8 @@ export async function runMapCommand(opts: MapCommandOpts): Promise<number> {
     console.log('✓ map draft 已写(--api 单进程)');
     return LB_EXIT_OK;
   }
-  // 默认 agent:emit manifest
-  const manifest = buildManifest({ op: 'map', round: 1, tasks: [task], forgeVersion: FORGE_VERSION });
-  await writeManifest(forgeRoot, manifest);
+  // 默认 agent:emit manifest(经 AgentHandoffRunner)
+  await new AgentHandoffRunner(forgeRoot, FORGE_VERSION).emit('map', 1, [task]);
   console.log(`✓ map manifest 已写 ${manifestPath(forgeRoot, 'map')}\n  → 请 fulfill 后跑 forge legacy-bridge map --apply(见 skill: legacy-bridge-fulfillment)`);
   return LB_EXIT_OK;
 }
@@ -1364,7 +1491,7 @@ export async function runMapCommand(opts: MapCommandOpts): Promise<number> {
 
 commander 注册处把 `map` 子命令改为 `.option('--apply', ...)`.`.option('--api', ...)`,action 调 `runMapCommand` 后 `process.exit(code)`。`makeApiClient()` 抽出现有 `loadEnv()` + `new Anthropic(...)` 逻辑(`legacy-bridge.ts:610-618`)成一个 helper。
 
-> `index` / `regenerate` / `sync-check` 三子命令同构,各加 `runIndexCommand` / `runRegenerateCommand` / `runSyncCheckCommand`。`regenerate` 的 `--apply` 需读 `manifest.round`:`round===1` → `applyRound1AndBuildRound2` + emit 轮2 manifest(`round:2`);`round===2` → `applyRound2` + 写产物 / `.partial`。
+> `index` / `regenerate` / `sync-check` 三子命令同构,各加 `runIndexCommand` / `runRegenerateCommand` / `runSyncCheckCommand`,emit 分支同样用 `AgentHandoffRunner`。`regenerate` 的 `--apply` 读 `manifest.round`:`round===1` → `applyRound1AndBuildRound2` 得 `{task, sampling}` → emit 轮2 manifest(`round:2`、`meta:{sampling}`);`round===2` → 从 `manifest.meta.sampling` 取回 `SamplingOutput` → `applyRound2(judgeText, sampling, threshold)` → 按 `QualityResult.passed` 写产物 / `.partial`。
 
 - [ ] **Step 4: 跑测试确认通过**
 
@@ -1717,3 +1844,17 @@ pnpm format:check && pnpm lint && pnpm typecheck && pnpm build && pnpm test
 - `ApiRunner` mock ✓(Task 1.3)
 - regenerate 2 轮 ✓(Task 5.2 / 5.3 / 6.2)
 - sync-check × archive(裸 CLI halt / `--resume` 拒绝)✓(Task 6.3 / 6.4)
+
+---
+
+## 附录:Codex 对抗性审查处置
+
+### Round 1:5 MEDIUM,均独立对照代码核实为真,全处置
+
+| #  | severity | 核实结论                                                                                              | 处置                                                                                          |
+| -- | -------- | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| F1 | MEDIUM   | 真 —— `stratifiedSample(input: SamplingInput)`、`allFacts: KeyFact[]`;plan Task 5.2 传 `string[]` 编译不过 | Task 5.1 extract-facts prompt 改产 `{text,section,critical}`;Task 5.2 解析为 `KeyFact[]`、传 `{allFacts}` |
+| F2 | MEDIUM   | 真 —— `judgeAllFacts` 用三态 + critical 必须 100%;plan `applyRound2` 用 boolean 比例,静默砍 critical 保护 | Task 5.3 重写:抽 `computeQualityResult`(含 critical gate),`applyRound2` 用三态 + 复用它      |
+| F3 | MEDIUM   | 真 —— Task 6.1 测试 fixture 未建 config/ack,`runMapCommand` 经 `assertLlmOptIn` 必失败                  | Task 6.1 `beforeEach` 加 `config.yaml` + `writeAck` 写匹配 ack                                |
+| F4 | MEDIUM   | 真 —— spec 提「Tier2/3 archive skill」,但 `forge-repo/skills/` 下无此 skill                            | Phase 0 加注:无独立 archive skill,`legacy-bridge-fulfillment`(tier-agnostic)覆盖 Tier2/3   |
+| F5 | MEDIUM   | 真 —— spec D3/§2.2 要 `AgentHandoffRunner` 类,plan 只有散函数                                          | Task 1.3 加 `AgentHandoffRunner` 类;Phase 0 / Task 6.1 同步                                   |

@@ -6,10 +6,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-05-17
+
 ### Fixed
 
 - **文档**:`docs/cli-reference.md` 补全到当前 16 个 CLI 子命令全集 —— 此前停留在 v0.3 的 7 命令快照,缺 `migrate` / `ack` / `evidence` / `finding` / `scope` / `preflight` / `backlog`;`CLAUDE.md` / `AGENTS.md` 的「14 子命令」与 `getting-started.md` 的「13 子命令」计数同步更正为 16,并清理 `getting-started.md` 内「v1.1 新 CLI 段待下轮补」的失效提示。
 - **文档**:`docs/migration/from-openspec.md` §2.3 与 `docs/migration/from-superpowers.md` §4.3 的 `--dry-run` 说明更正为占位 stub 的真实行为(此前描述的 plan 预览 / missing-preview / cost estimate 输出尚未实现)。
+- **版本对齐**:`.claude-plugin/plugin.json` / `.codex-plugin/plugin.json` / `.claude-plugin/marketplace.json` 的 plugin version 及 `scripts/run-forge.mjs` 的 `REQUIRED_RANGE` 此前停留在 plugin 形态引入时的 `0.3`,与 npm 包 / git tag 的 `1.x` 线脱节;现统一对齐到 `1.4.0`(`REQUIRED_RANGE` → `^1.4.0`),修复 plugin helper 按 `^0.3` 永远拉不到 1.x CLI 的问题。
+- **文档**:`docs/getting-started.md` 第 0 步补充 forge CLI 安装说明 —— plugin 安装不提供 PATH 上的 `forge`,而第 3 步 `forge preflight` 需在 shell 直接调用;补 `pnpm dlx` / `npm i -g` 两种获取方式。
+- **文档**:`docs/claude-install.md` / `docs/codex-install.md` / `docs/opencode-install.md` 与 `skills/writing-plans` 中过时的 `@accelerator-mzq/forge@0.3.0` / `@^0.3` 引用更正 —— 全局安装命令改为不钉版本,helper 范围对齐 `^1.4.0`。
 
 ### Added
 
@@ -20,6 +25,7 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - `forge:subagent-driven-development` 的 model 选型不再内联 matrix,改为指向 `forge:subagent-driven-discipline` §1 + `model_tiers` 配置(消除两 skill 的 model tier 摘要漂移)。`forge:subagent-driven-discipline` 的 §1 `haiku`/`sonnet`/`opus` 明确为 tier 标签,`## Platform Note` 措辞修正(区分跨 harness 与跨模型 provider)。
+- `package.json` 新增 `prepublishOnly` 脚本(`npm publish` 前自动 `pnpm build`),避免漏构建发出缺 `dist/` 的包。
 
 ## [1.3.0] - 2026-05-16
 

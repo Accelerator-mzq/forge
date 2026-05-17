@@ -19,7 +19,7 @@
 git clone https://github.com/Accelerator-mzq/forge.git ~/.codex/forge
 mkdir -p ~/.agents/skills
 ln -s ~/.codex/forge/skills ~/.agents/skills/forge
-npm i -g @accelerator-mzq/forge@0.3.0
+npm i -g @accelerator-mzq/forge
 ```
 
 ### Windows (PowerShell)
@@ -34,7 +34,7 @@ New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.agents\skills"
 cmd /c mklink /J "$env:USERPROFILE\.agents\skills\forge" `
                   "$env:USERPROFILE\.codex\forge\skills"
 
-npm i -g @accelerator-mzq/forge@0.3.0
+npm i -g @accelerator-mzq/forge
 ```
 
 注:`mklink /J` 创建 directory junction(无需 admin / Developer Mode);**不要**用 `mklink` 不带 `/J`(单文件 symlink 需要权限)。
@@ -85,11 +85,11 @@ node "${FORGE_HELPER}" validate <change-id>
 ```
 ````
 
-`$FORGE_HELPER` 解析:`$HOME/.codex/forge/scripts/run-forge.mjs`(`os.homedir()` 跨平台,Windows 走 `USERPROFILE`)。helper 内 spawn `npx -y --package @accelerator-mzq/forge@^0.3 -- forge ...` 拉 forge CLI。
+`$FORGE_HELPER` 解析:`$HOME/.codex/forge/scripts/run-forge.mjs`(`os.homedir()` 跨平台,Windows 走 `USERPROFILE`)。helper 内 spawn `npx -y --package @accelerator-mzq/forge@^1.4.0 -- forge ...` 拉 forge CLI。
 
 ## 备选 — 用全局 forge 替代 helper
 
-如果你已 `npm i -g @accelerator-mzq/forge@0.3.0`,helper spawn npx 时会优先找全局 bin(0 延迟)。这是 Codex 推荐路径(skill 文本不变,实测 PASS)。
+如果你已 `npm i -g @accelerator-mzq/forge`,helper spawn npx 时会优先找全局 bin(0 延迟)。这是 Codex 推荐路径(skill 文本不变,实测 PASS)。
 
 ## Troubleshooting
 
@@ -122,7 +122,7 @@ Plan 0a.1.4 known-issue 推 v0.4 验证 namespace differentiator 是否够稳定
 v0.2 codex adapter 写到 `.agents/skills/forge-*` + `.agents/commands/forge/`。`forge upgrade` 命令(Plan 4)自动扫这些路径清理:
 
 ```bash
-npm i -g @accelerator-mzq/forge@0.3.0
+npm i -g @accelerator-mzq/forge
 cd <your v0.2 project>
 forge upgrade
 # y → STASH .agents/skills/forge-* + .agents/commands/forge/* +

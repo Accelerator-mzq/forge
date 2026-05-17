@@ -61,7 +61,7 @@ session 内输入:
 /forge:ack-confirm            # confirm 待 ack 的 WARNING finding
 ```
 
-每个 command 内部调 `node "${CLAUDE_PLUGIN_ROOT}/scripts/run-forge.mjs"` helper,helper 内 spawn `npx -y --package @accelerator-mzq/forge@^0.3 -- forge ...` 拉 forge CLI(避开 v0.2 P1 全局 PATH 问题)。
+每个 command 内部调 `node "${CLAUDE_PLUGIN_ROOT}/scripts/run-forge.mjs"` helper,helper 内 spawn `npx -y --package @accelerator-mzq/forge@^1.4.0 -- forge ...` 拉 forge CLI(避开 v0.2 P1 全局 PATH 问题)。
 
 ## Troubleshooting
 
@@ -83,7 +83,7 @@ CLAUDE_PLUGIN_ROOT="$(pwd)" bash hooks/run-hook.cmd session-start
 
 不需要全局装 forge。plugin commands.md 自动调 `${CLAUDE_PLUGIN_ROOT}/scripts/run-forge.mjs` helper(plugin tarball 自带),helper 内部 npx 拉 forge。
 
-如果你想全局装:`npm i -g @accelerator-mzq/forge@0.3.0`(可选 — Plan 3 helper 已避开 P1)。
+如果你想全局装:`npm i -g @accelerator-mzq/forge`(可选 — Plan 3 helper 已避开 P1)。
 
 ### Cross-plugin 同名(superpowers + forge brainstorming)
 

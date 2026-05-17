@@ -55,6 +55,42 @@ import type { LegacyAnchorRole, RegenQualityFile } from '../../core/legacy-bridg
 import type { RegenerateClient } from '../../core/legacy-bridge/regenerator.js';
 import type { JudgeClient } from '../../core/legacy-bridge/quality-judge.js';
 
+/** spec §5:opt-in gate —— agent 与 --api 两模式都先过。复用既有 checkAck。 */
+export async function assertLlmOptIn(
+  forgeRoot: string,
+): Promise<{ ok: true } | { ok: false; reason: string; graceful: boolean }> {
+  const configPath = join(forgeRoot, 'config.yaml');
+  if (!existsSync(configPath))
+    return { ok: false, graceful: false, reason: 'forge/config.yaml 不存在,先跑 forge init' };
+  let config: ForgeConfig;
+  try {
+    config = parseYaml(await readFile(configPath, 'utf8')) as ForgeConfig;
+  } catch (e) {
+    return { ok: false, graceful: false, reason: `config.yaml 格式错误:${(e as Error).message}` };
+  }
+  // allow_llm_calls=false/缺失 → graceful skip(spec §4 点6:两模式都 graceful skip)
+  if (!config.legacy_bridge?.allow_llm_calls) {
+    return {
+      ok: false,
+      graceful: true,
+      reason: 'legacy_bridge.allow_llm_calls 未开启 — 跳过(graceful skip)',
+    };
+  }
+  const anchors = await loadAnchorsFile(forgeRoot).catch(() => null);
+  const ack = await checkAck(
+    forgeRoot,
+    config,
+    anchors ?? { schema: 'forge-legacy-anchor/v1', anchors: [] },
+  );
+  if (!ack.ok)
+    return {
+      ok: false,
+      graceful: false,
+      reason: `LLM 数据传输 ack 未就绪:${ack.reason};跑 forge legacy-bridge --acknowledge-data-transfer`,
+    };
+  return { ok: true };
+}
+
 /** 5 子命令通用退出码,与 forge 现有约定一致(spec §4.6) */
 export const LB_EXIT_OK = 0;
 export const LB_EXIT_GENERAL_ERROR = 1;

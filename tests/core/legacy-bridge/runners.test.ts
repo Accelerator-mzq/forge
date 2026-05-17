@@ -44,6 +44,15 @@ describe('ApiRunner', () => {
     expect(calls).toEqual(['p']);
     expect(results).toEqual([{ op: 'map', text: 'RESULT' }]);
   });
+
+  it('API 未返回文本块 → text 为空字符串', async () => {
+    const fakeClient = {
+      messages: { create: async () => ({ content: [], stop_reason: 'refusal' }) },
+    };
+    const runner = new ApiRunner(fakeClient as never);
+    const results = await runner.run([task]);
+    expect(results).toEqual([{ op: 'map', text: '' }]);
+  });
 });
 
 describe('AgentHandoffRunner', () => {
@@ -72,5 +81,12 @@ describe('readTaskResults', () => {
   it('结果文件缺失 → 抛错', async () => {
     const t: LlmTask = { ...task, outputPath: '.cache/missing.json' };
     await expect(readTaskResults(dir, [t])).rejects.toThrow(/结果文件/);
+  });
+
+  it('结果文件是损坏 JSON → 抛带「解析失败」字样的错', async () => {
+    await mkdir(join(dir, '.cache'), { recursive: true });
+    await writeFile(join(dir, '.cache', 'legacy-bridge-result-map.json'), '{truncated', 'utf8');
+    const t: LlmTask = { ...task, outputPath: '.cache/legacy-bridge-result-map.json' };
+    await expect(readTaskResults(dir, [t])).rejects.toThrow(/解析失败/);
   });
 });

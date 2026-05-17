@@ -39,6 +39,12 @@ export class ApiRunner {
       const block = result.content.find(
         (b): b is Anthropic.Messages.TextBlock => b.type === 'text',
       );
+      if (!block) {
+        // API 因 refusal 等 stop_reason 未返回 TextBlock —— 显式 warn,避免静默变空串
+        console.warn(
+          `⚠ op=${t.op} API 未返回文本块(stop_reason=${result.stop_reason ?? 'unknown'}),以空字符串代替`,
+        );
+      }
       out.push({ op: t.op, text: block?.text ?? '' });
     }
     return out;
@@ -76,7 +82,15 @@ export async function readTaskResults(
     if (!existsSync(p)) {
       throw new Error(`agent 结果文件缺失:${p};请先 fulfill manifest 再跑 --apply`);
     }
-    const parsed = JSON.parse(await readFile(p, 'utf8')) as { text?: string };
+    // 包装裸 SyntaxError —— 结果文件被截断写入时,错误信息要含路径(同 Task 1.2 readManifest 先例)
+    let parsed: { text?: string };
+    try {
+      parsed = JSON.parse(await readFile(p, 'utf8')) as { text?: string };
+    } catch (err) {
+      throw new Error(
+        `agent 结果文件 ${p} JSON 解析失败(文件可能被截断写入):${(err as Error).message}`,
+      );
+    }
     out.push({ op: t.op, text: parsed.text ?? '' });
   }
   return out;

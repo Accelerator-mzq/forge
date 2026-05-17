@@ -8,6 +8,7 @@ import { join, relative, extname } from 'node:path';
 import { stringify as stringifyYaml } from 'yaml';
 import type { LegacyAnchor, LegacyAnchorRole, LegacyAnchorsFile } from './types.js';
 import { redact } from './redact.js';
+import type { LlmTask } from './llm-task.js';
 
 const DEFAULT_DOCS_PATHS = ['docs', 'doc', 'document', 'documents', 'documentation'];
 const SKIP_DIRS = new Set([
@@ -146,6 +147,39 @@ function parseMapperResponse(
     // 解析失败:全 mark unmatched(用户审)
     return fallbackPaths.map((p) => ({ path: p, role: 'unmatched' as const }));
   }
+}
+
+/** 确定性 prep:扫文件 + 读 preview + redact + 拼 prompt → 一个 LlmTask */
+export async function buildMapTask(input: MapperInput): Promise<LlmTask> {
+  const { projectRoot } = input;
+  const docsPaths = input.docsPaths ?? DEFAULT_DOCS_PATHS;
+  const allFiles: string[] = [];
+  for (const docDir of docsPaths) {
+    const full = join(projectRoot, docDir);
+    if (!existsSync(full)) continue;
+    for await (const f of walk(full, projectRoot)) allFiles.push(f);
+  }
+  if (input.scanSrc) {
+    const srcRoot = join(projectRoot, 'src');
+    if (existsSync(srcRoot)) {
+      for await (const f of walk(srcRoot, projectRoot)) {
+        if (f.includes('test') || f.includes('spec')) allFiles.push(f);
+      }
+    }
+  }
+  const entries: Array<{ path: string; preview: string }> = [];
+  for (const f of allFiles) {
+    const preview = redact(await readPreview(join(projectRoot, f))).redactedText;
+    entries.push({ path: f, preview });
+  }
+  return {
+    op: 'map',
+    inputs: entries.map((e) => ({ source: e.path, content: e.preview })),
+    prompt: buildMapperPrompt(entries),
+    model: DEFAULT_MODEL,
+    outputSchema: '[{ "path": string, "role": string, "modules": string[] }]',
+    outputPath: '.cache/legacy-bridge-result-map.json',
+  };
 }
 
 /** 跑 mapping(LLM 推测) */

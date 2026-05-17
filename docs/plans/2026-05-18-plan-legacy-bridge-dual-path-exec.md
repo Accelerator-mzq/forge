@@ -1482,7 +1482,8 @@ export async function runMapCommand(opts: MapCommandOpts): Promise<number> {
     if (!manifest) { console.error('✗ 无 map manifest;请先跑 forge legacy-bridge map'); return LB_EXIT_GENERAL_ERROR; }
     const [result] = await readTaskResults(forgeRoot, manifest.tasks);
     const allFiles = manifest.tasks[0]!.inputs.map((i) => i.source);
-    const out = applyMapResult(result!.text, allFiles, { mode: opts.mode });
+    const existing = opts.mode === 'merge' ? ((await loadAnchorsFile(forgeRoot).catch(() => null)) ?? undefined) : undefined;
+    const out = applyMapResult(result!.text, allFiles, { mode: opts.mode, existing });
     await writeMapperDraft(forgeRoot, out);
     await consumeManifest(forgeRoot, 'map');
     console.log('✓ map draft 已写 forge/legacy-anchors-draft.yaml');
@@ -1492,7 +1493,8 @@ export async function runMapCommand(opts: MapCommandOpts): Promise<number> {
   if (opts.api) {
     const client = makeApiClient() as unknown as RunnerClient; // 复用现有 loadEnv()
     const [result] = await new ApiRunner(client).run([task]);
-    const out = applyMapResult(result!.text, task.inputs.map((i) => i.source), { mode: opts.mode });
+    const existing = opts.mode === 'merge' ? ((await loadAnchorsFile(forgeRoot).catch(() => null)) ?? undefined) : undefined;
+    const out = applyMapResult(result!.text, task.inputs.map((i) => i.source), { mode: opts.mode, existing });
     await writeMapperDraft(forgeRoot, out);
     console.log('✓ map draft 已写(--api 单进程)');
     return LB_EXIT_OK;
@@ -1537,7 +1539,17 @@ Expected: FAIL —— 三个 `run*Command` 未定义。
 
 - [ ] **Step 3: 实现三个 `run*Command`**
 
-按 Task 6.1 的 `runMapCommand` 模板实现 `runIndexCommand`(用 `buildIndexTask`/`applyIndexResult`,注意 `buildIndexTask` 返回 `{task,prebuilt}`,`prebuilt` 要随 manifest 的 `meta` 一起带、供 `--apply` 用)、`runSyncCheckCommand`(用 `buildSyncCheckTask`/`applySyncCheckResult`;`meta.gate_context='standalone'`)、`runRegenerateCommand`(轮次分支见 Task 6.1 注)。commander 注册三子命令对应 flag。
+按 Task 6.1 的 `runMapCommand` 模板实现,各入口先过 `assertLlmOptIn`(同 6.1)。三命令的关键差异 + **null-task 分支**(必须显式定义,否则实现者会歧义):
+
+- **`runIndexCommand`**(`buildIndexTask` / `applyIndexResult`):`buildIndexTask` 返回 `{ task, prebuilt }`。
+  - **`task === null`**(全部 anchor 是 metadata-only,无 LLM 工作)→ **不 emit manifest、不走 agent**:直接 `applyIndexResult('', file, prebuilt)` 渲染 index 写盘、`return LB_EXIT_OK`。
+  - `task !== null` → emit 时 manifest 带 `meta: { prebuilt }`;`--apply` 从 `manifest.meta.prebuilt` 取回 prebuilt 一并传 `applyIndexResult`。
+- **`runSyncCheckCommand`**(`buildSyncCheckTask` / `applySyncCheckResult`):`buildSyncCheckTask` 返回 `LlmTask | null`。
+  - **`task === null`**(无 affected anchor / 全部读取失败)→ 打印「无需 sync-check」、`return LB_EXIT_OK`,不 emit。
+  - emit 时 `meta.gate_context = 'standalone'`;`--apply` 把 `manifest.manifest_hash` 作 `produced_from` 传 `applySyncCheckResult`。
+- **`runRegenerateCommand`**(轮次分支见 Task 6.1 注):`buildRegenerateRound1Tasks` / `applyRound1AndBuildRound2` 抛 `RegenOutputError`(metadata-only role / extract-facts 空)→ 写 `.partial` + `return LB_EXIT_PARTIAL_SUCCESS`。
+
+commander 注册三子命令对应 `--apply` / `--api` flag。
 
 - [ ] **Step 4: 跑测试确认通过 + 回归**
 
@@ -1881,3 +1893,10 @@ pnpm format:check && pnpm lint && pnpm typecheck && pnpm build && pnpm test
 | F6 | HIGH     | 真 —— `computeQualityResult` 遇空 `judged` → `criticalRate=totalRate=1.0` → `passed=true`;extract-facts 失败时质量 gate 反判「完美」 | Task 5.2:`facts.length===0` 抛 `RegenOutputError`,regenerate `--apply` 转 `.partial`,不走「空抽样=passed」 |
 | F7 | MEDIUM   | 真 —— `buildSyncCheckTask` 在 anchor 全部读取失败时 `blocks` 空,仍 return 只含 changeContext 的空 task | Task 4.1:catch 加 `console.warn`;循环后 `if (blocks.length===0) return null`               |
 | F8 | LOW      | 真 —— Phase 0 写 `buildRegenerateTask`/`applyRegenerateRound1`,与实际任务名不符                        | Phase 0 regenerator.ts / quality-judge.ts 两行更正为实际函数名                                |
+
+### Round 3:2 MEDIUM,均独立对照代码核实为真,全处置
+
+| #   | severity | 核实结论                                                                                              | 处置                                                                                          |
+| --- | -------- | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| F9  | MEDIUM   | 真 —— Task 6.1 `runMapCommand` 的 `--apply`/`--api` 调 `applyMapResult` 未传 `existing`,merge 模式退化成 overwrite、丢用户已审 anchors | Task 6.1 两分支加 `loadAnchorsFile` 载 `existing`、传 `applyMapResult`                         |
+| F10 | MEDIUM   | 真 —— `buildIndexTask` / `buildSyncCheckTask` 可返回 `null` task,Task 6.2 未定义 CLI 在 `task===null` 时的分支 | Task 6.2 Step 3 显式定义 index / sync-check 的 `task===null` 分支(直接渲染 / 跳过,不 emit) |

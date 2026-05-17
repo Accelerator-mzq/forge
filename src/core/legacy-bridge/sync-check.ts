@@ -279,7 +279,17 @@ export function applySyncCheckResult(
   let raw: Array<Partial<SyncStateDiff>> = [];
   try {
     const parsed = JSON.parse(llmText.trim());
-    if (Array.isArray(parsed)) raw = parsed as Array<Partial<SyncStateDiff>>;
+    if (Array.isArray(parsed)) {
+      raw = parsed as Array<Partial<SyncStateDiff>>;
+    } else {
+      // valid JSON 但形态非数组 —— 同等视为输出异常,写告警 diff,不静默漏报
+      raw = [
+        {
+          severity: 'info',
+          description: `LLM 输出格式非数组:${JSON.stringify(parsed).slice(0, 200)}`,
+        },
+      ];
+    }
   } catch {
     raw = [{ severity: 'info', description: `LLM 输出非合法 JSON:${llmText.slice(0, 200)}` }];
   }

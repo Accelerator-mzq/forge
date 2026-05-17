@@ -2,7 +2,6 @@
 // 双路径执行模型核心:LlmTask + TaskManifest 信封 + canonical hash
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile, rm } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 /** 可走双路径的 LLM 操作类型 */
@@ -104,11 +103,23 @@ export async function writeManifest(forgeRoot: string, m: TaskManifest): Promise
   await writeFile(manifestPath(forgeRoot, m.op), JSON.stringify(m, null, 2), 'utf8');
 }
 
-/** 读 manifest;不存在返回 null;hash 校验失败抛错 */
+/** 读 manifest;不存在返回 null;JSON 损坏 / hash 校验失败抛错 */
 export async function readManifest(forgeRoot: string, op: LlmOp): Promise<TaskManifest | null> {
   const p = manifestPath(forgeRoot, op);
-  if (!existsSync(p)) return null;
-  const m = JSON.parse(await readFile(p, 'utf8')) as TaskManifest;
+  let raw: string;
+  try {
+    raw = await readFile(p, 'utf8');
+  } catch (err) {
+    // 文件不存在 → 返回 null;其他 IO 错误(权限等)向上抛
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw err;
+  }
+  let m: TaskManifest;
+  try {
+    m = JSON.parse(raw) as TaskManifest;
+  } catch (err) {
+    throw new Error(`manifest ${p} 解析失败(文件可能损坏或截断写入):${(err as Error).message}`);
+  }
   const v = verifyManifest(m);
   if (!v.ok) throw new Error(`manifest ${p} 校验失败:${v.reason}`);
   return m;

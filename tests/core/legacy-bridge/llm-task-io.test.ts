@@ -8,6 +8,7 @@ import {
   writeManifest,
   readManifest,
   manifestPath,
+  consumeManifest,
 } from '../../../src/core/legacy-bridge/llm-task.js';
 import type { LlmTask } from '../../../src/core/legacy-bridge/llm-task.js';
 
@@ -48,5 +49,25 @@ describe('writeManifest / readManifest', () => {
 
   it('manifest 不存在 → readManifest 返回 null', async () => {
     expect(await readManifest(dir, 'index')).toBeNull();
+  });
+
+  it('磁盘上是损坏 JSON → readManifest 抛带「解析失败」字样的错', async () => {
+    const m = buildManifest({ op: 'map', round: 1, tasks: [task], forgeVersion: '1.4.0' });
+    await writeManifest(dir, m);
+    await writeFile(manifestPath(dir, 'map'), '{truncated', 'utf8');
+    await expect(readManifest(dir, 'map')).rejects.toThrow(/解析失败|损坏/);
+  });
+});
+
+describe('consumeManifest', () => {
+  it('写入后 consume → 之后 readManifest 返回 null', async () => {
+    const m = buildManifest({ op: 'map', round: 1, tasks: [task], forgeVersion: '1.4.0' });
+    await writeManifest(dir, m);
+    await consumeManifest(dir, 'map');
+    expect(await readManifest(dir, 'map')).toBeNull();
+  });
+
+  it('对不存在的 manifest 调 consumeManifest 不抛错(force:true 幂等)', async () => {
+    await expect(consumeManifest(dir, 'index')).resolves.toBeUndefined();
   });
 });

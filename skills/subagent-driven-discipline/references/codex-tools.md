@@ -68,3 +68,5 @@ This skill mandates **Opus actor** for Type 1 + Type 2 retrospect. On Codex:
 ## What still works exactly as written
 
 §1 28-subtype taxonomy, §2 strict prompt elements, §3.2 cross-verify command list, §3.3 inline-fix decision tree, §4.1 cherry-pick recovery, §4.2 mid-phase upgrade trigger, §5 case studies, §6 pattern catalog — these are platform-independent controller-side judgments and apply verbatim.
+
+> 注:此处「platform-independent」指跨 _harness_ 通用;§1 的 model tier 列 `haiku`/`sonnet`/`opus` 是 tier 标签,默认对应同名 Claude 模型,实际派发模型按 harness / `forge/config.yaml#model_tiers` 解析(见 SKILL.md `## Model Tier 映射` 段)。

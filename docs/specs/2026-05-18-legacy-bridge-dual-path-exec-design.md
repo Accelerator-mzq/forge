@@ -2,7 +2,7 @@
 
 - **作者**:msc(由 Claude Opus 4.7 协助 brainstorming)
 - **日期**:2026-05-18
-- **状态**:草案,待用户审阅
+- **状态**:草案,经 5 轮 Codex 对抗性审查收敛(2026-05-18),待用户审阅
 - **关联**:
   - brownfield 设计 [`2026-05-05-brownfield-onboarding-design.md`](2026-05-05-brownfield-onboarding-design.md) —— legacy-bridge v0.2 三层能力 + LLM opt-in 边界
   - forge-migrate 设计 [`2026-05-10-forge-migrate-design.md`](2026-05-10-forge-migrate-design.md) —— `--no-regenerate` + agent-fill 范式的来源
@@ -248,3 +248,9 @@ manifest 设计天然可测,三层各自独立测,不需真调 API:
 | 2   | LOW      | 真 —— §7 prep 测试条目仍残留「输入 hash」(第 3 轮只改了 `--apply` 条目)                                                  | §7 prep 条目统一为 `manifest_hash`                                                                            |
 
 finding 数趋势:4 → 4 → 3 → 2,单调收敛。
+
+### Round 5(v5):0 HIGH + 0 MEDIUM + 0 LOW —— **收敛**
+
+第 4 轮遗留的 1 MEDIUM + 1 LOW 均已处置,本轮未发现新 finding。`produced_from` 的固有限制已作诚实边界声明(§4.5),并以 §6 skill 反偷懒约束 + `--api` 高保证路径分层。
+
+**收敛声明**:文档经 5 轮 Codex 对抗性审查,finding 趋势 **4 → 4 → 3 → 2 → 0**,单调收敛。自 v5 起视为收敛,可进入 writing-plans 阶段。

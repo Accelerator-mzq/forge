@@ -6,6 +6,7 @@ import matter from 'gray-matter';
 import type { LegacyAnchor, LegacyAnchorRole, LegacyAnchorsFile } from './types.js';
 import { redact, type RedactReport } from './redact.js';
 import { readAnchorAsText } from './encoding.js';
+import type { LlmTask } from './llm-task.js';
 
 /** 复写参数 */
 export interface RegenerateInput {
@@ -275,4 +276,52 @@ function mergeHits(a: Record<string, number>, b: Record<string, number>): Record
     merged[name] = (merged[name] ?? 0) + count;
   }
   return merged;
+}
+
+/** 轮1:产 regenerate + extract-facts 两个 LlmTask */
+export async function buildRegenerateRound1Tasks(
+  input: RegenerateInput,
+  // 默认用 readAnchorAsText;测试可注入 mock
+  readText: (anchor: LegacyAnchor) => Promise<string> = readAnchorAsText,
+): Promise<LlmTask[]> {
+  // metadata-only role 不发 LLM(spec §7 line 909 / P7-03 修复)
+  if (METADATA_ONLY_ROLES.includes(input.role)) {
+    throw new RegenOutputError(
+      `role=${input.role} 是 metadata-only(spec §7 line 909);不复写。`,
+      input.role,
+    );
+  }
+
+  // 合并全局 redact 规则和 anchor 级别规则,然后对权威源文本 mask
+  const redactRules = [...(input.globalRedactRules ?? []), ...(input.authoritative.redact ?? [])];
+  const maskedAuth = redact(await readText(input.authoritative), redactRules).redactedText;
+
+  // 复写 prompt(复用既有 buildRegeneratePrompt)
+  const regeneratePrompt = buildRegeneratePrompt(input, maskedAuth);
+
+  // 关键事实抽取 prompt:从老文档提取结构化 JSON 事实列表
+  const extractFactsPrompt = `从下列老文档抽取关键事实(数字 / 字段约束 / 业务规则 / 合规条款 / 设计决策)。\n严格输出 JSON 数组,每项含 { "text": string(<=80 字单句), "section": string(章节锚如 "§4.5",无则 "(unstructured)"), "critical": boolean(合规/安全/业务硬约束=true) }。不加 preamble、不带 code fence。\n\n# 老文档\n${maskedAuth}`;
+
+  // 两个 task 共用的公共字段
+  const common = {
+    model: DEFAULT_MODEL,
+    inputs: [{ source: input.authoritative.path, content: maskedAuth }],
+  };
+
+  return [
+    {
+      ...common,
+      op: 'regenerate' as const,
+      prompt: regeneratePrompt,
+      outputSchema: 'markdown 正文',
+      outputPath: `.cache/legacy-bridge-result-regenerate.json`,
+    },
+    {
+      ...common,
+      op: 'extract-facts' as const,
+      prompt: extractFactsPrompt,
+      outputSchema: '[{ "text": string, "section": string, "critical": boolean }]',
+      outputPath: `.cache/legacy-bridge-result-extract-facts.json`,
+    },
+  ];
 }

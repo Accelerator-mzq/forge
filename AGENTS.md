@@ -6,7 +6,7 @@ This file provides guidance to AI coding agents (Codex, OpenCode, and others) wh
 
 ## 项目概述
 
-Forge 是一个多 harness AI 工作流 plugin —— 融合 OpenSpec 的产物驱动工作流与 superpowers 的行为塑造 skill,**核心增量是「反向加固协议」:防止 AI 在 spec / verify / archive 阶段偷懒**。它有双重分发形态:既作为 Claude Code plugin 分发,也作为 npm 包(`@accelerator-mzq/forge`,bin `forge`)提供 14 个 CLI 子命令。
+Forge 是一个多 harness AI 工作流 plugin —— 融合 OpenSpec 的产物驱动工作流与 superpowers 的行为塑造 skill,**核心增量是「反向加固协议」:防止 AI 在 spec / verify / archive 阶段偷懒**。它有双重分发形态:既作为 Claude Code plugin 分发,也作为 npm 包(`@accelerator-mzq/forge`,bin `forge`)提供 16 个 CLI 子命令。
 
 ## 常用命令
 
@@ -59,7 +59,7 @@ forge 同时是:(a) Claude Code plugin —— `.claude-plugin/`(`plugin.json` + 
 
 ### 三层结构
 
-- **`src/cli/`** —— CLI 入口 `index.ts` + `commands/` 下 14 个子命令(commander 注册)。
+- **`src/cli/`** —— CLI 入口 `index.ts` + `commands/` 下 16 个子命令(commander 注册)。
 - **`src/core/`** —— 工作流协议核心,约 24 个子域目录。
 - **`commands/` 与 `skills/`(仓库根)** —— plugin 形态的 10 个 slash 命令 `.md` 与 16 个 skill。**这是 plugin 的实际行为载体**,TS core 给 CLI helper 与验证逻辑撑腰。
 
@@ -87,5 +87,5 @@ vitest;`tests/` 分 `cli/` `core/` `integration/` `migrate/` `scripts/` `forge-e
 ## 分支与文档
 
 - CI 跑 `main` 和 `dev`;日常开发在 `dev`。`forge preflight branch-check` 用来防 main/master 误改。
-- 详尽文档在 `docs/`:`getting-started.md`(端到端流程)、`cli-reference.md`(14 子命令)、`stage-extensions.md`、`codex-review.md`、`docs/plans/`(plan-9a..9j 等设计 plan)、`docs/specs/`(权威 spec)。
+- 详尽文档在 `docs/`:`getting-started.md`(端到端流程)、`cli-reference.md`(16 子命令)、`stage-extensions.md`、`codex-review.md`、`docs/plans/`(plan-9a..9j 等设计 plan)、`docs/specs/`(权威 spec)。
 - `CHANGELOG.md` 按 Keep a Changelog,版本号遵循 SemVer。

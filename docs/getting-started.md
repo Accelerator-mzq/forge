@@ -4,6 +4,8 @@
 
 > ⚠️ 适用 forge **v1.1.0** 及以后版本。装的是 v1.0.x 走 [v1.0 getting-started](https://github.com/Accelerator-mzq/forge/tree/v1.0.x/docs/getting-started.md);v0.3 / v0.2 升级指南待写(下一轮单独文档)。
 
+> 📦 **已有 OpenSpec / superpowers 项目?** 本教程从空目录起步;若你要把已有项目转 forge,改看 [从已有项目接入 forge](migration/from-existing-project.md)。
+
 ## 在你开始前
 
 - Node.js ≥ 20.19,pnpm ≥ 9
@@ -523,7 +525,7 @@ ls .claude/commands/forge/ # 期望 9 个 .md
 
 **修法**:**AI 应当自动调** record-* helper(沿 `commands/apply.md:179-182`)。若 AI 没调,提示 AI invoke 对应 helper(record-tdd 在 apply 完成时、record-verify 在 verify 后、record-review 在 review 后)。
 
-完整错误退出码清单见 [`docs/cli-reference.md`](cli-reference.md)(总览页;v1.1 新 CLI 段待下轮补)。
+完整错误退出码清单见 [`docs/cli-reference.md`](cli-reference.md)。
 
 ## 与 superpowers plugin 共存
 
@@ -670,7 +672,7 @@ wc -l forge/changes/<change-id>/tasks.md
 
 ## 接下来
 
-- [`docs/cli-reference.md`](cli-reference.md) — 13 个 CLI 子命令完整参数 + 退出码(v1.1 新 6 CLI 段下轮补)
+- [`docs/cli-reference.md`](cli-reference.md) — 16 个 CLI 子命令完整参数 + 退出码
 - [`docs/installation.md`](installation.md) — 三 harness 安装总览
 - [`docs/claude-install.md`](claude-install.md) — Claude Code 专题安装
 - **Legacy 形态文档**(v0.2-v0.4 时期,**新用户不需要看**):

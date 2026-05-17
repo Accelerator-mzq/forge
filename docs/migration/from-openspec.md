@@ -50,15 +50,15 @@ forge migrate openspec --regenerate
 
 ### 2.3 `--dry-run`
 
-只打印 plan,不写 `forge/`(只有 `.cache` 等 bootstrap 必要目录会创建)。
+> ⚠️ **当前实现是占位 stub**(`src/core/migrate/index.ts` dry-run 分支),下面描述的是实际行为而非设计意图。
 
 ```bash
 forge migrate openspec --dry-run
 ```
 
-输出包含:scanned files 数、missing-preview 计数、cost estimate(若 `--regenerate`)。
+实际行为:跑完 detect → scan → classify → unsafe-slug 检查后提前返回,**只打印一行 `scanned <N> files` 计数,不输出 plan 表、不算 missing-preview / cost estimate**,exit 0。`forge/` 下仅创建 `.cache` / `.forge-trash` / `.forge-ack` 等 bootstrap 目录,不写 change 产物。
 
-适用场景:迁移前 sanity check、CI 检查目标件数量。
+完整 plan 预览(逐件 active/archive 分类、missing-preview 计数、cost estimate)尚未落地。迁移前若要看真实结果,目前的替代做法:先跑 `--no-regenerate`(写真 `forge/` + 出完整 `migrate-report.md`,不花 LLM 钱),看报告后再决定是否 `--regenerate`;`forge/` 可整目录删除撤销。
 
 ### 2.4 `--force`
 
@@ -195,10 +195,62 @@ rm -rf forge/
 - `forge/migrate-trace.json.ndjson` 存在但 `.json` 不存在 → 重跑 `forge migrate` 会检测 crash,清残留 `.tmp` + 反向 rm 已 committed 件
 - `forge/migrate-trace.json` 已存在 → migrate 已成功完成,不需要 rollback
 
-## 7. 参考
+## 7. 项目同时含 OpenSpec 与 superpowers
+
+`forge migrate` 的 `<source>` 参数一次只接受 `openspec` **或** `superpowers` 之一,不能一次迁移两者。两个 source 探测的是不同目录:
+
+- `openspec` → `openspec/`
+- `superpowers` → `docs/superpowers/{specs,plans}/`
+
+所以项目里两者都有时:**串行跑两遍,每个 source 各一次。**
+
+### 7.1 关键 gotcha:第二遍会覆盖第一遍的报告
+
+`migrate-report.md` 与 `migrate-trace.json` 都是 `forge/` 下的固定文件名。第二遍 migrate 的 `writeReportMd`(覆盖写)与 `finalizeAndRename`(覆盖 rename)会把第一遍那份**直接冲掉**。
+
+→ 第一遍跑完、第二遍开始前,**必须先把这两个文件拷出来备份**,否则第一个 source 的统计报告就丢了。
+
+### 7.2 推荐操作顺序
+
+```bash
+# 第一遍 —— openspec
+forge migrate openspec
+cp forge/migrate-report.md  forge/migrate-report-openspec.md
+cp forge/migrate-trace.json forge/migrate-trace-openspec.json
+cat forge/migrate-report-openspec.md      # 检查第一遍结果
+
+# 第二遍 —— superpowers
+forge migrate superpowers
+cp forge/migrate-report.md  forge/migrate-report-superpowers.md
+```
+
+先后顺序无所谓(先 superpowers 也行),关键是**两遍之间把报告拷走**。两遍不要并发跑 —— `forge/migrate.lock` 是串行锁。
+
+### 7.3 两个 source 的产物如何共存
+
+| 方面               | 行为                                                                                                  |
+| ------------------ | ----------------------------------------------------------------------------------------------------- |
+| change 落地        | 两个 source 的 change 都写进 `forge/changes/`,互不覆盖(除非 slug 撞名)                              |
+| slug 冲突          | 第二遍 conflict 检测会看到第一遍已落地的 change;冲突件加 `--imported-N` 后缀,或 `--force` 移入 `forge/.forge-trash/<ts>/` |
+| 锁                 | `forge/migrate.lock` 每遍跑完即释放,串行无冲突                                                        |
+| `forge/` bootstrap | `ensureForgeBootstrap` 是幂等 `mkdir`,第二遍不报错                                                    |
+| `--regenerate` 成本 | 每遍各自估算、各自 ack,互不影响                                                                       |
+
+### 7.4 cleanup
+
+两个源目录都要清:
+
+```bash
+git rm -r openspec/
+git rm -r docs/superpowers/{specs,plans}/
+git commit -m "chore: migrate openspec + superpowers → forge"
+```
+
+## 8. 参考
 
 - spec: [`docs/specs/2026-05-10-forge-migrate-design.md`](../specs/2026-05-10-forge-migrate-design.md)
 - transformer 规则:spec §2.5
 - archive-detect 信号:spec §2.2
 - 错误矩阵(exit code):spec §3.1
 - superpowers 迁移:[`docs/migration/from-superpowers.md`](from-superpowers.md)
+- 已有项目接入 forge 端到端教程:[`docs/migration/from-existing-project.md`](from-existing-project.md)

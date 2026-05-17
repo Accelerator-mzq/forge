@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **文档**:`docs/cli-reference.md` 补全到当前 16 个 CLI 子命令全集 —— 此前停留在 v0.3 的 7 命令快照,缺 `migrate` / `ack` / `evidence` / `finding` / `scope` / `preflight` / `backlog`;`CLAUDE.md` / `AGENTS.md` 的「14 子命令」与 `getting-started.md` 的「13 子命令」计数同步更正为 16,并清理 `getting-started.md` 内「v1.1 新 CLI 段待下轮补」的失效提示。
+- **文档**:`docs/migration/from-openspec.md` §2.3 与 `docs/migration/from-superpowers.md` §4.3 的 `--dry-run` 说明更正为占位 stub 的真实行为(此前描述的 plan 预览 / missing-preview / cost estimate 输出尚未实现)。
+
+### Added
+
+- **文档**:`docs/migration/from-openspec.md` 新增 §7「项目同时含 OpenSpec 与 superpowers」—— 此前两份迁移文档均未覆盖双 source 项目;新节说明须串行跑两遍 `forge migrate`,并提示两遍之间备份 `migrate-report.md` / `migrate-trace.json`(固定文件名,第二遍会覆盖第一遍)。`from-superpowers.md` 加 §8.8 对应 FAQ 指针。
+- **文档**:新增 `docs/migration/from-existing-project.md` —— 已有 OpenSpec / superpowers 项目接入 forge 的端到端教程(安装 → `forge migrate` → 验收产物 → 从 `/forge:apply` 接入主流程 → cleanup)。补上 `getting-started.md`(从空目录起步)未覆盖的「已有项目」入口;`getting-started.md` 与两份 `from-*.md` 加交叉指针。§4.2 增「让 AI agent 补缺件代替 `--regenerate`」一节,说明 `--no-regenerate` + agent 手补的免 API key 路径及与 `--regenerate` 的 fidelity 校验差异。
+
 ## [1.3.0] - 2026-05-16
 
 ### Added

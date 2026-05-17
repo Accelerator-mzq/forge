@@ -35,7 +35,9 @@ describe('forge legacy-bridge sync-check (CLI)', () => {
 
   afterEach(() => rmSync(tmp, { recursive: true, force: true }));
 
-  it('无 legacy-anchors.yaml → graceful skip exit 0(决策 #11)', async () => {
+  it('无 legacy-anchors.yaml → graceful skip exit 0(决策 #11)(Task 6.2:统一 opt-in gate 路径)', async () => {
+    // Task 6.2:runSyncCheckCommand 先过 assertLlmOptIn gate;
+    // config 无 allow_llm_calls → graceful=true → exit 0(新行为:错误信息在 console.error)
     const cwd = process.cwd();
     try {
       process.chdir(tmp);
@@ -43,21 +45,23 @@ describe('forge legacy-bridge sync-check (CLI)', () => {
         await import('../../../src/cli/commands/legacy-bridge.js');
       const cmd = buildLegacyBridgeCommand();
       const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
-      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
       try {
         await cmd.parseAsync(['node', 'forge', 'sync-check']);
         expect(exitSpy).toHaveBeenCalledWith(0);
-        expect(logSpy.mock.calls.flat().join('\n')).toContain('skipping sync-check');
+        // graceful skip 原因包含 allow_llm_calls 相关文字
+        expect(errSpy.mock.calls.flat().join('\n')).toContain('allow_llm_calls');
       } finally {
         exitSpy.mockRestore();
-        logSpy.mockRestore();
+        errSpy.mockRestore();
       }
     } finally {
       process.chdir(cwd);
     }
   });
 
-  it('allow_llm_calls=false → graceful skip exit 0(决策 #22)', async () => {
+  it('allow_llm_calls=false → graceful skip exit 0(决策 #22)(Task 6.2:统一 opt-in gate 路径)', async () => {
+    // Task 6.2:runSyncCheckCommand 先过 assertLlmOptIn;allow_llm_calls 缺失 → graceful skip exit 0
     writeFileSync(
       join(tmp, 'forge', 'legacy-anchors.yaml'),
       `schema: forge-legacy-anchor/v1\nanchors:\n  - role: requirements\n    path: docs/legacy/SRS.md\n    authoritative: true\n`,
@@ -69,21 +73,23 @@ describe('forge legacy-bridge sync-check (CLI)', () => {
         await import('../../../src/cli/commands/legacy-bridge.js');
       const cmd = buildLegacyBridgeCommand();
       const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
-      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
       try {
         await cmd.parseAsync(['node', 'forge', 'sync-check']);
         expect(exitSpy).toHaveBeenCalledWith(0);
-        expect(logSpy.mock.calls.flat().join('\n')).toContain('allow_llm_calls=false');
+        // 错误信息包含 allow_llm_calls
+        expect(errSpy.mock.calls.flat().join('\n')).toContain('allow_llm_calls');
       } finally {
         exitSpy.mockRestore();
-        logSpy.mockRestore();
+        errSpy.mockRestore();
       }
     } finally {
       process.chdir(cwd);
     }
   });
 
-  it('happy path:配 ack + anchors + change → 写 sync-state(P7-12 修复)', async () => {
+  it('happy path(默认 agent 路径):配 ack + anchors + change → emit manifest(Task 6.2 新行为)', async () => {
+    // Task 6.2:默认翻转 → emit manifest 而非直接写 sync-state
     // 配置 opt-in
     writeFileSync(
       join(tmp, 'forge', 'config.yaml'),
@@ -95,7 +101,7 @@ describe('forge legacy-bridge sync-check (CLI)', () => {
       join(tmp, 'forge', 'legacy-anchors.yaml'),
       `schema: forge-legacy-anchor/v1\nanchors:\n  - role: requirements\n    path: ${join(tmp, 'docs', 'legacy', 'SRS.md').replace(/\\/g, '/')}\n    authoritative: true\n    modules: [payment]\n`,
     );
-    // change 上下文
+    // change 上下文(specs/payment.md → affectedModules=['payment'],匹配 anchor.modules=['payment'])
     mkdirSync(join(tmp, 'forge', 'changes', 'add-payment', 'specs'), { recursive: true });
     writeFileSync(join(tmp, 'forge', 'changes', 'add-payment', 'proposal.md'), '# 提案');
     writeFileSync(
@@ -120,16 +126,17 @@ describe('forge legacy-bridge sync-check (CLI)', () => {
         await import('../../../src/cli/commands/legacy-bridge.js');
       const cmd = buildLegacyBridgeCommand();
       const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
-      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
       try {
         await cmd.parseAsync(['node', 'forge', 'sync-check', '--change-id', 'add-payment']);
         expect(exitSpy).toHaveBeenCalledWith(0);
-        // sync-state 文件被写入(双栈 md + yaml)
-        expect(existsSync(join(tmp, 'forge', 'legacy-sync-state', 'add-payment.yaml'))).toBe(true);
-        expect(existsSync(join(tmp, 'forge', 'legacy-sync-state', 'add-payment.md'))).toBe(true);
+        // 新行为:manifest 已 emit,sync-state 文件不写(agent 路径)
+        expect(existsSync(join(tmp, 'forge', '.cache', 'legacy-bridge-task-sync-check.json'))).toBe(
+          true,
+        );
+        // sync-state 文件还未写(等 agent fulfill 后跑 --apply 才写)
+        expect(existsSync(join(tmp, 'forge', 'legacy-sync-state', 'add-payment.yaml'))).toBe(false);
       } finally {
         exitSpy.mockRestore();
-        logSpy.mockRestore();
       }
     } finally {
       process.chdir(cwd);

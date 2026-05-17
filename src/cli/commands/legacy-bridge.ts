@@ -16,24 +16,30 @@ import {
 } from '../../core/legacy-bridge/anchors.js';
 import { writeAck, checkAck, renderOptinPrompt } from '../../core/legacy-bridge/ack.js';
 import { formatRedactReport, redact, type RedactReport } from '../../core/legacy-bridge/redact.js';
-import { runSyncCheck, type SyncCheckClient } from '../../core/legacy-bridge/sync-check.js';
 import {
-  renderDiffMarkdown,
-  renderDiffYaml,
-  hasCriticalPending,
-} from '../../core/legacy-bridge/diff-report.js';
+  runSyncCheck,
+  buildSyncCheckTask,
+  applySyncCheckResult,
+  type SyncCheckClient,
+} from '../../core/legacy-bridge/sync-check.js';
+import { renderDiffMarkdown, renderDiffYaml } from '../../core/legacy-bridge/diff-report.js';
 import { resolveSyncState, ResolveError } from '../../core/legacy-bridge/resolve.js';
 import {
   regenerateRole,
   REGEN_FILENAMES,
   RegenOutputError,
   METADATA_ONLY_ROLES,
+  buildRegenerateRound1Tasks,
+  applyRound1AndBuildRound2,
+  applyRound2,
 } from '../../core/legacy-bridge/regenerator.js';
 import {
   stratifiedSample,
   judgeAllFacts,
   formatQualityReport,
   extractFactsFromOriginal,
+  DEFAULT_FIDELITY_THRESHOLD,
+  type SamplingOutput,
 } from '../../core/legacy-bridge/quality-judge.js';
 import {
   estimateRegenerateCost,
@@ -54,6 +60,8 @@ import {
 import {
   buildIndex,
   renderIndexMarkdown,
+  buildIndexTask,
+  applyIndexResult,
   type IndexerClient,
 } from '../../core/legacy-bridge/indexer.js';
 import { FORGE_VERSION } from '../../index.js';
@@ -250,6 +258,577 @@ export async function runMapCommand(opts: MapCommandOpts): Promise<number> {
   return LB_EXIT_OK;
 }
 
+// ==========================================================================
+// index 子命令双路径(Task 6.2)
+// ==========================================================================
+
+/** index 子命令参数接口(三分支:emit / --apply / --api) */
+export interface IndexCommandOpts {
+  /** 项目根目录(process.cwd() 或测试 fixture) */
+  projectRoot: string;
+  /** 消费 agent 结果文件 → 写 index.md */
+  apply: boolean;
+  /** 进程内直接调 Anthropic SDK */
+  api: boolean;
+}
+
+/**
+ * index 子命令三分支执行函数:
+ *   默认 → buildIndexTask → emit manifest(agent 路径);
+ *   --apply → 读 agent 结果 → applyIndexResult → 写 index.md;
+ *   --api → 进程内调 Anthropic SDK → 写 index.md。
+ * 返回 exit code(0=成功,1=错误)。
+ */
+export async function runIndexCommand(opts: IndexCommandOpts): Promise<number> {
+  const forgeRoot = join(opts.projectRoot, 'forge');
+  // I-1:--apply 与 --api 语义互斥
+  if (opts.apply && opts.api) {
+    console.error('✗ --apply 与 --api 互斥,不能同时使用');
+    return LB_EXIT_GENERAL_ERROR;
+  }
+  // --apply 不调 LLM,跳过 opt-in gate;emit / --api 先过 gate
+  if (!opts.apply) {
+    const optin = await assertLlmOptIn(forgeRoot);
+    if (!optin.ok) {
+      console.error(`✗ ${optin.reason}`);
+      return optin.graceful ? LB_EXIT_OK : LB_EXIT_GENERAL_ERROR;
+    }
+  }
+
+  // 读 anchors(--apply 也需要:applyIndexResult 用 file 反查 role)
+  const anchors = await loadAnchorsFile(forgeRoot).catch((e) => {
+    console.warn(`⚠ legacy-anchors.yaml 读取失败:${(e as Error).message}`);
+    return null;
+  });
+
+  if (opts.apply) {
+    // --apply 分支:读 manifest → 读 agent 结果 → applyIndexResult → 写 index.md
+    let manifest: Awaited<ReturnType<typeof readManifest>>;
+    try {
+      manifest = await readManifest(forgeRoot, 'index');
+    } catch (e) {
+      console.error(`✗ index manifest 读取失败:${(e as Error).message}`);
+      return LB_EXIT_GENERAL_ERROR;
+    }
+    if (!manifest) {
+      console.error('✗ 无 index manifest;请先跑 forge legacy-bridge index');
+      return LB_EXIT_GENERAL_ERROR;
+    }
+    // 从 manifest.meta.prebuilt 取回 metadata-only 已预建项(null-task 分支写的)
+    const prebuilt =
+      (manifest.meta?.prebuilt as
+        | import('../../core/legacy-bridge/indexer.js').IndexEntry[]
+        | undefined) ?? [];
+    let result: Awaited<ReturnType<typeof readTaskResults>>[number] | undefined;
+    try {
+      [result] = await readTaskResults(forgeRoot, manifest.tasks);
+    } catch (e) {
+      console.error(`✗ agent 结果读取失败:${(e as Error).message}`);
+      return LB_EXIT_GENERAL_ERROR;
+    }
+    if (!result) {
+      console.error('✗ index manifest 的 tasks 为空,无 agent 结果');
+      return LB_EXIT_GENERAL_ERROR;
+    }
+    // applyIndexResult:LLM 输出 {path:summary} + prebuilt → markdown
+    const file = anchors ?? { schema: 'forge-legacy-anchor/v1' as const, anchors: [] };
+    const md = applyIndexResult(result.text, file, prebuilt);
+    const indexPath = join(forgeRoot, 'docs', 'index.md');
+    await mkdir(join(forgeRoot, 'docs'), { recursive: true });
+    await writeFile(indexPath, md, 'utf8');
+    await consumeManifest(forgeRoot, 'index');
+    console.log(`✓ index.md 已写 ${indexPath}`);
+    return LB_EXIT_OK;
+  }
+
+  // 需要 anchors 才能构建 task
+  if (!anchors) {
+    console.error('✗ legacy-anchors.yaml 不存在;先跑 forge legacy-bridge map 生成 draft');
+    return LB_EXIT_GENERAL_ERROR;
+  }
+
+  if (opts.api) {
+    // --api 分支:进程内调 Anthropic SDK
+    const client = (await makeApiClient()) as unknown as IndexerClient;
+    const entries = await buildIndex(client, anchors);
+    const md = renderIndexMarkdown(entries);
+    const indexPath = join(forgeRoot, 'docs', 'index.md');
+    await mkdir(join(forgeRoot, 'docs'), { recursive: true });
+    await writeFile(indexPath, md, 'utf8');
+    console.log(`✓ index.md 已写(--api 单进程,${entries.length} entries)`);
+    return LB_EXIT_OK;
+  }
+
+  // 默认 agent 模式:buildIndexTask → 分析 null-task 分支
+  const { task, prebuilt } = await buildIndexTask(anchors, (anchor) => readAnchorAsText(anchor));
+  if (task === null) {
+    // null-task:所有 anchor 均为 metadata-only,无 LLM 工作
+    // 直接 applyIndexResult('', file, prebuilt) 写 index.md,不 emit
+    console.log('ℹ 所有 anchor 均为 metadata-only,无需 LLM;直接写 index.md');
+    const md = applyIndexResult('', anchors, prebuilt);
+    const indexPath = join(forgeRoot, 'docs', 'index.md');
+    await mkdir(join(forgeRoot, 'docs'), { recursive: true });
+    await writeFile(indexPath, md, 'utf8');
+    console.log(`✓ index.md 已写 ${indexPath}(metadata-only 路径)`);
+    return LB_EXIT_OK;
+  }
+  // task 非 null:emit manifest,prebuilt 存进 meta 供 --apply 取回
+  await new AgentHandoffRunner(forgeRoot, FORGE_VERSION).emit('index', 1, [task], {
+    prebuilt: prebuilt as unknown as Record<string, unknown>[],
+  });
+  console.log(
+    `✓ index manifest 已写 ${manifestPath(forgeRoot, 'index')}\n  → 请 fulfill 后跑 forge legacy-bridge index --apply`,
+  );
+  return LB_EXIT_OK;
+}
+
+// ==========================================================================
+// sync-check 子命令双路径(Task 6.2)
+// ==========================================================================
+
+/** sync-check 子命令参数接口(三分支:emit / --apply / --api) */
+export interface SyncCheckCommandOpts {
+  /** 项目根目录 */
+  projectRoot: string;
+  /** 指定 change-id;默认 '(latest-archive)' */
+  changeId?: string;
+  /** 消费 agent 结果文件 → 写 sync-state yaml */
+  apply: boolean;
+  /** 进程内直接调 Anthropic SDK */
+  api: boolean;
+}
+
+/** 从 changes/<changeId> 目录读 proposal.md + specs/,拼 changeContext + affectedModules */
+async function readChangeContext(
+  forgeRoot: string,
+  changeId: string,
+): Promise<{ changeContext: string; affectedModules: string[] }> {
+  const changesDir = join(forgeRoot, 'changes', changeId);
+  let changeContext = '';
+  const affectedModules: string[] = [];
+  if (existsSync(join(changesDir, 'proposal.md'))) {
+    changeContext += await readFile(join(changesDir, 'proposal.md'), 'utf8');
+  }
+  if (existsSync(join(changesDir, 'specs'))) {
+    const { readdir } = await import('node:fs/promises');
+    const files = await readdir(join(changesDir, 'specs'));
+    for (const f of files) {
+      const txt = await readFile(join(changesDir, 'specs', f), 'utf8');
+      changeContext += `\n## specs/${f}\n${txt}`;
+      affectedModules.push(f.replace(/\.md$/, ''));
+    }
+  }
+  return { changeContext, affectedModules };
+}
+
+/**
+ * sync-check 子命令三分支执行函数:
+ *   默认 → buildSyncCheckTask → emit manifest(agent 路径);
+ *   --apply → 读 agent 结果 → applySyncCheckResult → 写 sync-state yaml;
+ *   --api → 进程内调 Anthropic SDK → 写 sync-state yaml。
+ * 返回 exit code(0=成功,1=错误)。
+ */
+export async function runSyncCheckCommand(opts: SyncCheckCommandOpts): Promise<number> {
+  const forgeRoot = join(opts.projectRoot, 'forge');
+  // I-1:--apply 与 --api 语义互斥
+  if (opts.apply && opts.api) {
+    console.error('✗ --apply 与 --api 互斥,不能同时使用');
+    return LB_EXIT_GENERAL_ERROR;
+  }
+  // --apply 不调 LLM,跳过 opt-in gate
+  if (!opts.apply) {
+    const optin = await assertLlmOptIn(forgeRoot);
+    if (!optin.ok) {
+      console.error(`✗ ${optin.reason}`);
+      return optin.graceful ? LB_EXIT_OK : LB_EXIT_GENERAL_ERROR;
+    }
+  }
+
+  const changeId = opts.changeId ?? '(latest-archive)';
+
+  if (opts.apply) {
+    // --apply 分支:读 manifest → 读 agent 结果 → applySyncCheckResult → 写 yaml
+    let manifest: Awaited<ReturnType<typeof readManifest>>;
+    try {
+      manifest = await readManifest(forgeRoot, 'sync-check');
+    } catch (e) {
+      console.error(`✗ sync-check manifest 读取失败:${(e as Error).message}`);
+      return LB_EXIT_GENERAL_ERROR;
+    }
+    if (!manifest) {
+      console.error('✗ 无 sync-check manifest;请先跑 forge legacy-bridge sync-check');
+      return LB_EXIT_GENERAL_ERROR;
+    }
+    let result: Awaited<ReturnType<typeof readTaskResults>>[number] | undefined;
+    try {
+      [result] = await readTaskResults(forgeRoot, manifest.tasks);
+    } catch (e) {
+      console.error(`✗ agent 结果读取失败:${(e as Error).message}`);
+      return LB_EXIT_GENERAL_ERROR;
+    }
+    if (!result) {
+      console.error('✗ sync-check manifest 的 tasks 为空,无 agent 结果');
+      return LB_EXIT_GENERAL_ERROR;
+    }
+    // manifest.manifest_hash 作 produced_from(双路径 resume gate 复核用)
+    const syncState = applySyncCheckResult(result.text, changeId, manifest.manifest_hash);
+    const stateDir = join(forgeRoot, 'legacy-sync-state');
+    await mkdir(stateDir, { recursive: true });
+    await writeFile(join(stateDir, `${changeId}.md`), renderDiffMarkdown(syncState), 'utf8');
+    await writeFile(join(stateDir, `${changeId}.yaml`), renderDiffYaml(syncState), 'utf8');
+    await consumeManifest(forgeRoot, 'sync-check');
+    console.log(`✓ sync-state 已写 forge/legacy-sync-state/${changeId}.yaml`);
+    return LB_EXIT_OK;
+  }
+
+  // emit / --api 需要 anchors
+  const anchors = await loadAnchorsFile(forgeRoot).catch((e) => {
+    console.warn(`⚠ legacy-anchors.yaml 读取失败:${(e as Error).message}`);
+    return null;
+  });
+  if (!anchors) {
+    // 无 anchors → graceful skip(决策 #11)
+    console.log('no legacy anchors configured, skipping sync-check');
+    return LB_EXIT_OK;
+  }
+
+  const configPath = join(forgeRoot, 'config.yaml');
+  let config: ForgeConfig;
+  try {
+    config = parseYaml(await readFile(configPath, 'utf8')) as ForgeConfig;
+  } catch (e) {
+    console.error(`forge/config.yaml 格式错误:${(e as Error).message}`);
+    return LB_EXIT_GENERAL_ERROR;
+  }
+
+  const { changeContext, affectedModules } = await readChangeContext(forgeRoot, changeId);
+
+  const syncInput = {
+    changeId,
+    changeContext,
+    affectedModules,
+    anchors,
+    autoResolveCrossAnchor: config.legacy_bridge?.auto_resolve_cross_anchor ?? false,
+    mtimeOf: (p: string) => {
+      try {
+        return Math.floor(statSync(p).mtimeMs / 1000);
+      } catch {
+        return 0;
+      }
+    },
+  };
+
+  if (opts.api) {
+    // --api 分支:进程内调 Anthropic SDK
+    const client = (await makeApiClient()) as unknown as SyncCheckClient;
+    const out = await runSyncCheck(
+      client,
+      syncInput,
+      async (path) => (await readAnchorFile(path)).text,
+    );
+    const stateDir = join(forgeRoot, 'legacy-sync-state');
+    await mkdir(stateDir, { recursive: true });
+    await writeFile(join(stateDir, `${changeId}.md`), renderDiffMarkdown(out.syncState), 'utf8');
+    await writeFile(join(stateDir, `${changeId}.yaml`), renderDiffYaml(out.syncState), 'utf8');
+    console.log(`✓ sync-state 已写(--api 单进程)`);
+    return LB_EXIT_OK;
+  }
+
+  // 默认 agent 模式:buildSyncCheckTask → null-task 分支 / emit manifest
+  const task = await buildSyncCheckTask(
+    syncInput,
+    async (path) => (await readAnchorFile(path)).text,
+  );
+  if (task === null) {
+    // null-task:无受影响 anchor 或全部读取失败 → graceful skip
+    console.log('ℹ 无受影响的 anchor,无需 sync-check');
+    return LB_EXIT_OK;
+  }
+  // meta.gate_context='standalone' 标记本次非 archive 集成触发
+  await new AgentHandoffRunner(forgeRoot, FORGE_VERSION).emit('sync-check', 1, [task], {
+    gate_context: 'standalone',
+  });
+  console.log(
+    `✓ sync-check manifest 已写 ${manifestPath(forgeRoot, 'sync-check')}\n  → 请 fulfill 后跑 forge legacy-bridge sync-check --apply`,
+  );
+  return LB_EXIT_OK;
+}
+
+// ==========================================================================
+// regenerate 子命令双路径(Task 6.2)
+// ==========================================================================
+
+/** regenerate 子命令参数接口(三分支:emit / --apply / --api) */
+export interface RegenerateCommandOpts {
+  /** 项目根目录 */
+  projectRoot: string;
+  /** 仅复写指定 role(默认全量;Task 6.2 单 role 接线,多 role 全量留 TODO) */
+  role?: LegacyAnchorRole;
+  /** 消费 agent 结果文件 → 写产物 */
+  apply: boolean;
+  /** 进程内直接调 Anthropic SDK */
+  api: boolean;
+}
+
+/**
+ * regenerate 子命令三分支执行函数(单 role 双路径):
+ *   默认 → buildRegenerateRound1Tasks → emit round=1 manifest;
+ *   --apply round=1 → applyRound1AndBuildRound2 → emit round=2 manifest;
+ *   --apply round=2 → applyRound2 → 写 SRS.md / .partial;
+ *   --api → 单进程串两轮。
+ * 返回 exit code(0=成功,1=错误,3=partial-success)。
+ */
+export async function runRegenerateCommand(opts: RegenerateCommandOpts): Promise<number> {
+  const forgeRoot = join(opts.projectRoot, 'forge');
+  // I-1:--apply 与 --api 语义互斥
+  if (opts.apply && opts.api) {
+    console.error('✗ --apply 与 --api 互斥,不能同时使用');
+    return LB_EXIT_GENERAL_ERROR;
+  }
+  // --apply 不调 LLM,跳过 opt-in gate
+  if (!opts.apply) {
+    const optin = await assertLlmOptIn(forgeRoot);
+    if (!optin.ok) {
+      console.error(`✗ ${optin.reason}`);
+      return optin.graceful ? LB_EXIT_OK : LB_EXIT_GENERAL_ERROR;
+    }
+  }
+
+  // 读 config + anchors(emit / --apply / --api 均需要)
+  const configPath = join(forgeRoot, 'config.yaml');
+  if (!existsSync(configPath)) {
+    console.error('forge/config.yaml 不存在,先跑 forge init');
+    return LB_EXIT_GENERAL_ERROR;
+  }
+  let config: ForgeConfig;
+  try {
+    config = parseYaml(await readFile(configPath, 'utf8')) as ForgeConfig;
+  } catch (e) {
+    console.error(`forge/config.yaml 格式错误:${(e as Error).message}`);
+    return LB_EXIT_GENERAL_ERROR;
+  }
+
+  // 读 anchors:损坏 warn(不静默吞 LegacyAnchorsError)
+  const anchors = await loadAnchorsFile(forgeRoot).catch((e) => {
+    console.warn(`⚠ legacy-anchors.yaml 读取失败:${(e as Error).message}`);
+    return null;
+  });
+  if (!anchors) {
+    console.error('✗ legacy-anchors.yaml 不存在;先跑 forge legacy-bridge map 生成 draft');
+    return LB_EXIT_GENERAL_ERROR;
+  }
+
+  const regenLicense = config.legacy_bridge?.regen_license ?? 'derived-from-source';
+  const docsDir = join(forgeRoot, 'docs', 'regenerated');
+  // threshold 沿用 quality-judge DEFAULT_FIDELITY_THRESHOLD
+  const threshold = DEFAULT_FIDELITY_THRESHOLD;
+
+  if (opts.apply) {
+    // --apply 分支:读 manifest → 分 round 处理
+    let manifest: Awaited<ReturnType<typeof readManifest>>;
+    try {
+      manifest = await readManifest(forgeRoot, 'regenerate');
+    } catch (e) {
+      console.error(`✗ regenerate manifest 读取失败:${(e as Error).message}`);
+      return LB_EXIT_GENERAL_ERROR;
+    }
+    if (!manifest) {
+      console.error('✗ 无 regenerate manifest;请先跑 forge legacy-bridge regenerate');
+      return LB_EXIT_GENERAL_ERROR;
+    }
+
+    if (manifest.round === 1) {
+      // round=1 --apply:applyRound1AndBuildRound2
+      let results: Awaited<ReturnType<typeof readTaskResults>>;
+      try {
+        results = await readTaskResults(forgeRoot, manifest.tasks);
+      } catch (e) {
+        console.error(`✗ agent 结果读取失败:${(e as Error).message}`);
+        return LB_EXIT_GENERAL_ERROR;
+      }
+      // 按 task.op 区分 regenerate / extract-facts 两结果
+      const regenResult = results.find((r) => r.op === 'regenerate');
+      const extractResult = results.find((r) => r.op === 'extract-facts');
+      if (!regenResult || !extractResult) {
+        console.error('✗ round=1 结果不完整:需要 regenerate + extract-facts 两个 task 结果');
+        return LB_EXIT_GENERAL_ERROR;
+      }
+
+      // 从 manifest.tasks 取 role(从第一个 task 的 inputs[0].source 反推)
+      const taskRole = (opts.role ?? manifest.meta?.role ?? 'requirements') as LegacyAnchorRole;
+
+      let round2Result: {
+        task: import('../../core/legacy-bridge/llm-task.js').LlmTask;
+        sampling: SamplingOutput;
+      };
+      try {
+        round2Result = applyRound1AndBuildRound2(regenResult.text, extractResult.text, taskRole);
+      } catch (e) {
+        if (e instanceof RegenOutputError) {
+          // metadata-only role / extract-facts 空 → 写 .partial,不 emit 轮2
+          console.error(`✗ ${e.message}`);
+          await mkdir(docsDir, { recursive: true });
+          const outPath = join(docsDir, REGEN_FILENAMES[taskRole]);
+          const partialPath = `${outPath}.partial`;
+          await writeFile(partialPath, regenResult.text, 'utf8');
+          console.error(`✗ 已写 ${partialPath};用户决策:接受 .partial / 重写 prompt`);
+          return LB_EXIT_PARTIAL_SUCCESS;
+        }
+        throw e;
+      }
+
+      // 成功:emit round=2 manifest
+      const { task: r2task, sampling } = round2Result;
+      await new AgentHandoffRunner(forgeRoot, FORGE_VERSION).emit('regenerate', 2, [r2task], {
+        sampling: sampling as unknown as Record<string, unknown>,
+        regenBody: regenResult.text,
+        role: taskRole,
+      });
+      console.log(
+        `✓ round=2 manifest 已写 ${manifestPath(forgeRoot, 'regenerate')}\n  → 请 fulfill quality-judge task 后跑 forge legacy-bridge regenerate --apply`,
+      );
+      return LB_EXIT_OK;
+    }
+
+    if (manifest.round === 2) {
+      // round=2 --apply:applyRound2 → 写产物 / .partial
+      let results: Awaited<ReturnType<typeof readTaskResults>>;
+      try {
+        results = await readTaskResults(forgeRoot, manifest.tasks);
+      } catch (e) {
+        console.error(`✗ agent 结果读取失败:${(e as Error).message}`);
+        return LB_EXIT_GENERAL_ERROR;
+      }
+      const judgeResult = results.find((r) => r.op === 'quality-judge');
+      if (!judgeResult) {
+        console.error('✗ round=2 结果缺失:需要 quality-judge task 结果');
+        return LB_EXIT_GENERAL_ERROR;
+      }
+      // 从 manifest.meta.sampling 取回 SamplingOutput(JSON 往返后 as 类型)
+      const sampling = manifest.meta?.sampling as SamplingOutput | undefined;
+      if (!sampling) {
+        console.error('✗ manifest.meta.sampling 缺失,无法跑 applyRound2');
+        return LB_EXIT_GENERAL_ERROR;
+      }
+      const regenBody = (manifest.meta?.regenBody as string | undefined) ?? '';
+      const taskRole = (opts.role ?? manifest.meta?.role ?? 'requirements') as LegacyAnchorRole;
+      const quality = applyRound2(judgeResult.text, sampling, threshold);
+      await mkdir(docsDir, { recursive: true });
+      const outPath = join(docsDir, REGEN_FILENAMES[taskRole]);
+      const partialPath = `${outPath}.partial`;
+      if (!quality.passed) {
+        // 不达标:写 .partial
+        await writeFile(
+          partialPath,
+          regenBody ||
+            '<!-- 复写正文(来自 manifest.meta.regenBody)为空,请检查 round=1 --apply 是否正确存储 -->',
+          'utf8',
+        );
+        console.error(
+          `✗ quality 不达标:total=${(quality.total_rate * 100).toFixed(1)}%,critical=${(quality.critical_rate * 100).toFixed(1)}%`,
+        );
+        console.error(`✗ 已写 ${partialPath}`);
+        await consumeManifest(forgeRoot, 'regenerate');
+        return LB_EXIT_PARTIAL_SUCCESS;
+      }
+      // 达标:写产物,消费 manifest
+      // round=2 的产物:用 regenBody 拼 frontmatter(此处简化:直接写 regenBody)
+      // 生产路径的 fullMarkdown 由 regenerateRole 产,双路径中 regenBody 无 frontmatter —— 保持一致
+      await writeFile(outPath, regenBody, 'utf8');
+      await consumeManifest(forgeRoot, 'regenerate');
+      console.log(
+        `✓ quality 达标:total=${(quality.total_rate * 100).toFixed(1)}%,critical=${(quality.critical_rate * 100).toFixed(1)}%`,
+      );
+      console.log(`✓ 写产物 ${outPath}`);
+      return LB_EXIT_OK;
+    }
+
+    console.error(`✗ manifest.round=${String(manifest.round)} 不识别`);
+    return LB_EXIT_GENERAL_ERROR;
+  }
+
+  // 需要 authoritative anchor 确定 role
+  const authoritativeAnchors = getAuthoritativeAnchors(anchors)
+    .filter((a) => !METADATA_ONLY_ROLES.includes(a.role))
+    .filter((a) => !opts.role || a.role === opts.role);
+  if (authoritativeAnchors.length === 0) {
+    console.error(
+      opts.role
+        ? `✗ role '${opts.role}' 在 legacy-anchors.yaml 无 authoritative anchor`
+        : '✗ legacy-anchors.yaml 无任何 authoritative=true 的非 metadata-only anchor',
+    );
+    return LB_EXIT_GENERAL_ERROR;
+  }
+  // Task 6.2 单 role 接线(全量多 role 留给后续):取第一个
+  const anchor = authoritativeAnchors[0]!;
+  const regenInput = {
+    role: anchor.role,
+    authoritative: anchor,
+    forgeVersion: FORGE_VERSION,
+    regenLicense,
+    globalRedactRules: anchors.redact,
+  };
+
+  if (opts.api) {
+    // --api 分支:单进程串两轮
+    const client = (await makeApiClient()) as unknown as RegenerateClient &
+      import('../../core/legacy-bridge/quality-judge.js').JudgeClient;
+    // 轮1:buildRegenerateRound1Tasks → ApiRunner 跑两个 task
+    const round1Tasks = await buildRegenerateRound1Tasks(regenInput);
+    const round1Results = await new ApiRunner(client as unknown as RunnerClient).run(round1Tasks);
+    const regenResult = round1Results.find((r) => r.op === 'regenerate');
+    const extractResult = round1Results.find((r) => r.op === 'extract-facts');
+    if (!regenResult || !extractResult) {
+      console.error('✗ ApiRunner 轮1 返回结果不完整');
+      return LB_EXIT_GENERAL_ERROR;
+    }
+    // applyRound1AndBuildRound2
+    let round2Task: import('../../core/legacy-bridge/llm-task.js').LlmTask;
+    let sampling: SamplingOutput;
+    try {
+      const r2 = applyRound1AndBuildRound2(regenResult.text, extractResult.text, anchor.role);
+      round2Task = r2.task;
+      sampling = r2.sampling;
+    } catch (e) {
+      if (e instanceof RegenOutputError) {
+        console.error(`✗ ${e.message}`);
+        await mkdir(docsDir, { recursive: true });
+        const outPath = join(docsDir, REGEN_FILENAMES[anchor.role]);
+        await writeFile(`${outPath}.partial`, regenResult.text, 'utf8');
+        return LB_EXIT_PARTIAL_SUCCESS;
+      }
+      throw e;
+    }
+    // 轮2:ApiRunner 跑 quality-judge
+    const [judgeResult] = await new ApiRunner(client as unknown as RunnerClient).run([round2Task]);
+    if (!judgeResult) {
+      console.error('✗ ApiRunner 轮2 未返回结果');
+      return LB_EXIT_GENERAL_ERROR;
+    }
+    const quality = applyRound2(judgeResult.text, sampling, threshold);
+    await mkdir(docsDir, { recursive: true });
+    const outPath = join(docsDir, REGEN_FILENAMES[anchor.role]);
+    if (!quality.passed) {
+      await writeFile(`${outPath}.partial`, regenResult.text, 'utf8');
+      console.error(`✗ quality 不达标;写 ${outPath}.partial`);
+      return LB_EXIT_PARTIAL_SUCCESS;
+    }
+    await writeFile(outPath, regenResult.text, 'utf8');
+    console.log(`✓ 写产物 ${outPath}(--api 单进程)`);
+    return LB_EXIT_OK;
+  }
+
+  // 默认 agent 模式:buildRegenerateRound1Tasks → emit round=1 manifest
+  const round1Tasks = await buildRegenerateRound1Tasks(regenInput);
+  await new AgentHandoffRunner(forgeRoot, FORGE_VERSION).emit('regenerate', 1, round1Tasks, {
+    role: anchor.role,
+  });
+  console.log(
+    `✓ regenerate round=1 manifest 已写 ${manifestPath(forgeRoot, 'regenerate')}\n  → 请 fulfill 后跑 forge legacy-bridge regenerate --apply`,
+  );
+  return LB_EXIT_OK;
+}
+
 /** 主命令 build:无参数走 help;含 --acknowledge-data-transfer 时进入 ack 流程(Phase B1 填) */
 export function buildLegacyBridgeCommand(): Command {
   const cmd = new Command('legacy-bridge')
@@ -349,6 +928,8 @@ export function buildLegacyBridgeCommand(): Command {
     .option('--redact-report', '输出每条 redact 规则的命中数')
     .option('--yes', '非 TTY 必须显式 ack 高 cost 才继续(M-4)')
     .option('--skip-quality', '跳过 quality-judge 双 LLM 抽样(性能 / 调试用;P7-02 默认跑)')
+    .option('--apply', '消费 agent 已写入的结果文件 → 写产物(默认 agent 路径第二步)')
+    .option('--api', '进程内直接调 Anthropic SDK(跳过 agent 交接;需 ANTHROPIC_API_KEY)')
     .action(
       async (opts: {
         role?: LegacyAnchorRole;
@@ -357,7 +938,20 @@ export function buildLegacyBridgeCommand(): Command {
         redactReport?: boolean;
         yes?: boolean;
         skipQuality?: boolean;
+        apply?: boolean;
+        api?: boolean;
       }) => {
+        // --apply / --api 存在时走双路径新函数(runRegenerateCommand)
+        if (opts.apply ?? opts.api) {
+          const code = await runRegenerateCommand({
+            projectRoot: process.cwd(),
+            role: opts.role,
+            apply: opts.apply ?? false,
+            api: opts.api ?? false,
+          });
+          process.exit(code);
+          return;
+        }
         const forgeRoot = join(process.cwd(), 'forge');
         const configPath = join(forgeRoot, 'config.yaml');
         if (!existsSync(configPath)) {
@@ -602,201 +1196,31 @@ export function buildLegacyBridgeCommand(): Command {
     .command('index')
     .description('为每个 anchor 生成 ~100 字 LLM 摘要(决策 #14 Layer 2)')
     .option('--yes', '非 TTY 必须显式 ack')
-    .action(async (_opts: { yes?: boolean }) => {
-      const forgeRoot = join(process.cwd(), 'forge');
-      const configPath = join(forgeRoot, 'config.yaml');
-      if (!existsSync(configPath)) {
-        console.error('forge/config.yaml 不存在,先跑 forge init');
-        process.exit(LB_EXIT_GENERAL_ERROR);
-      }
-      const config = parseYaml(await readFile(configPath, 'utf8')) as ForgeConfig;
-      const anchors = await loadAnchorsFile(forgeRoot).catch((err) => {
-        if (err instanceof LegacyAnchorsError) {
-          console.error(`✗ ${err.message}`);
-          process.exit(LB_EXIT_GENERAL_ERROR);
-        }
-        throw err;
+    .option('--apply', '消费 agent 已写入的结果文件 → 写 index.md(默认 agent 路径第二步)')
+    .option('--api', '进程内直接调 Anthropic SDK(跳过 agent 交接;需 ANTHROPIC_API_KEY)')
+    .action(async (opts: { yes?: boolean; apply?: boolean; api?: boolean }) => {
+      const code = await runIndexCommand({
+        projectRoot: process.cwd(),
+        apply: opts.apply ?? false,
+        api: opts.api ?? false,
       });
-      if (!anchors) {
-        console.error('✗ legacy-anchors.yaml 不存在;先跑 forge legacy-bridge map 生成 draft');
-        process.exit(LB_EXIT_GENERAL_ERROR);
-      }
-      const ack = await checkAck(forgeRoot, config, anchors);
-      if (!ack.ok) {
-        console.error(renderOptinPrompt(ack.reason, ack.customerDataPaths));
-        process.exit(LB_EXIT_GENERAL_ERROR);
-      }
-
-      // 锁(同 regenerate:archive + legacy-bridge 双锁)
-      let releaseLb: (() => Promise<void>) | undefined;
-      let releaseArchive: (() => Promise<void>) | undefined;
-      try {
-        releaseArchive = await acquireLockByPath(forgeRoot, 'legacy-bridge-index', 'archive.lock');
-        releaseLb = await acquireLockByPath(forgeRoot, 'legacy-bridge-index', 'legacy-bridge.lock');
-      } catch (err) {
-        if (err instanceof LockHeldError) {
-          console.error(`✗ ${err.message}`);
-          process.exit(LB_EXIT_LOCK_HELD);
-        }
-        throw err;
-      }
-
-      try {
-        const evalLoadEnvPath = new URL('../../../forge-eval/load-env.js', import.meta.url).href;
-        const { loadEnv } = (await import(/* @vite-ignore */ evalLoadEnvPath)) as {
-          loadEnv: () => { anthropicApiKey: string };
-        };
-        const { anthropicApiKey } = loadEnv();
-        // double-cast 同 mapper 子命令
-        const client = new Anthropic({ apiKey: anthropicApiKey }) as unknown as IndexerClient;
-        const entries = await buildIndex(client, anchors);
-        const md = renderIndexMarkdown(entries);
-        const indexPath = join(forgeRoot, 'docs', 'index.md');
-        await mkdir(join(forgeRoot, 'docs'), { recursive: true });
-        await writeFile(indexPath, md, 'utf8');
-        console.log(`✓ wrote ${indexPath} (${entries.length} entries)`);
-        process.exit(LB_EXIT_OK);
-      } finally {
-        if (releaseLb) await releaseLb();
-        if (releaseArchive) await releaseArchive();
-      }
+      process.exit(code);
     });
 
   cmd
     .command('sync-check')
     .description('检测 change 影响的老锚点是否需更新 → 5 档差异报告(决策 #5/#19)')
     .option('--change-id <id>', '指定 change-id;默认取最近一次 archive')
-    .action(async (opts: { changeId?: string }) => {
-      const forgeRoot = join(process.cwd(), 'forge');
-      const configPath = join(forgeRoot, 'config.yaml');
-      if (!existsSync(configPath)) {
-        console.error('forge/config.yaml 不存在,先跑 forge init');
-        process.exit(LB_EXIT_GENERAL_ERROR);
-      }
-      const config = parseYaml(await readFile(configPath, 'utf8')) as ForgeConfig;
-      const anchors = await loadAnchorsFile(forgeRoot).catch((err) => {
-        if (err instanceof LegacyAnchorsError) {
-          console.error(`✗ ${err.message}`);
-          process.exit(LB_EXIT_GENERAL_ERROR);
-        }
-        throw err;
+    .option('--apply', '消费 agent 已写入的结果文件 → 写 sync-state yaml(默认 agent 路径第二步)')
+    .option('--api', '进程内直接调 Anthropic SDK(跳过 agent 交接;需 ANTHROPIC_API_KEY)')
+    .action(async (opts: { changeId?: string; apply?: boolean; api?: boolean }) => {
+      const code = await runSyncCheckCommand({
+        projectRoot: process.cwd(),
+        changeId: opts.changeId,
+        apply: opts.apply ?? false,
+        api: opts.api ?? false,
       });
-      // 决策 #11:无 anchors → graceful skip(exit 0)
-      if (!anchors) {
-        console.log('no legacy anchors configured, skipping sync-check');
-        process.exit(LB_EXIT_OK);
-        return;
-      }
-      // ack 检查(若 allow_llm_calls=false 也 graceful skip,决策 #22)
-      const ackResult = await checkAck(forgeRoot, config, anchors);
-      if (!ackResult.ok && ackResult.reason === 'allow_llm_calls=false') {
-        console.log('legacy_bridge.allow_llm_calls=false, sync-check skipped');
-        process.exit(LB_EXIT_OK);
-        return;
-      }
-      if (!ackResult.ok) {
-        console.error(renderOptinPrompt(ackResult.reason, ackResult.customerDataPaths));
-        process.exit(LB_EXIT_GENERAL_ERROR);
-        return;
-      }
-
-      // 拼 change context(读 proposal.md + specs/)
-      const changeId = opts.changeId ?? '(latest-archive)';
-      const changesDir = join(forgeRoot, 'changes', changeId);
-      let changeContext = '';
-      const affectedModules: string[] = [];
-      if (existsSync(join(changesDir, 'proposal.md'))) {
-        changeContext += await readFile(join(changesDir, 'proposal.md'), 'utf8');
-      }
-      if (existsSync(join(changesDir, 'specs'))) {
-        const { readdir } = await import('node:fs/promises');
-        const files = await readdir(join(changesDir, 'specs'));
-        for (const f of files) {
-          const txt = await readFile(join(changesDir, 'specs', f), 'utf8');
-          changeContext += `\n## specs/${f}\n${txt}`;
-          // 推测 module:文件名去 .md 即可(简化)
-          affectedModules.push(f.replace(/\.md$/, ''));
-        }
-      }
-
-      // 锁(legacy-bridge-sync-check 单锁,不与 archive 双重持锁)
-      let release: (() => Promise<void>) | undefined;
-      try {
-        release = await acquireLockByPath(
-          forgeRoot,
-          'legacy-bridge-sync-check',
-          'legacy-bridge.lock',
-        );
-      } catch (err) {
-        if (err instanceof LockHeldError) {
-          console.error(`✗ ${err.message}`);
-          process.exit(LB_EXIT_LOCK_HELD);
-          return;
-        }
-        throw err;
-      }
-
-      try {
-        // 运行时动态加载 forge-eval/load-env(避免 src/ rootDir 静态分析边界限制)
-        const evalLoadEnvPath = new URL('../../../forge-eval/load-env.js', import.meta.url).href;
-        const { loadEnv } = (await import(/* @vite-ignore */ evalLoadEnvPath)) as {
-          loadEnv: () => { anthropicApiKey: string };
-        };
-        const { anthropicApiKey } = loadEnv();
-        // Anthropic overload 与单签名接口不兼容,double-cast(与 regenerate 一致)
-        const client = new Anthropic({ apiKey: anthropicApiKey }) as unknown as SyncCheckClient;
-        const out = await runSyncCheck(
-          client,
-          {
-            changeId,
-            changeContext,
-            affectedModules,
-            anchors,
-            autoResolveCrossAnchor: config.legacy_bridge?.auto_resolve_cross_anchor ?? false,
-            mtimeOf: (p) => {
-              try {
-                return Math.floor(statSync(p).mtimeMs / 1000);
-              } catch {
-                return 0;
-              }
-            },
-          },
-          async (path) => (await readAnchorFile(path)).text,
-        );
-
-        // 写 markdown + yaml 双栈
-        const stateDir = join(forgeRoot, 'legacy-sync-state');
-        await mkdir(stateDir, { recursive: true });
-        await writeFile(
-          join(stateDir, `${changeId}.md`),
-          renderDiffMarkdown(out.syncState),
-          'utf8',
-        );
-        await writeFile(join(stateDir, `${changeId}.yaml`), renderDiffYaml(out.syncState), 'utf8');
-
-        const counts = out.syncState.diffs.length;
-        const critPending = hasCriticalPending(out.syncState);
-        console.log(`⚠ ${counts} 项老文档可能需更新 — 详见 forge/legacy-sync-state/${changeId}.md`);
-
-        // hash 过期 warn(决策 §4.3)
-        for (const h of out.hashChecks) {
-          if (h.state === 'stale') {
-            console.warn(
-              `⚠ anchor ${h.anchor.path} 已改动(用户改了 docs/legacy/);复写产物可能脱节`,
-            );
-          }
-        }
-
-        // enforce_sync 已在 archive preflight 处理,sync-check 命令本身不阻塞(spec §2.5 post-archive)
-        if (critPending) {
-          console.error(
-            `⚠ 含 critical 未 resolve 项;在 enforce_sync=true 模式下,下次 archive 前请跑 forge legacy-bridge resolve ${changeId}`,
-          );
-        }
-        process.exit(LB_EXIT_OK);
-      } finally {
-        if (release) await release();
-      }
+      process.exit(code);
     });
 
   cmd

@@ -43,7 +43,14 @@ import {
 } from '../../core/legacy-bridge/budget.js';
 import { computeAnchorHash } from '../../core/legacy-bridge/hash-anchor.js';
 import { readAnchorFile, readAnchorAsText } from '../../core/legacy-bridge/encoding.js';
-import { runMapper, writeMapperDraft, type MapperClient } from '../../core/legacy-bridge/mapper.js';
+import { writeMapperDraft, buildMapTask, applyMapResult } from '../../core/legacy-bridge/mapper.js';
+import { readManifest, consumeManifest, manifestPath } from '../../core/legacy-bridge/llm-task.js';
+import {
+  ApiRunner,
+  AgentHandoffRunner,
+  readTaskResults,
+  type RunnerClient,
+} from '../../core/legacy-bridge/runners.js';
 import {
   buildIndex,
   renderIndexMarkdown,
@@ -114,6 +121,94 @@ export const LB_EXIT_PARTIAL_SUCCESS = 3;
 export const LB_EXIT_DATA_CORRUPT = 4;
 export const LB_EXIT_LOCK_HELD = 5;
 
+/**
+ * 抽出 Anthropic client 创建逻辑为 helper,供 --api 模式复用。
+ * 动态加载 forge-eval/load-env(避免 src/ rootDir 静态分析边界限制)。
+ */
+async function makeApiClient(): Promise<Anthropic> {
+  const evalLoadEnvPath = new URL('../../../forge-eval/load-env.js', import.meta.url).href;
+  const { loadEnv } = (await import(/* @vite-ignore */ evalLoadEnvPath)) as {
+    loadEnv: () => { anthropicApiKey: string };
+  };
+  const { anthropicApiKey } = loadEnv();
+  return new Anthropic({ apiKey: anthropicApiKey });
+}
+
+/** map 子命令参数接口(三分支:emit / --apply / --api) */
+export interface MapCommandOpts {
+  /** 项目根目录(process.cwd() 或测试 fixture) */
+  projectRoot: string;
+  /** merge(保留用户审过部分) 或 overwrite(全量重生成) */
+  mode: 'merge' | 'overwrite';
+  /** 消费 agent 结果文件 → 写 draft yaml */
+  apply: boolean;
+  /** 进程内直接调 Anthropic SDK */
+  api: boolean;
+}
+
+/**
+ * map 子命令三分支执行函数:
+ *   默认 → emit manifest(agent 路径);
+ *   --apply → 读 agent 结果 → 写 draft yaml;
+ *   --api → 进程内调 Anthropic SDK → 写 draft yaml。
+ * 返回 exit code(0=成功,1=错误)。
+ */
+export async function runMapCommand(opts: MapCommandOpts): Promise<number> {
+  const forgeRoot = join(opts.projectRoot, 'forge');
+  // --apply 不调 LLM,跳过 opt-in gate;emit / --api 先过 gate(spec §5)
+  if (!opts.apply) {
+    const optin = await assertLlmOptIn(forgeRoot);
+    if (!optin.ok) {
+      console.error(`✗ ${optin.reason}`);
+      return optin.graceful ? LB_EXIT_OK : LB_EXIT_GENERAL_ERROR;
+    }
+  }
+  if (opts.apply) {
+    // --apply 分支:读 manifest → 读 agent 结果 → 后处理 → 写 draft
+    const manifest = await readManifest(forgeRoot, 'map');
+    if (!manifest) {
+      console.error('✗ 无 map manifest;请先跑 forge legacy-bridge map');
+      return LB_EXIT_GENERAL_ERROR;
+    }
+    const [result] = await readTaskResults(forgeRoot, manifest.tasks);
+    const allFiles = manifest.tasks[0]!.inputs.map((i) => i.source);
+    const existing =
+      opts.mode === 'merge'
+        ? ((await loadAnchorsFile(forgeRoot).catch(() => null)) ?? undefined)
+        : undefined;
+    const out = applyMapResult(result!.text, allFiles, { mode: opts.mode, existing });
+    await writeMapperDraft(forgeRoot, out);
+    await consumeManifest(forgeRoot, 'map');
+    console.log('✓ map draft 已写 forge/legacy-anchors-draft.yaml');
+    return LB_EXIT_OK;
+  }
+  // 准备 map task(确定性扫描 + redact + 拼 prompt)
+  const task = await buildMapTask({ projectRoot: opts.projectRoot, mode: opts.mode });
+  if (opts.api) {
+    // --api 分支:进程内调 Anthropic SDK
+    const client = (await makeApiClient()) as unknown as RunnerClient;
+    const [result] = await new ApiRunner(client).run([task]);
+    const existing =
+      opts.mode === 'merge'
+        ? ((await loadAnchorsFile(forgeRoot).catch(() => null)) ?? undefined)
+        : undefined;
+    const out = applyMapResult(
+      result!.text,
+      task.inputs.map((i) => i.source),
+      { mode: opts.mode, existing },
+    );
+    await writeMapperDraft(forgeRoot, out);
+    console.log('✓ map draft 已写(--api 单进程)');
+    return LB_EXIT_OK;
+  }
+  // 默认 agent 模式:emit manifest 到 .cache,等 agent fulfill 后跑 --apply
+  await new AgentHandoffRunner(forgeRoot, FORGE_VERSION).emit('map', 1, [task]);
+  console.log(
+    `✓ map manifest 已写 ${manifestPath(forgeRoot, 'map')}\n  → 请 fulfill 后跑 forge legacy-bridge map --apply(见 skill: legacy-bridge-fulfillment)`,
+  );
+  return LB_EXIT_OK;
+}
+
 /** 主命令 build:无参数走 help;含 --acknowledge-data-transfer 时进入 ack 流程(Phase B1 填) */
 export function buildLegacyBridgeCommand(): Command {
   const cmd = new Command('legacy-bridge')
@@ -177,88 +272,30 @@ export function buildLegacyBridgeCommand(): Command {
     .command('map')
     .description('扫 docs/ + src/ → LLM 推测 → legacy-anchors-draft.yaml(决策 #4)')
     .option('--merge', '与已存在 anchors.yaml 合并新发现项,保留用户审过部分(默认)', true)
-    .option('--overwrite', '全量重生成(覆盖用户改动,需用户确认)')
+    .option('--overwrite', '全量重生成(覆盖用户改动)')
     .option('--docs-paths <paths>', '逗号分隔的额外 docs 目录(默认扫 docs/ doc/ document/)')
     .option('--redact-report', '输出每条 redact 规则的命中数(决策 #20)')
+    .option('--apply', '消费 agent 已写入的结果文件 → 产 draft yaml(默认 agent 路径第二步)')
+    .option('--api', '进程内直接调 Anthropic SDK(跳过 agent 交接;需 ANTHROPIC_API_KEY)')
     .action(
       async (opts: {
         merge?: boolean;
         overwrite?: boolean;
         docsPaths?: string;
         redactReport?: boolean;
+        apply?: boolean;
+        api?: boolean;
       }) => {
-        const projectRoot = process.cwd();
-        const forgeRoot = join(projectRoot, 'forge');
-        const configPath = join(forgeRoot, 'config.yaml');
-        if (!existsSync(configPath)) {
-          console.error('forge/config.yaml 不存在,先跑 forge init');
-          process.exit(LB_EXIT_GENERAL_ERROR);
-        }
-        const config = parseYaml(await readFile(configPath, 'utf8')) as ForgeConfig;
-        const existingAnchors = await loadAnchorsFile(forgeRoot).catch(() => null);
-
         // mode 决策(M-2):--overwrite 优先;否则 merge(默认)
         const mode: 'merge' | 'overwrite' = opts.overwrite ? 'overwrite' : 'merge';
-        if (mode === 'overwrite' && existingAnchors) {
-          console.warn(
-            '⚠ --overwrite 将覆盖现有 legacy-anchors.yaml(用户审过的部分会丢);确认请按 Enter,Ctrl-C 取消',
-          );
-          if (process.stdout.isTTY) {
-            await new Promise<void>((resolve) => process.stdin.once('data', () => resolve()));
-          }
-        }
-
-        // ack 检查(决策 #22 LLM opt-in)
-        const ack = await checkAck(forgeRoot, config, existingAnchors);
-        if (!ack.ok) {
-          console.error(renderOptinPrompt(ack.reason, ack.customerDataPaths));
-          process.exit(LB_EXIT_GENERAL_ERROR);
-        }
-
-        // 锁
-        let release: (() => Promise<void>) | undefined;
-        try {
-          release = await acquireLockByPath(forgeRoot, 'legacy-bridge-map', 'legacy-bridge.lock');
-        } catch (err) {
-          if (err instanceof LockHeldError) {
-            console.error(`✗ ${err.message}`);
-            process.exit(LB_EXIT_LOCK_HELD);
-          }
-          throw err;
-        }
-
-        try {
-          // 动态加载 forge-eval/load-env(同 regenerate / sync-check 子命令)
-          const evalLoadEnvPath = new URL('../../../forge-eval/load-env.js', import.meta.url).href;
-          const { loadEnv } = (await import(/* @vite-ignore */ evalLoadEnvPath)) as {
-            loadEnv: () => { anthropicApiKey: string };
-          };
-          const { anthropicApiKey } = loadEnv();
-          // Anthropic overload signature 与 MapperClient 单签名接口不兼容,需 double-cast
-          const client = new Anthropic({ apiKey: anthropicApiKey }) as unknown as MapperClient;
-          const docsPaths = opts.docsPaths
-            ? opts.docsPaths.split(',').map((s) => s.trim())
-            : undefined;
-          const out = await runMapper(client, {
-            projectRoot,
-            docsPaths,
-            scanSrc: true,
-            mode,
-            existing: existingAnchors ?? undefined,
-          });
-          const { yamlPath, mdPath } = await writeMapperDraft(forgeRoot, out);
-          console.log(`✓ wrote ${yamlPath}`);
-          console.log(`✓ wrote ${mdPath}`);
-          console.log(
-            `   新增 ${out.newAnchors.length} 个 anchor(merge 保留 ${out.preservedAnchors.length});unmatched ${out.unmatched.length} 个文件需用户审`,
-          );
-          console.log(
-            '下一步:审改 legacy-anchors-draft.yaml 后跑 mv legacy-anchors-draft.yaml legacy-anchors.yaml',
-          );
-          process.exit(LB_EXIT_OK);
-        } finally {
-          if (release) await release();
-        }
+        // 调 runMapCommand 完成三分支逻辑(emit / --apply / --api)
+        const code = await runMapCommand({
+          projectRoot: process.cwd(),
+          mode,
+          apply: opts.apply ?? false,
+          api: opts.api ?? false,
+        });
+        process.exit(code);
       },
     );
 

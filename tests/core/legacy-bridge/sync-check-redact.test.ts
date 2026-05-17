@@ -26,5 +26,10 @@ describe('buildSyncCheckTask redact 覆盖 changeContext', () => {
     expect(task).not.toBeNull();
     expect(task!.prompt).not.toContain('AKIA1234567890ABCDEF'); // 现状盲区:此前会失败
     expect(task!.prompt).toContain('<<REDACTED');
+    // inputs 里的 change-context 条目同样会写进 manifest 交给 agent —— 也必须已 mask
+    const ctxInput = task!.inputs.find((i) => i.source === 'change-context');
+    expect(ctxInput).toBeTruthy();
+    expect(ctxInput!.content).not.toContain('AKIA1234567890ABCDEF');
+    expect(ctxInput!.content).toContain('<<REDACTED');
   });
 });

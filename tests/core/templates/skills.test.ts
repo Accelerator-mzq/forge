@@ -114,7 +114,7 @@ describe('Model Tier 映射 —— discipline 两副本 parity', () => {
     if (start === -1) return ''; // 抽不到 → 空串,断言必失败(预期的 drift 告警)
     let end = lines.length;
     for (let i = start + 1; i < lines.length; i++) {
-      if (lines[i].startsWith('## ')) {
+      if (lines[i]?.startsWith('## ')) {
         end = i;
         break;
       }

@@ -15,6 +15,11 @@ All notable changes to this project will be documented in this file.
 
 - **文档**:`docs/migration/from-openspec.md` 新增 §7「项目同时含 OpenSpec 与 superpowers」—— 此前两份迁移文档均未覆盖双 source 项目;新节说明须串行跑两遍 `forge migrate`,并提示两遍之间备份 `migrate-report.md` / `migrate-trace.json`(固定文件名,第二遍会覆盖第一遍)。`from-superpowers.md` 加 §8.8 对应 FAQ 指针。
 - **文档**:新增 `docs/migration/from-existing-project.md` —— 已有 OpenSpec / superpowers 项目接入 forge 的端到端教程(安装 → `forge migrate` → 验收产物 → 从 `/forge:apply` 接入主流程 → cleanup)。补上 `getting-started.md`(从空目录起步)未覆盖的「已有项目」入口;`getting-started.md` 与两份 `from-*.md` 加交叉指针。§4.2 增「让 AI agent 补缺件代替 `--regenerate`」一节,说明 `--no-regenerate` + agent 手补的免 API key 路径及与 `--regenerate` 的 fidelity 校验差异。
+- `forge/config.yaml` 新增 `model_tiers` 配置:把 `forge:subagent-driven-discipline` §1 的 `haiku`/`sonnet` model tier 重映射到实际派发模型(默认恒等、不改变现状)。`forge config set model_tiers.<tier> <model>` 写入。**仅对直接传 `model` 参数的 harness(如 Claude Code)生效**;把 `haiku`/`sonnet` 档映射到更强模型会抬高 token / 调用成本。`opus` 档不可重映射。
+
+### Changed
+
+- `forge:subagent-driven-development` 的 model 选型不再内联 matrix,改为指向 `forge:subagent-driven-discipline` §1 + `model_tiers` 配置(消除两 skill 的 model tier 摘要漂移)。`forge:subagent-driven-discipline` 的 §1 `haiku`/`sonnet`/`opus` 明确为 tier 标签,`## Platform Note` 措辞修正(区分跨 harness 与跨模型 provider)。
 
 ## [1.3.0] - 2026-05-16
 

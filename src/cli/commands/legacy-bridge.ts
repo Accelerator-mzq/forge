@@ -155,6 +155,11 @@ export interface MapCommandOpts {
  */
 export async function runMapCommand(opts: MapCommandOpts): Promise<number> {
   const forgeRoot = join(opts.projectRoot, 'forge');
+  // I-1:--apply(消费 agent 结果)与 --api(进程内调 SDK)语义互斥,同传无意义
+  if (opts.apply && opts.api) {
+    console.error('✗ --apply 与 --api 互斥,不能同时使用');
+    return LB_EXIT_GENERAL_ERROR;
+  }
   // --apply 不调 LLM,跳过 opt-in gate;emit / --api 先过 gate(spec §5)
   if (!opts.apply) {
     const optin = await assertLlmOptIn(forgeRoot);
@@ -165,18 +170,43 @@ export async function runMapCommand(opts: MapCommandOpts): Promise<number> {
   }
   if (opts.apply) {
     // --apply 分支:读 manifest → 读 agent 结果 → 后处理 → 写 draft
-    const manifest = await readManifest(forgeRoot, 'map');
+    // C-1:readManifest 在 manifest 损坏/篡改时抛错,包 try/catch 转友好错误
+    let manifest: Awaited<ReturnType<typeof readManifest>>;
+    try {
+      manifest = await readManifest(forgeRoot, 'map');
+    } catch (e) {
+      console.error(`✗ map manifest 读取失败:${(e as Error).message}`);
+      return LB_EXIT_GENERAL_ERROR;
+    }
     if (!manifest) {
       console.error('✗ 无 map manifest;请先跑 forge legacy-bridge map');
       return LB_EXIT_GENERAL_ERROR;
     }
-    const [result] = await readTaskResults(forgeRoot, manifest.tasks);
-    const allFiles = manifest.tasks[0]!.inputs.map((i) => i.source);
+    // C-1:readTaskResults 在结果文件缺失/JSON 截断时抛错,同样包 try/catch
+    let result: Awaited<ReturnType<typeof readTaskResults>>[number] | undefined;
+    try {
+      [result] = await readTaskResults(forgeRoot, manifest.tasks);
+    } catch (e) {
+      console.error(`✗ agent 结果读取失败:${(e as Error).message}`);
+      return LB_EXIT_GENERAL_ERROR;
+    }
+    // I-2:manifest.tasks 为空时 result 为 undefined,显式守卫避免 TypeError
+    if (!result) {
+      console.error('✗ map manifest 的 tasks 为空,无 agent 结果');
+      return LB_EXIT_GENERAL_ERROR;
+    }
+    const allFiles = manifest.tasks[0]?.inputs.map((i) => i.source) ?? [];
+    // M-2:merge 模式下 legacy-anchors.yaml 损坏不能静默吞 —— 否则 merge 静默退化成 overwrite
     const existing =
       opts.mode === 'merge'
-        ? ((await loadAnchorsFile(forgeRoot).catch(() => null)) ?? undefined)
+        ? ((await loadAnchorsFile(forgeRoot).catch((e) => {
+            console.warn(
+              `⚠ legacy-anchors.yaml 读取失败,merge 退化为 overwrite:${(e as Error).message}`,
+            );
+            return null;
+          })) ?? undefined)
         : undefined;
-    const out = applyMapResult(result!.text, allFiles, { mode: opts.mode, existing });
+    const out = applyMapResult(result.text, allFiles, { mode: opts.mode, existing });
     await writeMapperDraft(forgeRoot, out);
     await consumeManifest(forgeRoot, 'map');
     console.log('✓ map draft 已写 forge/legacy-anchors-draft.yaml');
@@ -188,12 +218,23 @@ export async function runMapCommand(opts: MapCommandOpts): Promise<number> {
     // --api 分支:进程内调 Anthropic SDK
     const client = (await makeApiClient()) as unknown as RunnerClient;
     const [result] = await new ApiRunner(client).run([task]);
+    // I-2:ApiRunner 返回空数组时 result 为 undefined,显式守卫避免 TypeError
+    if (!result) {
+      console.error('✗ ApiRunner 未返回结果');
+      return LB_EXIT_GENERAL_ERROR;
+    }
+    // M-2:merge 模式下 legacy-anchors.yaml 损坏不能静默吞
     const existing =
       opts.mode === 'merge'
-        ? ((await loadAnchorsFile(forgeRoot).catch(() => null)) ?? undefined)
+        ? ((await loadAnchorsFile(forgeRoot).catch((e) => {
+            console.warn(
+              `⚠ legacy-anchors.yaml 读取失败,merge 退化为 overwrite:${(e as Error).message}`,
+            );
+            return null;
+          })) ?? undefined)
         : undefined;
     const out = applyMapResult(
-      result!.text,
+      result.text,
       task.inputs.map((i) => i.source),
       { mode: opts.mode, existing },
     );

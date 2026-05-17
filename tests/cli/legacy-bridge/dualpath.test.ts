@@ -53,4 +53,24 @@ describe('runMapCommand 默认 agent 模式', () => {
     expect(code).toBe(0);
     expect(existsSync(join(dir, 'forge', 'legacy-anchors-draft.yaml'))).toBe(true);
   });
+
+  it('--apply 但无 manifest → 返回非 0 exit code', async () => {
+    const code = await runMapCommand({
+      projectRoot: dir,
+      mode: 'overwrite',
+      apply: true,
+      api: false,
+    });
+    expect(code).not.toBe(0);
+  });
+
+  it('--apply 与 --api 同传 → 返回非 0 exit code', async () => {
+    const code = await runMapCommand({
+      projectRoot: dir,
+      mode: 'overwrite',
+      apply: true,
+      api: true,
+    });
+    expect(code).not.toBe(0);
+  });
 });

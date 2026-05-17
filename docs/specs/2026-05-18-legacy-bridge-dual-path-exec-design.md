@@ -88,7 +88,7 @@ interface TaskManifest {
 ```
 agent 模式  forge legacy-bridge <op>          → 建 LlmTask[] → 写 manifest → 退出 0
             [agent 读 manifest、逐个做 LLM、写结果到各 outputPath]
-            forge legacy-bridge <op> --apply  → 校验结果(schema + 输入 hash)
+            forge legacy-bridge <op> --apply  → 校验结果(schema + manifest_hash)
                                               → 跑确定性后处理 → 写最终产物(或 emit 下一轮 manifest)
 api 模式    forge legacy-bridge <op> --api    → 建 LlmTask[] → ApiRunner 调 SDK
                                               → 同确定性后处理 → 写产物(单进程)
@@ -145,7 +145,7 @@ api 模式    forge legacy-bridge <op> --api    → 建 LlmTask[] → ApiRunner 
    - `enforce_sync=true`(默认 agent 模式)→ archive 走到 preflight 点 emit manifest(`gate_context: archive-preflight`)后**停在 gate**(archive 越不过一个自己评不了的 gate)。经 `/forge:archive` 时由 slash/skill 自动 fulfill + `forge archive --resume`;裸 CLI 用户看到提示「fulfill manifest 后 `forge archive --resume`」。**同一个 emit+halt,无 agent 检测机制**。
    - `forge archive --api` → sync-check 步骤改由 `ApiRunner` 在本进程内联跑(不 emit manifest、不 halt),供 CI / 无 agent 场景;`--api` 是 archive 命令侧的 flag,对应 §2.3 的 `forge legacy-bridge <op> --api`。
    - `enforce_sync=false` → archive 正常完成,post-archive 点 emit manifest(`gate_context: archive-posthook`,非阻塞);裸 CLI 下不 fulfill 也不影响 archive(本就非阻塞)。
-5. **`forge archive --resume` 的暂停态与 gate 复核**。archive 停在 preflight gate 时写暂停态文件 `forge/.cache/archive-pause-<changeId>.json`(记 changeId + 暂停的 archive 步骤 + 与该 change 绑定的 hash)。`forge archive --resume` 读它定位 changeId 与续跑点。**gate 不靠「token 信任」复核** —— `--resume` 直接对 `forge/legacy-sync-state/<changeId>.yaml` 重跑确定性 `hasCriticalPending`:仍有 critical pending → 拒绝 resume(等价 preflight 的 exit 2);干净 → 续跑 archive 余下步骤。gate 在 resume 处**幂等重评**,不存在「绕过 `--apply` 直接 resume」的偷懒空间。(`--resume-summary` 是既有的另一个独立 flag,与本机制不冲突。)
+5. **`forge archive --resume` 的暂停态、产物绑定与 gate 复核**。archive 停在 preflight gate 时写暂停态文件 `forge/.cache/archive-pause-<changeId>.json`,记 changeId + 暂停的 archive 步骤 + **本次 preflight emit 的 sync-check manifest 的 `manifest_hash`**。`sync-check --apply` 产 `forge/legacy-sync-state/<changeId>.yaml` 时,把它消费的 manifest 的 `manifest_hash` 一并写进 sync-state 的 `produced_from` 字段。`forge archive --resume` 复核两件事,**缺一即拒绝**:① sync-state 的 `produced_from` == 暂停态记录的 `manifest_hash`(**证明 sync-state 确实由本次 preflight 的 `--apply` 产生,堵掉手写一份干净 sync-state 绕过 `--apply` 的偷懒**);② 对 sync-state 重跑确定性 `hasCriticalPending` —— 仍有 critical pending → 拒绝(等价 preflight exit 2)。两项都过才续跑 archive 余下步骤。gate 在 resume 处**幂等重评**且**绑定产物来源**。(`--resume-summary` 是既有的另一个独立 flag,与本机制不冲突。)
 6. **`allow_llm_calls=false`** → 两模式都 graceful skip(不变)。
 
 ---
@@ -153,7 +153,7 @@ api 模式    forge legacy-bridge <op> --api    → 建 LlmTask[] → ApiRunner 
 ## 5. opt-in / redact / 默认翻转
 
 - **opt-in gate 适用两模式**。`allow_llm_calls` + `--acknowledge-data-transfer` ack 含义泛化为「本命令会把老文档(含 `contains_customer_data` 锚点)交给 LLM —— 不论 agent 还是 API」。agent 模式同样过 gate;`allow_llm_calls=false` 两模式都 graceful skip。
-- **redact 在两模式都跑**。CLI 在**写 manifest 前**就 redact 输入 bundle —— agent 永远拿不到未脱敏的 secret;api 模式在调 SDK 前 redact(现状)。CLI 数据传输声明随模式变:api 印 `→ sending N bytes to Anthropic API`;agent 印 `→ N bytes(已 redact)prepared for agent fulfillment`。
+- **redact 在两模式都跑,并补齐现状盲区**。CLI 在**写 manifest 前 / 调 SDK 前**对**整个输入 bundle**做 redact —— agent 与 API 都拿不到未脱敏 secret。**注意现状不一致**:`mapper` 的文件 preview 已 redact,但 `sync-check` 当前只 redact anchor 文本、`changeContext`(change 的 proposal/specs/design 合并文本)**未 redact 就进了 prompt**(`sync-check.ts:71` / `:104`)。双路径化把 redact 统一成「对全部输入(含 `changeContext`)脱敏」,顺带修掉这个现状盲区。CLI 数据传输声明随模式变:api 印 `→ sending N bytes to Anthropic API`;agent 印 `→ N bytes(已 redact)prepared for agent fulfillment`。
 - **默认翻转 + 迁移**。四命令从 API-only 翻成 **agent 默认**,`--api` 切回。破坏性说明:现有靠 `forge legacy-bridge map` 进程内出活的脚本 / CI,现在拿到的是 manifest。缓解:整个 legacy-bridge 本就锁在 `allow_llm_calls` opt-in 后(v0.2、用户基数小),爆炸半径有限;`CHANGELOG.md` + `docs/legacy-bridge.md` 明确标 breaking。
 
 ---
@@ -171,7 +171,7 @@ api 模式    forge legacy-bridge <op> --api    → 建 LlmTask[] → ApiRunner 
 manifest 设计天然可测,三层各自独立测,不需真调 API:
 
 - **命令 prep(确定性)** → 断言 emit 的 manifest 内容(文件清单 / prompt / 输入 hash)。
-- **`--apply`** → 喂 fixture 结果文件 → 断言最终产物;含输入 hash 不匹配的漂移检测用例。
+- **`--apply`** → 喂 fixture 结果文件 → 断言最终产物;含 `manifest_hash` 不匹配的篡改检测用例。
 - **`ApiRunner`** → 复用现有注入式 client 做 mock(`tests/core/legacy-bridge/` 既有 fixture 模式)。
 - **§3.1 regenerate 2 轮** → 测轮1 `--apply` 正确 emit 轮2 manifest;轮2 `--apply` 保真率阈值 gate 的达标 / 不达标 / `.partial` 三分支。
 - **§4 sync-check × archive** → 测裸 CLI + `enforce_sync=true` 在 preflight gate emit manifest + halt(非特判报错);`forge archive --resume` 对仍有 critical pending 的 sync-state 拒绝 resume;`/forge:archive` 编排路径的 e2e。
@@ -190,7 +190,7 @@ manifest 设计天然可测,三层各自独立测,不需真调 API:
 | `src/core/legacy-bridge/indexer.ts`(改)        | 同上                                                                                       |
 | `src/core/legacy-bridge/regenerator.ts`(改)    | 同上;多 `LlmTask`、2 轮流                                                                  |
 | `src/core/legacy-bridge/quality-judge.ts`(改)  | `extract-facts` / `quality-judge` 成独立 `LlmTask`;`stratifiedSample` + 算分留确定性       |
-| `src/core/legacy-bridge/sync-check.ts`(改)     | 重构产 `LlmTask`;确定性后处理留 `renderDiff*` / `hasCriticalPending`                       |
+| `src/core/legacy-bridge/sync-check.ts`(改)     | 重构产 `LlmTask`;redact 扩到 `changeContext`(补现状盲区);`--apply` 写 `produced_from` 进 sync-state;后处理留 `renderDiff*` / `hasCriticalPending` |
 | `src/cli/commands/legacy-bridge.ts`(改)        | 加 `--apply` / `--api` flag;manifest 接线;默认翻转为 agent                                |
 | `src/cli/commands/archive.ts`(改)              | sync-check 改为 emit manifest;加 `--api` / `--resume`;preflight gate emit+halt;暂停态文件 `archive-pause-<changeId>.json` |
 | `commands/archive.md`(改)                      | 加 sync-check manifest 编排步(改后必 `pnpm build`)                                        |
@@ -229,3 +229,11 @@ manifest 设计天然可测,三层各自独立测,不需真调 API:
 | 2   | MEDIUM   | 真 —— §4.4 提示用 `--api`,但 `--api` 只定义在 `forge legacy-bridge <op>`,archive 命令未定义该 flag                       | §4 点4 明确 `forge archive --api` flag;§8 archive.ts 行补 `--api`                                            |
 | 3   | MEDIUM   | 真 —— `forge archive --resume` 的暂停态持久化 / changeId 绑定 / gate 复核全未定义,不可实现                                 | §4 新增点5:暂停态文件 `archive-pause-<changeId>.json` + `--resume` 对 sync-state 幂等重跑 `hasCriticalPending` 复核 |
 | 4   | LOW      | 真 —— §7 测试仍写「裸 CLI + enforce_sync=true 报错」,与 §4.4 已改的「emit+halt 不特判」矛盾                               | §7 改为「emit manifest + halt(非特判报错)」+ 补 resume 拒绝用例                                              |
+
+### Round 3(v3 → v4):1 HIGH + 1 MEDIUM + 1 LOW,均独立对照代码核实为真,全处置
+
+| #   | severity | 核实结论                                                                                                              | 处置                                                                                                      |
+| --- | -------- | ----------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| 1   | HIGH     | 真 —— §5 称「api 模式调 SDK 前 redact(现状)」,但 `sync-check.ts:71/104` 实测 `changeContext` 原样进 prompt、未 redact | §5 改写:点明 redact 现状不一致(sync-check 未覆盖 `changeContext`),双路径化统一对全部输入 redact、补此盲区 |
+| 2   | MEDIUM   | 真 —— §4.5 resume 只重跑 `hasCriticalPending`,未绑定 sync-state 由本次 `--apply` 产生;手写干净 sync-state 可绕过       | §4 点5:sync-state 写 `produced_from`(manifest_hash),`--resume` 复核它 == 暂停态记录的 hash 才放行        |
+| 3   | LOW      | 真 —— §2.2 已改名 `manifest_hash`,§2.3 / §7 仍残留「输入 hash」措辞                                                    | §2.3 / §7 统一为 `manifest_hash`                                                                          |

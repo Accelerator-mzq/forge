@@ -1580,25 +1580,46 @@ import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { emitPreflightSyncCheck } from '../../../src/cli/commands/archive.js';
+import { emitPreflightSyncCheck, emitPostHookSyncCheck } from '../../../src/cli/commands/archive.js';
 
 let dir: string;
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'arc-'));
-  await mkdir(join(dir, 'forge', 'changes', 'add-pay'), { recursive: true });
+  await mkdir(join(dir, 'forge', 'changes', 'add-pay', 'specs'), { recursive: true });
+  await mkdir(join(dir, 'docs'), { recursive: true });
+  // anchor 用绝对路径 → readAnchorFile 不依赖 cwd;modules 与 change specs/<area> 对齐才有 affected anchor
+  await writeFile(join(dir, 'docs', 'SRS.md'), '# SRS\n支付幂等性约束。', 'utf8');
+  await writeFile(join(dir, 'forge', 'changes', 'add-pay', 'proposal.md'), '# add payment', 'utf8');
+  await writeFile(join(dir, 'forge', 'changes', 'add-pay', 'specs', 'payment.md'), '# payment', 'utf8');
   await writeFile(join(dir, 'forge', 'config.yaml'),
     'legacy_bridge:\n  allow_llm_calls: true\n  enforce_sync: true\n', 'utf8');
+  const srsPath = join(dir, 'docs', 'SRS.md').replace(/\\/g, '/');
   await writeFile(join(dir, 'forge', 'legacy-anchors.yaml'),
-    'schema: forge-legacy-anchor/v1\nanchors:\n  - role: requirements\n    path: docs/SRS.md\n    authoritative: true\n    modules: [payment]\n', 'utf8');
+    `schema: forge-legacy-anchor/v1\nanchors:\n  - role: requirements\n    path: ${JSON.stringify(srsPath)}\n    authoritative: true\n    modules: [payment]\n`, 'utf8');
 });
 afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
 
-describe('emitPreflightSyncCheck', () => {
+describe('emitPreflightSyncCheck(enforce_sync=true)', () => {
   it('agent 模式 emit sync-check manifest(gate_context=archive-preflight)+ 暂停态文件', async () => {
     const r = await emitPreflightSyncCheck(join(dir, 'forge'), 'add-pay');
     expect(r.kind).toBe('halted-for-fulfillment');
     expect(existsSync(join(dir, 'forge', '.cache', 'legacy-bridge-task-sync-check.json'))).toBe(true);
     expect(existsSync(join(dir, 'forge', '.cache', 'archive-pause-add-pay.json'))).toBe(true);
+  });
+});
+
+describe('emitPostHookSyncCheck(enforce_sync=false)', () => {
+  it('post-archive emit posthook manifest,不写暂停态文件', async () => {
+    const forgeRoot = join(dir, 'forge');
+    // posthook 从已归档位置取 change context
+    const today = new Date().toISOString().slice(0, 10);
+    await mkdir(join(forgeRoot, 'changes', 'archive', `${today}-add-pay`, 'specs'), { recursive: true });
+    await writeFile(join(forgeRoot, 'changes', 'archive', `${today}-add-pay`, 'proposal.md'), '# add payment', 'utf8');
+    await writeFile(join(forgeRoot, 'changes', 'archive', `${today}-add-pay`, 'specs', 'payment.md'), '# payment', 'utf8');
+    const r = await emitPostHookSyncCheck(forgeRoot, 'add-pay');
+    expect(r.kind).toBe('emitted');
+    expect(existsSync(join(forgeRoot, '.cache', 'legacy-bridge-task-sync-check.json'))).toBe(true);
+    expect(existsSync(join(forgeRoot, '.cache', 'archive-pause-add-pay.json'))).toBe(false); // posthook 无暂停态
   });
 });
 ```
@@ -1608,27 +1629,60 @@ describe('emitPreflightSyncCheck', () => {
 Run: `pnpm vitest run tests/cli/legacy-bridge/archive-dualpath.test.ts`
 Expected: FAIL —— `emitPreflightSyncCheck is not a function`
 
-- [ ] **Step 3: 在 `archive.ts` 实现 emit + 暂停态**
+- [ ] **Step 3: 在 `archive.ts` 实现 emit(preflight + posthook)+ 暂停态**
 
-把 `runArchivePreflight`(`archive.ts:655-747`)的「`new Anthropic` + `runSyncCheck`」段替换为 `buildSyncCheckTask` + emit:
+把 `runArchivePreflight`(`archive.ts:655-747`)与 `runArchivePostHook`(`archive.ts:749-810`)的「`new Anthropic` + `runSyncCheck`」段,分别替换为调 `emitPreflightSyncCheck` / `emitPostHookSyncCheck`;`--api` 模式两者都走 `ApiRunner` 内联 + `applySyncCheckResult`。两个 emit 函数共用一个抽出的 context 拼装函数:
 
 ```ts
 import { buildSyncCheckTask } from '../../core/legacy-bridge/sync-check.js';
-import { buildManifest, writeManifest, computeManifestHash } from '../../core/legacy-bridge/llm-task.js';
+import { applySyncCheckResult } from '../../core/legacy-bridge/sync-check.js';
+import { AgentHandoffRunner } from '../../core/legacy-bridge/runners.js';
+import type { SyncCheckInput } from '../../core/legacy-bridge/sync-check.js';
+
+/** 抽出:合并现 archive.ts:678-692(preflight)与 :765-777(posthook)两处重复的 change context 拼装。
+ *  archived=false → forge/changes/<id>/;archived=true → forge/changes/archive/<date>-<id>/。
+ *  调用方需已确认 anchors 存在(preflight/posthook 的 gate 检查在调用前)。 */
+async function buildSyncCheckChangeContext(
+  forgeRoot: string,
+  changeId: string,
+  opts: { archived: boolean },
+): Promise<SyncCheckInput> {
+  const config = parseYaml(await readFile(join(forgeRoot, 'config.yaml'), 'utf8')) as ForgeConfig;
+  const anchors = await loadAnchorsFile(forgeRoot);
+  const changesDir = opts.archived
+    ? join(forgeRoot, 'changes', 'archive', `${new Date().toISOString().slice(0, 10)}-${changeId}`)
+    : join(forgeRoot, 'changes', changeId);
+  let changeContext = '';
+  const affectedModules: string[] = [];
+  if (existsSync(join(changesDir, 'proposal.md'))) {
+    changeContext += await readFile(join(changesDir, 'proposal.md'), 'utf8');
+  }
+  const specsDir = join(changesDir, 'specs');
+  if (existsSync(specsDir)) {
+    for (const f of await readdir(specsDir)) {
+      changeContext += `\n## specs/${f}\n${await readFile(join(specsDir, f), 'utf8')}`;
+      affectedModules.push(f.replace(/\.md$/, ''));
+    }
+  }
+  return {
+    changeId, changeContext, affectedModules,
+    anchors: anchors ?? { schema: 'forge-legacy-anchor/v1', anchors: [] },
+    autoResolveCrossAnchor: config.legacy_bridge?.auto_resolve_cross_anchor ?? false,
+    mtimeOf: (p) => { try { return Math.floor(statSync(p).mtimeMs / 1000); } catch { return 0; } },
+  };
+}
 
 /** agent 模式:emit preflight sync-check manifest + 暂停态文件,halt archive */
 export async function emitPreflightSyncCheck(
   forgeRoot: string,
   changeId: string,
 ): Promise<{ kind: 'halted-for-fulfillment' | 'skip' }> {
-  const ctx = await buildSyncCheckChangeContext(forgeRoot, changeId); // 抽自现 preflight 行 678-692
+  const ctx = await buildSyncCheckChangeContext(forgeRoot, changeId, { archived: false });
   const task = await buildSyncCheckTask(ctx, async (p) => (await readAnchorFile(p)).text);
-  if (!task) return { kind: 'skip' }; // 无 affected anchor
-  const manifest = buildManifest({
-    op: 'sync-check', round: 1, tasks: [task], forgeVersion: FORGE_VERSION,
-    meta: { gate_context: 'archive-preflight', change_id: changeId },
-  });
-  await writeManifest(forgeRoot, manifest);
+  if (!task) return { kind: 'skip' }; // 无 affected anchor / 全部读取失败
+  const manifest = await new AgentHandoffRunner(forgeRoot, FORGE_VERSION).emit(
+    'sync-check', 1, [task], { gate_context: 'archive-preflight', change_id: changeId },
+  );
   await mkdir(join(forgeRoot, '.cache'), { recursive: true });
   await writeFile(
     join(forgeRoot, '.cache', `archive-pause-${changeId}.json`),
@@ -1637,9 +1691,23 @@ export async function emitPreflightSyncCheck(
   );
   return { kind: 'halted-for-fulfillment' };
 }
+
+/** agent 模式:enforce_sync=false 时 post-archive emit sync-check manifest(非阻塞,无暂停态) */
+export async function emitPostHookSyncCheck(
+  forgeRoot: string,
+  changeId: string,
+): Promise<{ kind: 'emitted' | 'skip' }> {
+  const ctx = await buildSyncCheckChangeContext(forgeRoot, changeId, { archived: true });
+  const task = await buildSyncCheckTask(ctx, async (p) => (await readAnchorFile(p)).text);
+  if (!task) return { kind: 'skip' };
+  await new AgentHandoffRunner(forgeRoot, FORGE_VERSION).emit(
+    'sync-check', 1, [task], { gate_context: 'archive-posthook', change_id: changeId },
+  );
+  return { kind: 'emitted' }; // 非阻塞:archive 已完成;fulfill 后跑 sync-check --apply 出报告
+}
 ```
 
-加 `--api` flag 时走 `ApiRunner` 内联 + `applySyncCheckResult`;加 `--resume`:读暂停态 → 读 `legacy-sync-state/<changeId>.yaml` → 校 `produced_from === 暂停态.manifest_hash` 且 `hasCriticalPending` 为 false → 续跑,否则拒绝(见 Task 6.4)。
+`--resume` 见 Task 6.4。preflight/posthook 的 opt-in gate(`allow_llm_calls` / `enforce_sync` / anchors 存在性)沿用现 `runArchivePreflight`/`runArchivePostHook` 的前置检查,在调 emit 函数前。
 
 - [ ] **Step 4: 跑测试确认通过**
 
@@ -1650,7 +1718,7 @@ Expected: PASS
 
 ```bash
 git add src/cli/commands/archive.ts tests/cli/legacy-bridge/archive-dualpath.test.ts
-git commit -m "feat(archive): preflight sync-check 改 emit manifest + 暂停态文件"
+git commit -m "feat(archive): sync-check 改 emit manifest(preflight + posthook)+ 暂停态文件"
 ```
 
 ### Task 6.4:`forge archive --resume` 的 gate 复核
@@ -1900,3 +1968,10 @@ pnpm format:check && pnpm lint && pnpm typecheck && pnpm build && pnpm test
 | --- | -------- | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | F9  | MEDIUM   | 真 —— Task 6.1 `runMapCommand` 的 `--apply`/`--api` 调 `applyMapResult` 未传 `existing`,merge 模式退化成 overwrite、丢用户已审 anchors | Task 6.1 两分支加 `loadAnchorsFile` 载 `existing`、传 `applyMapResult`                         |
 | F10 | MEDIUM   | 真 —— `buildIndexTask` / `buildSyncCheckTask` 可返回 `null` task,Task 6.2 未定义 CLI 在 `task===null` 时的分支 | Task 6.2 Step 3 显式定义 index / sync-check 的 `task===null` 分支(直接渲染 / 跳过,不 emit) |
+
+### Round 4:1 MEDIUM,独立对照核实为真,全处置(顺带修两处自查发现的关联问题)
+
+| #   | severity | 核实结论                                                                                              | 处置                                                                                          |
+| --- | -------- | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| F11 | MEDIUM   | 真 —— Task 6.3 intro 称 preflight/posthook 都改造,但 Step 1/3 只实现 `emitPreflightSyncCheck`,`archive-posthook` emit 路径缺失 | Task 6.3 加 `emitPostHookSyncCheck` 实现 + 测试;抽 `buildSyncCheckChangeContext` 共用(`archived` 参数) |
+| 关联 | —        | 自查:Task 6.3 测试 fixture 缺 `specs/` 与锚点文件,preflight 测试跑不出 `halted-for-fulfillment`;`emitPreflight` 未用 `AgentHandoffRunner` | fixture 补 `specs/payment.md` + 绝对路径锚点;`emitPreflight` 改用 `AgentHandoffRunner`(与 Task 6.1 一致) |

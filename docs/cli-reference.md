@@ -1,6 +1,13 @@
 # Forge CLI Reference
 
-> v0.3 共 7 个公开命令:`forge init / upgrade / validate / archive / config / update / legacy-bridge`。`forge init` 标记 deprecated(v0.4 移除),新项目改用 plugin install。
+> forge CLI 共 16 个子命令(`src/cli/index.ts` commander 注册)。下表按用途分组;`forge init` 已 deprecated(v0.4 移除),新项目改用 plugin install。
+
+| 分组                 | 命令                                                                    |
+| -------------------- | ----------------------------------------------------------------------- |
+| 产物校验与归档       | `validate` · `archive`                                                  |
+| 初始化 / 迁移 / 升级 | `init`(deprecated) · `update` · `migrate` · `upgrade` · `legacy-bridge` |
+| 工作流内部 helper    | `ack` · `evidence` · `finding` · `scope` · `preflight` · `backlog`      |
+| 配置与诊断           | `config` · `monitor` · `stage-extensions`                               |
 
 ## `forge upgrade`(v0.3 新增)
 
@@ -45,8 +52,43 @@ forge upgrade --gc
 
 ---
 
+## `forge migrate`(v0.4 新增)
 
-v0.3 共 7 个公开命令:`init`(**deprecated**)/ `upgrade` / `update` / `config` / `validate` / `archive` / `legacy-bridge`。新项目改用 plugin install,`forge init` v0.4 移除。
+把已有的 OpenSpec / superpowers 项目仓库搬运到 forge 工作目录(`forge/`)。**不属于主工作流**,是一次性 onboarding 命令,无对应 slash 命令。命令在当前工作目录探测源、把产物写进 cwd 下的 `forge/`,**默认不动源目录**。
+
+```
+forge migrate <source> [选项]
+```
+
+`<source>` 必填,只接受 `openspec` 或 `superpowers`(不自动猜)。
+
+### 选项
+
+| 选项                    | 说明                                                                                  |
+| ----------------------- | ------------------------------------------------------------------------------------- |
+| `--no-regenerate`       | 不调 LLM 补缺件;缺件标 `[needs-fix]`,不阻塞 cp                                       |
+| `--dry-run`             | 预演不写 `forge/`。**注意:当前实现仅打印扫描文件数,完整 plan 预览尚未落地**          |
+| `--force`               | 冲突时旧目标 mv 到 `forge/.forge-trash/<ts>/`(留 24h)再覆盖;不加则冲突件加 `--imported-N` 后缀 |
+| `--archive-list <file>` | 显式指定哪些 slug 进 archive,跳过自动推测                                             |
+| `--no-interactive`      | 跳过 active/archive 交互确认,全用推测默认值                                           |
+| `--redact-rules <file>` | `--regenerate` 时附加自定义 redact 规则                                               |
+
+`--regenerate` 是默认行为(无对应 flag,用 `--no-regenerate` 关闭)。它调 LLM 补 proposal/specs,需要 `ANTHROPIC_API_KEY`;缺 key 会 warn 并退化为 `--no-regenerate`。预估成本 ≥ $5 时要求 ack。
+
+### 退出码
+
+| 码  | 含义                                                            |
+| --- | --------------------------------------------------------------- |
+| 0   | 成功                                                            |
+| 1   | `forge/migrate.lock` 被另一进程占用                             |
+| 2   | 源目录未找到 / 源为空 / `<source>` 参数非法                     |
+| 4   | unsafe-slug 占比过高 / archive 完整性不可达 / cost 拒签 / 冲突后缀耗尽 |
+
+### 产物
+
+成功后写 `forge/migrate-report.md`(统计报告:ops / conflicts / downgrades 计数 + Plan 表 + cleanup 建议)与 `forge/migrate-trace.json`(机器可读 trace)。
+
+完整流程、transformer 规则、archive 推测信号、FAQ 见 [`docs/migration/from-openspec.md`](migration/from-openspec.md) 与 [`docs/migration/from-superpowers.md`](migration/from-superpowers.md)。
 
 ## `forge init`(deprecated v0.3,v0.4 移除)
 
@@ -379,6 +421,94 @@ forge stage-extensions run --stage review --change-id c1 --extension codex-revie
 # 收敛趋势分析
 forge stage-extensions analyze-trend --history '[{"round":1,"block_count":5},{"round":2,"block_count":3},{"round":3,"block_count":1}]'
 ```
+
+## 工作流内部 helper 命令
+
+以下 6 个命令主要由 slash 命令模板(`/forge:apply` / `/forge:verify` / `/forge:review` / `/forge:ack-confirm` 等)在工作流内部调用,一般不需手敲。列在此处供排障与理解协议。
+
+### `forge ack`
+
+ack 两步确认协议(反向加固):WARNING finding 必须走 AI propose + User confirm 两步,AI 不能自 ack。
+
+```
+forge ack propose <changeId> --finding <id> --action <type> [--rationale <text>] [--target-severity <sev>]
+forge ack confirm <changeId> <findingId> [--target-severity <sev>]
+forge ack reject  <changeId> <findingId> --rationale <text>
+```
+
+| 子命令    | 行为                                                                  | 退出码                                                          |
+| --------- | --------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `propose` | AI 写 pending ack YAML(`--action` 如 `ack-warning` / `ack-critical` / `resign-c-simcode`) | **1 = 已写 pending(正常路径,提示 user 去 confirm)**;2 = CI 模式拒绝(`CI=true`) |
+| `confirm` | User 确认,写入 `ack-log.jsonl` 并删 pending                          | 0 成功;2 = 无 pending / pending YAML 损坏 / `--target-severity` 非法 |
+| `reject`  | User 拒绝,写 reject 日志并删 pending                                 | 0 成功;2 = 无 pending / YAML 损坏                              |
+
+注意:`propose` 成功时 **exit 1** 是有意设计的信号(pending 已写、待 user 操作),不是错误。
+
+### `forge evidence`
+
+记录 TDD / verify / review 过程证据到 `ack-log.jsonl` + `.evidence/process-evidence.staging.yaml`,最后 `freeze` 凝固进 marker。由 apply / verify / review slash 模板调用。
+
+```
+forge evidence record-tdd    <changeId> --task <ref> [--red-commit <sha>] --green-commit <sha> [...]
+forge evidence record-verify <changeId> --task-refs <list> --scope <per-task|change-level> --report <path> [...]
+forge evidence record-review <changeId> --task <ref> --implementer-commit <sha> [...]
+forge evidence freeze        <changeId> --kind <verify|review> [--marker <path>]
+```
+
+`record-*` 三个子命令各有大量可选证据字段(timestamp / log / report / hash / exit code 等),完整列表见 `forge evidence <sub> --help`。`freeze` 把 staging 凝固进 `.verify-passed` / `.review-passed` marker 并校验 `staging_hash`。
+
+退出码:0 成功;1 = staging / marker 缺失、`staging_hash` 不匹配、CRITICAL 不变量失败;2 = 参数无效(JSON 解析失败 / `--scope` 或 `--kind` 取值非法)。
+
+### `forge finding`
+
+```
+<FindingHashPayload JSON> | forge finding hash
+```
+
+从 stdin 读 8 字段 `FindingHashPayload` JSON(`content_hash` / `git_head` / `dimension` / `check_type` / `severity` / `automated` / `evidence` / `recommendation`),按 JCS 规范算 `finding_hash` 输出到 stdout(64-hex)。供 verify 阶段写 marker 用,避免 AI 自行实现 JCS 序列化。
+
+退出码:0 成功;1 = stdin 非合法 JSON / 缺必填字段;2 = io 错误。
+
+### `forge scope`
+
+```
+forge scope scan-archived-followups <changeId>
+```
+
+扫 `forge/changes/archive/` 里的 out-of-scope / future-work / non-goal YAML 块,把仍 active 的条目以 JSON 输出到 stdout(供新 change 的 propose 阶段参考)。`<changeId>` 仅用于日志显示,不参与扫描;坏块逐条 warn 到 stderr。
+
+退出码:0 成功;2 = 扫描失败。
+
+### `forge preflight`
+
+```
+forge preflight branch-check [changeId] [--allow-protected-branch]
+```
+
+检查当前 git 分支是否为保护分支(`forge/config.yaml#protected_branches`,缺省用内置默认),防在 main/master 上误改。
+
+| 情况                                     | 结果                                              |
+| ---------------------------------------- | ------------------------------------------------- |
+| 非 git 项目                              | graceful skip,exit 0                             |
+| 当前分支非保护分支                       | exit 0                                            |
+| 保护分支 + `--allow-protected-branch`    | exit 0,stderr 留 warning                         |
+| 保护分支(默认)                         | exit 2,stderr 建议 `git checkout -b feature/<changeId>` |
+| `forge/config.yaml` 解析失败             | exit 2                                            |
+
+### `forge backlog`
+
+生成 / 查询 `forge/backlog/` 注册表(汇总各 change 的未决项)。
+
+```
+forge backlog [--check]
+forge backlog list
+```
+
+| 形式                      | 行为                                  | 退出码                       |
+| ------------------------- | ------------------------------------- | ---------------------------- |
+| `forge backlog`           | 重生成 `forge/backlog/active.md`      | 0 成功;2 错误               |
+| `forge backlog --check`   | 只比对磁盘与重生成结果,不写盘        | 0 一致;1 陈旧;2 错误       |
+| `forge backlog list`      | 把当前未决 backlog 打到 stdout,不落盘 | 0 成功;2 错误               |
 
 ## 错误退出码(全命令通用)
 

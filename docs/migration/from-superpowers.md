@@ -75,13 +75,13 @@ cat forge/migrate-report.md
 
 ### 4.3 `--dry-run`
 
-只打印 plan,不写 `forge/`。
+> ⚠️ **当前实现是占位 stub**(同 [`from-openspec.md` §2.3](from-openspec.md))。
 
 ```bash
 forge migrate superpowers --dry-run
 ```
 
-适用场景:迁移前 sanity check,确认配对结果(design + plan 匹配数、unrecognized 文件列表)。
+实际只打印一行 `scanned <N> files` 计数即 exit 0,**不输出配对结果 / unrecognized 文件列表 / plan 表**。要在迁移前确认 design+plan 配对结果,目前先跑 `--no-regenerate` 看 `forge/migrate-report.md`。
 
 ## 5. transformer 规则速查
 
@@ -173,6 +173,10 @@ LLM 从 design + tasks 推导 proposal,fidelity 阈值 0.6 下允许一定程度
 - 直接编辑 `forge/changes/<slug>/proposal.md`
 - 或重跑 `forge migrate superpowers --regenerate`(会覆盖现有 proposal,带 --force 才覆盖已有 forge change)
 
+### 8.8 项目里同时有 superpowers 和 openspec 怎么办?
+
+`forge migrate` 一次只吃一个 source,需串行跑两遍(`forge migrate openspec` 与 `forge migrate superpowers`)。**两遍之间必须备份 `forge/migrate-report.md` 与 `migrate-trace.json`** —— 它们是固定文件名,第二遍会覆盖第一遍。完整操作顺序与产物共存说明见 [`from-openspec.md` §7](from-openspec.md#7-项目同时含-openspec-与-superpowers)。
+
 ## 9. cleanup + rollback
 
 ### 9.1 cleanup
@@ -215,3 +219,4 @@ cp 阶段 crash 处理同 from-openspec.md §6。
 - bundled 决策(M16):spec
 - fidelity 0.6 决策(M15):spec
 - OpenSpec 迁移:[`docs/migration/from-openspec.md`](from-openspec.md)
+- 已有项目接入 forge 端到端教程:[`docs/migration/from-existing-project.md`](from-existing-project.md)

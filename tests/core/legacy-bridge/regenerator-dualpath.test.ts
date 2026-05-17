@@ -17,7 +17,11 @@ describe('buildRegenerateRound1Tasks', () => {
       async () => '老 SRS 正文,含密钥 AKIA1234567890ABCDEF',
     );
     expect(tasks.map((t) => t.op).sort()).toEqual(['extract-facts', 'regenerate']);
-    for (const t of tasks) expect(t.prompt).not.toContain('AKIA1234567890ABCDEF'); // redact
+    for (const t of tasks) {
+      expect(t.prompt).not.toContain('AKIA1234567890ABCDEF'); // prompt 已 redact
+      // inputs 同样写进 manifest 交给 agent —— 也必须是 masked 内容
+      expect(t.inputs[0]!.content).not.toContain('AKIA1234567890ABCDEF');
+    }
   });
 
   it('metadata-only role 抛 RegenOutputError', async () => {

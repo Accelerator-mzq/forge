@@ -51,7 +51,11 @@ import {
 } from '../../core/legacy-bridge/indexer.js';
 import { FORGE_VERSION } from '../../index.js';
 import type { ForgeConfig } from '../../core/schema/types.js';
-import type { LegacyAnchorRole, RegenQualityFile } from '../../core/legacy-bridge/types.js';
+import type {
+  LegacyAnchorRole,
+  RegenQualityFile,
+  LegacyAnchorsFile,
+} from '../../core/legacy-bridge/types.js';
 import type { RegenerateClient } from '../../core/legacy-bridge/regenerator.js';
 import type { JudgeClient } from '../../core/legacy-bridge/quality-judge.js';
 
@@ -76,7 +80,18 @@ export async function assertLlmOptIn(
       reason: 'legacy_bridge.allow_llm_calls 未开启 — 跳过(graceful skip)',
     };
   }
-  const anchors = await loadAnchorsFile(forgeRoot).catch(() => null);
+  // loadAnchorsFile 对「文件不存在」已返回 null;corrupt(LegacyAnchorsError)不能静默吞 ——
+  // 否则 contains_customer_data 的 GDPR 二次确认门会被绕过
+  let anchors: LegacyAnchorsFile | null;
+  try {
+    anchors = await loadAnchorsFile(forgeRoot);
+  } catch (e) {
+    return {
+      ok: false,
+      graceful: false,
+      reason: `legacy-anchors.yaml 解析失败:${(e as Error).message};修复后重试`,
+    };
+  }
   const ack = await checkAck(
     forgeRoot,
     config,
@@ -86,7 +101,7 @@ export async function assertLlmOptIn(
     return {
       ok: false,
       graceful: false,
-      reason: `LLM 数据传输 ack 未就绪:${ack.reason};跑 forge legacy-bridge --acknowledge-data-transfer`,
+      reason: `LLM 数据传输 ack 未就绪:${ack.reason ?? '(unknown)'};跑 forge legacy-bridge --acknowledge-data-transfer`,
     };
   return { ok: true };
 }

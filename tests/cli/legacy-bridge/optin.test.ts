@@ -15,15 +15,42 @@ afterEach(async () => {
 });
 
 describe('assertLlmOptIn', () => {
-  it('config 无 allow_llm_calls → not-ok,reason 提示该字段', async () => {
+  it('config 无 allow_llm_calls → not-ok,reason 提示该字段,graceful=true(合法 opt-out)', async () => {
     await writeFile(join(dir, 'forge', 'config.yaml'), 'legacy_bridge: {}\n', 'utf8');
     const r = await assertLlmOptIn(join(dir, 'forge'));
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toMatch(/allow_llm_calls/);
+    if (!r.ok) {
+      expect(r.reason).toMatch(/allow_llm_calls/);
+      expect(r.graceful).toBe(true);
+    }
   });
 
-  it('config.yaml 缺失 → not-ok', async () => {
+  it('config.yaml 缺失 → not-ok,graceful=false(error)', async () => {
     const r = await assertLlmOptIn(join(dir, 'forge'));
     expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.graceful).toBe(false);
+  });
+
+  it('config.yaml 格式错误 → not-ok,graceful=false', async () => {
+    await writeFile(join(dir, 'forge', 'config.yaml'), 'legacy_bridge: [unclosed\n', 'utf8');
+    const r = await assertLlmOptIn(join(dir, 'forge'));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.graceful).toBe(false);
+  });
+
+  it('legacy-anchors.yaml 损坏 → not-ok,graceful=false(不静默绕过 GDPR 门)', async () => {
+    await writeFile(
+      join(dir, 'forge', 'config.yaml'),
+      'legacy_bridge:\n  allow_llm_calls: true\n',
+      'utf8',
+    );
+    await writeFile(
+      join(dir, 'forge', 'legacy-anchors.yaml'),
+      'schema: forge-legacy-anchor/v1\nanchors: [unclosed\n',
+      'utf8',
+    );
+    const r = await assertLlmOptIn(join(dir, 'forge'));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.graceful).toBe(false);
   });
 });

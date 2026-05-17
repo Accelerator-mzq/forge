@@ -35,7 +35,7 @@ digraph when_to_use {
 Dispatch 前,检查环境中是否存在 `forge:subagent-driven-discipline`。
 
 - **若存在** → 立即调用(`Skill(forge:subagent-driven-discipline)`)再开始 dispatch。它是本 skill 内联摘要的权威完整版 —— 包含完整的 subagent task-type taxonomy(§1)、cheap-model 可靠性 playbook、cross-verify 协议(§3.2)、inline-fix vs round-2 decision tree(§3.3)、以及 Trigger Type Matrix retrospect。以其 taxonomy / playbook 驱动 model-tier 选型和 review discipline。
-- **若不存在** → 本 skill 内联的 model 选型 matrix / cross-verify 五类 / decision tree 已自足;仅凭本 skill 继续执行即可。
+- **若不存在** → model tier 选型回退到本 skill `## Model Selection` 的粗粒度直觉(cheap↔`haiku` / standard↔`sonnet` / most-capable↔`opus`);cross-verify 五类与 decision tree 仍由本 skill 内联段自足(这两段本就 harness/模型无关)。仅凭本 skill 继续执行即可。
 
 ## The Process
 
@@ -107,16 +107,12 @@ Subagents are dispatched via the **Task tool**(not `spawn_agent` or other invent
 ```
 Use Task tool with:
   subagent_type: <implementer | spec_reviewer | code_quality_reviewer>
-  model: <haiku | sonnet | opus>  # 按 task subtype 选;不传则 inherit 父 session 浪费 cost
+  model: <haiku | sonnet | opus>  # 按 task subtype 选(实际模型见 forge:subagent-driven-discipline 的「Model Tier 映射」段);不传则 inherit 父 session 浪费 cost
   description: <3-5 word task summary>
   prompt: <full task text + context + DoD + verify checklist>
 ```
 
-**model 选型 matrix**(沿 forge:subagent-driven-discipline §1 taxonomy):
-
-- **`haiku`** — Mechanical tasks(完整 inline code + 全 fence test 名 + commit message 模板;无 design judgment)
-- **`sonnet`** — Multi-file integration / Pattern-matching / 所有 review(spec_reviewer + code_quality_reviewer + adversarial review)
-- **`opus`** — Architectural / 跨子系统 / 新 ABC / design 类(MANDATORY,绝对原则)
+**model 选型**:每个 task 的 model tier 依据 `forge:subagent-driven-discipline` §1 task-type taxonomy。§1 的 `haiku`/`sonnet`/`opus` 是 tier 标签 —— 在 Claude Code 等直接传 `model` 参数的 harness 上,实际模型经 discipline 的 `model_tiers` 配置解析(默认恒等);在 OpenCode/Codex 等 harness 上,经 subagent agent 定义的 `model:` 解析。本 skill 不单列 model tier 摘要,以免与 discipline §1 漂移。粗粒度直觉见上方 `## Model Selection`。
 
 **fresh subagent per task 原则**:每个 task 独立 dispatch,**不共享 context**(避免 context bloat + 责任不清);subagent return 后 controller cross-verify(`§3.2` 五类 verify 命令)再决策。
 

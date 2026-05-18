@@ -5,12 +5,25 @@
 //
 // 沿 transaction.test.ts 同模式 — tmpdir 搭 forge skeleton + 跑 archiveTransaction
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { parse as parseYaml } from 'yaml';
+
+// —— mock specs-sync:让 Sync 失败注入 case 可以模拟 applyDeltas 失败 ——
+// 注意:vi.mock 必须在 import 之前,vitest 会提升它
+vi.mock('../../../src/core/specs-sync/index.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/core/specs-sync/index.js')>();
+  return {
+    ...actual,
+    // applyDeltas 默认使用真实实现;失败注入 case 通过 vi.spyOn 覆盖
+    applyDeltas: actual.applyDeltas,
+  };
+});
+
 import { archiveTransaction } from '../../../src/core/archive/transaction.js';
+import * as specsSync from '../../../src/core/specs-sync/index.js';
 import {
   ARCHIVE_SUMMARY_VERSION,
   PLACEHOLDER_PROCESS_EVIDENCE_SUMMARY,
@@ -226,14 +239,73 @@ describe('archiveTransaction with archiveSummary', () => {
     }
   });
 
-  // v2 MAJOR 2:三类失败注入留 it.todo(rename / Backup / Sync 失败),
-  // 由 9z release plan unskip(同步加 3 个 9e1 todo 到 release-blocker-attack-path.test.ts,
-  // EXPECTED_TODO_COUNT_SOFT 2 → 5)
-  it.todo(
-    'rename .tmp → 正式名失败(archive dir 注入)→ archive 数据已 move,提示用户走 --resume-summary(v2 MAJOR 2)',
-  );
-  it.todo('Backup 失败 → 反向 Move + 回滚 unlink summary + 抛错(v2 MAJOR 2)');
-  it.todo(
-    'Sync 失败 → 反向 Move + 回滚 unlink summary + restore specs from backup + 抛错(v2 MAJOR 2)',
-  );
+  // v2 MAJOR 2:三类失败注入(rename / Backup / Sync 失败)
+  // 由 9z release plan unskip(plan-9e1 Task 3 Block A)
+  afterEach(() => vi.restoreAllMocks());
+
+  it('rename .tmp → 正式名失败 → 抛 --resume-summary 提示(archive 数据已 move)', async () => {
+    const ctx = setupForgeRoot();
+    try {
+      // 注入:在 source changeDir 预建 archive_summary.yaml 为「目录」。
+      // Move 把它一起搬到 archive 目录;阶段 1.5 rename(.tmp.yaml → archive_summary.yaml)
+      // 目标已是目录 → rename 失败。
+      mkdirSync(join(ctx.changeDir, 'archive_summary.yaml'), { recursive: true });
+      await expect(
+        archiveTransaction({
+          forgeRoot: ctx.forgeRoot,
+          changeId: 'add-x',
+          archiveDate: '2026-05-12',
+          archiveSummary: buildSummary('add-x'),
+        }),
+      ).rejects.toThrow(/--resume-summary/);
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  it('Backup 失败 → 反向 Move + unlink summary + 抛 Backup failed', async () => {
+    const ctx = setupForgeRoot();
+    try {
+      // 注入:backupDir 路径预建为普通文件,cp(dir→file) 失败(沿 transaction.test.ts P2.2)
+      const backupDir = join(ctx.forgeRoot, '.cache', `archive-sync-backup-${process.pid}`);
+      writeFileSync(backupDir, 'blocker', 'utf8');
+      await expect(
+        archiveTransaction({
+          forgeRoot: ctx.forgeRoot,
+          changeId: 'add-x',
+          archiveDate: '2026-05-12',
+          archiveSummary: buildSummary('add-x'),
+        }),
+      ).rejects.toThrow(/Backup failed/);
+      // 反向 Move:source changeDir 恢复
+      expect(existsSync(ctx.changeDir)).toBe(true);
+      // unlink summary:source 内不残留 archive_summary(.tmp).yaml
+      expect(existsSync(join(ctx.changeDir, 'archive_summary.yaml'))).toBe(false);
+      expect(existsSync(join(ctx.changeDir, 'archive_summary.tmp.yaml'))).toBe(false);
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  it('Sync 失败 → 反向 Move + restore specs + unlink summary + 抛 rolled back', async () => {
+    const ctx = setupForgeRoot();
+    try {
+      writeFileSync(join(ctx.forgeRoot, 'specs', 'existing.md'), '# Existing\n', 'utf8');
+      vi.spyOn(specsSync, 'applyDeltas').mockRejectedValueOnce(new Error('disk full (simulated)'));
+      await expect(
+        archiveTransaction({
+          forgeRoot: ctx.forgeRoot,
+          changeId: 'add-x',
+          archiveDate: '2026-05-12',
+          archiveSummary: buildSummary('add-x'),
+        }),
+      ).rejects.toThrow(/rolled back/);
+      expect(existsSync(ctx.changeDir)).toBe(true);
+      expect(existsSync(join(ctx.forgeRoot, 'specs', 'existing.md'))).toBe(true);
+      expect(existsSync(join(ctx.changeDir, 'archive_summary.yaml'))).toBe(false);
+      expect(existsSync(join(ctx.changeDir, 'archive_summary.tmp.yaml'))).toBe(false);
+    } finally {
+      ctx.cleanup();
+    }
+  });
 });

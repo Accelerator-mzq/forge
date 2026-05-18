@@ -17,7 +17,29 @@
 // 9e1 plan 若先于 9z 完成且接入 git diff parser,可直接在 9e1 实施同 attack 路径,
 // 本文件相应 unskip + 改 `EXPECTED_TODO_COUNT_SOFT`(可选)。
 
-import { describe, it } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+
+// —— mock specs-sync:让 Sync 失败注入 case 可以模拟 applyDeltas 失败 ——
+// 注意:vi.mock 必须在 import 之前,vitest 会提升它(沿 transaction.test.ts:19-26)
+vi.mock('../../src/core/specs-sync/index.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/core/specs-sync/index.js')>();
+  return {
+    ...actual,
+    // applyDeltas 默认使用真实实现;失败注入 case 通过 vi.spyOn 覆盖
+    applyDeltas: actual.applyDeltas,
+  };
+});
+
+import { archiveTransaction } from '../../src/core/archive/transaction.js';
+import * as specsSync from '../../src/core/specs-sync/index.js';
+import {
+  ARCHIVE_SUMMARY_VERSION,
+  PLACEHOLDER_PROCESS_EVIDENCE_SUMMARY,
+  type ArchiveSummary,
+} from '../../src/core/schemas/archive-summary.js';
 
 describe('release-blocker: pause_decisions option=1/2 attack paths (9z gate)', () => {
   it.todo(
@@ -30,15 +52,98 @@ describe('release-blocker: pause_decisions option=1/2 attack paths (9z gate)', (
 });
 
 describe('release-blocker: 9e1 transaction failure injection paths (9z gate)', () => {
-  it.todo(
-    '9e1 transaction rename .tmp → 正式名失败:archive dir 注入失败 → archive 数据已 move,fence 应明确抛错提示 --resume-summary(plan-9e1 Task 3 v2 MAJOR 2)',
-  );
-  it.todo(
-    '9e1 transaction Backup 失败:反向 Move 后 unlink summary 应清理 source 目录残留(plan-9e1 Task 3 v2 MAJOR 2)',
-  );
-  it.todo(
-    '9e1 transaction Sync 失败:反向 Move + restore specs from backup + unlink summary 应原子回滚(plan-9e1 Task 3 v2 MAJOR 2)',
-  );
+  afterEach(() => vi.restoreAllMocks());
+
+  // —— helper:创建标准 forge skeleton ——
+  function setup() {
+    const tmpRoot = mkdtempSync(join(tmpdir(), 'forge-relblk-tx-'));
+    const forgeRoot = join(tmpRoot, 'forge');
+    mkdirSync(join(forgeRoot, 'changes', 'add-x', 'specs'), { recursive: true });
+    mkdirSync(join(forgeRoot, 'specs'), { recursive: true });
+    mkdirSync(join(forgeRoot, '.cache'), { recursive: true });
+    writeFileSync(join(forgeRoot, 'changes', 'add-x', 'specs', 'x.md'), '# X spec\n', 'utf8');
+    return { tmpRoot, forgeRoot, changeDir: join(forgeRoot, 'changes', 'add-x') };
+  }
+
+  // —— helper:构造最小合法 ArchiveSummary ——
+  function summary(): ArchiveSummary {
+    return {
+      schema: 'forge-archive-summary/v1',
+      version: ARCHIVE_SUMMARY_VERSION,
+      archived_at: '2026-05-12T16:45:00Z',
+      change_id: 'add-x',
+      verify_passed: { verified_invariants: [] },
+      review_passed: { reviewers: ['ai-agent'] },
+      process_evidence_summary: PLACEHOLDER_PROCESS_EVIDENCE_SUMMARY,
+      handoff_to_backlog: [],
+      acked_warnings: [],
+      pending_suggestions: [],
+    };
+  }
+
+  it('9e1 transaction rename .tmp → 正式名失败 → 抛 --resume-summary 提示', async () => {
+    const s = setup();
+    try {
+      // 注入:在 source changeDir 预建 archive_summary.yaml 为「目录」
+      // Move 把它一起搬到 archive 目录;阶段 1.5 rename(.tmp.yaml → archive_summary.yaml)
+      // 目标已是目录 → rename 失败
+      mkdirSync(join(s.changeDir, 'archive_summary.yaml'), { recursive: true });
+      await expect(
+        archiveTransaction({
+          forgeRoot: s.forgeRoot,
+          changeId: 'add-x',
+          archiveDate: '2026-05-12',
+          archiveSummary: summary(),
+        }),
+      ).rejects.toThrow(/--resume-summary/);
+    } finally {
+      rmSync(s.tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('9e1 transaction Backup 失败 → 反向 Move + unlink summary 残留', async () => {
+    const s = setup();
+    try {
+      // 注入:backupDir 路径预建为普通文件,cp(dir→file) 失败
+      writeFileSync(join(s.forgeRoot, '.cache', `archive-sync-backup-${process.pid}`), 'x', 'utf8');
+      await expect(
+        archiveTransaction({
+          forgeRoot: s.forgeRoot,
+          changeId: 'add-x',
+          archiveDate: '2026-05-12',
+          archiveSummary: summary(),
+        }),
+      ).rejects.toThrow(/Backup failed/);
+      // 反向 Move 后 source changeDir 应恢复
+      expect(existsSync(s.changeDir)).toBe(true);
+      // summary .tmp 不应残留在 source
+      expect(existsSync(join(s.changeDir, 'archive_summary.tmp.yaml'))).toBe(false);
+    } finally {
+      rmSync(s.tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('9e1 transaction Sync 失败 → 反向 Move + restore specs + unlink summary 原子回滚', async () => {
+    const s = setup();
+    try {
+      writeFileSync(join(s.forgeRoot, 'specs', 'existing.md'), '# Existing\n', 'utf8');
+      vi.spyOn(specsSync, 'applyDeltas').mockRejectedValueOnce(new Error('sync fail (simulated)'));
+      await expect(
+        archiveTransaction({
+          forgeRoot: s.forgeRoot,
+          changeId: 'add-x',
+          archiveDate: '2026-05-12',
+          archiveSummary: summary(),
+        }),
+      ).rejects.toThrow(/rolled back/);
+      // 反向 Move 后 source changeDir 应恢复
+      expect(existsSync(s.changeDir)).toBe(true);
+      // specs restore:existing.md 应仍存在
+      expect(existsSync(join(s.forgeRoot, 'specs', 'existing.md'))).toBe(true);
+    } finally {
+      rmSync(s.tmpRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('release-blocker: 9j version-retrograde fail-closed git error path (9z gate)', () => {

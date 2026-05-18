@@ -1,5 +1,5 @@
 // tests/cli/legacy-bridge/dualpath.test.ts
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtemp, rm, mkdir, writeFile, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -15,6 +15,73 @@ import { writeAck } from '../../../src/core/legacy-bridge/ack.js';
 import { buildManifest } from '../../../src/core/legacy-bridge/llm-task.js';
 import type { ForgeConfig } from '../../../src/core/schema/types.js';
 import type { LegacyAnchorRole } from '../../../src/core/legacy-bridge/types.js';
+
+// --api 路径需要 mock:Anthropic SDK + forge-eval/load-env
+// regenerate --api 串两轮(regenerate→extract-facts→quality-judge),每轮 messages.create 返回不同内容;
+// 这里用一个能按 prompt 关键词分支的 mock,index/sync-check 也用同一 mock。
+vi.mock('@anthropic-ai/sdk', () => {
+  const Anthropic = vi.fn().mockImplementation(() => ({
+    messages: {
+      create: vi.fn().mockImplementation((args: { messages: Array<{ content: string }> }) => {
+        const prompt = args.messages?.[0]?.content ?? '';
+        // quality-judge:三态判定 → 全 preserved(JSON 数组)
+        if (prompt.includes('三态判定')) {
+          // 抽样数不定,返回足量 preserved(applyRound2 对越界 fact 视 lost,这里给够)
+          return Promise.resolve({
+            content: [
+              { type: 'text', text: JSON.stringify(Array(40).fill({ state: 'preserved' })) },
+            ],
+            usage: { input_tokens: 100, output_tokens: 50 },
+          });
+        }
+        // extract-facts:抽取关键事实 → JSON 数组
+        if (prompt.includes('抽取关键事实')) {
+          return Promise.resolve({
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify([
+                  { text: 'Order 表 user_id 字段非空', section: '§1', critical: true },
+                  { text: 'Idempotency-Key 头部强制', section: '§1', critical: false },
+                ]),
+              },
+            ],
+            usage: { input_tokens: 100, output_tokens: 50 },
+          });
+        }
+        // sync-check:5 档差异 → 空数组(无更新)
+        if (prompt.includes('sync 审计员')) {
+          return Promise.resolve({
+            content: [{ type: 'text', text: '[]' }],
+            usage: { input_tokens: 100, output_tokens: 50 },
+          });
+        }
+        // index 摘要:返回 {path: summary} JSON 对象 / 或纯文本摘要
+        if (prompt.includes('摘要')) {
+          return Promise.resolve({
+            content: [{ type: 'text', text: '这是一份需求文档的约 100 字摘要内容。' }],
+            usage: { input_tokens: 100, output_tokens: 50 },
+          });
+        }
+        // 默认(regenerate 复写正文):返回足够长的 markdown
+        return Promise.resolve({
+          content: [
+            {
+              type: 'text',
+              text: '# 需求规格\n## 1. 订单\nOrder 表 user_id 字段非空。Idempotency-Key 头部强制。\n## 2. 支付\n支付流程必须幂等且保留所有约束。',
+            },
+          ],
+          usage: { input_tokens: 1000, output_tokens: 500 },
+        });
+      }),
+    },
+  }));
+  return { default: Anthropic };
+});
+
+vi.mock('../../../forge-eval/load-env.js', () => ({
+  loadEnv: () => ({ anthropicApiKey: 'sk-test' }),
+}));
 
 const CONFIG_YAML = 'legacy_bridge:\n  allow_llm_calls: true\n';
 
@@ -181,6 +248,16 @@ describe('runIndexCommand 双路径', () => {
     const code = await runIndexCommand({ projectRoot: dir, apply: true, api: false });
     expect(code).not.toBe(0);
   });
+
+  it('--api happy path → 进程内调 LLM → 写 forge/docs/index.md', async () => {
+    // --api 走 buildIndex(client, anchors),Anthropic mock 返回摘要文本
+    const code = await runIndexCommand({ projectRoot: dir, apply: false, api: true });
+    expect(code).toBe(0);
+    expect(existsSync(join(dir, 'forge', 'docs', 'index.md'))).toBe(true);
+    // index.md 含 anchor 路径表头
+    const content = await readFile(join(dir, 'forge', 'docs', 'index.md'), 'utf8');
+    expect(content).toContain('Legacy Anchor Index');
+  });
 });
 
 // ==========================================================================
@@ -245,6 +322,40 @@ describe('runSyncCheckCommand 双路径', () => {
       api: true,
     });
     expect(code).not.toBe(0);
+  });
+
+  it('--api happy path → 进程内调 LLM → 写 forge/legacy-sync-state/<id>.yaml', async () => {
+    // --api 走 runSyncCheck(client, ...),Anthropic mock 返回空 diff 数组
+    const code = await runSyncCheckCommand({
+      projectRoot: dir,
+      changeId: CHANGE_ID,
+      apply: false,
+      api: true,
+    });
+    expect(code).toBe(0);
+    expect(existsSync(join(dir, 'forge', 'legacy-sync-state', `${CHANGE_ID}.yaml`))).toBe(true);
+    expect(existsSync(join(dir, 'forge', 'legacy-sync-state', `${CHANGE_ID}.md`))).toBe(true);
+  });
+
+  it('--apply 不带 --change-id → 从 manifest.meta.changeId 回退(I-3)', async () => {
+    // emit 时带 changeId=ch-001 → 写进 meta;--apply 不带 → 应从 meta 取回写对文件名
+    await runSyncCheckCommand({ projectRoot: dir, changeId: CHANGE_ID, apply: false, api: false });
+    const manifestFile = join(dir, 'forge', '.cache', 'legacy-bridge-task-sync-check.json');
+    const manifest = JSON.parse(await readFile(manifestFile, 'utf8')) as {
+      tasks: Array<{ outputPath: string }>;
+      meta?: { changeId?: string };
+    };
+    // 确认 changeId 写进了 meta
+    expect(manifest.meta?.changeId).toBe(CHANGE_ID);
+    await writeFile(
+      join(dir, 'forge', manifest.tasks[0]!.outputPath),
+      JSON.stringify({ text: '[]' }),
+      'utf8',
+    );
+    // --apply 不传 changeId → 应回退取 meta.changeId 写 ch-001.yaml
+    const code = await runSyncCheckCommand({ projectRoot: dir, apply: true, api: false });
+    expect(code).toBe(0);
+    expect(existsSync(join(dir, 'forge', 'legacy-sync-state', `${CHANGE_ID}.yaml`))).toBe(true);
   });
 
   it('无 affected anchor(changeId 无 proposal)→ task=null → exit 0 不 emit', async () => {
@@ -396,7 +507,8 @@ describe('runRegenerateCommand 双路径', () => {
       JSON.stringify({ text: judgeText }),
       'utf8',
     );
-    // --apply round=2 → applyRound2 → 写产物
+    // --apply round=2 → applyRound2 → 写产物;先写好 anchor 文件供 hash 回写
+    await writeAnchorsYaml(join(dir, 'forge'), join(dir, 'docs', 'SRS.md'));
     await mkdir(join(dir, 'forge', 'docs', 'regenerated'), { recursive: true });
     const code = await runRegenerateCommand({
       projectRoot: dir,
@@ -406,7 +518,118 @@ describe('runRegenerateCommand 双路径', () => {
     });
     expect(code).toBe(0);
     // 产物应写到 forge/docs/regenerated/SRS.md
-    expect(existsSync(join(dir, 'forge', 'docs', 'regenerated', 'SRS.md'))).toBe(true);
+    const outPath = join(dir, 'forge', 'docs', 'regenerated', 'SRS.md');
+    expect(existsSync(outPath)).toBe(true);
+    // I-2:产物含 frontmatter + disclaimer
+    const content = await readFile(outPath, 'utf8');
+    expect(content).toContain('generated-by: forge-legacy-bridge');
+    expect(content).toContain('此文档由 forge 自动生成');
+    // I-1:anchor hash + last_regenerated 回写 legacy-anchors.yaml
+    const anchorsContent = await readFile(join(dir, 'forge', 'legacy-anchors.yaml'), 'utf8');
+    expect(anchorsContent).toContain('hash:');
+    expect(anchorsContent).toContain('last_regenerated:');
+  });
+
+  it('--apply round=1 抛 RegenOutputError(extract-facts 空)→ 写 .partial + exit 3', async () => {
+    // 先 emit 轮1
+    await runRegenerateCommand({ projectRoot: dir, role: ROLE, apply: false, api: false });
+    const manifestFile = join(dir, 'forge', '.cache', 'legacy-bridge-task-regenerate.json');
+    const manifest = JSON.parse(await readFile(manifestFile, 'utf8')) as {
+      tasks: Array<{ op: string; outputPath: string }>;
+    };
+    // regenerate 结果正常,extract-facts 返回空数组 → applyRound1AndBuildRound2 抛 RegenOutputError
+    for (const task of manifest.tasks) {
+      const resultPath = join(dir, 'forge', task.outputPath);
+      await mkdir(join(dir, 'forge', '.cache'), { recursive: true });
+      if (task.op === 'regenerate') {
+        await writeFile(resultPath, JSON.stringify({ text: REGEN_BODY }), 'utf8');
+      } else {
+        // extract-facts 空数组 → 无 fact → RegenOutputError
+        await writeFile(resultPath, JSON.stringify({ text: '[]' }), 'utf8');
+      }
+    }
+    const code = await runRegenerateCommand({
+      projectRoot: dir,
+      role: ROLE,
+      apply: true,
+      api: false,
+    });
+    // exit 3 = LB_EXIT_PARTIAL_SUCCESS
+    expect(code).toBe(3);
+    // .partial 文件写出,不 emit 轮2
+    expect(existsSync(join(dir, 'forge', 'docs', 'regenerated', 'SRS.md.partial'))).toBe(true);
+    expect(existsSync(join(dir, 'forge', 'docs', 'regenerated', 'SRS.md'))).toBe(false);
+  });
+
+  it('--apply round=2 quality-fail(judge 全 lost)→ 写 .partial + exit 3', async () => {
+    const { applyRound1AndBuildRound2 } =
+      await import('../../../src/core/legacy-bridge/regenerator.js');
+    const factsText = JSON.stringify([
+      { text: 'Order 表 user_id 字段非空', section: '§1', critical: true },
+      { text: 'Idempotency-Key 头部强制', section: '§1', critical: false },
+    ]);
+    const { task: r2task, sampling } = applyRound1AndBuildRound2(REGEN_BODY, factsText, ROLE);
+    const { FORGE_VERSION } = await import('../../../src/index.js');
+    const r2manifest = buildManifest({
+      op: 'regenerate',
+      round: 2,
+      tasks: [r2task],
+      forgeVersion: FORGE_VERSION,
+      meta: {
+        sampling: sampling as unknown as Record<string, unknown>,
+        regenBody: REGEN_BODY,
+        role: ROLE,
+      },
+    });
+    await mkdir(join(dir, 'forge', '.cache'), { recursive: true });
+    await writeFile(
+      join(dir, 'forge', '.cache', 'legacy-bridge-task-regenerate.json'),
+      JSON.stringify(r2manifest, null, 2),
+      'utf8',
+    );
+    // quality-judge 结果:全部 fact 判 lost → critical 丢失 → quality.passed=false
+    const judgeText = JSON.stringify(sampling.sampled.map(() => ({ state: 'lost' })));
+    await writeFile(
+      join(dir, 'forge', r2task.outputPath),
+      JSON.stringify({ text: judgeText }),
+      'utf8',
+    );
+    await writeAnchorsYaml(join(dir, 'forge'), join(dir, 'docs', 'SRS.md'));
+    await mkdir(join(dir, 'forge', 'docs', 'regenerated'), { recursive: true });
+    const code = await runRegenerateCommand({
+      projectRoot: dir,
+      role: ROLE,
+      apply: true,
+      api: false,
+    });
+    // exit 3 = LB_EXIT_PARTIAL_SUCCESS
+    expect(code).toBe(3);
+    // 写 .partial + quality YAML,不写正式产物
+    expect(existsSync(join(dir, 'forge', 'docs', 'regenerated', 'SRS.md.partial'))).toBe(true);
+    expect(existsSync(join(dir, 'forge', 'docs', 'regenerated', 'SRS.md.partial.yaml'))).toBe(true);
+    expect(existsSync(join(dir, 'forge', 'docs', 'regenerated', 'SRS.md'))).toBe(false);
+  });
+
+  it('--api happy path → 单进程串两轮 → 写产物含 frontmatter + anchor 回写', async () => {
+    // --api 复用 Anthropic mock:regenerate→extract-facts→quality-judge 三调用
+    const code = await runRegenerateCommand({
+      projectRoot: dir,
+      role: ROLE,
+      apply: false,
+      api: true,
+      yes: true, // 跳过 countdown
+    });
+    expect(code).toBe(0);
+    const outPath = join(dir, 'forge', 'docs', 'regenerated', 'SRS.md');
+    expect(existsSync(outPath)).toBe(true);
+    // 产物含 frontmatter + disclaimer(regenerateRole 的 fullMarkdown)
+    const content = await readFile(outPath, 'utf8');
+    expect(content).toContain('generated-by: forge-legacy-bridge');
+    expect(content).toContain('此文档由 forge 自动生成');
+    // anchor hash + last_regenerated 回写
+    const anchorsContent = await readFile(join(dir, 'forge', 'legacy-anchors.yaml'), 'utf8');
+    expect(anchorsContent).toContain('hash:');
+    expect(anchorsContent).toContain('last_regenerated:');
   });
 
   it('--apply 与 --api 互斥 → 返回非 0', async () => {

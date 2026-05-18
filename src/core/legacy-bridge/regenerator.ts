@@ -245,8 +245,12 @@ export class RegenOutputError extends Error {
   }
 }
 
-/** 加 frontmatter + 顶部 disclaimer(决策 #21 / §9) */
-function wrapWithFrontmatterAndDisclaimer(body: string, input: RegenerateInput): string {
+/**
+ * 加 frontmatter + 顶部 disclaimer(决策 #21 / §9)。
+ * Task 6.2 round-2:export 供双路径 CLI(--api / --apply 成功路径)复用,
+ * 与 regenerateRole 单进程路径产物保持一致(同一 frontmatter/disclaimer)。
+ */
+export function wrapWithFrontmatterAndDisclaimer(body: string, input: RegenerateInput): string {
   const generatedAt = new Date().toISOString();
   // 用 JSON.stringify 包裹路径,确保含特殊 yaml 字符(`: ` / `#` / `\n` 等)的路径不破 yaml 结构
   // (JSON 字符串字面量是 yaml 双引号字符串的合法子集)

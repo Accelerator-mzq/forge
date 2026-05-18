@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { discoverSources } from '../../../src/core/legacy-bridge/extractor.js';
+import { discoverSources, extractText } from '../../../src/core/legacy-bridge/extractor.js';
 
 async function tmpRepo(files: Record<string, string>): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'extract-'));
@@ -37,5 +37,22 @@ describe('discoverSources', () => {
     const found = await discoverSources(root);
     expect(found.find((s) => s.path === 'docs/SRS.md')?.kind).toBe('srs');
     expect(found.find((s) => s.path === 'BACKLOG.md')?.kind).toBe('backlog-file');
+  });
+});
+
+describe('extractText', () => {
+  it('.md 直读', async () => {
+    const root = await tmpRepo({ 'docs/SRS.md': '# 需求\n第一条' });
+    expect(await extractText(root, 'docs/SRS.md')).toContain('第一条');
+  });
+
+  it('.txt 直读', async () => {
+    const root = await tmpRepo({ 'TODO.txt': '待办内容' });
+    expect(await extractText(root, 'TODO.txt')).toContain('待办内容');
+  });
+
+  it('读取失败 → 抛带路径的错误', async () => {
+    const root = await tmpRepo({});
+    await expect(extractText(root, 'missing.md')).rejects.toThrow(/missing\.md/);
   });
 });

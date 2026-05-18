@@ -1,5 +1,5 @@
 // Layer 3b:whole-repo 发现 + 文本抽取 + prep + apply + 增量 diff(spec §4/§5/§6)
-import { readdir, stat } from 'node:fs/promises';
+import { readdir, stat, readFile } from 'node:fs/promises';
 import { join, relative, extname, basename } from 'node:path';
 import type { LegacyRequirementKind } from './legacy-requirements.js';
 
@@ -81,4 +81,46 @@ export async function discoverSources(repoRoot: string): Promise<DiscoveredSourc
   // 排序:跨平台确定,便于测试与 manifest 稳定
   out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   return out;
+}
+
+import { parseWorkbook, sheetToMarkdown } from './excel.js';
+
+/**
+ * 按扩展名抽纯文本(spec §5.2)。
+ * .md/.txt 直读;.xlsx 复用 excel.ts;.docx 用 mammoth;.pdf 用 pdf-parse(v2 class API)。
+ * 读取/解析失败抛带路径的错误。
+ */
+export async function extractText(repoRoot: string, relPath: string): Promise<string> {
+  const full = join(repoRoot, relPath);
+  const ext = extname(relPath).toLowerCase();
+  try {
+    if (ext === '.md' || ext === '.txt') {
+      return await readFile(full, 'utf8');
+    }
+    if (ext === '.xlsx') {
+      const wb = await parseWorkbook(full);
+      return wb.sheets.map((s) => sheetToMarkdown(s)).join('\n\n');
+    }
+    if (ext === '.docx') {
+      // mammoth 动态 import:仅 .docx 路径需要,避免无谓加载
+      const mammoth = await import('mammoth');
+      const { value } = await mammoth.extractRawText({ path: full });
+      return value;
+    }
+    if (ext === '.pdf') {
+      // pdf-parse v2:class API(动态 import 仅 .pdf 路径需要,避免无谓加载)
+      const { PDFParse } = await import('pdf-parse');
+      const buf = await readFile(full);
+      const parser = new PDFParse({ data: buf });
+      try {
+        const result = await parser.getText();
+        return result.text;
+      } finally {
+        await parser.destroy();
+      }
+    }
+    throw new Error(`不支持的扩展名 ${ext}`);
+  } catch (err) {
+    throw new Error(`文本抽取失败 ${relPath}:${(err as Error).message}`);
+  }
 }

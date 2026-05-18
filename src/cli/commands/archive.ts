@@ -453,6 +453,7 @@ export function buildArchiveCommand(): Command {
               verifyRec,
               changeDir,
               process.cwd(),
+              {}, // Task 12 接线:从 verifyRec 取 ack_log_tail_hash / entry_count / change_id
               verifyPath,
             );
             if (!pdVerifyResult.valid) {
@@ -465,6 +466,7 @@ export function buildArchiveCommand(): Command {
               reviewRec,
               changeDir,
               process.cwd(),
+              {}, // Task 12 接线:从 reviewRec 取 ack_log_tail_hash / entry_count / change_id
               reviewPath,
             );
             if (!pdReviewResult.valid) {

@@ -255,13 +255,17 @@ export function buildArchiveCommand(): Command {
             // preflight 不再 process.exit,改返 PreflightResult,caller 在 try 块内手动 release+exit
             // 与 marker check 现有 inline-release convention 一致(避免 process.exit 跳过 finally 致锁残留)
             // Task 6.3:--api 透传 —— agent 模式 emit manifest+halt;--api 模式进程内跑 sync-check
-            const preflightResult = await runArchivePreflight(forgeRoot, changeId, {
-              api: opts.api ?? false,
-            });
-            if (preflightResult.kind !== 'ok') {
-              console.error(preflightResult.message);
-              await archiveRelease();
-              process.exit(2);
+            // Task 6.4:--resume 时跳过 preflight — gate 复核已在 --resume 分支完成(暂停态也已清除),
+            //   再跑 preflight 会因 enforce_sync=true 再次 emit manifest + halt,造成死循环。
+            if (!opts.resume) {
+              const preflightResult = await runArchivePreflight(forgeRoot, changeId, {
+                api: opts.api ?? false,
+              });
+              if (preflightResult.kind !== 'ok') {
+                console.error(preflightResult.message);
+                await archiveRelease();
+                process.exit(2);
+              }
             }
 
             // plan-9g 默认开启 14 不变量 fence(brainstorm v6 删两 opt-in flag);所有 archive 调用都跑

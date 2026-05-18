@@ -443,6 +443,23 @@ describe('option=1 diff 段级校验', () => {
     );
     expect(result.valid).toBe(true);
   });
+
+  it('happy path:What Changes 是最后一段且 proposal.md 无尾换行 → 段末新增行正确识别', async () => {
+    // 回归 code review Issue 1:wcEnd off-by-one — What Changes 无后续 ## 标题
+    // + 文件无尾换行时,段区间须含文件最后一行
+    const { repoRoot, changeDir } = setupGitChange({
+      proposalBaseline: '# P\n\n## What Changes\n\n- a',
+      proposalMutated: '# P\n\n## What Changes\n\n- a\n- b 扩 scope',
+      tasksBaseline: '# Tasks\n\n- [x] task-1: t\n',
+    });
+    dirs.push(repoRoot);
+    const result = await validatePauseDecisionsFence(
+      { pause_decisions: [OPT1_DECISION] },
+      changeDir,
+      repoRoot,
+    );
+    expect(result.valid).toBe(true);
+  });
 });
 
 // Helper:构造含 scope-entries fenced YAML 块的 proposal.md(沿 9b §2.6.3 anchor 模式)

@@ -113,7 +113,7 @@ export async function validatePauseDecisionsFence(
         );
       }
       // diff 段级校验:字段校验之后追加(字段校验失败时也继续累积,沿现有 results.push 模式)
-      results.push(await checkOption1WhatChangesDiff(p, changeDir, repoRoot, fieldBase, file));
+      results.push(await checkOption1WhatChangesDiff(changeDir, repoRoot, fieldBase, file));
     } else if (p.chosen_option === 2) {
       // option=2 加 task:tasks.md 中 task_ref 末段对应的行已勾选 [x]
       const tasksRes = await checkOption2TaskChecked(p, changeDir, fieldBase, file);
@@ -167,7 +167,6 @@ export async function validatePauseDecisionsFence(
  * 沿 design §5.3。非 git → N/A 降级(返回 ok);git 项目内 git diff 失败 → fail-closed 拒签。
  */
 async function checkOption1WhatChangesDiff(
-  p: PauseDecision,
   changeDir: string,
   repoRoot: string,
   fieldBase: string,
@@ -203,7 +202,9 @@ async function checkOption1WhatChangesDiff(
   const content = await readFile(proposalPath, 'utf8');
   const srcLines = content.split('\n');
   let wcStart = -1;
-  let wcEnd = srcLines.length;
+  // wcEnd 初始 +1:What Changes 是 proposal.md 最后一段(无后续 ## 标题)时,段区间须含
+  // 文件最后一行 —— 无尾换行时 srcLines.length 恰为末行号,半开区间会漏掉它(code review)
+  let wcEnd = srcLines.length + 1;
   for (let i = 0; i < srcLines.length; i++) {
     // 1-indexed 行号(git diff 行号从 1 开始)
     if (/^##\s+What Changes\s*$/.test(srcLines[i] ?? '')) {

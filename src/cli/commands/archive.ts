@@ -11,7 +11,6 @@ import { existsSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
-import Anthropic from '@anthropic-ai/sdk';
 import { parseMarker } from '../../core/markers/index.js';
 import { validateMarkerSchema } from '../../core/validate/index.js';
 import {
@@ -29,7 +28,11 @@ import { loadAnchorsFile } from '../../core/legacy-bridge/anchors.js';
 import { checkAck } from '../../core/legacy-bridge/ack.js';
 import { buildSyncCheckTask, applySyncCheckResult } from '../../core/legacy-bridge/sync-check.js';
 import type { SyncCheckInput } from '../../core/legacy-bridge/sync-check.js';
-import { AgentHandoffRunner, ApiRunner } from '../../core/legacy-bridge/runners.js';
+import {
+  AgentHandoffRunner,
+  ApiRunner,
+  makeForgeApiClient,
+} from '../../core/legacy-bridge/runners.js';
 import type { RunnerClient } from '../../core/legacy-bridge/runners.js';
 import { renderDiffMarkdown, renderDiffYaml } from '../../core/legacy-bridge/diff-report.js';
 import { readAnchorFile } from '../../core/legacy-bridge/encoding.js';
@@ -764,7 +767,7 @@ export async function runArchivePreflight(
     const task = await buildSyncCheckTask(ctx, async (p) => (await readAnchorFile(p)).text);
     if (!task) return { kind: 'ok' }; // 无受影响 anchor → 无需 sync-check,续跑 archive
     // 进程内调 Anthropic SDK(client 构造方式与旧 archive 代码一致:forge-eval/load-env)
-    const client = (await makeArchiveApiClient()) as unknown as RunnerClient;
+    const client = (await makeForgeApiClient()) as unknown as RunnerClient;
     const results = await new ApiRunner(client).run([task]);
     // --api 无 manifest,produced_from 标 'api-inline' sentinel(区别于 agent 路径的 manifest_hash;
     // 该 sync-state 不经 resume gate,Task 6.4 据此 sentinel 可识别 --api 来源)
@@ -854,7 +857,7 @@ export async function runArchivePostHook(
     try {
       const task = await buildSyncCheckTask(ctx, async (p) => (await readAnchorFile(p)).text);
       if (!task) return; // 无受影响 anchor → graceful skip
-      const client = (await makeArchiveApiClient()) as unknown as RunnerClient;
+      const client = (await makeForgeApiClient()) as unknown as RunnerClient;
       const results = await new ApiRunner(client).run([task]);
       const syncState = applySyncCheckResult(results[0]?.text ?? '', changeId, 'api-inline');
       await mkdir(join(forgeRoot, 'legacy-sync-state'), { recursive: true });
@@ -887,21 +890,6 @@ export async function runArchivePostHook(
     );
   }
   // kind='skip':无受影响 anchor / 全部读取失败 → graceful skip,无输出
-}
-
-/**
- * Task 6.3:构造 --api 模式的 Anthropic client。
- * 动态加载 forge-eval/load-env(避免 src/ rootDir 静态分析边界限制),
- * 与旧 archive preflight/posthook 的 client 构造方式一致。
- * (legacy-bridge.ts 的 makeApiClient 非导出,故在此复用同一逻辑。)
- */
-async function makeArchiveApiClient(): Promise<Anthropic> {
-  const evalLoadEnvPath = new URL('../../../forge-eval/load-env.js', import.meta.url).href;
-  const { loadEnv } = (await import(/* @vite-ignore */ evalLoadEnvPath)) as {
-    loadEnv: () => { anthropicApiKey: string };
-  };
-  const { anthropicApiKey } = loadEnv();
-  return new Anthropic({ apiKey: anthropicApiKey });
 }
 
 /**

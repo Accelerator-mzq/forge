@@ -95,3 +95,14 @@ export async function readTaskResults(
   }
   return out;
 }
+
+/** 构造 --api 模式的 Anthropic client。
+ *  动态加载 forge-eval/load-env(避免 src/ rootDir 静态分析边界限制)。 */
+export async function makeForgeApiClient(): Promise<Anthropic> {
+  const evalLoadEnvPath = new URL('../../../forge-eval/load-env.js', import.meta.url).href;
+  const { loadEnv } = (await import(/* @vite-ignore */ evalLoadEnvPath)) as {
+    loadEnv: () => { anthropicApiKey: string };
+  };
+  const { anthropicApiKey } = loadEnv();
+  return new Anthropic({ apiKey: anthropicApiKey });
+}

@@ -7,7 +7,6 @@ import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
 import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
-import Anthropic from '@anthropic-ai/sdk';
 import { acquireLockByPath, LockHeldError } from '../../core/archive/lock.js';
 import { loadAnchorsFile, getAuthoritativeAnchors } from '../../core/legacy-bridge/anchors.js';
 import { writeAck, checkAck } from '../../core/legacy-bridge/ack.js';
@@ -54,6 +53,7 @@ import {
   ApiRunner,
   AgentHandoffRunner,
   readTaskResults,
+  makeForgeApiClient,
   type RunnerClient,
 } from '../../core/legacy-bridge/runners.js';
 import {
@@ -129,19 +129,6 @@ export const LB_EXIT_BUSINESS_RULE_FAIL = 2;
 export const LB_EXIT_PARTIAL_SUCCESS = 3;
 export const LB_EXIT_DATA_CORRUPT = 4;
 export const LB_EXIT_LOCK_HELD = 5;
-
-/**
- * 抽出 Anthropic client 创建逻辑为 helper,供 --api 模式复用。
- * 动态加载 forge-eval/load-env(避免 src/ rootDir 静态分析边界限制)。
- */
-async function makeApiClient(): Promise<Anthropic> {
-  const evalLoadEnvPath = new URL('../../../forge-eval/load-env.js', import.meta.url).href;
-  const { loadEnv } = (await import(/* @vite-ignore */ evalLoadEnvPath)) as {
-    loadEnv: () => { anthropicApiKey: string };
-  };
-  const { anthropicApiKey } = loadEnv();
-  return new Anthropic({ apiKey: anthropicApiKey });
-}
 
 /** map 子命令参数接口(三分支:emit / --apply / --api) */
 export interface MapCommandOpts {
@@ -225,7 +212,7 @@ export async function runMapCommand(opts: MapCommandOpts): Promise<number> {
   const task = await buildMapTask({ projectRoot: opts.projectRoot, mode: opts.mode });
   if (opts.api) {
     // --api 分支:进程内调 Anthropic SDK
-    const client = (await makeApiClient()) as unknown as RunnerClient;
+    const client = (await makeForgeApiClient()) as unknown as RunnerClient;
     const [result] = await new ApiRunner(client).run([task]);
     // I-2:ApiRunner 返回空数组时 result 为 undefined,显式守卫避免 TypeError
     if (!result) {
@@ -347,7 +334,7 @@ export async function runIndexCommand(opts: IndexCommandOpts): Promise<number> {
 
   if (opts.api) {
     // --api 分支:进程内调 Anthropic SDK
-    const client = (await makeApiClient()) as unknown as IndexerClient;
+    const client = (await makeForgeApiClient()) as unknown as IndexerClient;
     const entries = await buildIndex(client, anchors);
     const md = renderIndexMarkdown(entries);
     const indexPath = join(forgeRoot, 'docs', 'index.md');
@@ -521,7 +508,7 @@ export async function runSyncCheckCommand(opts: SyncCheckCommandOpts): Promise<n
 
   if (opts.api) {
     // --api 分支:进程内调 Anthropic SDK
-    const client = (await makeApiClient()) as unknown as SyncCheckClient;
+    const client = (await makeForgeApiClient()) as unknown as SyncCheckClient;
     const out = await runSyncCheck(
       client,
       syncInput,
@@ -951,8 +938,8 @@ export async function runRegenerateCommand(opts: RegenerateCommandOpts): Promise
     }
 
     try {
-      // RegenerateClient / JudgeClient 结构相同;复用 makeApiClient,double-cast
-      const client = (await makeApiClient()) as unknown as RegenerateClient & JudgeClient;
+      // RegenerateClient / JudgeClient 结构相同;复用 makeForgeApiClient,double-cast
+      const client = (await makeForgeApiClient()) as unknown as RegenerateClient & JudgeClient;
       await mkdir(docsDir, { recursive: true });
 
       console.log(`→ regenerating role=${anchor.role} (model=claude-sonnet-4-6)`);

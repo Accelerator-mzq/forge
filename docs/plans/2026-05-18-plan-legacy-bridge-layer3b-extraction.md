@@ -37,7 +37,7 @@
 | `docs/legacy-bridge.md` / `docs/cli-reference.md` / `CHANGELOG.md`(改) | 文档化 Layer 3b | F2 |
 | `package.json`(改) | 加 `mammoth` + `pdf-parse` 依赖 | B1 |
 
-任务依赖顺序:A1 → A2;B1 → B2 → B3 → B4;C1 → C2 → C3(依赖 A1/B4);D1 → D2(依赖 A、C);E1 → E2 → E3(依赖 A1);F1、F2 独立。建议线性执行 A→B→C→D→E→F。
+任务依赖顺序:A1 → A2;B1 → B2 → B3;**D1 必须先于 B4**(B4 的代码用到 `op: 'extract'`,该值在 D1 才加入 `LlmOp`,顺序反了会编译失败);B4 → C1 → C2 → C3;D2 依赖 A / C / D1;E1 → E2 → E3(依赖 A1);F1、F2 独立。**建议执行顺序:A1 A2 → B1 B2 B3 → D1 → B4 → C1 C2 C3 → D2 → E1 E2 E3 → F1 F2。**(注意:D1 提前到 B4 之前,不按 Phase 字母顺序。)
 
 ---
 
@@ -231,7 +231,9 @@ function validateRequirement(r: unknown, i: number): void {
   if (o.priority !== null && !PRIORITY_VALUES.has(o.priority as string)) {
     throw new Error(`${at}.priority 越界:${String(o.priority)}`);
   }
-  if (!Array.isArray(o.evidence)) throw new Error(`${at}.evidence 须为数组`);
+  if (!Array.isArray(o.evidence) || !o.evidence.every((x) => typeof x === 'string')) {
+    throw new Error(`${at}.evidence 须为 string[]`);
+  }
   if (typeof o.notes !== 'string') throw new Error(`${at}.notes 须为字符串`);
   const src = o.source as Record<string, unknown> | undefined;
   if (typeof src !== 'object' || src === null) throw new Error(`${at}.source 须为对象`);
@@ -687,21 +689,24 @@ import { buildExtractTasks } from '../../../src/core/legacy-bridge/extractor.js'
 describe('buildExtractTasks', () => {
   it('每来源文档一个 task,op=extract,prompt 内嵌 redact 后文本', async () => {
     const root = await tmpRepo({
-      'docs/SRS.md': '# 需求\nAPI key sk-ABCDEF1234567890 出现在此',
+      'docs/SRS.md': '# 需求\nAWS key AKIAIOSFODNN7EXAMPLE 出现在此',
       'TODO.md': '- 待办',
     });
     const sources = await discoverSources(root);
-    const tasks = await buildExtractTasks(root, sources, ['src/app.ts']);
+    // codeIndex 含一个 secret 样的路径 —— 用于验证代码索引也走 redact
+    const tasks = await buildExtractTasks(root, sources, ['src/app.ts', 'src/cfg-AKIAIOSFODNN7EXAMPLE.ts']);
     expect(tasks).toHaveLength(2);
     for (const t of tasks) {
       expect(t.op).toBe('extract');
       expect(t.outputPath).toMatch(/^\.cache\/extract-result-\d+\.json$/);
     }
-    // redact:prompt 里不出现原始 secret
     const srsTask = tasks.find((t) => t.prompt.includes('docs/SRS.md'));
-    expect(srsTask?.prompt).not.toContain('sk-ABCDEF1234567890');
+    // redact:文档正文里的 secret 不进 prompt
+    expect(srsTask?.prompt).not.toContain('AKIAIOSFODNN7EXAMPLE');
     // 代码索引内嵌进 prompt(spec §4.2 关键约定)
     expect(srsTask?.prompt).toContain('src/app.ts');
+    // 代码索引也走 redact(spec §4.1 第 3 步:全部输入都 redact)—— 上面 not.toContain 已同时覆盖
+    //(secret 出现在文档正文与代码索引两处,prompt 两处都不应含原始串)
   });
 });
 ```
@@ -724,12 +729,12 @@ const EXTRACT_OUTPUT_SCHEMA =
   '[{ "title": string, "description": string, "status": "implemented"|"unimplemented", ' +
   '"section": string, "evidence": string[], "confidence": "high"|"medium"|"low" }]';
 
-/** 单文档抽取 prompt:内嵌 redact 后文本 + 代码索引(spec §4.2) */
+/** 单文档抽取 prompt:内嵌 redact 后文本 + redact 后代码索引(spec §4.2) */
 function buildExtractPrompt(args: {
   docPath: string;
   docKind: LegacyRequirementKind;
   redactedText: string;
-  codeIndex: string[];
+  redactedCodeIndex: string;
 }): string {
   return `你是一名需求抽取员。从下面这份老文档抽取需求条目,逐条判定其在当前代码库里是否已实现。
 
@@ -740,7 +745,7 @@ ${args.redactedText}
 ---
 
 # 当前代码库结构索引(file tree;判 implemented 时参考)
-${args.codeIndex.join('\n')}
+${args.redactedCodeIndex}
 
 # 任务
 - 抽取该文档里的每条需求,给 title(一行)+ description(正文)。
@@ -755,7 +760,7 @@ ${EXTRACT_OUTPUT_SCHEMA}`;
 
 /**
  * prep:每来源文档建一个 LlmTask(spec §4.1 第 4 步 / §4.2)。
- * redact 对全部输入;prompt 内嵌 redact 后文本 + 代码索引(ApiRunner 只发 prompt)。
+ * redact 对**全部输入**(文档文本 + 代码索引);prompt 内嵌 redact 后两者(ApiRunner 只发 prompt)。
  * @param codeIndex whole-repo 代码文件路径列表(file tree),由调用方传入
  */
 export async function buildExtractTasks(
@@ -763,6 +768,8 @@ export async function buildExtractTasks(
   sources: DiscoveredSource[],
   codeIndex: string[],
 ): Promise<LlmTask[]> {
+  // 代码索引对全部 task 相同,redact 一次(spec §4.1 第 3 步:全部输入都 redact,含代码索引)
+  const redactedCodeIndex = redact(codeIndex.join('\n')).redactedText;
   const tasks: LlmTask[] = [];
   for (let i = 0; i < sources.length; i++) {
     const src = sources[i]!;
@@ -772,12 +779,15 @@ export async function buildExtractTasks(
       docPath: src.path,
       docKind: src.kind,
       redactedText,
-      codeIndex,
+      redactedCodeIndex,
     });
     tasks.push({
       op: 'extract',
-      // inputs:与 prompt 并列的 redact 快照(非送 LLM 通道,spec §4.2)
-      inputs: [{ source: src.path, content: redactedText }],
+      // inputs:与 prompt 并列的 redact 快照(文档 + 代码索引;非送 LLM 通道,spec §4.2)
+      inputs: [
+        { source: src.path, content: redactedText },
+        { source: '<code-index>', content: redactedCodeIndex },
+      ],
       prompt,
       model: DEFAULT_MODEL,
       outputSchema: EXTRACT_OUTPUT_SCHEMA,
@@ -905,7 +915,9 @@ export function parseExtractResults(inputs: ExtractResultInput[]): ExtractedRequ
       if (typeof o.description !== 'string') throw new Error(`${at}.description 须为字符串`);
       if (!STATUS_SET.has(o.status as string)) throw new Error(`${at}.status 越界:${String(o.status)}`);
       if (!CONFIDENCE_SET.has(o.confidence as string)) throw new Error(`${at}.confidence 越界`);
-      if (!Array.isArray(o.evidence)) throw new Error(`${at}.evidence 须为数组`);
+      if (!Array.isArray(o.evidence) || !o.evidence.every((x) => typeof x === 'string')) {
+        throw new Error(`${at}.evidence 须为 string[]`);
+      }
       const section = typeof o.section === 'string' ? o.section : '';
       out.push({
         title: o.title,
@@ -949,6 +961,7 @@ git commit -m "feat(legacy-bridge): parseExtractResults —— 校验汇总 agen
 // 追加到 tests/core/legacy-bridge/extractor.test.ts
 import { diffAgainstConfirmed } from '../../../src/core/legacy-bridge/extractor.js';
 import type { ExtractedRequirement } from '../../../src/core/legacy-bridge/extractor.js';
+import type { LegacyRequirement } from '../../../src/core/legacy-bridge/legacy-requirements.js';
 
 function extracted(p: Partial<ExtractedRequirement>): ExtractedRequirement {
   return {
@@ -958,6 +971,23 @@ function extracted(p: Partial<ExtractedRequirement>): ExtractedRequirement {
     source: { document: 'docs/SRS.md', section: '1', kind: 'srs' },
     evidence: [],
     confidence: 'medium',
+    ...p,
+  };
+}
+
+/** 构造一条既有 LegacyRequirement(confirmed yaml fixture 用)—— 本 helper 在本测试文件内定义 */
+function req(p: Partial<LegacyRequirement>): LegacyRequirement {
+  return {
+    id: 'LR-0001',
+    title: 't',
+    description: 'd',
+    status: 'unimplemented',
+    source: { document: 'docs/SRS.md', section: '1', kind: 'srs' },
+    evidence: [],
+    confidence: 'medium',
+    priority: null,
+    review: 'confirmed',
+    notes: '',
     ...p,
   };
 }
@@ -999,6 +1029,23 @@ describe('diffAgainstConfirmed', () => {
     expect(draft[0]?.requirement.id).toBe('LR-0005');
   });
 
+  it('matched 仅 confidence/evidence 变 → changed,review 回退 pending(spec §6.1「全一致」)', () => {
+    const confirmed = {
+      schema: 'forge-legacy-requirements/v1' as const,
+      requirements: [
+        req({ id: 'LR-0005', title: 'A', description: 'd', confidence: 'low', evidence: [],
+              source: { document: 'docs/SRS.md', section: '1', kind: 'srs' } }),
+      ],
+    };
+    // title/description/status 与既有一致,仅 confidence low→high
+    const draft = diffAgainstConfirmed(
+      [extracted({ title: 'A', description: 'd', confidence: 'high' })],
+      confirmed,
+    );
+    expect(draft[0]?.change).toBe('changed');
+    expect(draft[0]?.requirement.review).toBe('pending');
+  });
+
   it('既有有、本轮没抽到 → vanished,保留 id', () => {
     const confirmed = {
       schema: 'forge-legacy-requirements/v1' as const,
@@ -1021,6 +1068,21 @@ describe('diffAgainstConfirmed', () => {
     expect(draft.every((d) => d.change === 'conflict')).toBe(true);
     expect(draft.every((d) => d.requirement.id === '')).toBe(true);
     expect(draft.every((d) => d.requirement.review === 'pending')).toBe(true);
+  });
+
+  it('旧侧同 key 多条 + 新侧 1 条 → 旧 confirmed 条目不丢、全标 conflict(F02 防静默丢失)', () => {
+    const confirmed = {
+      schema: 'forge-legacy-requirements/v1' as const,
+      requirements: [
+        req({ id: 'LR-0005', title: 'A', source: { document: 'docs/SRS.md', section: '1', kind: 'srs' } }),
+        req({ id: 'LR-0006', title: 'B', source: { document: 'docs/SRS.md', section: '1', kind: 'srs' } }),
+      ],
+    };
+    const draft = diffAgainstConfirmed([extracted({ title: 'C' })], confirmed);
+    // 2 旧 + 1 新 = 3 条都在 draft,旧 confirmed 条目未被静默丢弃
+    expect(draft).toHaveLength(3);
+    expect(draft.every((d) => d.change === 'conflict')).toBe(true);
+    expect(draft.every((d) => d.requirement.id === '')).toBe(true);
   });
 });
 ```
@@ -1101,20 +1163,32 @@ export function diffAgainstConfirmed(
     const olds = oldByKey.get(k) ?? [];
     const news = newByKey.get(k) ?? [];
     if (olds.length > 1 || news.length > 1) {
-      // 冲突:该键下所有本轮条目按 new/pending,不继承 id(spec §6.1)
+      // 冲突:键非唯一(spec §6.1)。该键下旧 + 新条目一个都不能丢:
+      // 新条目 → conflict,不继承 id
       for (const e of news) draft.push({ requirement: toRequirement(e), change: 'conflict' });
-      // 冲突键的旧条目:若本轮没有对应新条目,作 vanished 留住
-      if (news.length === 0) for (const o of olds) draft.push({ requirement: o, change: 'vanished' });
+      // 旧条目:本轮没抽到该键 → vanished(保留 id,用户决定删不删);
+      //         键被本轮新条目竞争 → 同进 conflict、清空 id(spec §6.1「不继承既有 id」),不静默丢失
+      for (const o of olds) {
+        draft.push(
+          news.length === 0
+            ? { requirement: o, change: 'vanished' }
+            : { requirement: { ...o, id: '', review: 'pending' }, change: 'conflict' },
+        );
+      }
       continue;
     }
     const old = olds[0];
     const ne = news[0];
     if (old && ne) {
-      // matched:复制 id,保留用户 priority/notes;status/evidence/confidence 用新值
+      // matched:复制 id,保留用户 priority/notes;status/evidence/confidence 用新值。
+      // changed 判定须含 title/description/status/evidence/confidence 全部 5 项(spec §6.1
+      //「新值与既有全一致」)—— 漏 evidence/confidence 会把它们的变化误标 unchanged、跳过用户复审。
       const changed =
         old.title !== ne.title ||
         old.description !== ne.description ||
-        old.status !== ne.status;
+        old.status !== ne.status ||
+        old.confidence !== ne.confidence ||
+        JSON.stringify(old.evidence) !== JSON.stringify(ne.evidence);
       draft.push({
         requirement: {
           ...toRequirement(ne),
@@ -1138,7 +1212,7 @@ export function diffAgainstConfirmed(
 - [ ] **Step 4:运行测试,确认通过**
 
 Run: `pnpm vitest run tests/core/legacy-bridge/extractor.test.ts -t diffAgainstConfirmed`
-Expected: PASS(5 个用例)。
+Expected: PASS(7 个用例)。
 
 - [ ] **Step 5:Commit**
 
@@ -1348,6 +1422,9 @@ async function tmpProject(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'extract-cli-'));
   const forge = join(root, 'forge');
   await mkdir(join(forge, '.cache'), { recursive: true });
+  // 建空的 changes/archive/ —— D2 执行序在 E1 之前,此时 buildBacklog 仍无条件 scanArchivedFollowups;
+  // 建一个空 archive 目录使 --finalize 调的 generateBacklog 跑得通(E1 空 archive 容错落地后此行可保留也无害)
+  await mkdir(join(forge, 'changes', 'archive'), { recursive: true });
   await writeFile(join(root, 'forge', 'config.yaml'), 'legacy_bridge:\n  allow_llm_calls: true\n', 'utf8');
   await writeFile(join(root, 'docs-SRS.md'), '# SRS\n需求一', 'utf8'); // 文件名含 SRS
   // 写 llm-ack 让 opt-in 通过(config_hash 由实现侧 computeConfigHash 校验,测试可先 emit 再断言)
@@ -1398,6 +1475,33 @@ requirements:
     expect(finalized).toContain('LR-0001');
     expect(finalized).toContain('review: confirmed');
   });
+
+  it('--finalize 后 backlog 刷新失败 → 返回 PARTIAL_SUCCESS(3),yaml 仍写成功', async () => {
+    const root = await tmpProject();
+    await writeFile(
+      join(root, 'forge', 'legacy-requirements-draft.yaml'),
+      `schema: forge-legacy-requirements/v1
+requirements:
+  - id: ""
+    title: 需求一
+    description: d
+    status: unimplemented
+    source: { document: docs-SRS.md, section: "1", kind: srs }
+    evidence: []
+    confidence: medium
+    priority: null
+    review: pending
+    notes: ""
+`,
+      'utf8',
+    );
+    // 把 forge/backlog 占成普通文件 → generateBacklog 的 mkdir 抛错(无需 mock)
+    await writeFile(join(root, 'forge', 'backlog'), 'occupied', 'utf8');
+    const code = await runExtractCommand({ projectRoot: root, apply: false, api: false, finalize: true });
+    expect(code).toBe(3); // LB_EXIT_PARTIAL_SUCCESS —— finalize 成功但 backlog 刷新失败
+    // finalize 本身成功:legacy-requirements.yaml 仍写出
+    expect(existsSync(join(root, 'forge', 'legacy-requirements.yaml'))).toBe(true);
+  });
 });
 ```
 
@@ -1425,11 +1529,14 @@ import {
   LEGACY_REQUIREMENTS_FILE,
   LEGACY_REQUIREMENTS_DRAFT_FILE,
   LEGACY_REQUIREMENTS_DRAFT_MD,
+  type LegacyRequirementsFile,
 } from '../../core/legacy-bridge/legacy-requirements.js';
-import { readdir, writeFile as fsWriteFile, readFile as fsReadFile } from 'node:fs/promises';
-import type { Dirent } from 'node:fs';
-import { relative } from 'node:path'; // 注:legacy-bridge.ts 已 import join,这里把 relative 并入该 import 即可
-import { parse as parseYamlExtract, stringify as stringifyYamlExtract } from 'yaml';
+// node 内置 / yaml 的名字 legacy-bridge.ts 顶部都已 import,**不要新增重复 import**(否则
+// duplicate identifier,typecheck 失败):readFile/writeFile/mkdir/readdir 在第 6 行、
+// existsSync 在第 7 行、join 在第 8 行、parseYaml/stringifyYaml 在第 9 行,直接复用即可。
+// 本 Task 只在两行既有 import 上各补一个名字:
+//   第 7 行 → import { existsSync, statSync, type Dirent } from 'node:fs';
+//   第 8 行 → import { join, relative } from 'node:path';
 
 /** extract 子命令参数(四分支:emit / --apply / --api / --finalize) */
 export interface ExtractCommandOpts {
@@ -1516,14 +1623,18 @@ export async function runExtractCommand(opts: ExtractCommandOpts): Promise<numbe
       kind: sources[i]!.kind,
     }));
     const out = applyExtractResult(apiInputs, confirmed);
-    await fsWriteFile(join(forgeRoot, LEGACY_REQUIREMENTS_DRAFT_FILE), out.draftYaml, 'utf8');
-    await fsWriteFile(join(forgeRoot, LEGACY_REQUIREMENTS_DRAFT_MD), out.draftMarkdown, 'utf8');
+    await writeFile(join(forgeRoot, LEGACY_REQUIREMENTS_DRAFT_FILE), out.draftYaml, 'utf8');
+    await writeFile(join(forgeRoot, LEGACY_REQUIREMENTS_DRAFT_MD), out.draftMarkdown, 'utf8');
     console.log('✓ extract draft 已写(--api 单进程)');
     return LB_EXIT_OK;
   }
 
-  // 默认 agent 模式:emit manifest
-  await new AgentHandoffRunner(forgeRoot, FORGE_VERSION).emit('extract', 1, tasks);
+  // 默认 agent 模式:emit manifest。已确认 yaml 快照写进 meta —— `--apply` 据此做增量 diff,
+  // 不在 apply 时回读磁盘(emit 与 apply 之间 yaml 可能被改;快照随 manifest_hash 锁定基线,spec §4.1/§6.1)
+  const confirmedSnapshot = await loadLegacyRequirements(forgeRoot);
+  await new AgentHandoffRunner(forgeRoot, FORGE_VERSION).emit('extract', 1, tasks, {
+    confirmed_snapshot: confirmedSnapshot,
+  });
   console.log(
     `✓ extract manifest 已写 ${manifestPath(forgeRoot, 'extract')}\n  → 请 fulfill 后跑 forge legacy-bridge extract --apply(见 skill: legacy-bridge-fulfillment)`,
   );
@@ -1555,7 +1666,8 @@ async function runExtractApply(forgeRoot: string): Promise<number> {
     const src = manifest!.tasks[i]!.inputs[0]!.source;
     return { text: r.text, source: src, kind: inferKind(src) };
   });
-  const confirmed = await loadLegacyRequirements(forgeRoot);
+  // 增量 diff 基线取自 manifest.meta 的快照(emit 时写入),不回读磁盘 —— manifest_hash 已锁定该快照
+  const confirmed = (manifest.meta?.confirmed_snapshot ?? null) as LegacyRequirementsFile | null;
   let out;
   try {
     out = applyExtractResult(applyInputs, confirmed);
@@ -1563,8 +1675,8 @@ async function runExtractApply(forgeRoot: string): Promise<number> {
     console.error(`✗ extract 结果校验失败:${(e as Error).message}`);
     return LB_EXIT_GENERAL_ERROR;
   }
-  await fsWriteFile(join(forgeRoot, LEGACY_REQUIREMENTS_DRAFT_FILE), out.draftYaml, 'utf8');
-  await fsWriteFile(join(forgeRoot, LEGACY_REQUIREMENTS_DRAFT_MD), out.draftMarkdown, 'utf8');
+  await writeFile(join(forgeRoot, LEGACY_REQUIREMENTS_DRAFT_FILE), out.draftYaml, 'utf8');
+  await writeFile(join(forgeRoot, LEGACY_REQUIREMENTS_DRAFT_MD), out.draftMarkdown, 'utf8');
   await consumeManifest(forgeRoot, 'extract');
   console.log(`✓ extract draft 已写 forge/${LEGACY_REQUIREMENTS_DRAFT_FILE} —— 审改后跑 extract --finalize`);
   return LB_EXIT_OK;
@@ -1583,20 +1695,20 @@ async function runExtractFinalize(forgeRoot: string, projectRoot: string): Promi
   const draftPath = join(forgeRoot, LEGACY_REQUIREMENTS_DRAFT_FILE);
   let raw: string;
   try {
-    raw = await fsReadFile(draftPath, 'utf8');
+    raw = await readFile(draftPath, 'utf8');
   } catch {
     console.error(`✗ 找不到 ${LEGACY_REQUIREMENTS_DRAFT_FILE};请先跑 forge legacy-bridge extract + --apply`);
     return LB_EXIT_GENERAL_ERROR;
   }
   let draftFile;
   try {
-    draftFile = validateLegacyRequirementsFile(parseYamlExtract(raw));
+    draftFile = validateLegacyRequirementsFile(parseYaml(raw));
   } catch (e) {
     console.error(`✗ draft 校验失败:${(e as Error).message}`);
     return LB_EXIT_GENERAL_ERROR;
   }
   const finalized = finalizeLegacyRequirements(draftFile.requirements);
-  await fsWriteFile(join(forgeRoot, LEGACY_REQUIREMENTS_FILE), stringifyYamlExtract(finalized), 'utf8');
+  await writeFile(join(forgeRoot, LEGACY_REQUIREMENTS_FILE), stringifyYaml(finalized), 'utf8');
   console.log(`✓ ${LEGACY_REQUIREMENTS_FILE} 已写(${finalized.requirements.length} 条)`);
   // 立即刷新 backlog(spec §6.2 第 6 步);archive 目录可能不存在 → buildBacklog 已容错(E1)
   try {
@@ -1604,7 +1716,12 @@ async function runExtractFinalize(forgeRoot: string, projectRoot: string): Promi
     await generateBacklog(forgeRoot);
     console.log('✓ forge/backlog/ 已刷新');
   } catch (e) {
-    console.warn(`⚠ backlog 刷新失败(不影响 finalize):${(e as Error).message}`);
+    // legacy-requirements.yaml 已写成功,但 backlog 未刷新 → 部分成功(active.md 暂时陈旧)。
+    // 不返回 OK —— 否则掩盖 active.md 与 yaml 不一致;也不返回硬错误 —— finalize 本身已成功。
+    console.error(
+      `⚠ legacy-requirements.yaml 已写,但 backlog 刷新失败:${(e as Error).message}\n  → 请手动跑 forge backlog 刷新`,
+    );
+    return LB_EXIT_PARTIAL_SUCCESS;
   }
   return LB_EXIT_OK;
 }
@@ -1637,7 +1754,7 @@ async function runExtractFinalize(forgeRoot: string, projectRoot: string): Promi
 - [ ] **Step 5:运行测试 + 类型检查,确认通过**
 
 Run: `pnpm vitest run tests/cli/legacy-bridge/extract-cli.test.ts && pnpm typecheck`
-Expected: PASS(4 个用例)。
+Expected: PASS(5 个用例)。
 
 - [ ] **Step 6:Commit**
 
@@ -1650,13 +1767,13 @@ git commit -m "feat(legacy-bridge): extract 子命令四分支(emit/--apply/--ap
 
 ## Phase E:backlog registry 双源
 
-### Task E1:`buildBacklog` 双源 + 空 archive 容错
+### Task E1:`buildBacklog` 空 archive 容错
 
 **Files:**
 - Modify: `src/core/backlog/index.ts`
 - Test: `tests/core/backlog/legacy-source.test.ts`(新)
 
-实现 spec §7.1:`buildBacklog` 加 `loadLegacyRequirements` 第二源;`scanArchivedFollowups` 前判 `forge/changes/archive/` 是否存在,不存在则源一取空结果。
+实现 spec §7.1 的「空 archive 容错」部分:`buildBacklog` 在调 `scanArchivedFollowups` 前判 `forge/changes/archive/` 是否存在,不存在则源一取空结果。**本任务不接 legacy-requirements 第二源** —— 第二源连同 `renderActiveMarkdown` 改签名一起在 E3 做。这样 E1 单独提交即可编译通过、测试转绿(不留下不可编译的中间态)。
 
 - [ ] **Step 1:写失败测试**
 
@@ -1674,32 +1791,8 @@ async function tmpForge(): Promise<string> {
   return forge;
 }
 
-describe('buildBacklog 双源', () => {
-  it('archive 目录不存在 + 有 legacy-requirements.yaml → 不抛错,源二生效', async () => {
-    const forge = await tmpForge();
-    await writeFile(
-      join(forge, 'legacy-requirements.yaml'),
-      `schema: forge-legacy-requirements/v1
-requirements:
-  - id: LR-0001
-    title: 未实现需求
-    description: d
-    status: unimplemented
-    source: { document: docs/SRS.md, section: "1", kind: srs }
-    evidence: []
-    confidence: medium
-    priority: null
-    review: confirmed
-    notes: ""
-`,
-      'utf8',
-    );
-    const result = await buildBacklog(forge);
-    expect(result.activeMd).toContain('Legacy Requirements');
-    expect(result.activeMd).toContain('未实现需求');
-  });
-
-  it('archive 目录不存在 + 无 legacy-requirements.yaml → 不抛错', async () => {
+describe('buildBacklog 空 archive 容错', () => {
+  it('forge/changes/archive/ 不存在 → buildBacklog 不抛错', async () => {
     const forge = await tmpForge();
     await expect(buildBacklog(forge)).resolves.toBeDefined();
   });
@@ -1709,16 +1802,18 @@ requirements:
 - [ ] **Step 2:运行测试,确认失败**
 
 Run: `pnpm vitest run tests/core/backlog/legacy-source.test.ts`
-Expected: FAIL —— 当前 `buildBacklog` 无条件 `scanArchivedFollowups` 抛错 / 无 Legacy Requirements 段。
+Expected: FAIL —— 当前 `buildBacklog` 无条件 `scanArchivedFollowups`,archive 目录不存在即抛错。
 
 - [ ] **Step 3:写实现 —— 修改 `src/core/backlog/index.ts` 的 `buildBacklog`**
 
+只加空 archive 容错,**不动 `renderActiveMarkdown` 调用**(仍两参)—— E1 单独提交即编译通过:
+
 ```typescript
-import { existsSync } from 'node:fs';
-import { loadLegacyRequirements } from '../legacy-bridge/legacy-requirements.js';
+// existsSync(node:fs)、join(node:path)已在 backlog/index.ts 第 5-6 行 import —— 复用,勿重复 import。
+// 本任务只新增一个 type import:
 import type { AggregatorResult } from '../scope/aggregator.js';
 
-/** 聚合 + 渲染,返回两份 markdown(纯计算,不写盘)—— 双源(spec §7.1) */
+/** 聚合 + 渲染,返回两份 markdown(纯计算,不写盘) */
 export async function buildBacklog(forgeRoot: string): Promise<GenerateBacklogResult> {
   // 源一:archived scope-entry —— 空 archive 容错(spec §7.1)
   let agg: AggregatorResult;
@@ -1727,28 +1822,26 @@ export async function buildBacklog(forgeRoot: string): Promise<GenerateBacklogRe
   } else {
     agg = { entries: [], superseding: [], skipped: [] };
   }
-  // 源二:legacy-requirements.yaml
-  const legacyReqs = await loadLegacyRequirements(forgeRoot);
-
   const { warnings, tombstones } = deriveWarningsAndTombstones(agg.superseding, agg.skipped);
-  const activeMd = renderActiveMarkdown(agg.entries, warnings, legacyReqs);
+  const activeMd = renderActiveMarkdown(agg.entries, warnings);
   const archivedMd = renderArchivedMarkdown(tombstones);
   const openCount = countOpenBacklog(agg.entries);
   return { openCount, warningCount: warnings.length, activeMd, archivedMd };
 }
 ```
 
-> **注意:** `renderActiveMarkdown` 第三参 `legacyReqs` 在 Task E3 加上;本任务 E1 先让 `buildBacklog` 编译通过的最小做法是 E3 与 E1 一起验收,或本步先传 `legacyReqs` 给一个 E3 将实现的签名 —— 实施时 E1/E2/E3 作为一组连续提交,E1 的测试在 E3 完成后整体转绿。**故 Phase E 三任务连续执行,E1 的失败测试在 E3 后才整体 PASS。**
+> **注意:** 此版 `buildBacklog` 仍是单源(scope),只多了空 archive 容错 —— 编译通过、E1 测试转绿、既有 backlog 测试不回归。第二数据源(`loadLegacyRequirements`)+ superseding 分流 + `renderActiveMarkdown` 改签名,统一在 Task E3 接入,届时整体替换本函数。
 
-- [ ] **Step 4:留待 E3 后整体验证**
+- [ ] **Step 4:运行测试,确认通过**
 
-(E1 的测试此刻仍 FAIL —— `renderActiveMarkdown` 尚未接受第三参。继续 E2、E3。)
+Run: `pnpm vitest run tests/core/backlog/legacy-source.test.ts && pnpm vitest run tests/core/backlog/`
+Expected: PASS —— `legacy-source.test.ts` 通过,既有 backlog 测试无回归。
 
-- [ ] **Step 5:Commit(E1 改动)**
+- [ ] **Step 5:Commit**
 
 ```bash
-git add src/core/backlog/index.ts
-git commit -m "feat(backlog): buildBacklog 双源 + 空 archive 容错(spec §7.1)"
+git add src/core/backlog/index.ts tests/core/backlog/legacy-source.test.ts
+git commit -m "feat(backlog): buildBacklog 空 archive 容错(spec §7.1)"
 ```
 
 ---
@@ -1968,7 +2061,7 @@ git commit -m "feat(backlog): splitLegacyClaims —— legacy 退役分流 + win
 
 ```typescript
 // 追加到 tests/core/backlog/legacy-source.test.ts
-import { renderActiveMarkdown } from '../../../src/core/backlog/render.js';
+import { renderActiveMarkdown, renderArchivedMarkdown } from '../../../src/core/backlog/render.js';
 
 describe('renderActiveMarkdown Legacy Requirements 段', () => {
   it('只渲染 unimplemented + 未退役条目;implemented 不渲染', () => {
@@ -1989,9 +2082,78 @@ describe('renderActiveMarkdown Legacy Requirements 段', () => {
     expect(md).not.toContain('已实现');
   });
 
-  it('legacyReqs 为 null → 不渲染 Legacy Requirements 段(向后兼容)', () => {
+  it('legacyReqs 为 null → 不渲染 Legacy Requirements 段、不改顶部待办行(向后兼容)', () => {
     const md = renderActiveMarkdown([], [], null);
     expect(md).not.toContain('## Legacy Requirements');
+    expect(md).not.toContain('legacy requirements 待办');
+  });
+
+  it('legacyReqs 非 null → 顶部待办行补「另有 N 项 legacy requirements 待办」(F3,spec §7.2)', () => {
+    const legacyReqs = {
+      schema: 'forge-legacy-requirements/v1' as const,
+      requirements: [
+        { id: 'LR-0001', title: '未实现', description: 'd', status: 'unimplemented' as const,
+          source: { document: 'docs/SRS.md', section: '1', kind: 'srs' as const },
+          evidence: [], confidence: 'medium' as const, priority: null, review: 'confirmed' as const, notes: '' },
+      ],
+    };
+    const md = renderActiveMarkdown([], [], legacyReqs);
+    expect(md).toContain('另有 1 项 legacy requirements 待办');
+  });
+});
+
+describe('renderArchivedMarkdown Retired 段', () => {
+  it('scope tombstone 为空但有 legacy tombstone → Retired 段仍渲染(F2,不被早退吞掉)', () => {
+    const lt = [
+      {
+        entry_id: 'LR-0001', new_status: 'completed', rationale: 'r',
+        superseded_in_change: '2026-05-01-foo', superseded_at: '2026-05-01',
+        requirement_snapshot: null,
+      },
+    ];
+    const md = renderArchivedMarkdown([], lt);
+    expect(md).toContain('## Legacy Requirements — Retired');
+    expect(md).toContain('LR-0001');
+  });
+
+  it('无 legacy tombstone → archived.md 不含 Retired 段(既有项目不变)', () => {
+    const md = renderArchivedMarkdown([], []);
+    expect(md).not.toContain('Retired');
+  });
+});
+
+describe('buildBacklog 双源(legacy-requirements.yaml 第二源)', () => {
+  it('有 legacy-requirements.yaml → active.md 出 Legacy Requirements 段', async () => {
+    const forge = await tmpForge();
+    await writeFile(
+      join(forge, 'legacy-requirements.yaml'),
+      `schema: forge-legacy-requirements/v1
+requirements:
+  - id: LR-0001
+    title: 未实现需求
+    description: d
+    status: unimplemented
+    source: { document: docs/SRS.md, section: "1", kind: srs }
+    evidence: []
+    confidence: medium
+    priority: null
+    review: confirmed
+    notes: ""
+`,
+      'utf8',
+    );
+    const result = await buildBacklog(forge);
+    expect(result.activeMd).toContain('## Legacy Requirements');
+    expect(result.activeMd).toContain('未实现需求');
+  });
+});
+
+describe('buildBacklog reserved-archive-dirname(spec §8.5 第 6 项)', () => {
+  it('archive 下存在名为 legacy-requirements 的目录 → active.md 报 reserved-archive-dirname warning', async () => {
+    const forge = await tmpForge();
+    await mkdir(join(forge, 'changes', 'archive', 'legacy-requirements'), { recursive: true });
+    const result = await buildBacklog(forge);
+    expect(result.activeMd).toContain('reserved-archive-dirname');
   });
 });
 ```
@@ -2001,51 +2163,80 @@ describe('renderActiveMarkdown Legacy Requirements 段', () => {
 Run: `pnpm vitest run tests/core/backlog/legacy-source.test.ts`
 Expected: FAIL —— `renderActiveMarkdown` 仍是两参签名。
 
-- [ ] **Step 3:写实现 —— 改 `renderActiveMarkdown`**
+- [ ] **Step 3:写实现 —— 改 `renderActiveMarkdown` + 加 2 个 helper**
 
-修改 `render.ts` 的 `renderActiveMarkdown`,加可选第三参并在末尾追加 Legacy Requirements 段:
+`renderActiveMarkdown`(`render.ts:169`)是既有函数,做 4 处改动,并在同文件加 2 个新 helper。
 
+**改动 1 —— 签名**(加第 3、4 参,`warnings` 类型放宽;前两参不变 + 新参有默认值 → 既有调用点不破):
 ```typescript
-import type { LegacyRequirementsFile } from '../legacy-bridge/legacy-requirements.js';
-
-/** 渲染 active.md(spec §4 + 双源 §7.2);legacyReqs 为 null 时不渲染 Legacy Requirements 段 */
 export function renderActiveMarkdown(
   entries: AggregatedScopeEntry[],
-  warnings: BacklogWarning[],
+  warnings: (BacklogWarning | LegacyBacklogWarning)[],
   legacyReqs: LegacyRequirementsFile | null = null,
   retiredLegacyIds: Set<string> = new Set(),
 ): string {
-  // ……（原有 scope-entry 渲染逻辑保持不变,略）……
-  // 在 return 之前,追加 Legacy Requirements 段:
-  const legacyLines = renderLegacyRequirementsSection(legacyReqs, retiredLegacyIds);
-  return [/* 原有 lines */ ...legacyLines].join('\n').trimEnd() + '\n';
-}
+```
 
-/** 渲染 active.md 的 ## Legacy Requirements 段(spec §7.2) */
-function renderLegacyRequirementsSection(
+**改动 2 —— import**:文件头加
+```typescript
+import type { LegacyRequirementsFile, LegacyRequirement } from '../legacy-bridge/legacy-requirements.js';
+```
+
+**改动 3 —— 顶部待办行(F3,spec §7.2)**:函数体里 `lines.push(`> 待办计 ${openCount} 项(…)。`)` 那行**之后**插入(仅 legacyReqs 非 null 时补):
+```typescript
+const legacyOpen = openLegacyRequirements(legacyReqs, retiredLegacyIds);
+if (legacyReqs) {
+  lines.push(`> 另有 ${legacyOpen.length} 项 legacy requirements 待办(不计入上面 ${openCount})。`);
+}
+```
+`countOpenBacklog`(scope 口径 future-work + out-of-scope)**不变**,legacy 不混入。
+
+**改动 4 —— 追加 Legacy Requirements 段**:三段 category(Future Work / Out of Scope / Non-Goals)渲染**之后**、`return` 之前:
+```typescript
+lines.push(...renderLegacyRequirementsSection(legacyReqs, legacyOpen));
+```
+
+**新 helper 1 —— `openLegacyRequirements`**(active 口径过滤,§7.2/§8.4 共用):
+```typescript
+/** active 的 legacy requirement:unimplemented 且未退役(spec §7.2 / §8.4) */
+function openLegacyRequirements(
   legacyReqs: LegacyRequirementsFile | null,
   retiredIds: Set<string>,
-): string[] {
+): LegacyRequirement[] {
   if (!legacyReqs) return [];
-  // 只列 unimplemented + 未退役(spec §7.2 / §8.4)
-  const open = legacyReqs.requirements.filter(
+  return legacyReqs.requirements.filter(
     (r) => r.status === 'unimplemented' && !retiredIds.has(r.id),
   );
+}
+```
+
+**新 helper 2 —— `renderLegacyRequirementsSection`**(spec §7.2):
+```typescript
+/** 渲染 active.md 的 ## Legacy Requirements 段;open 由 openLegacyRequirements 预过滤 */
+function renderLegacyRequirementsSection(
+  legacyReqs: LegacyRequirementsFile | null,
+  open: LegacyRequirement[],
+): string[] {
+  if (!legacyReqs) return []; // 无 legacy-requirements.yaml → 不出段,active.md 对既有项目不变
   const lines: string[] = ['', `## Legacy Requirements (${open.length})`, ''];
   if (open.length === 0) {
     lines.push('(无)');
     return lines;
   }
   // 按来源文档分组
-  const byDoc = new Map<string, typeof open>();
+  const byDoc = new Map<string, LegacyRequirement[]>();
   for (const r of open) {
-    (byDoc.get(r.source.document) ?? byDoc.set(r.source.document, []).get(r.source.document)!).push(r);
+    const list = byDoc.get(r.source.document) ?? [];
+    list.push(r);
+    byDoc.set(r.source.document, list);
   }
   for (const [doc, list] of [...byDoc.entries()].sort()) {
     lines.push(`### \`${doc}\``, '');
     for (const r of list) {
-      lines.push(`- \`${r.id}\` **${r.title}** — ${r.description}` +
-        (r.priority ? ` (priority: ${r.priority})` : ''));
+      lines.push(
+        `- \`${r.id}\` **${r.title}** — ${r.description}` +
+          (r.priority ? ` (priority: ${r.priority})` : ''),
+      );
     }
     lines.push('');
   }
@@ -2053,19 +2244,39 @@ function renderLegacyRequirementsSection(
 }
 ```
 
-> **实施提示:** `renderActiveMarkdown` 现有实现把内容拼进局部 `lines` 数组后 `return lines.join(...)`。把 `renderLegacyRequirementsSection` 的返回追加进该 `lines`(在三段 category 之后)即可,不要新建数组。保留现有签名行为:前两参不变,新参有默认值 → 既有调用点不破。
+> **实施提示:** `renderActiveMarkdown` 现有实现把内容拼进局部 `lines` 数组后 `return lines.join('\n').trimEnd() + '\n'`。改动 3/4 都是往那个 `lines` 里 `push`,不要新建数组、不要改 `return` 表达式。
 
 - [ ] **Step 4:改 `renderArchivedMarkdown` 加 Retired 段 + 接线 `buildBacklog`**
 
-`render.ts`:`renderArchivedMarkdown` 加可选第二参 `legacyTombstones: LegacyRequirementTombstone[] = []`,在 scope tombstone 段后追加:
+`renderArchivedMarkdown`(`render.ts:211`)是既有函数。**关键:现有实现在 `tombstones` 为空时早退 `(无)` —— 必须去掉这个早退**(改成 `if/else` 落到末尾),否则「只有 legacy retired、无 scope tombstone」时 Retired 段会被吞掉(F2)。改造:
 
 ```typescript
-function renderLegacyRetiredSection(tombstones: LegacyRequirementTombstone[]): string[] {
-  const lines: string[] = ['', `## Legacy Requirements — Retired (${tombstones.length})`, ''];
+export function renderArchivedMarkdown(
+  tombstones: SupersedingDetail[],
+  legacyTombstones: LegacyRequirementTombstone[] = [],
+): string {
+  const lines: string[] = [];
+  lines.push('# Archived Backlog (Tombstones)');
+  lines.push('');
+  // ……原有两行 `> 生成产物 …` / `> 异常 …` 说明 + 空行,保持不变……
+  // scope tombstone:原「if 空 → push (无) → return」改为 if/else,不再 return
   if (tombstones.length === 0) {
     lines.push('(无)');
-    return lines;
+  } else {
+    for (const t of tombstones) {
+      // ……原有 tombstone 渲染循环体(### / superseded_* / cancellation_reason / snapshot),保持不变……
+    }
   }
+  // legacy retired 段:仅当有 legacy tombstone 时追加(空则不出段)
+  if (legacyTombstones.length > 0) {
+    lines.push(...renderLegacyRetiredSection(legacyTombstones));
+  }
+  return lines.join('\n').trimEnd() + '\n';
+}
+
+/** 渲染 archived.md 的 ## Legacy Requirements — Retired 段(spec §8.3);仅在 legacyTombstones 非空时被调用 */
+function renderLegacyRetiredSection(tombstones: LegacyRequirementTombstone[]): string[] {
+  const lines: string[] = ['', `## Legacy Requirements — Retired (${tombstones.length})`, ''];
   for (const t of tombstones) {
     lines.push(`### \`${t.entry_id}\``, '');
     lines.push(`- **new_status**: ${t.new_status}`);
@@ -2079,24 +2290,56 @@ function renderLegacyRetiredSection(tombstones: LegacyRequirementTombstone[]): s
 }
 ```
 
-`index.ts` 的 `buildBacklog` 接线(在 E1 基础上补完):
+> **不回归保证:** 上面对 `tombstones` 空/非空两分支的输出与改造前逐字节相同(只把 `return` 改成 `if/else` 落到末尾);`legacyTombstones` 为空时不追加任何东西。故没有 legacy 退役的既有项目 `archived.md` 输出不变,既有 backlog 测试不回归。
+
+`index.ts` 的 `buildBacklog` —— **以下是完整最终版,取代 Task E1 Step 3 写的中间版**:
 
 ```typescript
-import { splitLegacyClaims } from './render.js';
+// existsSync(node:fs)、join(node:path)已在 backlog/index.ts 第 5-6 行 import —— 复用,勿重复。
+// 本任务新增的 import:
+import { loadLegacyRequirements } from '../legacy-bridge/legacy-requirements.js';
+import { splitLegacyClaims, type LegacyBacklogWarning } from './render.js';
+import type { AggregatorResult } from '../scope/aggregator.js';
 
-// buildBacklog 内,deriveWarningsAndTombstones 之前先分流 legacy claims:
-const legacyClaims = agg.superseding.filter((s) => s.source_change === 'legacy-requirements');
-const scopeClaims = agg.superseding.filter((s) => s.source_change !== 'legacy-requirements');
-const { tombstones: legacyTombstones, warnings: legacyWarnings, retiredIds } = splitLegacyClaims(
-  legacyClaims,
-  legacyReqs?.requirements ?? [],
-);
-const { warnings, tombstones } = deriveWarningsAndTombstones(scopeClaims, agg.skipped);
-const activeMd = renderActiveMarkdown(agg.entries, warnings, legacyReqs, retiredIds);
-const archivedMd = renderArchivedMarkdown(tombstones, legacyTombstones);
-// 注:legacyWarnings 渲染进 active.md ## Warnings 段 —— 实施时把 legacyWarnings
-//    与 warnings 一起传给 renderActiveMarkdown(给 renderWarningLine 补 legacy 5 个 kind 分支)。
+/** 聚合 + 渲染,返回两份 markdown(纯计算,不写盘)—— 双源(spec §7 / §8) */
+export async function buildBacklog(forgeRoot: string): Promise<GenerateBacklogResult> {
+  // 源一:archived scope-entry —— 空 archive 容错(spec §7.1)
+  let agg: AggregatorResult;
+  if (existsSync(join(forgeRoot, 'changes', 'archive'))) {
+    agg = await scanArchivedFollowups(forgeRoot);
+  } else {
+    agg = { entries: [], superseding: [], skipped: [] };
+  }
+  // 源二:legacy-requirements.yaml
+  const legacyReqs = await loadLegacyRequirements(forgeRoot);
+
+  // legacy claim 分流(spec §8.2):在 deriveWarningsAndTombstones 之前
+  const legacyClaims = agg.superseding.filter((s) => s.source_change === 'legacy-requirements');
+  const scopeClaims = agg.superseding.filter((s) => s.source_change !== 'legacy-requirements');
+  const { tombstones: legacyTombstones, warnings: legacyWarnings, retiredIds } = splitLegacyClaims(
+    legacyClaims,
+    legacyReqs?.requirements ?? [],
+  );
+  const { warnings: scopeWarnings, tombstones } = deriveWarningsAndTombstones(
+    scopeClaims,
+    agg.skipped,
+  );
+  // reserved-archive-dirname:archive 下若真存在名为 legacy-requirements 的目录(spec §8.5 第 6 项)
+  const reservedWarnings: LegacyBacklogWarning[] = existsSync(
+    join(forgeRoot, 'changes', 'archive', 'legacy-requirements'),
+  )
+    ? [{ kind: 'reserved-archive-dirname' }]
+    : [];
+  // legacy warning + scope warning + reserved 合并,一起渲染进 active.md ## Warnings 段
+  const allWarnings = [...scopeWarnings, ...legacyWarnings, ...reservedWarnings];
+  const activeMd = renderActiveMarkdown(agg.entries, allWarnings, legacyReqs, retiredIds);
+  const archivedMd = renderArchivedMarkdown(tombstones, legacyTombstones);
+  const openCount = countOpenBacklog(agg.entries);
+  return { openCount, warningCount: allWarnings.length, activeMd, archivedMd };
+}
 ```
+
+> **说明:** Task E1 Step 3 先写一个只有「双源 + 空 archive 容错」的中间版 `buildBacklog`(此时 E1 测试 FAIL,因 `renderActiveMarkdown` 还是两参);E2 加 `splitLegacyClaims`;E3 此处用上面的完整版整体替换,E1/E2/E3 三处测试此刻整体转绿。`renderActiveMarkdown` 的 `warnings` 参类型须放宽为 `(BacklogWarning | LegacyBacklogWarning)[]`。
 
 > **实施提示:** `renderWarningLine`(`render.ts:125`)的 `switch` 须补 `dangling-legacy-claim` / `invalid-legacy-status` / `duplicate-legacy-claim` / `reserved-archive-dirname` 四个 case(`malformed-dirname` 已有)。`BacklogWarning` 联合类型并入 `LegacyBacklogWarning`。`renderActiveMarkdown` 的 `warnings` 参类型相应放宽为 `(BacklogWarning | LegacyBacklogWarning)[]`。
 
@@ -2211,3 +2454,66 @@ git commit -m "chore(legacy-bridge): Layer 3b 收尾校验修补"
 **类型一致性:** `LegacyRequirement` / `LegacyRequirementsFile`(A1)、`DiscoveredSource` / `ExtractedRequirement` / `DraftEntry` / `ExtractChangeKind`(B/C)、`LegacyRequirementTombstone` / `LegacyBacklogWarning` / `SplitLegacyResult`(E2)跨任务一致。`runExtractCommand` 的 `ExtractCommandOpts` 四字段(D2)与注册 action(D2 Step 4)一致。
 
 **留待项(spec §13,实施时定):** `--apply` 是否对 agent 模式强校验 `evidence`;`pdf-parse` 若双平台 CI 有问题改选 `pdfjs-dist`;whole-repo ignore 规则细化;`forge backlog list` 是否列 legacy requirements(本计划未含,属可选)。
+
+---
+
+## Codex 对抗性审查处置(本计划)
+
+本实施计划经 Codex 多轮对抗性审查;每条 finding 均独立对照 forge-repo 实际代码核实后处置。
+
+### Round 1:4 真,全处置
+
+| #   | severity | 核实结论 | 处置 |
+| --- | -------- | -------- | ---- |
+| 1   | HIGH     | 真 —— 依赖顺序行写「线性 A→B→C→D」与 B4「D1 须先于 B4」矛盾;B4 用 `op:'extract'`,该值 D1 才入 `LlmOp`,顺序反则编译失败 | 改依赖顺序行:明确 D1 提前到 B4 之前,给出完整执行序 |
+| 2   | HIGH     | 真 —— E3 接线算了 `legacyWarnings` 却没合进 `renderActiveMarkdown` 调用,legacy warning 被静默丢弃 | E3 的 `buildBacklog` 重写为完整版:`allWarnings = [...scope, ...legacy, ...reserved]` 一起传 |
+| 3   | MEDIUM   | 真 —— `reserved-archive-dirname` 只声明 warning kind、无检测逻辑;检测需 `existsSync` 属 `buildBacklog` 层 | E3 `buildBacklog` 加 `existsSync(changes/archive/legacy-requirements)` 检测 + 测试 |
+| 4   | MEDIUM   | 真 —— `runExtractFinalize` 在 `generateBacklog` 失败时只 warn 仍返回 `LB_EXIT_OK`,掩盖 active.md 陈旧 | 改返回 `LB_EXIT_PARTIAL_SUCCESS` + 明确提示 + 加无 mock 的测试(占用 `forge/backlog` 触发) |
+
+### Round 2:3 真,全处置
+
+| #   | severity | 核实结论 | 处置 |
+| --- | -------- | -------- | ---- |
+| 1   | HIGH     | 真 —— D2 执行序在 E1 前,D2 `--finalize` 测试 `tmpProject` 没建 `forge/changes/archive/`,原版 `buildBacklog` 无条件 `scanArchivedFollowups` 会抛错 | D2 的 `tmpProject` 建空 `changes/archive/` 目录,使 `generateBacklog` 在 E1 容错落地前也跑得通 |
+| 2   | MEDIUM   | 真 —— `renderArchivedMarkdown` 在 scope tombstone 为空时早退 `(无)`,「只有 legacy retired」时 Retired 段被吞 | E3 Step 4 明确去掉早退、改 `if/else`;补「scope 空 + legacy 非空」测试 |
+| 3   | MEDIUM   | 真 —— spec §7.2 要求顶部待办行补「另有 N 项 legacy requirements 待办」,E3 只加段未改顶部行 | E3 Step 3 加改动 3:顶部行补 legacy 计数;补顶部行断言测试 |
+
+### Round 3:3 真(MED)+ 1 真(LOW)+ 1 自查发现的 latent bug,全处置
+
+| #   | severity | 核实结论 | 处置 |
+| --- | -------- | -------- | ---- |
+| 1   | MEDIUM   | 真 —— B4 测试用 `sk-...` 作 secret,但 `DEFAULT_REDACT_RULES`(`redact.ts:7`)无 OpenAI `sk-` 规则,redact 不掉、测试不会绿 | B4 测试 fixture 换成 `AKIAIOSFODNN7EXAMPLE`(命中 `aws-access-key` 规则) |
+| 2   | MEDIUM   | 真 —— C2 `changed` 判定只比 `title/description/status`,漏 `evidence/confidence`,与 spec §6.1「全一致」不符 | `changed` 补 `confidence` + `evidence`(JSON 比);补「仅 confidence/evidence 变 → changed」测试 |
+| 3   | MEDIUM   | 真 —— E1 的 `buildBacklog` 调 3 参 `renderActiveMarkdown`,但该函数 E3 才改签名 → E1 单独提交编译失败 | E1 重构为「只做空 archive 容错、仍两参」,自洽可编译;双源 + 第二源测试移入 E3 |
+| 4   | LOW      | 真 —— D2 测试块实为 5 个 `it`,计划写「PASS(4 个用例)」 | 改为「5 个用例」 |
+| 5   | —        | 自查发现(Codex 未报)—— C2 测试用 `req()` 但 `extractor.test.ts` 只定义了 `extracted()`,`req` 未定义、测试不编译 | C2 测试块加 `req` helper + `LegacyRequirement` 类型 import |
+
+### Round 4:2 真(MED),全处置
+
+| #   | severity | 核实结论 | 处置 |
+| --- | -------- | -------- | ---- |
+| 1   | MEDIUM   | 真 —— `buildExtractTasks` 只 redact 文档正文,`codeIndex` 原样进 prompt;spec §4.1「全部输入(含代码索引)redact」 | `buildExtractTasks` 对 `codeIndex.join` 也跑 redact;`buildExtractPrompt` 改收 `redactedCodeIndex`;补代码索引 redact 测试 |
+| 2   | MEDIUM   | 真 —— C2 conflict 分支 `olds.length>1 && news.length>=1` 时旧 confirmed 条目被静默丢弃 | conflict 分支补旧条目处理:`news` 空→`vanished`、否则→`conflict`(清 id);补「旧侧多条」测试 |
+
+### Round 5:1 HIGH + 1 MEDIUM,全处置
+
+| #   | severity | 核实结论 | 处置 |
+| --- | -------- | -------- | ---- |
+| 1   | HIGH     | 真 —— D2 import 块重复 import `readdir`(`legacy-bridge.ts:6` 已有),还多余别名 `fsWriteFile`/`fsReadFile`/`*Extract` → duplicate identifier,typecheck 失败 | 删重复 import;D2 代码改用既有 `readFile/writeFile/readdir/mkdir/join/existsSync/parseYaml/stringifyYaml`,只给 `node:fs`/`node:path` 两行各补 `Dirent`/`relative` |
+| 2   | MEDIUM   | 真 —— 计划没把已确认 yaml 快照写进 manifest `meta`,`--apply` 回读磁盘 → emit/apply 间 yaml 被改则 diff 基线漂移,违背 spec §4.1/§6.1 的 manifest 快照契约 | emit 时 `loadLegacyRequirements` 写入 `meta.confirmed_snapshot`;`--apply` 从 `manifest.meta` 取快照(`--api` 仍读磁盘,单进程无 gap) |
+
+### Round 6:1 真(MED),全处置
+
+| #   | severity | 核实结论 | 处置 |
+| --- | -------- | -------- | ---- |
+| 1   | MEDIUM   | 真 —— E1/E3 的 `buildBacklog` 片段重复 import `existsSync`/`join`(`backlog/index.ts:5-6` 已有)→ duplicate identifier,typecheck 失败 | E1/E3 import 指引改为「复用既有 `existsSync`/`join`,只新增缺失的 `AggregatorResult`/`loadLegacyRequirements`/`splitLegacyClaims` 等」 |
+
+### Round 7:0 HIGH / 0 MEDIUM —— 收敛(顺手处置 1 LOW)
+
+Codex 对照既有源码逐一核实,Round 1-6 所有已处置项均无复发。仅剩 1 条 LOW:
+
+| #   | severity | 核实结论 | 处置 |
+| --- | -------- | -------- | ---- |
+| 1   | LOW      | 真 —— A1 `validateLegacyRequirementsFile`、C1 `parseExtractResults` 对 `evidence` 只校验 `Array.isArray`,未校验元素是 `string` | 两处补 `.every((x) => typeof x === 'string')` 校验 |
+
+**收敛声明:** Plan 有效 finding 趋势 **4 → 3 → 4 → 2 → 2 → 1 → 0(HIGH/MED)**。Round 7 达成 **0 HIGH / 0 MEDIUM**(用户设定的收敛目标),残留的 1 条 LOW 亦已顺手处置。每轮 finding 均独立对照 forge-repo 实际代码核实后处置,其中 Round 3 还自查发现 1 条 Codex 未报的 latent bug(`req` helper 未定义)。计划可作为执行依据。

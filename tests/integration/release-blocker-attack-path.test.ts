@@ -51,6 +51,8 @@ import {
 } from '../../src/core/schemas/archive-summary.js';
 import { validateVersionRetrograde } from '../../src/core/archive/version-retrograde-fence.js';
 import { validatePauseDecisionsFence } from '../../src/core/archive/pause-decisions-fence.js';
+import { appendAckLog, readAllAckLogEntries } from '../../src/core/ack-log.js';
+import { canonicalHash } from '../../src/core/canonical-json.js';
 import { execFileSync } from 'node:child_process';
 
 // 文件级 beforeEach:每个测试前把 execFileMock 转发到真实 execFile + 适配 callback 形态
@@ -126,9 +128,64 @@ describe('release-blocker: pause_decisions option=1/2 attack paths (9z gate)', (
     }
   });
 
-  it.todo(
-    'option=2 attack: marker 写 task_ref=tasks.md#task-2 + 该 task 已勾选,但 git log 显示该 task 在 paused_at 之前已存在(非新增) → fence 应拒签(沿 9c §7.5.2 + design §2.1.5 line 263)',
-  );
+  it('option=2 attack:added_task_ref 指向的 task 在 capture 快照中已存在(非新增)→ fence 拒签', async () => {
+    const changeDir = mkdtempSync(join(tmpdir(), 'forge-relblk-opt2-'));
+    try {
+      // 写 tasks.md:task-1 和 task-3 都存在
+      writeFileSync(
+        join(changeDir, 'tasks.md'),
+        '# Tasks\n\n- [x] task-1: a\n- [x] task-3: 旧 task\n',
+      );
+      // 构造 pause-capture entry:tasks_md_task_ids 含 task-3(attack:task-3 在 capture 时已存在)
+      const entry = {
+        schema: 'forge-ack-log/v1' as const,
+        kind: 'pause-capture' as const,
+        timestamp: '2026-05-12T14:25:00Z',
+        capture_id: 'cap-attack',
+        change_id: 'c1',
+        task_ref: 'tasks.md#task-1',
+        pause_issue_summary: 'x',
+        tasks_md_task_ids: ['task-1', 'task-3'], // attack:task-3 在 capture 时已存在
+        git_head: null,
+        extra: {},
+      };
+      await appendAckLog(changeDir, entry);
+      const all = await readAllAckLogEntries(changeDir);
+      const tail = canonicalHash(all[all.length - 1]!);
+      // added_task_ref='tasks.md#task-3' 末段 'task-3' ∈ tasks_md_task_ids → 非新增 → fence 拒签
+      const result = await validatePauseDecisionsFence(
+        {
+          ack_log_tail_hash: tail,
+          ack_log_entry_count: all.length,
+          pause_decisions: [
+            {
+              id: 1,
+              paused_at: '2026-05-12T14:25:00Z',
+              task_ref: 'tasks.md#task-1',
+              issue_summary: 'x',
+              severity: 'WARNING',
+              severity_acked_by: 'msc',
+              severity_acked_at: '2026-05-12T14:27:00Z',
+              chosen_option: 2,
+              target_artifact: 'tasks.md',
+              target_anchor: '- task-3',
+              non_blocking_rationale: null,
+              other_rationale: null,
+              other_acked_by: null,
+              added_task_ref: 'tasks.md#task-3',
+              capture_id: 'cap-attack',
+            },
+          ],
+        },
+        changeDir,
+        changeDir,
+        { verifyAckLogTailHash: tail, verifyAckLogEntryCount: all.length, changeId: 'c1' },
+      );
+      expect(result.valid).toBe(false);
+    } finally {
+      rmSync(changeDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('release-blocker: 9e1 transaction failure injection paths (9z gate)', () => {

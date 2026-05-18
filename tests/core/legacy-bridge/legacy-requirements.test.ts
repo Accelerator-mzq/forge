@@ -5,7 +5,9 @@ import { join } from 'node:path';
 import {
   loadLegacyRequirements,
   validateLegacyRequirementsFile,
+  finalizeLegacyRequirements,
 } from '../../../src/core/legacy-bridge/legacy-requirements.js';
+import type { LegacyRequirement } from '../../../src/core/legacy-bridge/legacy-requirements.js';
 
 async function tmpForge(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'lr-'));
@@ -73,9 +75,6 @@ describe('validateLegacyRequirementsFile', () => {
     expect(() => validateLegacyRequirementsFile(bad)).toThrow(/status/);
   });
 });
-
-import { finalizeLegacyRequirements } from '../../../src/core/legacy-bridge/legacy-requirements.js';
-import type { LegacyRequirement } from '../../../src/core/legacy-bridge/legacy-requirements.js';
 
 function req(partial: Partial<LegacyRequirement>): LegacyRequirement {
   return {

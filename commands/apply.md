@@ -75,7 +75,10 @@ subagent 在 apply 中段报告以下三档之一时,主代理**不直接处理*
 subagent 报告 → 主代理判定 severity(CRITICAL / WARNING / SUGGESTION,沿 design §2.3)
               ↓
               CRITICAL? → yes → 走 forge 强 fence 拒签(原 v0.4 行为)
-                       → no  → AskUserQuestion 四选项
+                       → no  → 主代理调 `forge pause-capture <change-id> --task <triggering-task-ref> --issue "<summary>"`
+                                (捕获 pause 时刻 tasks.md 状态进 ack-log hash-chain;记下 stdout 返回的 capture_id)
+                                ↓
+                                AskUserQuestion 四选项
                                 ↓
                                 用户选择
                                 ↓
@@ -128,8 +131,10 @@ pause_decisions:
     severity_acked_by: msc # WARNING 必须;SUGGESTION 允许 null
     severity_acked_at: 2026-05-12T14:32:00Z
     chosen_option: 3 # 1=扩 scope / 2=加 task / 3=转 out-of-scope / 4=Other
+    added_task_ref: tasks.md#task-7 # option=2 必填:Fluid Pause 新增的 task(与 task_ref=触发 task 区分)
+    capture_id: <forge pause-capture 返回的 capture_id> # option=2 必填:关联 pause-capture entry
     target_artifact: proposal.md # option=1=proposal.md;option=2=tasks.md;option=3=proposal.md|design.md
-    target_anchor: '## Out of Scope' # marker 记录写到哪个段
+    target_anchor: '## Out of Scope' # option=2 仅人类可读记录,fence 不据此校验
     non_blocking_rationale: 'subagent 可跳过该 issue 完成本 task 主体功能' # option=3 必填
     other_rationale: null # option=4 必填
     other_acked_by: null # option=4 必填
@@ -142,9 +147,13 @@ pause_decisions:
 - CRITICAL severity → 拒签(CRITICAL 应走 forge 强 fence,不应进 pause)
 - WARNING + (severity_acked_by 空 ∨ severity_acked_at 空)→ 拒签
 - option=1:`target_artifact='proposal.md'` + `target_anchor` 含 `What Changes`
-- option=2:tasks.md 中 `task_ref` 末段对应的行已勾选 `[x]`
+- option=2:`added_task_ref` 指向的 task ∉ capture 快照、∈ 当前 tasks.md 且勾选 `[x]`;`capture_id` 匹配 ack-log pause-capture entry;链完整
 - option=3:proposal/design YAML 块含对应 entry.id + `non_blocking_rationale` 非空
 - option=4:`other_rationale` + `other_acked_by` 非空
+
+### option=2 capture 的已知边界(capture-input gap,design §9.2/§9.3)
+
+`forge pause-capture` 是轻量锚点,**不能**密码学证明 "task 是 pause 真新增的"。它能挡:无 capture 流程的 option=2、capture entry 事后被篡改、同 marker 内 capture 复用。它**挡不住**:capture 当下喂假输入(删旧 task → capture → 恢复)、AI 预先攒多条 capture 后选择性认领、AI 完全不记录 pause_decision。轻量 capture 对 "诚实但偷懒" 的 AI 有效,对蓄意构造假输入的攻击者无效 —— 此 gap 是当前 forge 架构下的已知限制。
 
 ## 与其他 sub-plan 合并点
 

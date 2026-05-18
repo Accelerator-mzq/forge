@@ -4,26 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 
-vi.mock('@anthropic-ai/sdk', () => {
-  const Anthropic = vi.fn().mockImplementation(() => ({
-    messages: {
-      create: vi.fn().mockResolvedValue({
-        // LLM 返 critical → preflight 应阻塞
-        content: [
-          {
-            type: 'text',
-            text: '[{"severity":"critical","section":"§4.5","description":"幂等约束变化"}]',
-          },
-        ],
-      }),
-    },
-  }));
-  return { default: Anthropic };
-});
-
-vi.mock('../../../forge-eval/load-env.js', () => ({
-  loadEnv: () => ({ anthropicApiKey: 'sk-test' }),
-}));
+// 注:Task 6.3 后本文件全是 agent 模式用例(preflight emit manifest,不调 SDK),
+// 原先的 vi.mock('@anthropic-ai/sdk') / vi.mock('forge-eval/load-env') 已成死代码,故移除。
+// --api 模式的 SDK mock 集成测试见 archive-dualpath.test.ts。
 
 describe('forge archive 集成 brownfield preflight + post-archive', () => {
   let tmp: string;

@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
-## [2.0.0] - 2026-05-18
+## [Unreleased]
 
 ### BREAKING
 
@@ -13,6 +13,8 @@ All notable changes to this project will be documented in this file.
   entry。**发布前已 verify/review 但未 archive、且 apply 期未走过 `forge pause-capture` 的
   option=2 change 会被 archive 拒签。** 受影响 change 由用户人工处理(将该 pause_decision 改判为
   option=4 Other 并补 `other_rationale`/`other_acked_by`,或人工接受后另行归档)— fence 不开自动放行口子。
+
+## [2.0.0] - 2026-05-18
 
 ### Added
 

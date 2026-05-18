@@ -119,6 +119,8 @@ describe('release-blocker: pause_decisions option=1/2 attack paths (9z gate)', (
       );
       // proposal.md 未改 → git diff 空 → What Changes 段无新增行 → fence 拒签
       expect(result.valid).toBe(false);
+      // 锁定拒签原因是 option=1 diff 段级校验(防 fence 重构后退化为字段校验拒签仍假绿)
+      expect(result.errors.some((e) => /What Changes.*无新增行/.test(e.message))).toBe(true);
     } finally {
       rmSync(repoRoot, { recursive: true, force: true });
     }

@@ -6,6 +6,14 @@ All notable changes to this project will be documented in this file.
 
 ## [2.0.0] - 2026-05-18
 
+### BREAKING
+
+- option=2(Fluid Pause 加 task)归档校验加固:archive fence 现要求 option=2 的 pause_decision
+  携带 `added_task_ref` + `capture_id`,并在 ack-log hash-chain 中匹配一条 `forge pause-capture`
+  entry。**发布前已 verify/review 但未 archive、且 apply 期未走过 `forge pause-capture` 的
+  option=2 change 会被 archive 拒签。** 受影响 change 由用户人工处理(将该 pause_decision 改判为
+  option=4 Other 并补 `other_rationale`/`other_acked_by`,或人工接受后另行归档)— fence 不开自动放行口子。
+
 ### Added
 
 - legacy-bridge Layer 3b:`forge legacy-bridge extract` —— 从老文档抽取需求条目并接入 backlog registry 第二数据源

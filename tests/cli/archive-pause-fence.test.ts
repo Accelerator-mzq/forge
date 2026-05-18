@@ -437,6 +437,12 @@ describe('verify/review pause_decisions cross-check', () => {
     const r = crossCheckPauseDecisions([base, { ...base, id: 2 }], [base]);
     expect(r.valid).toBe(true);
   });
+
+  it('review-only id(verify 无)→ 不拒签(单侧独有合法,design §6.5)', () => {
+    // review 侧有 id=1 + id=2,verify 侧只有 id=1,id=2 单侧独有 → 不拒签
+    const r = crossCheckPauseDecisions([base], [base, { ...base, id: 2 }]);
+    expect(r.valid).toBe(true);
+  });
 });
 
 // Helper:构造含 scope-entries fenced YAML 块的 proposal.md(沿 9b §2.6.3 anchor 模式)

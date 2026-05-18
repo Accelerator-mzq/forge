@@ -429,6 +429,10 @@ async function checkOption2TaskChecked(
  * verify/review 双 marker pause_decisions cross-check(design §6.5)。
  * 对两侧 id 相同的 pause_decision,逐字段比对;单侧独有 id 不拒签。
  *
+ * 前置假设:各 marker 内 pause_decision 的 id 唯一(design §2.1.5 schema 约定)。
+ * 若同侧出现重复 id,reviewById Map 后者覆盖前者 —— 该场景属 marker 数据异常,
+ * 不在本函数防御范围(整 marker 镜像 / id 唯一性校验是 design §12 非目标)。
+ *
  * @param verifyDecisions — verify marker 的 pause_decisions 数组
  * @param reviewDecisions — review marker 的 pause_decisions 数组
  * @param file — 可选错误报告用 marker 文件路径

@@ -1,6 +1,6 @@
 {
   "name": "forge",
-  "version": "1.4.0",
+  "version": "2.0.0",
   "description": "Spec-driven workflow + 12 behavior-shaping skills for Claude Code (OpenSpec × superpowers fusion)",
   "author": { "name": "msc", "email": "msc920426@proton.me" },
   "homepage": "https://github.com/Accelerator-mzq/forge",

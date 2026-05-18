@@ -11,7 +11,8 @@ export type LlmOp =
   | 'regenerate'
   | 'extract-facts'
   | 'quality-judge'
-  | 'sync-check';
+  | 'sync-check'
+  | 'extract';
 
 /** 一条已 redact 的输入 */
 export interface LlmTaskInput {

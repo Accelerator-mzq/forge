@@ -5,13 +5,16 @@ import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { scanArchivedFollowups } from '../scope/aggregator.js';
+import { scanArchivedFollowups, type AggregatorResult } from '../scope/aggregator.js';
 import {
   deriveWarningsAndTombstones,
   renderActiveMarkdown,
   renderArchivedMarkdown,
   countOpenBacklog,
+  splitLegacyClaims,
+  type LegacyBacklogWarning,
 } from './render.js';
+import { loadLegacyRequirements } from '../legacy-bridge/legacy-requirements.js';
 
 export * from './render.js';
 
@@ -29,15 +32,42 @@ export interface GenerateBacklogResult {
   archivedMd: string;
 }
 
-/** 聚合 + 渲染,返回两份 markdown(纯计算,不写盘) */
+/** 聚合 + 渲染,返回两份 markdown(纯计算,不写盘)—— 双源(spec §7 / §8) */
 export async function buildBacklog(forgeRoot: string): Promise<GenerateBacklogResult> {
-  const agg = await scanArchivedFollowups(forgeRoot);
-  const { warnings, tombstones } = deriveWarningsAndTombstones(agg.superseding, agg.skipped);
-  const activeMd = renderActiveMarkdown(agg.entries, warnings);
-  const archivedMd = renderArchivedMarkdown(tombstones);
-  // 待办计数口径由 render.ts 的 countOpenBacklog 统一(避免与 renderActiveMarkdown 各写一份)
+  // 源一:archived scope-entry —— 空 archive 容错(spec §7.1)
+  let agg: AggregatorResult;
+  if (existsSync(join(forgeRoot, 'changes', 'archive'))) {
+    agg = await scanArchivedFollowups(forgeRoot);
+  } else {
+    agg = { entries: [], superseding: [], skipped: [] };
+  }
+  // 源二:legacy-requirements.yaml
+  const legacyReqs = await loadLegacyRequirements(forgeRoot);
+
+  // legacy claim 分流(spec §8.2):在 deriveWarningsAndTombstones 之前
+  const legacyClaims = agg.superseding.filter((s) => s.source_change === 'legacy-requirements');
+  const scopeClaims = agg.superseding.filter((s) => s.source_change !== 'legacy-requirements');
+  const {
+    tombstones: legacyTombstones,
+    warnings: legacyWarnings,
+    retiredIds,
+  } = splitLegacyClaims(legacyClaims, legacyReqs?.requirements ?? []);
+  const { warnings: scopeWarnings, tombstones } = deriveWarningsAndTombstones(
+    scopeClaims,
+    agg.skipped,
+  );
+  // reserved-archive-dirname:archive 下若真存在名为 legacy-requirements 的目录(spec §8.5 第 6 项)
+  const reservedWarnings: LegacyBacklogWarning[] = existsSync(
+    join(forgeRoot, 'changes', 'archive', 'legacy-requirements'),
+  )
+    ? [{ kind: 'reserved-archive-dirname' }]
+    : [];
+  // legacy warning + scope warning + reserved 合并,一起渲染进 active.md ## Warnings 段
+  const allWarnings = [...scopeWarnings, ...legacyWarnings, ...reservedWarnings];
+  const activeMd = renderActiveMarkdown(agg.entries, allWarnings, legacyReqs, retiredIds);
+  const archivedMd = renderArchivedMarkdown(tombstones, legacyTombstones);
   const openCount = countOpenBacklog(agg.entries);
-  return { openCount, warningCount: warnings.length, activeMd, archivedMd };
+  return { openCount, warningCount: allWarnings.length, activeMd, archivedMd };
 }
 
 /** 聚合 + 渲染 + 写盘到 forge/backlog/(README 仅首写) */

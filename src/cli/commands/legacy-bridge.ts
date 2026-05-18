@@ -1,11 +1,11 @@
-// forge legacy-bridge 主命令 + 5 子命令骨架 — Plan 7 Phase A
+// forge legacy-bridge 主命令 + 6 子命令 — Plan 7 Phase A / Layer 3b extract(D2)
 // 各子命令在后续 Phase B-D 填实;本 Task 仅完成骨架 + commander 结构
 // spec §2.1 子命令一览 + 决策 #22 LLM opt-in 流程
 
 import { Command } from 'commander';
 import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
-import { existsSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, statSync, type Dirent } from 'node:fs';
+import { join, relative, basename } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { acquireLockByPath, LockHeldError } from '../../core/archive/lock.js';
 import { loadAnchorsFile, getAuthoritativeAnchors } from '../../core/legacy-bridge/anchors.js';
@@ -68,6 +68,21 @@ import type {
 import type { RegenerateClient, RegenerateInput } from '../../core/legacy-bridge/regenerator.js';
 import type { JudgeClient } from '../../core/legacy-bridge/quality-judge.js';
 import type { IndexEntry } from '../../core/legacy-bridge/indexer.js';
+import {
+  discoverSources,
+  buildExtractTasks,
+  applyExtractResult,
+  type ExtractResultInput,
+} from '../../core/legacy-bridge/extractor.js';
+import {
+  loadLegacyRequirements,
+  validateLegacyRequirementsFile,
+  finalizeLegacyRequirements,
+  LEGACY_REQUIREMENTS_FILE,
+  LEGACY_REQUIREMENTS_DRAFT_FILE,
+  LEGACY_REQUIREMENTS_DRAFT_MD,
+  type LegacyRequirementsFile,
+} from '../../core/legacy-bridge/legacy-requirements.js';
 
 /** spec §5:opt-in gate —— agent 与 --api 两模式都先过。复用既有 checkAck。 */
 export async function assertLlmOptIn(
@@ -237,6 +252,212 @@ export async function runMapCommand(opts: MapCommandOpts): Promise<number> {
   console.log(
     `✓ map manifest 已写 ${manifestPath(forgeRoot, 'map')}\n  → 请 fulfill 后跑 forge legacy-bridge map --apply(见 skill: legacy-bridge-fulfillment)`,
   );
+  return LB_EXIT_OK;
+}
+
+// ==========================================================================
+// extract 子命令四分支(Task D2)
+// ==========================================================================
+
+/** extract 子命令参数(四分支:emit / --apply / --api / --finalize) */
+export interface ExtractCommandOpts {
+  projectRoot: string;
+  apply: boolean;
+  api: boolean;
+  finalize: boolean;
+}
+
+/** 收集 whole-repo 代码文件路径(file tree 索引,供 prompt 内嵌) */
+async function collectCodeIndex(repoRoot: string): Promise<string[]> {
+  const out: string[] = [];
+  const skip = new Set([
+    'node_modules',
+    '.git',
+    'dist',
+    'dist-bundled',
+    'build',
+    'forge',
+    '.cache',
+  ]);
+  async function walk(dir: string): Promise<void> {
+    let entries: Dirent[];
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const ent of entries) {
+      if (skip.has(ent.name) || ent.name.startsWith('.')) continue;
+      const full = join(dir, ent.name);
+      if (ent.isDirectory()) await walk(full);
+      else if (ent.isFile()) out.push(relative(repoRoot, full).split('\\').join('/'));
+    }
+  }
+  await walk(repoRoot);
+  return out.sort();
+}
+
+/**
+ * extract 子命令四分支:
+ *   默认 → 发现 + buildExtractTasks → emit manifest;
+ *   --apply → 读 manifest + agent 结果 → applyExtractResult → 写 draft;
+ *   --api → ApiRunner 进程内调 SDK → 同后处理;
+ *   --finalize → 读 draft → finalizeLegacyRequirements → 写 legacy-requirements.yaml + 刷新 backlog。
+ */
+export async function runExtractCommand(opts: ExtractCommandOpts): Promise<number> {
+  const forgeRoot = join(opts.projectRoot, 'forge');
+  // 互斥校验:--apply / --api / --finalize 三者不能同传(spec §2)
+  const exclusive = [opts.apply, opts.api, opts.finalize].filter(Boolean).length;
+  if (exclusive > 1) {
+    console.error('✗ --apply / --api / --finalize 三者互斥,只能用其一');
+    return LB_EXIT_GENERAL_ERROR;
+  }
+
+  // --finalize 分支:纯确定性,不调 LLM,不过 opt-in gate(spec §6.2)
+  if (opts.finalize) {
+    return runExtractFinalize(forgeRoot);
+  }
+
+  // --apply 不调 LLM,跳过 opt-in gate;emit / --api 先过 gate(spec §5 / §5.3)
+  if (!opts.apply) {
+    const optin = await assertLlmOptIn(forgeRoot);
+    if (!optin.ok) {
+      console.error(`✗ ${optin.reason}`);
+      return optin.graceful ? LB_EXIT_OK : LB_EXIT_GENERAL_ERROR;
+    }
+  }
+
+  if (opts.apply) {
+    return runExtractApply(forgeRoot);
+  }
+
+  // emit / --api:确定性 prep
+  const sources = await discoverSources(opts.projectRoot);
+  if (sources.length === 0) {
+    console.error(
+      '✗ 未发现任何需求文档 / backlog 文件;检查仓库是否有 SRS/PRD/BACKLOG/TODO 命名的文件',
+    );
+    return LB_EXIT_GENERAL_ERROR;
+  }
+  const codeIndex = await collectCodeIndex(opts.projectRoot);
+  const tasks = await buildExtractTasks(opts.projectRoot, sources, codeIndex);
+  // 透明告知(spec §5.3 第 3 点)
+  console.log(`→ 本次将把 ${sources.length} 份发现文档交给 LLM(redact 已跑默认规则)`);
+
+  if (opts.api) {
+    const client = (await makeForgeApiClient()) as unknown as RunnerClient;
+    const results = await new ApiRunner(client).run(tasks);
+    const confirmed = await loadLegacyRequirements(forgeRoot);
+    const apiInputs: ExtractResultInput[] = results.map((r, i) => ({
+      text: r.text,
+      source: tasks[i]!.inputs[0]!.source,
+      kind: sources[i]!.kind,
+    }));
+    const out = applyExtractResult(apiInputs, confirmed);
+    await writeFile(join(forgeRoot, LEGACY_REQUIREMENTS_DRAFT_FILE), out.draftYaml, 'utf8');
+    await writeFile(join(forgeRoot, LEGACY_REQUIREMENTS_DRAFT_MD), out.draftMarkdown, 'utf8');
+    console.log('✓ extract draft 已写(--api 单进程)');
+    return LB_EXIT_OK;
+  }
+
+  // 默认 agent 模式:emit manifest。已确认 yaml 快照写进 meta —— `--apply` 据此做增量 diff,
+  // 不在 apply 时回读磁盘(emit 与 apply 之间 yaml 可能被改;快照随 manifest_hash 锁定基线,spec §4.1/§6.1)
+  const confirmedSnapshot = await loadLegacyRequirements(forgeRoot);
+  await new AgentHandoffRunner(forgeRoot, FORGE_VERSION).emit('extract', 1, tasks, {
+    confirmed_snapshot: confirmedSnapshot,
+  });
+  console.log(
+    `✓ extract manifest 已写 ${manifestPath(forgeRoot, 'extract')}\n  → 请 fulfill 后跑 forge legacy-bridge extract --apply(见 skill: legacy-bridge-fulfillment)`,
+  );
+  return LB_EXIT_OK;
+}
+
+/** --apply:读 manifest + agent 结果 → 写 draft */
+async function runExtractApply(forgeRoot: string): Promise<number> {
+  let manifest: Awaited<ReturnType<typeof readManifest>>;
+  try {
+    manifest = await readManifest(forgeRoot, 'extract');
+  } catch (e) {
+    console.error(`✗ extract manifest 读取失败:${(e as Error).message}`);
+    return LB_EXIT_GENERAL_ERROR;
+  }
+  if (!manifest) {
+    console.error('✗ 无 extract manifest;请先跑 forge legacy-bridge extract');
+    return LB_EXIT_GENERAL_ERROR;
+  }
+  let results: Awaited<ReturnType<typeof readTaskResults>>;
+  try {
+    results = await readTaskResults(forgeRoot, manifest.tasks);
+  } catch (e) {
+    console.error(`✗ agent 结果读取失败:${(e as Error).message}`);
+    return LB_EXIT_GENERAL_ERROR;
+  }
+  // 每个 task 的来源文档 = task.inputs[0].source;kind 由 source 反查
+  const applyInputs: ExtractResultInput[] = results.map((r, i) => {
+    const src = manifest!.tasks[i]!.inputs[0]!.source;
+    return { text: r.text, source: src, kind: inferKind(src) };
+  });
+  // 增量 diff 基线取自 manifest.meta 的快照(emit 时写入),不回读磁盘 —— manifest_hash 已锁定该快照
+  const confirmed = (manifest.meta?.confirmed_snapshot ?? null) as LegacyRequirementsFile | null;
+  let out;
+  try {
+    out = applyExtractResult(applyInputs, confirmed);
+  } catch (e) {
+    console.error(`✗ extract 结果校验失败:${(e as Error).message}`);
+    return LB_EXIT_GENERAL_ERROR;
+  }
+  await writeFile(join(forgeRoot, LEGACY_REQUIREMENTS_DRAFT_FILE), out.draftYaml, 'utf8');
+  await writeFile(join(forgeRoot, LEGACY_REQUIREMENTS_DRAFT_MD), out.draftMarkdown, 'utf8');
+  await consumeManifest(forgeRoot, 'extract');
+  console.log(
+    `✓ extract draft 已写 forge/${LEGACY_REQUIREMENTS_DRAFT_FILE} —— 审改后跑 extract --finalize`,
+  );
+  return LB_EXIT_OK;
+}
+
+/** 据文件名反查 kind(与 extractor.classifyKind 同口径:只看 basename) */
+function inferKind(relPath: string): 'srs' | 'backlog-file' | 'issue-export' {
+  // 只看文件名本体 —— 否则 docs/issues/SRS.md 这类路径会被整路径里的 'issue' 误判为 issue-export
+  const name = basename(relPath).toLowerCase();
+  if (/issue/.test(name)) return 'issue-export';
+  if (/^(backlog|todo|roadmap)\b/.test(name)) return 'backlog-file';
+  return 'srs';
+}
+
+/** --finalize:读 draft → finalize → 写 legacy-requirements.yaml + 刷新 backlog */
+async function runExtractFinalize(forgeRoot: string): Promise<number> {
+  const draftPath = join(forgeRoot, LEGACY_REQUIREMENTS_DRAFT_FILE);
+  let raw: string;
+  try {
+    raw = await readFile(draftPath, 'utf8');
+  } catch {
+    console.error(
+      `✗ 找不到 ${LEGACY_REQUIREMENTS_DRAFT_FILE};请先跑 forge legacy-bridge extract + --apply`,
+    );
+    return LB_EXIT_GENERAL_ERROR;
+  }
+  let draftFile;
+  try {
+    draftFile = validateLegacyRequirementsFile(parseYaml(raw));
+  } catch (e) {
+    console.error(`✗ draft 校验失败:${(e as Error).message}`);
+    return LB_EXIT_GENERAL_ERROR;
+  }
+  const finalized = finalizeLegacyRequirements(draftFile.requirements);
+  await writeFile(join(forgeRoot, LEGACY_REQUIREMENTS_FILE), stringifyYaml(finalized), 'utf8');
+  console.log(`✓ ${LEGACY_REQUIREMENTS_FILE} 已写(${finalized.requirements.length} 条)`);
+  // 立即刷新 backlog(spec §6.2 第 6 步);archive 目录可能不存在 → buildBacklog 已容错(E1)
+  try {
+    const { generateBacklog } = await import('../../core/backlog/index.js');
+    await generateBacklog(forgeRoot);
+    console.log('✓ forge/backlog/ 已刷新');
+  } catch (e) {
+    // legacy-requirements.yaml 已写成功,但 backlog 未刷新 → 部分成功(active.md 暂时陈旧)。
+    console.error(
+      `⚠ legacy-requirements.yaml 已写,但 backlog 刷新失败:${(e as Error).message}\n  → 请手动跑 forge backlog 刷新`,
+    );
+    return LB_EXIT_PARTIAL_SUCCESS;
+  }
   return LB_EXIT_OK;
 }
 
@@ -1238,6 +1459,22 @@ export function buildLegacyBridgeCommand(): Command {
       } finally {
         if (release) await release();
       }
+    });
+
+  cmd
+    .command('extract')
+    .description('扫全仓库老文档 → LLM 抽需求 + 判实现 → legacy-requirements.yaml(Layer 3b)')
+    .option('--apply', '消费 agent 已写入的结果文件 → 产 draft yaml')
+    .option('--api', '进程内直接调 Anthropic SDK(需 ANTHROPIC_API_KEY)')
+    .option('--finalize', '读 draft → 分配 ID → 转正为 legacy-requirements.yaml')
+    .action(async (opts: { apply?: boolean; api?: boolean; finalize?: boolean }) => {
+      const code = await runExtractCommand({
+        projectRoot: process.cwd(),
+        apply: opts.apply ?? false,
+        api: opts.api ?? false,
+        finalize: opts.finalize ?? false,
+      });
+      process.exit(code);
     });
 
   return cmd;

@@ -61,18 +61,22 @@ describe('forge backlog CLI 行为 (plan-backlog-registry Task 6)', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  it('forge backlog:无 forge/changes/archive → exit 2', () => {
+  it('forge backlog:无 forge/changes/archive → exit 0 + 生成 active.md(spec §7.1 空 archive 容错)', () => {
+    // Layer 3b spec §7.1:buildBacklog 对缺失的 forge/changes/archive 容错(源一取空),
+    // 故 archive 目录不存在不再是错误 —— 与第二数据源 legacy-requirements.yaml 解耦。
     const root = mkdtempSync(join(tmpdir(), 'forge-bl-cli-'));
     const r = runCli(['backlog'], root);
-    expect(r.exitCode).toBe(2);
+    expect(r.exitCode).toBe(0);
+    expect(existsSync(join(root, 'forge', 'backlog', 'active.md'))).toBe(true);
     rmSync(root, { recursive: true, force: true });
   });
 
-  it('forge backlog list:无 forge/changes/archive → exit 2', () => {
-    // 与 forge backlog 的 exit 2 用例对称
+  it('forge backlog list:无 forge/changes/archive → exit 0(spec §7.1 空 archive 容错)', () => {
+    // 与 forge backlog 的 exit 0 用例对称
     const root = mkdtempSync(join(tmpdir(), 'forge-bl-cli-'));
     const r = runCli(['backlog', 'list'], root);
-    expect(r.exitCode).toBe(2);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('# Active Backlog');
     rmSync(root, { recursive: true, force: true });
   });
 });

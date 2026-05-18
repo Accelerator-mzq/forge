@@ -4,7 +4,11 @@ All notable changes to this project will be documented in this file.
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [2.0.0] - 2026-05-18
+
+### Added
+
+- legacy-bridge Layer 3b:`forge legacy-bridge extract` —— 从老文档抽取需求条目并接入 backlog registry 第二数据源
 
 ### Changed
 

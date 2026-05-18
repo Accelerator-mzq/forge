@@ -41,6 +41,8 @@ describe('applyMapResult', () => {
     expect(out.draftYaml).toContain('requirements');
     expect(out.draftYaml).toContain('docs/SRS.md');
     expect(out.newAnchors).toHaveLength(1);
+    // 首个出现的 role → authoritative=true
+    expect(out.newAnchors[0]!.authoritative).toBe(true);
   });
 
   it('LLM 输出非法 JSON → 全部 fallback 成 unmatched', () => {

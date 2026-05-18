@@ -124,3 +124,32 @@ export async function loadLegacyRequirements(
   }
   return validateLegacyRequirementsFile(parsed);
 }
+
+/** 从 'LR-0042' 取数字 42;非法格式返回 0 */
+function parseLrNumber(id: string): number {
+  const m = /^LR-(\d{4,})$/.exec(id);
+  return m ? Number(m[1]) : 0;
+}
+
+/** 'LR-' + 4 位零填充 */
+function formatLrId(n: number): string {
+  return `LR-${String(n).padStart(4, '0')}`;
+}
+
+/**
+ * --finalize 纯逻辑(spec §6.2):
+ * 给 id 为空的条目按 max(既有所有 LR-NNNN)+1 顺序分配;整表 review 置 confirmed。
+ * 不读盘/不写盘 —— 调用方(CLI)负责 IO。
+ */
+export function finalizeLegacyRequirements(draft: LegacyRequirement[]): LegacyRequirementsFile {
+  let maxNum = 0;
+  for (const r of draft) {
+    if (r.id !== '') maxNum = Math.max(maxNum, parseLrNumber(r.id));
+  }
+  const requirements = draft.map((r) => ({
+    ...r,
+    id: r.id === '' ? formatLrId(++maxNum) : r.id,
+    review: 'confirmed' as LegacyRequirementReview,
+  }));
+  return { schema: 'forge-legacy-requirements/v1', requirements };
+}

@@ -73,3 +73,50 @@ describe('validateLegacyRequirementsFile', () => {
     expect(() => validateLegacyRequirementsFile(bad)).toThrow(/status/);
   });
 });
+
+import { finalizeLegacyRequirements } from '../../../src/core/legacy-bridge/legacy-requirements.js';
+import type { LegacyRequirement } from '../../../src/core/legacy-bridge/legacy-requirements.js';
+
+function req(partial: Partial<LegacyRequirement>): LegacyRequirement {
+  return {
+    id: '',
+    title: 't',
+    description: 'd',
+    status: 'unimplemented',
+    source: { document: 'docs/SRS.md', section: '1', kind: 'srs' },
+    evidence: [],
+    confidence: 'medium',
+    priority: null,
+    review: 'pending',
+    notes: '',
+    ...partial,
+  };
+}
+
+describe('finalizeLegacyRequirements', () => {
+  it('空 id 按 max(既有 LR-NNNN)+1 顺序分配,4 位零填充', () => {
+    const draft = [
+      req({ id: 'LR-0007', title: '已有' }),
+      req({ id: '', title: '新1' }),
+      req({ id: '', title: '新2' }),
+    ];
+    const out = finalizeLegacyRequirements(draft);
+    expect(out.requirements.map((r) => r.id)).toEqual(['LR-0007', 'LR-0008', 'LR-0009']);
+  });
+
+  it('整表 review 置 confirmed', () => {
+    const out = finalizeLegacyRequirements([req({ id: 'LR-0001', review: 'pending' })]);
+    expect(out.requirements[0]?.review).toBe('confirmed');
+  });
+
+  it('无既有 ID 时从 LR-0001 起', () => {
+    const out = finalizeLegacyRequirements([req({}), req({})]);
+    expect(out.requirements.map((r) => r.id)).toEqual(['LR-0001', 'LR-0002']);
+  });
+
+  it('幂等:对已 finalize 的结果再 finalize,ID 不变', () => {
+    const once = finalizeLegacyRequirements([req({}), req({ id: 'LR-0003' })]);
+    const twice = finalizeLegacyRequirements(once.requirements);
+    expect(twice.requirements.map((r) => r.id)).toEqual(once.requirements.map((r) => r.id));
+  });
+});

@@ -420,7 +420,7 @@ function inferKind(relPath: string): 'srs' | 'backlog-file' | 'issue-export' {
   // 只看文件名本体 —— 否则 docs/issues/SRS.md 这类路径会被整路径里的 'issue' 误判为 issue-export
   const name = basename(relPath).toLowerCase();
   if (/issue/.test(name)) return 'issue-export';
-  if (/^(backlog|todo|roadmap)/.test(name)) return 'backlog-file';
+  if (/^(backlog|todo|roadmap)\b/.test(name)) return 'backlog-file';
   return 'srs';
 }
 

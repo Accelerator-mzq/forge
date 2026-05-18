@@ -602,7 +602,14 @@ export function buildArchiveCommand(): Command {
             //      此处删 --resume 暂停态文件(正常收尾)。transaction 之前任一步失败时暂停态保留,
             //      用户修好后可再 --resume 重入。仅 opts.resume 路径有此文件,非 resume 路径 undefined 跳过。
             if (resumePausePath) {
-              await rm(resumePausePath, { force: true });
+              // transaction 已成功;删暂停态失败(罕见权限错)不应让 archive 报错 —— 降级为 warn
+              try {
+                await rm(resumePausePath, { force: true });
+              } catch (e) {
+                console.warn(
+                  `⚠ archive 已完成,但暂停态文件 ${resumePausePath} 清理失败(可手动删除):${(e as Error).message}`,
+                );
+              }
             }
 
             // 步骤 5.5:Plan 7 post-archive hook(enforce_sync=false 时不阻塞,只产报告)

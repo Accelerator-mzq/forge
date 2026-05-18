@@ -44,8 +44,12 @@ import { crossCuttingFenceCheck } from '../../core/archive/fence.js';
 // plan-9d Task 6:verify_findings fence + ack-log consistency
 import { validateVerifyFindingsFence } from '../../core/archive/verify-findings-fence.js';
 import { validateAckLogConsistency } from '../../core/archive/ack-log-consistency.js';
-// plan-9c Task 2:pause_decisions fence
-import { validatePauseDecisionsFence } from '../../core/archive/pause-decisions-fence.js';
+// plan-9c Task 2:pause_decisions fence + Task 12:cross-check
+import {
+  validatePauseDecisionsFence,
+  crossCheckPauseDecisions,
+} from '../../core/archive/pause-decisions-fence.js';
+import type { PauseDecision } from '../../core/markers/types.js';
 // plan-9e1 Task 4:三级 fence + summary builder + render + ScopeEntriesIntegrityError(v2 BLOCKER 4)
 import { validateThreeLevelFence } from '../../core/archive/three-level-fence.js';
 import {
@@ -449,11 +453,19 @@ export function buildArchiveCommand(): Command {
             // v2 codex MAJOR 4 修订:对 verifyRec + reviewRec 都跑 fence
             // v4 codex NEW-MAJOR A6 + B4 联动:fence 不再需要 ctx 参数(B4 改用 parseMarkdown 局部段校验,
             //   不再调 validateScopeEntries → ctx unused → 沿 YAGNI 移除)
+            // Task 12:从 verify marker 取链固化值组成 pauseFenceOpts(design §6.2 verify 是最后 freeze)
+            // marker 由 AI 产出,字段运行时可能是 string / null / undefined — 断言须含 null,
+            // 否则 null 会被错误窄化为 string,绕过 checkOption2TaskChecked 的 == null fail-closed 检查
+            const pauseFenceOpts = {
+              verifyAckLogTailHash: verifyRec['ack_log_tail_hash'] as string | null | undefined,
+              verifyAckLogEntryCount: verifyRec['ack_log_entry_count'] as number | null | undefined,
+              changeId,
+            };
             const pdVerifyResult = await validatePauseDecisionsFence(
               verifyRec,
               changeDir,
               process.cwd(),
-              {}, // Task 12 接线:从 verifyRec 取 ack_log_tail_hash / entry_count / change_id
+              pauseFenceOpts,
               verifyPath,
             );
             if (!pdVerifyResult.valid) {
@@ -462,16 +474,33 @@ export function buildArchiveCommand(): Command {
               await archiveRelease();
               process.exit(1);
             }
+            // 两处调用都传同一 pauseFenceOpts(都用 verify marker 的 tail/count — design §6.2)
             const pdReviewResult = await validatePauseDecisionsFence(
               reviewRec,
               changeDir,
               process.cwd(),
-              {}, // Task 12 接线:从 reviewRec 取 ack_log_tail_hash / entry_count / change_id
+              pauseFenceOpts,
               reviewPath,
             );
             if (!pdReviewResult.valid) {
               console.error('✗ pause_decisions fence 拒签(review-passed):');
               for (const e of pdReviewResult.errors) console.error(`  - ${e.field}: ${e.message}`);
+              await archiveRelease();
+              process.exit(1);
+            }
+
+            // 步骤 3.7.1:Task 12 — verify/review pause_decisions cross-check(design §6.5)
+            // 对两侧共有 id 的 pause_decision 逐字段比对;单侧独有 id 不拒签
+            const vDecisions = Array.isArray(verifyRec['pause_decisions'])
+              ? (verifyRec['pause_decisions'] as PauseDecision[])
+              : [];
+            const rDecisions = Array.isArray(reviewRec['pause_decisions'])
+              ? (reviewRec['pause_decisions'] as PauseDecision[])
+              : [];
+            const ccResult = crossCheckPauseDecisions(vDecisions, rDecisions, verifyPath);
+            if (!ccResult.valid) {
+              console.error('✗ pause_decisions verify/review cross-check 拒签:');
+              for (const e of ccResult.errors) console.error(`  - ${e.field}: ${e.message}`);
               await archiveRelease();
               process.exit(1);
             }

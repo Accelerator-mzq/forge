@@ -7,7 +7,11 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { validatePauseDecisionsFence } from '../../src/core/archive/pause-decisions-fence.js';
+import {
+  validatePauseDecisionsFence,
+  crossCheckPauseDecisions,
+} from '../../src/core/archive/pause-decisions-fence.js';
+import type { PauseDecision } from '../../src/core/markers/types.js';
 
 // 合法 PauseDecision baseline(option=3 + 完整 ack + non_blocking_rationale)
 const basePauseDecision = {
@@ -393,6 +397,45 @@ describe('option=1 diff 段级校验', () => {
       repoRoot,
     );
     expect(result.valid).toBe(true);
+  });
+});
+
+// —— verify/review pause_decisions cross-check 测试 ——
+describe('verify/review pause_decisions cross-check', () => {
+  // 合法 PauseDecision 完整 baseline(含 PauseDecision 所有必填字段)
+  const base: PauseDecision = {
+    id: 1,
+    paused_at: '2026-05-12T14:30:00Z',
+    task_ref: 'tasks.md#task-1',
+    issue_summary: 'test issue',
+    severity: 'WARNING',
+    severity_acked_by: 'msc',
+    severity_acked_at: '2026-05-12T14:32:00Z',
+    chosen_option: 2,
+    target_artifact: 'tasks.md',
+    target_anchor: 'task-3',
+    non_blocking_rationale: null,
+    other_rationale: null,
+    other_acked_by: null,
+    added_task_ref: 'tasks.md#task-3',
+    capture_id: 'cap-1',
+  };
+
+  it('共有 id 字段一致 → 通过', () => {
+    const r = crossCheckPauseDecisions([base], [{ ...base }]);
+    expect(r.valid).toBe(true);
+  });
+
+  it('共有 id 的 capture_id 不一致 → 拒签', () => {
+    const r = crossCheckPauseDecisions([base], [{ ...base, capture_id: 'cap-2' }]);
+    expect(r.valid).toBe(false);
+    expect(r.errors[0]?.message).toMatch(/capture_id.*不一致/);
+  });
+
+  it('verify-only id(review 无)→ 不拒签(单侧独有合法)', () => {
+    // verify 侧有 id=1 + id=2,review 侧只有 id=1,id=2 单侧独有 → 不拒签
+    const r = crossCheckPauseDecisions([base, { ...base, id: 2 }], [base]);
+    expect(r.valid).toBe(true);
   });
 });
 

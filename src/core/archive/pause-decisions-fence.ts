@@ -426,6 +426,48 @@ async function checkOption2TaskChecked(
 }
 
 /**
+ * verify/review 双 marker pause_decisions cross-check(design §6.5)。
+ * 对两侧 id 相同的 pause_decision,逐字段比对;单侧独有 id 不拒签。
+ *
+ * @param verifyDecisions — verify marker 的 pause_decisions 数组
+ * @param reviewDecisions — review marker 的 pause_decisions 数组
+ * @param file — 可选错误报告用 marker 文件路径
+ */
+export function crossCheckPauseDecisions(
+  verifyDecisions: PauseDecision[],
+  reviewDecisions: PauseDecision[],
+  file?: string,
+): ValidationResult {
+  const results: ValidationResult[] = [];
+  // 按 id 建 review 侧索引,方便 O(1) 查找
+  const reviewById = new Map(reviewDecisions.map((d) => [d.id, d]));
+  // 四个需要比对的字段
+  const FIELDS: (keyof PauseDecision)[] = [
+    'task_ref',
+    'chosen_option',
+    'added_task_ref',
+    'capture_id',
+  ];
+  for (const v of verifyDecisions) {
+    const r = reviewById.get(v.id);
+    if (!r) continue; // 单侧独有 id(verify-only)→ 合法,不拒
+    for (const f of FIELDS) {
+      if (v[f] !== r[f]) {
+        results.push(
+          failed({
+            artifact: 'marker',
+            field: `pause_decisions[id=${v.id}].${String(f)}`,
+            message: `verify/review marker pause_decision id=${v.id} 的 ${String(f)} 不一致(verify=${String(v[f])} review=${String(r[f])})`,
+            file,
+          }),
+        );
+      }
+    }
+  }
+  return results.length === 0 ? ok() : mergeResults(...results);
+}
+
+/**
  * option=3 校验:proposal.md / design.md 含 scope-entries fenced YAML 块 +
  *   通过 `triggered_by.source='pause_decisions' AND triggered_by.id=<pause.id>` 反向查找匹配 entry
  *   (沿 9b §2.6 scope-entries schema TriggeredByRef 字段)

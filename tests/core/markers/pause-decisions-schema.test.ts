@@ -164,6 +164,39 @@ describe('pause_decisions schema validation', () => {
     expect(result.valid).toBe(true);
   });
 
+  it('PauseDecision added_task_ref / capture_id 显式为 null → schema 通过', () => {
+    // null 是合法值(schema 层 optional + nullable);option=2 marker 可写 capture_id: null
+    const marker = {
+      schema: 'forge-verify/v1',
+      verified_at: '2026-05-12T14:30:00Z',
+      verified_by: 'ai-agent',
+      tasks_hash: 'sha256:' + 'a'.repeat(64),
+      content_hash: 'sha256:' + 'b'.repeat(64),
+      evidence: [],
+      pause_decisions: [
+        {
+          id: 1,
+          paused_at: '2026-05-12T14:30:00Z',
+          task_ref: 'tasks.md#task-1',
+          issue_summary: 'x',
+          severity: 'WARNING',
+          severity_acked_by: 'msc',
+          severity_acked_at: '2026-05-12T14:32:00Z',
+          chosen_option: 2,
+          target_artifact: 'tasks.md',
+          target_anchor: '- task-2',
+          non_blocking_rationale: null,
+          other_rationale: null,
+          other_acked_by: null,
+          added_task_ref: null,
+          capture_id: null,
+        },
+      ],
+    };
+    const result = validateMarkerSchema(marker);
+    expect(result.valid).toBe(true);
+  });
+
   it('PauseDecision added_task_ref / capture_id 类型错(非 string 非 null)→ schema 拒签', () => {
     // 构造独立完整 marker,避免共享引用;hash 同 baseVerifyMarker 模式
     const marker = {

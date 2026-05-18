@@ -777,7 +777,7 @@ function checkPauseDecisionsArray(v: unknown, file?: string): ValidationResult {
           failed({
             artifact: 'marker',
             field: `${fieldBase}.${field}`,
-            message: 'must be undefined / null / non-empty string',
+            message: 'must be null or non-empty string',
             file,
           }),
         );

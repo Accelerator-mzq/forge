@@ -7,7 +7,10 @@ import {
   extractText,
   buildExtractTasks,
   parseExtractResults,
+  diffAgainstConfirmed,
+  type ExtractedRequirement,
 } from '../../../src/core/legacy-bridge/extractor.js';
+import type { LegacyRequirement } from '../../../src/core/legacy-bridge/legacy-requirements.js';
 
 async function tmpRepo(files: Record<string, string>): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'extract-'));
@@ -144,5 +147,154 @@ describe('parseExtractResults', () => {
     expect(() =>
       parseExtractResults([{ text: '[null]', source: 'docs/SRS.md', kind: 'srs' }]),
     ).toThrow(/docs\/SRS\.md\[0\]/);
+  });
+});
+
+function extracted(p: Partial<ExtractedRequirement>): ExtractedRequirement {
+  return {
+    title: 't',
+    description: 'd',
+    status: 'unimplemented',
+    source: { document: 'docs/SRS.md', section: '1', kind: 'srs' },
+    evidence: [],
+    confidence: 'medium',
+    ...p,
+  };
+}
+
+/** 构造一条既有 LegacyRequirement(confirmed yaml fixture 用) */
+function req(p: Partial<LegacyRequirement>): LegacyRequirement {
+  return {
+    id: 'LR-0001',
+    title: 't',
+    description: 'd',
+    status: 'unimplemented',
+    source: { document: 'docs/SRS.md', section: '1', kind: 'srs' },
+    evidence: [],
+    confidence: 'medium',
+    priority: null,
+    review: 'confirmed',
+    notes: '',
+    ...p,
+  };
+}
+
+describe('diffAgainstConfirmed', () => {
+  it('首次抽取(无既有 yaml):全部 new,id 留空', () => {
+    const draft = diffAgainstConfirmed([extracted({ title: 'A' })], null);
+    expect(draft[0]?.change).toBe('new');
+    expect(draft[0]?.requirement.id).toBe('');
+  });
+
+  it('matched 未变 → unchanged,保留既有 id 与用户 priority/notes', () => {
+    const confirmed = {
+      schema: 'forge-legacy-requirements/v1' as const,
+      requirements: [
+        req({
+          id: 'LR-0005',
+          title: 'A',
+          description: 'd',
+          priority: 'high',
+          notes: '用户笔记',
+          source: { document: 'docs/SRS.md', section: '1', kind: 'srs' },
+        }),
+      ],
+    };
+    const draft = diffAgainstConfirmed([extracted({ title: 'A', description: 'd' })], confirmed);
+    expect(draft[0]?.change).toBe('unchanged');
+    expect(draft[0]?.requirement.id).toBe('LR-0005');
+    expect(draft[0]?.requirement.priority).toBe('high');
+    expect(draft[0]?.requirement.notes).toBe('用户笔记');
+    expect(draft[0]?.requirement.review).toBe('confirmed');
+  });
+
+  it('matched 但 description 变 → changed,review 回退 pending', () => {
+    const confirmed = {
+      schema: 'forge-legacy-requirements/v1' as const,
+      requirements: [
+        req({
+          id: 'LR-0005',
+          title: 'A',
+          description: '旧',
+          source: { document: 'docs/SRS.md', section: '1', kind: 'srs' },
+        }),
+      ],
+    };
+    const draft = diffAgainstConfirmed([extracted({ title: 'A', description: '新' })], confirmed);
+    expect(draft[0]?.change).toBe('changed');
+    expect(draft[0]?.requirement.review).toBe('pending');
+    expect(draft[0]?.requirement.id).toBe('LR-0005');
+  });
+
+  it('matched 仅 confidence/evidence 变 → changed,review 回退 pending(spec §6.1「全一致」)', () => {
+    const confirmed = {
+      schema: 'forge-legacy-requirements/v1' as const,
+      requirements: [
+        req({
+          id: 'LR-0005',
+          title: 'A',
+          description: 'd',
+          confidence: 'low',
+          evidence: [],
+          source: { document: 'docs/SRS.md', section: '1', kind: 'srs' },
+        }),
+      ],
+    };
+    const draft = diffAgainstConfirmed(
+      [extracted({ title: 'A', description: 'd', confidence: 'high' })],
+      confirmed,
+    );
+    expect(draft[0]?.change).toBe('changed');
+    expect(draft[0]?.requirement.review).toBe('pending');
+  });
+
+  it('既有有、本轮没抽到 → vanished,保留 id', () => {
+    const confirmed = {
+      schema: 'forge-legacy-requirements/v1' as const,
+      requirements: [
+        req({ id: 'LR-0009', source: { document: 'docs/SRS.md', section: '9', kind: 'srs' } }),
+      ],
+    };
+    const draft = diffAgainstConfirmed([], confirmed);
+    expect(draft[0]?.change).toBe('vanished');
+    expect(draft[0]?.requirement.id).toBe('LR-0009');
+  });
+
+  it('同 document+section 抽出多条 → 全部 conflict / pending,不继承 id', () => {
+    const confirmed = {
+      schema: 'forge-legacy-requirements/v1' as const,
+      requirements: [
+        req({ id: 'LR-0005', source: { document: 'docs/SRS.md', section: '1', kind: 'srs' } }),
+      ],
+    };
+    const draft = diffAgainstConfirmed(
+      [extracted({ title: 'A' }), extracted({ title: 'B' })],
+      confirmed,
+    );
+    expect(draft.every((d) => d.change === 'conflict')).toBe(true);
+    expect(draft.every((d) => d.requirement.id === '')).toBe(true);
+    expect(draft.every((d) => d.requirement.review === 'pending')).toBe(true);
+  });
+
+  it('旧侧同 key 多条 + 新侧 1 条 → 旧 confirmed 条目不丢、全标 conflict(F02 防静默丢失)', () => {
+    const confirmed = {
+      schema: 'forge-legacy-requirements/v1' as const,
+      requirements: [
+        req({
+          id: 'LR-0005',
+          title: 'A',
+          source: { document: 'docs/SRS.md', section: '1', kind: 'srs' },
+        }),
+        req({
+          id: 'LR-0006',
+          title: 'B',
+          source: { document: 'docs/SRS.md', section: '1', kind: 'srs' },
+        }),
+      ],
+    };
+    const draft = diffAgainstConfirmed([extracted({ title: 'C' })], confirmed);
+    expect(draft).toHaveLength(3);
+    expect(draft.every((d) => d.change === 'conflict')).toBe(true);
+    expect(draft.every((d) => d.requirement.id === '')).toBe(true);
   });
 });

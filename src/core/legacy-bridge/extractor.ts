@@ -1,7 +1,13 @@
 // Layer 3b:whole-repo 发现 + 文本抽取 + prep + apply + 增量 diff(spec §4/§5/§6)
 import { readdir, stat, readFile } from 'node:fs/promises';
 import { join, relative, extname, basename } from 'node:path';
-import type { LegacyRequirementKind, LegacyRequirementStatus } from './legacy-requirements.js';
+import { createHash } from 'node:crypto';
+import type {
+  LegacyRequirementKind,
+  LegacyRequirementStatus,
+  LegacyRequirement,
+  LegacyRequirementsFile,
+} from './legacy-requirements.js';
 import { parseWorkbook, sheetToMarkdown } from './excel.js';
 import { redact } from './redact.js';
 import type { LlmTask } from './llm-task.js';
@@ -270,4 +276,114 @@ export function parseExtractResults(inputs: ExtractResultInput[]): ExtractedRequ
     });
   }
   return out;
+}
+
+/** draft 条目的变化类别(spec §6.1) */
+export type ExtractChangeKind = 'new' | 'changed' | 'unchanged' | 'vanished' | 'conflict';
+
+/** 带变化标注的 draft 条目 */
+export interface DraftEntry {
+  requirement: LegacyRequirement;
+  change: ExtractChangeKind;
+}
+
+/** 归一化 content hash:title+description 去空白后 sha256 前 12 位 */
+function contentHash(title: string, description: string): string {
+  const norm = (title + ' ' + description).replace(/\s+/g, ' ').trim();
+  return createHash('sha256').update(norm, 'utf8').digest('hex').slice(0, 12);
+}
+
+/** 匹配键(spec §6.1):document +(section 非空用它,否则 content hash) */
+function matchKey(document: string, section: string, title: string, description: string): string {
+  return section !== ''
+    ? `${document} sec:${section}`
+    : `${document} hash:${contentHash(title, description)}`;
+}
+
+/** ExtractedRequirement → draft LegacyRequirement(id/review 由调用方按 change 定) */
+function toRequirement(e: ExtractedRequirement): LegacyRequirement {
+  return {
+    id: '',
+    title: e.title,
+    description: e.description,
+    status: e.status,
+    source: e.source,
+    evidence: e.evidence,
+    confidence: e.confidence,
+    priority: null,
+    review: 'pending',
+    notes: '',
+  };
+}
+
+/**
+ * 增量 diff(spec §6.1):本轮抽取条目 vs 已确认 yaml。
+ * 匹配仅在键唯一(旧侧、新侧各恰好 1 条)时进行;任一侧多于 1 条 → conflict。
+ * confirmed 为 null(首次抽取)时全部 new。
+ */
+export function diffAgainstConfirmed(
+  extracted: ExtractedRequirement[],
+  confirmed: LegacyRequirementsFile | null,
+): DraftEntry[] {
+  const oldList = confirmed?.requirements ?? [];
+  // 按键分组
+  const oldByKey = new Map<string, LegacyRequirement[]>();
+  for (const r of oldList) {
+    const k = matchKey(r.source.document, r.source.section, r.title, r.description);
+    (oldByKey.get(k) ?? oldByKey.set(k, []).get(k)!).push(r);
+  }
+  const newByKey = new Map<string, ExtractedRequirement[]>();
+  for (const e of extracted) {
+    const k = matchKey(e.source.document, e.source.section, e.title, e.description);
+    (newByKey.get(k) ?? newByKey.set(k, []).get(k)!).push(e);
+  }
+  const draft: DraftEntry[] = [];
+  const allKeys = new Set([...oldByKey.keys(), ...newByKey.keys()]);
+  for (const k of allKeys) {
+    const olds = oldByKey.get(k) ?? [];
+    const news = newByKey.get(k) ?? [];
+    if (olds.length > 1 || news.length > 1) {
+      // 冲突:键非唯一(spec §6.1)。该键下旧 + 新条目一个都不能丢:
+      // 新条目 → conflict,不继承 id
+      for (const e of news) draft.push({ requirement: toRequirement(e), change: 'conflict' });
+      // 旧条目:本轮没抽到该键 → vanished(保留 id,用户决定删不删);
+      //         键被本轮新条目竞争 → 同进 conflict、清空 id(spec §6.1「不继承既有 id」),不静默丢失
+      for (const o of olds) {
+        draft.push(
+          news.length === 0
+            ? { requirement: o, change: 'vanished' }
+            : { requirement: { ...o, id: '', review: 'pending' }, change: 'conflict' },
+        );
+      }
+      continue;
+    }
+    const old = olds[0];
+    const ne = news[0];
+    if (old && ne) {
+      // matched:复制 id,保留用户 priority/notes;status/evidence/confidence 用新值。
+      // changed 判定须含 title/description/status/evidence/confidence 全部 5 项(spec §6.1
+      //「新值与既有全一致」)—— 漏 evidence/confidence 会把它们的变化误标 unchanged、跳过用户复审。
+      const changed =
+        old.title !== ne.title ||
+        old.description !== ne.description ||
+        old.status !== ne.status ||
+        old.confidence !== ne.confidence ||
+        JSON.stringify(old.evidence) !== JSON.stringify(ne.evidence);
+      draft.push({
+        requirement: {
+          ...toRequirement(ne),
+          id: old.id,
+          priority: old.priority,
+          notes: old.notes,
+          review: changed ? 'pending' : 'confirmed',
+        },
+        change: changed ? 'changed' : 'unchanged',
+      });
+    } else if (ne) {
+      draft.push({ requirement: toRequirement(ne), change: 'new' });
+    } else if (old) {
+      draft.push({ requirement: old, change: 'vanished' });
+    }
+  }
+  return draft;
 }

@@ -93,6 +93,11 @@ export interface PauseDecision {
   other_rationale: string | null;
   /** option=4 必填(用户在 marker 之外某处确认 — fence 仅校验非空,不校验来源)  */
   other_acked_by: string | null;
+  /** option=2 新增的 task(末段 tasks.md#task-N);厘清 task_ref 语义 —— task_ref = 触发 pause 的 task。
+   *  schema 层 optional(superset additive,老 marker 无);必填性由 fence 层按 chosen_option 判。 */
+  added_task_ref?: string | null;
+  /** option=2 关联的 pause-capture entry 的 capture_id;schema 层 optional,同上。 */
+  capture_id?: string | null;
 }
 
 export interface EvidenceItem {

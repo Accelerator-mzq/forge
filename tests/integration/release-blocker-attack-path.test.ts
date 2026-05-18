@@ -182,6 +182,8 @@ describe('release-blocker: pause_decisions option=1/2 attack paths (9z gate)', (
         { verifyAckLogTailHash: tail, verifyAckLogEntryCount: all.length, changeId: 'c1' },
       );
       expect(result.valid).toBe(false);
+      // 锁定拒签原因是 capture 快照含 added task(防 fence 重构后退化为别的 step 拒签仍假绿)
+      expect(result.errors.some((e) => /capture 时刻已存在|非新增/.test(e.message))).toBe(true);
     } finally {
       rmSync(changeDir, { recursive: true, force: true });
     }

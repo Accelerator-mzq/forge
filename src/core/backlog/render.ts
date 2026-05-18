@@ -5,7 +5,10 @@
 import type { SupersedingDetail, SkippedBlock, AggregatedScopeEntry } from '../scope/aggregator.js';
 import { VALID_SUPERSEDING_NEW_STATUS } from '../schemas/scope-entries.js';
 import type { ScopeCategory } from '../schemas/scope-entries.js';
-import type { LegacyRequirement } from '../legacy-bridge/legacy-requirements.js';
+import type {
+  LegacyRequirement,
+  LegacyRequirementsFile,
+} from '../legacy-bridge/legacy-requirements.js';
 
 /** render 层呈现类型 —— 由 superseding[] / skipped[] 派生(spec §7.1) */
 export type BacklogWarning =
@@ -123,7 +126,7 @@ export function deriveWarningsAndTombstones(
 }
 
 /** 单条 BacklogWarning → 一行文本(spec §7.1 表) */
-export function renderWarningLine(w: BacklogWarning): string {
+export function renderWarningLine(w: BacklogWarning | LegacyBacklogWarning): string {
   switch (w.kind) {
     case 'dangling-reference':
       return `- [dangling] ${w.superseded_in_change} 认领的 ${w.source_change}::${w.entry_id} 不存在`;
@@ -137,6 +140,14 @@ export function renderWarningLine(w: BacklogWarning): string {
       return `- [malformed-dirname] ${w.superseded_in_change} 目录名无日期前缀,superseded_at=unknown`;
     case 'skipped-block':
       return `- [skipped] ${w.change}/${w.file}: ${w.reason}`;
+    case 'dangling-legacy-claim':
+      return `- [dangling-legacy-claim] ${w.superseded_in_change} 认领的 legacy 需求 ${w.entry_id} 不在 legacy-requirements.yaml`;
+    case 'invalid-legacy-status':
+      return `- [invalid-legacy-status] ${w.superseded_in_change} 认领 ${w.entry_id} new_status=${w.raw}(legacy 仅允许 completed/obsolete)`;
+    case 'duplicate-legacy-claim':
+      return `- [duplicate-legacy-claim] ${w.entry_id} claimants=${w.claimants.join(' ')} winner=${w.winner_superseded_in_change}`;
+    case 'reserved-archive-dirname':
+      return `- [reserved-archive-dirname] forge/changes/archive/ 下存在保留名目录 legacy-requirements,请改名该归档目录`;
   }
 }
 
@@ -166,10 +177,53 @@ function renderEntry(e: AggregatedScopeEntry): string {
   ].join('\n');
 }
 
+/** active 的 legacy requirement:unimplemented 且未退役(spec §7.2 / §8.4) */
+function openLegacyRequirements(
+  legacyReqs: LegacyRequirementsFile | null,
+  retiredIds: Set<string>,
+): LegacyRequirement[] {
+  if (!legacyReqs) return [];
+  return legacyReqs.requirements.filter(
+    (r) => r.status === 'unimplemented' && !retiredIds.has(r.id),
+  );
+}
+
+/** 渲染 active.md 的 ## Legacy Requirements 段;open 由 openLegacyRequirements 预过滤 */
+function renderLegacyRequirementsSection(
+  legacyReqs: LegacyRequirementsFile | null,
+  open: LegacyRequirement[],
+): string[] {
+  if (!legacyReqs) return []; // 无 legacy-requirements.yaml → 不出段,active.md 对既有项目不变
+  const lines: string[] = ['', `## Legacy Requirements (${open.length})`, ''];
+  if (open.length === 0) {
+    lines.push('(无)');
+    return lines;
+  }
+  const byDoc = new Map<string, LegacyRequirement[]>();
+  for (const r of open) {
+    const list = byDoc.get(r.source.document) ?? [];
+    list.push(r);
+    byDoc.set(r.source.document, list);
+  }
+  for (const [doc, list] of [...byDoc.entries()].sort()) {
+    lines.push(`### \`${doc}\``, '');
+    for (const r of list) {
+      lines.push(
+        `- \`${r.id}\` **${r.title}** — ${r.description}` +
+          (r.priority ? ` (priority: ${r.priority})` : ''),
+      );
+    }
+    lines.push('');
+  }
+  return lines;
+}
+
 /** 渲染 active.md(spec §4) */
 export function renderActiveMarkdown(
   entries: AggregatedScopeEntry[],
-  warnings: BacklogWarning[],
+  warnings: (BacklogWarning | LegacyBacklogWarning)[],
+  legacyReqs: LegacyRequirementsFile | null = null,
+  retiredLegacyIds: Set<string> = new Set(),
 ): string {
   // 按 category 分组过滤
   const byCat = (c: ScopeCategory) => entries.filter((e) => e.category === c);
@@ -184,6 +238,12 @@ export function renderActiveMarkdown(
   lines.push('');
   lines.push('> 生成产物 —— 由 `/forge:archive` 自动重生成,**勿手编**。Schema 见 README.md。');
   lines.push(`> 待办计 ${openCount} 项(Future Work + Out of Scope;Non-Goals 不计入)。`);
+  const legacyOpen = openLegacyRequirements(legacyReqs, retiredLegacyIds);
+  if (legacyReqs) {
+    lines.push(
+      `> 另有 ${legacyOpen.length} 项 legacy requirements 待办(不计入上面 ${openCount})。`,
+    );
+  }
   lines.push('');
   lines.push(`## Warnings (${warnings.length})`);
   lines.push('');
@@ -205,11 +265,31 @@ export function renderActiveMarkdown(
       for (const e of list) lines.push(renderEntry(e));
     }
   }
+  // Legacy Requirements 段(仅 legacyReqs 非 null 时出现)
+  lines.push(...renderLegacyRequirementsSection(legacyReqs, legacyOpen));
   return lines.join('\n').trimEnd() + '\n';
 }
 
+/** 渲染 archived.md 的 ## Legacy Requirements — Retired 段(spec §8.3);仅在 legacyTombstones 非空时被调用 */
+function renderLegacyRetiredSection(tombstones: LegacyRequirementTombstone[]): string[] {
+  const lines: string[] = ['', `## Legacy Requirements — Retired (${tombstones.length})`, ''];
+  for (const t of tombstones) {
+    lines.push(`### \`${t.entry_id}\``, '');
+    lines.push(`- **new_status**: ${t.new_status}`);
+    lines.push(`- **superseded_in_change**: ${t.superseded_in_change}`);
+    lines.push(`- **superseded_at**: ${t.superseded_at}`);
+    lines.push(`- **rationale**: ${t.rationale}`);
+    lines.push(`- **requirement_snapshot**: ${JSON.stringify(t.requirement_snapshot)}`);
+    lines.push('');
+  }
+  return lines;
+}
+
 /** 渲染 archived.md tombstone(spec §5);入参为 deriveWarningsAndTombstones 选出的 winner 列表 */
-export function renderArchivedMarkdown(tombstones: SupersedingDetail[]): string {
+export function renderArchivedMarkdown(
+  tombstones: SupersedingDetail[],
+  legacyTombstones: LegacyRequirementTombstone[] = [],
+): string {
   const lines: string[] = [];
   lines.push('# Archived Backlog (Tombstones)');
   lines.push('');
@@ -222,20 +302,24 @@ export function renderArchivedMarkdown(tombstones: SupersedingDetail[]): string 
   lines.push('');
   if (tombstones.length === 0) {
     lines.push('(无)');
-    return lines.join('\n').trimEnd() + '\n';
+  } else {
+    for (const t of tombstones) {
+      // registry_entry_snapshot 一定非 null(deriveWarningsAndTombstones 已剔 dangling)
+      const snapshot = JSON.stringify(t.registry_entry_snapshot);
+      lines.push(`### \`${t.source_change}::${t.entry_id}\``);
+      lines.push('');
+      lines.push(`- **superseded_in_change**: ${t.superseded_in_change}`);
+      lines.push(`- **superseded_at**: ${t.superseded_at}`);
+      lines.push(`- **new_status**: ${t.new_status}`);
+      // rationale 字段对应 spec §5 tombstone 的 cancellation_reason 显示标签
+      lines.push(`- **cancellation_reason**: ${t.rationale}`);
+      lines.push(`- **registry_entry_snapshot**: ${snapshot}`);
+      lines.push('');
+    }
   }
-  for (const t of tombstones) {
-    // registry_entry_snapshot 一定非 null(deriveWarningsAndTombstones 已剔 dangling)
-    const snapshot = JSON.stringify(t.registry_entry_snapshot);
-    lines.push(`### \`${t.source_change}::${t.entry_id}\``);
-    lines.push('');
-    lines.push(`- **superseded_in_change**: ${t.superseded_in_change}`);
-    lines.push(`- **superseded_at**: ${t.superseded_at}`);
-    lines.push(`- **new_status**: ${t.new_status}`);
-    // rationale 字段对应 spec §5 tombstone 的 cancellation_reason 显示标签
-    lines.push(`- **cancellation_reason**: ${t.rationale}`);
-    lines.push(`- **registry_entry_snapshot**: ${snapshot}`);
-    lines.push('');
+  // Legacy Retired 段(仅 legacyTombstones 非空时追加)
+  if (legacyTombstones.length > 0) {
+    lines.push(...renderLegacyRetiredSection(legacyTombstones));
   }
   return lines.join('\n').trimEnd() + '\n';
 }

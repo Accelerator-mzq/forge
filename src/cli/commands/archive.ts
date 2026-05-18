@@ -219,6 +219,11 @@ export function buildArchiveCommand(): Command {
           }
 
           // —— Task 6.4:--resume 独立路径(agent 履行后 gate 复核 + 续跑 archive)——
+          // I-2:暂停态文件此处不删 —— 仅记下路径,延后到 archiveTransaction 成功后才删。
+          //      若 gate 通过但后续 marker check / fence / archiveTransaction 任一失败,
+          //      暂停态保留 → 用户修好后可再 `forge archive --resume` 重入(否则会因
+          //      「无暂停态文件」被拒,--resume 失去重入性陷入死角)。
+          let resumePausePath: string | undefined;
           if (opts.resume) {
             if (!changeId) {
               console.error('✗ --resume 需要 changeId');
@@ -230,12 +235,10 @@ export function buildArchiveCommand(): Command {
               console.error(`✗ --resume gate 复核失败:${gateResult.reason}`);
               process.exit(2); // business-rule-fail
             }
-            // gate 通过 → 清暂停态文件(不可逆,archive 续跑前清理)
-            const pausePath = join(forgeRoot, '.cache', `archive-pause-${changeId}.json`);
-            await rm(pausePath, { force: true });
-            console.log(`✓ --resume gate 通过,已清暂停态文件;续跑 archive ${changeId}…`);
-            // --resume 清暂停态后,直接续跑正常 archive 主流程(opts.resume=true 不影响后续 opts 读取)
-            // fall-through 到下方正常 archive 路径(changeId 已确认存在)
+            // gate 通过 → 记下暂停态路径(延后删),fall-through 续跑正常 archive 主流程
+            resumePausePath = join(forgeRoot, '.cache', `archive-pause-${changeId}.json`);
+            console.log(`✓ --resume gate 通过;续跑 archive ${changeId}…`);
+            // --resume 续跑后,opts.resume=true 不影响后续 opts 读取(changeId 已确认存在)
           }
 
           // —— 正常 archive 路径 ——
@@ -594,6 +597,13 @@ export function buildArchiveCommand(): Command {
 
             // 步骤 5:调 archiveTransaction(Move→Sync,含 .tmp 写 / rename / 回滚)
             await archiveTransaction({ forgeRoot, changeId, archiveDate, archiveSummary });
+
+            // I-2:archiveTransaction await 成功返回(失败会 throw 走外层 catch)即 transaction 成功点 ——
+            //      此处删 --resume 暂停态文件(正常收尾)。transaction 之前任一步失败时暂停态保留,
+            //      用户修好后可再 --resume 重入。仅 opts.resume 路径有此文件,非 resume 路径 undefined 跳过。
+            if (resumePausePath) {
+              await rm(resumePausePath, { force: true });
+            }
 
             // 步骤 5.5:Plan 7 post-archive hook(enforce_sync=false 时不阻塞,只产报告)
             // Task 6.3 I-2:透传 archiveDate(避免 posthook 自己算 new Date() 跨午夜偏一天)
@@ -1072,7 +1082,18 @@ export async function resumeArchiveGateCheck(
     };
   }
   // 暂停态文件格式(Task 6.3 emitPreflightSyncCheck 写入):{ changeId, paused_step, manifest_hash }
-  const pause = JSON.parse(await readFile(pausePath, 'utf8')) as { manifest_hash: string };
+  // I-1:parse 包 try/catch —— 文件截断/手动误编辑致 JSON 损坏时转 business-fail,
+  //      用户看得出是哪个文件坏(否则裸 SyntaxError 被 action 外层兜底当未知错误)。
+  //      readFile 的 ENOENT 竞态(existsSync 后文件被删)也顺带被这层 catch 兜住,可接受。
+  let pause: { manifest_hash: string };
+  try {
+    pause = JSON.parse(await readFile(pausePath, 'utf8')) as { manifest_hash: string };
+  } catch (err) {
+    return {
+      ok: false,
+      reason: `暂停态文件 ${pausePath} 解析失败(可能损坏):${(err as Error).message}`,
+    };
+  }
 
   // 读 sync-state YAML:forge/legacy-sync-state/<changeId>.yaml
   const statePath = join(forgeRoot, 'legacy-sync-state', `${changeId}.yaml`);
@@ -1082,7 +1103,16 @@ export async function resumeArchiveGateCheck(
       reason: `sync-state 缺失(forge/legacy-sync-state/${changeId}.yaml);请先让 agent fulfill manifest 后跑 forge legacy-bridge sync-check --apply --change-id ${changeId}`,
     };
   }
-  const state = parseYaml(await readFile(statePath, 'utf8')) as SyncStateFile;
+  // I-1:同样包 try/catch —— sync-state YAML 损坏时转 business-fail
+  let state: SyncStateFile;
+  try {
+    state = parseYaml(await readFile(statePath, 'utf8')) as SyncStateFile;
+  } catch (err) {
+    return {
+      ok: false,
+      reason: `sync-state 文件 ${statePath} 解析失败(可能损坏):${(err as Error).message}`,
+    };
+  }
 
   // ① 产物绑定:sync-state.produced_from 必须等于暂停态的 manifest_hash
   if (state.produced_from !== pause.manifest_hash) {

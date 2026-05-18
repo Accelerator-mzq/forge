@@ -195,4 +195,46 @@ describe('resumeArchiveGateCheck', () => {
     const r = await resumeArchiveGateCheck(forgeRoot, 'add-pay');
     expect(r.ok).toBe(true);
   });
+
+  it('无暂停态文件 → 拒绝(reason 提示暂停态)', async () => {
+    const forgeRoot = join(dir, 'forge');
+    await mkdir(forgeRoot, { recursive: true });
+    const r = await resumeArchiveGateCheck(forgeRoot, 'add-pay');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/暂停态/);
+  });
+
+  it('暂停态在但 sync-state 缺失 → 拒绝(reason 提示 sync-state)', async () => {
+    const forgeRoot = join(dir, 'forge');
+    await mkdir(join(forgeRoot, '.cache'), { recursive: true });
+    await writeFile(
+      join(forgeRoot, '.cache', 'archive-pause-add-pay.json'),
+      JSON.stringify({ changeId: 'add-pay', manifest_hash: 'H1' }),
+      'utf8',
+    );
+    const r = await resumeArchiveGateCheck(forgeRoot, 'add-pay');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/sync-state/);
+  });
+
+  it('produced_from 匹配但仍有 critical pending → 拒绝', async () => {
+    const forgeRoot = join(dir, 'forge');
+    await mkdir(join(forgeRoot, '.cache'), { recursive: true });
+    await writeFile(
+      join(forgeRoot, '.cache', 'archive-pause-add-pay.json'),
+      JSON.stringify({ changeId: 'add-pay', manifest_hash: 'H1' }),
+      'utf8',
+    );
+    await mkdir(join(forgeRoot, 'legacy-sync-state'), { recursive: true });
+    // diffs 那条提供 SyncStateDiff 全部必填字段(id/anchor_path/severity/status/description)
+    await writeFile(
+      join(forgeRoot, 'legacy-sync-state', 'add-pay.yaml'),
+      'schema: forge-legacy-sync/v1\nchange_id: add-pay\nproduced_from: H1\n' +
+        'diffs:\n  - id: 1\n    anchor_path: docs/SRS.md\n    severity: critical\n    status: pending\n    description: x\n',
+      'utf8',
+    );
+    const r = await resumeArchiveGateCheck(forgeRoot, 'add-pay');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/critical/);
+  });
 });

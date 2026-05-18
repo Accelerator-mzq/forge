@@ -31,6 +31,7 @@ import {
  * pause_decisions fence 五类业务校验(沿 design §2.1.5)
  * @param marker — verify-passed / review-passed 等 marker 对象(Record 形)
  * @param changeDir — change 目录绝对路径(需读 proposal.md / tasks.md / design.md)
+ * @param repoRoot — git 仓库根目录绝对路径(Task 5 用于 option=1 `git diff HEAD -- <changeDir>/proposal.md`)
  * @param file — 可选错误报告用 marker 文件路径
  *
  * v4 codex NEW-MAJOR A6 + B4 联动修订:fence 不再需要 ctx 参数(v3 加 ctx 是为给

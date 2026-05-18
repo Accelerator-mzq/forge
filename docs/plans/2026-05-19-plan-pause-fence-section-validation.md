@@ -17,7 +17,7 @@
 design §6.2 / §8.4 要求 writing-plans 核查的事实,已核实:
 
 1. **工作流顺序** = `apply → review → verify → archive`(CLAUDE.md)。`review.md` 7b 跑 `forge evidence freeze --kind review`,`verify.md` 4.4 跑 `--kind verify`。**verify 是最后一次 freeze**,verify marker 的 `ack_log_tail_hash`/`ack_log_entry_count` 是 archive 时刻全量 ack-log 的快照。
-2. **tasks.md task 行格式**:`parseTasks`(`src/core/parse/tasks.ts:32`)的 `TASK_RE = /^\s*- \[([ x])\]\s+([\w-]+)\s*:\s*(.+)$/` 要求 `- [x] task-id: desc`(冒号分隔)。现有 pause fixtures(`tests/fixtures/pause-decisions/*/tasks.md`)用 `- [x] **task-1** desc`(bold,无冒号)。`commands/propose.md` 不定义精确格式。**本 plan 决策:canonical 格式 = `parseTasks` 的 `- [x] task-id: desc`**(它是 archive 工具链唯一的真 task-id 解析器);Task 14 迁移 fixtures。
+2. **tasks.md task 行格式(design §8.4 核查)**:`parseTasks`(`src/core/parse/tasks.ts:32`)的 `TASK_RE = /^\s*- \[([ x])\]\s+([\w-]+)\s*:\s*(.+)$/` 要求 `- [x] task-id: desc`(冒号分隔)。**走 design §8.4 分支 1(实际格式即 canonical)** —— 硬证据:`parseTasks` 是 `forge validate` 现役解析器(`src/core/validate/change.ts:88` `validateTasks(parseTasks(text), tasksPath)`);`forge validate` 在 propose 末 / verify 阶段必跑,forge v2.0.0 已稳定发布 + CI 全绿 → **生产 `tasks.md` 必然已是 `- [x] task-id: desc` canonical 格式**(否则 `parseTasks` 解析空、`forge validate` 早已失败、forge 不可能稳定发布)。bold 格式 `- [x] **task-1** desc` 仅存在于 `tests/fixtures/pause-decisions/*/tasks.md`(为旧 `checkOption2TaskChecked` bold 正则配套的过时测试假设),**非生产格式**。故按 design §8.4 分支 1:统一 `parseTasks` + 删旧 bold 正则(Task 11)+ 迁移 fixtures(Task 14)即可,**无需** propose/apply 协议侧加格式强制(那是 design §8.4 分支 2「旧格式确实在用」才触发,本特性不适用)。
 3. **CLI 注册**:`src/cli/index.ts` 用 `import { buildXxxCommand }` + `program.addCommand(buildXxxCommand())`;命令工厂模式见 `src/cli/commands/finding.ts`。
 4. **release gate**:`scripts/check-release-gate.mjs` 只扫 `tests/integration/release-blocker-attack-path.test.ts`,`EXPECTED_TODO_COUNT_SOFT = 6`。`pnpm test` = `vitest run && pnpm test:gate`(soft);`pnpm test:gate:release` 跑 `--release`(硬约束 actual=0)。CI(`.github/workflows/ci.yml`)只跑 `pnpm test`(soft),无 release gate step。
 5. **transaction.ts 失败回滚行为已实现**(阶段 1.5 rename / 1.6 Backup / 2 Sync 三处回滚 + summary unlink 齐全);`version-retrograde-fence.ts:73-81` git error fail-closed 已实现。Block A 纯补测试。
@@ -44,13 +44,15 @@ design §6.2 / §8.4 要求 writing-plans 核查的事实,已核实:
 - `src/core/validate/marker-schema.ts` — 校验两个新字段(`undefined` 走 legacy 分支)。
 - `src/cli/commands/archive.ts` — fence 调用传 repo root + verify marker tail/count;加 verify/review `pause_decisions` cross-check。
 - `src/cli/index.ts` — 注册 `pause-capture` 子命令。
-- `commands/apply.md` — Fluid Pause 段加 `forge pause-capture` 协议。
+- `commands/apply.md` — Fluid Pause 段加 `forge pause-capture` 协议 + capture-input gap 声明。
+- `commands/verify.md` — verify freeze 边界声明(Fluid Pause 须在 freeze 前完成,design §8.3)。
 - `scripts/check-release-gate.mjs` — `EXPECTED_TODO_COUNT_SOFT` 6 → 0。
 - `.github/workflows/ci.yml` — 加 `pnpm test:gate:release` step。
+- `CHANGELOG.md` — breaking change 声明(发布前 in-flight option=2 change 会被新 fence 拒,design §8.1)。
 - `tests/integration/release-blocker-attack-path.test.ts` — 6 个 `it.todo` 全 unskip。
 - `tests/core/archive/transaction-summary.test.ts` — 3 个 `it.todo` unskip。
 - `tests/fixtures/pause-decisions/option-2-add-task/` — tasks.md 迁移 canonical 格式 + 加 capture fixture。
-- `tests/cli/archive-pause-fence.test.ts` — 现有 option=2 测试同步新 schema。
+- `tests/cli/archive-pause-fence.test.ts` — 删除 3 个旧 option=2 inline 测试(Task 11,覆盖移至 `pause-capture-fence.test.ts`)+ 新增 verify/review cross-check 测试(Task 12)。
 - `docs/cli-reference.md` — 补 `pause-capture` 子命令。
 
 ---
@@ -260,41 +262,51 @@ git commit -m "test(archive): unskip transaction archiveSummary 失败回滚测�
 
 - [ ] **Step 1: 在 `version-retrograde-fence.test.ts` 把 `it.todo`(`:101-103`)替换为真实 `it()`**
 
+**关键约束(mock 注入点)**:`version-retrograde-fence.ts:9` 在**模块顶层** `const execFileAsync = promisify(execFile)` —— `promisify` 在模块加载时即按值捕获 `execFile`,后续 `:51`/`:64` 调的是 `execFileAsync`。测试运行时再 `vi.spyOn(childProcess, 'execFile')` **拦不到**(`execFileAsync` 闭包已 bind 旧引用)。必须用 `vi.mock` factory 在模块加载前替换 `execFile`,`promisify` 才拿到 stub。
+
+且本文件现有 6 个真实测试(`setupGitRepoWithMarker`)依赖 `validateVersionRetrograde` 真实跑 git,故 mock 必须**默认转发真实 `execFile`**(并把 `(err, stdout, stderr)` callback 适配为 `promisify` 默认期望的 `(err, {stdout,stderr})` —— mock 后的 `execFile` 不带 `util.promisify.custom`),仅 fail-closed 测试 override,否则其余测试因 callback 形态不符 / 永不触发而 FAIL 或 hang。
+
 ```ts
-// 文件顶部加 mock(vi.mock 提升到 import 前):
-//   import { describe, it, expect, afterEach, vi } from 'vitest';
-// 在现有 import 之上加:
+// 文件顶部 —— vi.mock hoist 到所有 import 前;factory 把 execFile 换成受控 mock。
+// (execFileSync 由 `...actual` 保留真实 → setupGitRepoWithMarker 不受影响。)
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
+
+const { execFileMock } = vi.hoisted(() => ({ execFileMock: vi.fn() }));
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
-  return { ...actual };
+  return { ...actual, execFile: execFileMock };
 });
-// import 之后:
-import * as childProcess from 'node:child_process';
 
-// 替换 it.todo —— 真实 it():
+// ... 现有 import(execFileSync / validateVersionRetrograde 等)保持 ...
+
+// describe('validateVersionRetrograde') 内,现有 afterEach 之上加 beforeEach:
+// 每个测试默认把 execFileMock 转发真实 execFile + 适配 callback 形态
+beforeEach(async () => {
+  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+  execFileMock.mockImplementation((cmd: string, args: readonly string[], opts: unknown, cb: (e: Error | null, r?: { stdout: string; stderr: string }) => void) =>
+    (actual.execFile as Function)(cmd, args, opts, (err: Error | null, stdout: string, stderr: string) => cb(err, { stdout, stderr })),
+  );
+});
+
+// 替换 it.todo(`:101-103`)—— 真实 it():
 it('git repo 内 git log 失败 → fail-closed 拒签(v3 MAJOR 1)', async () => {
-  // mock execFile:rev-parse 成功(确认是 git repo),git log 失败(模拟 git binary 异常)。
-  // version-retrograde-fence.ts 用 promisify(execFile);mock 须模拟 callback 形态。
-  vi.spyOn(childProcess, 'execFile').mockImplementation(
-    // @ts-expect-error — 仅模拟用到的 callback 重载
+  // override 当次:rev-parse 成功(确认是 git repo),git log 失败(模拟 git binary 异常)。
+  // promisify(execFileMock) 默认取 callback 第 2 参为 resolve 值 → cb(null,{stdout}) 使 await 得 {stdout}。
+  execFileMock.mockImplementation(
     (_cmd: string, args: readonly string[], _opts: unknown, cb: (e: Error | null, r?: { stdout: string }) => void) => {
-      if (args[0] === 'rev-parse') {
-        cb(null, { stdout: 'true\n' }); // 确认是 git repo
-      } else {
-        cb(new Error('git log: simulated binary failure')); // git log fail-closed
-      }
-      return {} as ReturnType<typeof childProcess.execFile>;
+      if (args[0] === 'rev-parse') cb(null, { stdout: 'true\n' }); // 确认是 git repo
+      else cb(new Error('git log: simulated binary failure')); // git log fail-closed
+      return undefined as unknown as ReturnType<typeof import('node:child_process').execFile>;
     },
   );
   const marker = { created_by_tool_version: '1.0.0' };
-  // gitDir 任意非空(rev-parse 已被 mock 成功)
   const result = await validateVersionRetrograde('/tmp/fake/.verify-passed', marker, '/tmp/fake');
   expect(result.valid).toBe(false);
   expect(result.errors.some((e) => /fail-closed|git log/.test(e.message))).toBe(true);
 });
 ```
 
-注:`version-retrograde-fence.ts` 用 `promisify(execFile)`。`promisify` 把 `(cmd, args, opts, cb)` 形态转 Promise;mock 的 `execFile` 须以 callback 形态返回(`cb(err)` / `cb(null, {stdout})`)。若 mock 形态与 `promisify` 不兼容导致测试 hang/报错,改用 `vi.mock` 整体替换 `execFile` 为返回 callback 的 stub(参考 vitest `vi.mock` factory 文档)。
+注:`beforeEach` 用 `vi.importActual` 拿真实 `execFile` 作默认实现并适配 callback,保证现有 6 个真实测试不受 mock 影响;fail-closed 测试在 body 内 `mockImplementation` override 当次行为(测试结束下个 `beforeEach` 又重置回转发)。
 
 - [ ] **Step 2: 运行确认通过**
 
@@ -303,27 +315,45 @@ Expected: 全部 PASS,含新增的 fail-closed `it()`。
 
 - [ ] **Step 3: 在 `release-blocker-attack-path.test.ts` unskip todo 6 为真 `it()`**
 
-```ts
-// describe('release-blocker: 9j version-retrograde fail-closed git error path (9z gate)', ...)
-// 内,把 it.todo 替换为真 it() —— 复用 Step 1 同款 mock 注入。
-// 文件顶部 import 补:
-//   import { validateVersionRetrograde } from '../../src/core/archive/version-retrograde-fence.js';
-//   import * as childProcess from 'node:child_process';
-//   + vi.mock('node:child_process', ...) 同 Step 1
+**与 Task 1/6 共用文件的 mock 隔离**:本文件 Task 1(transaction)、Task 6(option=1 attack)也在改。todo 6 需 mock `node:child_process` 的 `execFile`(同 Step 1 的注入点理由);但 option=1 attack 的 `checkOption1WhatChangesDiff` 同样用 `promisify(execFile)` 且需真实 git diff。故 mock 必须**默认转发真实 `execFile`**(同 Step 1 方案),仅 todo 6 测试 body override;`execFileSync`(option=1 attack 的 git init/commit)由 factory 的 `...actual` 保留真实。
 
+```ts
+// 文件顶部(与 Task 1 建立的 import 区合并)—— vi.mock hoist 到 import 前:
+const { execFileMock } = vi.hoisted(() => ({ execFileMock: vi.fn() }));
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return { ...actual, execFile: execFileMock };
+});
+// import 区补:
+//   import { validateVersionRetrograde } from '../../src/core/archive/version-retrograde-fence.js';
+// vitest import 补 beforeEach。
+
+// 文件级 beforeEach(在所有 describe 之上):默认转发真实 execFile + 适配 callback 形态
+beforeEach(async () => {
+  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+  execFileMock.mockImplementation((cmd: string, args: readonly string[], opts: unknown, cb: (e: Error | null, r?: { stdout: string; stderr: string }) => void) =>
+    (actual.execFile as Function)(cmd, args, opts, (err: Error | null, stdout: string, stderr: string) => cb(err, { stdout, stderr })),
+  );
+});
+
+// describe('release-blocker: 9j version-retrograde fail-closed git error path (9z gate)') 内
+// 把 it.todo 替换为真 it():
 it('9j git repo 内 git log 失败(模拟 git binary 异常)→ version-retrograde fail-closed 拒签', async () => {
-  vi.spyOn(childProcess, 'execFile').mockImplementation(
-    // @ts-expect-error — 仅模拟用到的 callback 重载
+  execFileMock.mockImplementation(
     (_cmd: string, args: readonly string[], _opts: unknown, cb: (e: Error | null, r?: { stdout: string }) => void) => {
       if (args[0] === 'rev-parse') cb(null, { stdout: 'true\n' });
       else cb(new Error('git log: simulated failure'));
-      return {} as ReturnType<typeof childProcess.execFile>;
+      return undefined as unknown as ReturnType<typeof import('node:child_process').execFile>;
     },
   );
-  const result = await validateVersionRetrograde('/tmp/fake/.verify-passed', { created_by_tool_version: '1.0.0' }, '/tmp/fake');
+  const result = await validateVersionRetrograde(
+    '/tmp/fake/.verify-passed', { created_by_tool_version: '1.0.0' }, '/tmp/fake',
+  );
   expect(result.valid).toBe(false);
 });
 ```
+
+注:`vi.mock('node:child_process')` 是 file-scoped,影响本文件全部测试。default 转发保证 Task 6 option=1 attack 的 `checkOption1WhatChangesDiff` 真实 git diff、Task 1 transaction 不被破坏;仅 todo 6 测试 override。Task 1 Step 3 的 `afterEach(() => vi.restoreAllMocks())` 与本 `beforeEach` 不冲突(每个测试前 `beforeEach` 重设 execFileMock 实现)。
 
 - [ ] **Step 4: 运行确认**
 
@@ -1097,7 +1127,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { runPauseCapture } from '../../src/cli/commands/pause-capture.js';
+import { runPauseCapture, buildPauseCaptureCommand } from '../../src/cli/commands/pause-capture.js';
 import { readAllAckLogEntries, type PauseCaptureEntry } from '../../src/core/ack-log.js';
 
 describe('forge pause-capture', () => {
@@ -1135,6 +1165,31 @@ describe('forge pause-capture', () => {
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
+  });
+});
+
+// design §11:CLI 单测须含 help / 参数校验 / unknown command(commander 层)
+describe('buildPauseCaptureCommand — commander 层', () => {
+  it('--help 信息含子命令名与必填选项', () => {
+    const help = buildPauseCaptureCommand().helpInformation();
+    expect(help).toMatch(/pause-capture/);
+    expect(help).toMatch(/--task/);
+    expect(help).toMatch(/--issue/);
+  });
+
+  it('缺 required option(--task / --issue)→ commander 报错', async () => {
+    // exitOverride 让 commander 抛 CommanderError 而非 process.exit
+    const cmd = buildPauseCaptureCommand().exitOverride();
+    await expect(cmd.parseAsync(['c1'], { from: 'user' })).rejects.toThrow(
+      /required option|--task/,
+    );
+  });
+
+  it('unknown option → commander 报错', async () => {
+    const cmd = buildPauseCaptureCommand().exitOverride();
+    await expect(
+      cmd.parseAsync(['c1', '--task', 't', '--issue', 'i', '--bogus'], { from: 'user' }),
+    ).rejects.toThrow(/unknown option/);
   });
 });
 ```
@@ -1289,6 +1344,7 @@ git commit -m "feat(cli): 加 forge pause-capture 子命令(option=2 capture 锚
 - Modify: `src/core/archive/pause-decisions-fence.ts`(`checkOption2TaskChecked` + fence 签名 + 主循环)
 - Modify: `src/cli/commands/archive.ts`(调用同步,Task 12 完整接线)
 - Create: `tests/core/archive/pause-capture-fence.test.ts`
+- Modify: `tests/cli/archive-pause-fence.test.ts`(删 3 个旧 option=2 测试 — 覆盖移至 `pause-capture-fence.test.ts`)
 
 design §6.4。fence 签名再扩展加 `opts`(verify marker tail/count);`checkOption2TaskChecked` 重写为 capture 校验。
 
@@ -1296,7 +1352,7 @@ design §6.4。fence 签名再扩展加 `opts`(verify marker tail/count);`checkO
 
 ```ts
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { validatePauseDecisionsFence } from '../../../src/core/archive/pause-decisions-fence.js';
@@ -1425,6 +1481,70 @@ describe('checkOption2TaskChecked — capture 校验', () => {
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => /复用|capture_id/.test(e.message))).toBe(true);
   });
+
+  it('ack-log 链坏(篡改 capture entry)→ fail-closed 拒签(design §10)', async () => {
+    const { changeDir, tailHash, count } = await setupCapture({
+      tasksMd: '# Tasks\n\n- [x] task-1: a\n- [x] task-3: t\n',
+      captureTaskIds: ['task-1'], captureId: 'cap-1', taskRef: 'tasks.md#task-1',
+    });
+    dirs.push(changeDir);
+    // 篡改 ack-log.jsonl 末行(capture entry)内容 → 尾 hash mismatch(canonicalHash 变化)
+    const logPath = join(changeDir, '.evidence', 'ack-log.jsonl');
+    const logLines = readFileSync(logPath, 'utf8').split('\n').filter((l) => l.trim());
+    const tampered = JSON.parse(logLines[logLines.length - 1]!);
+    tampered.pause_issue_summary = 'TAMPERED';
+    logLines[logLines.length - 1] = JSON.stringify(tampered);
+    writeFileSync(logPath, logLines.join('\n') + '\n');
+    const marker = opt2Marker('cap-1', 'tasks.md#task-3', tailHash, count);
+    const result = await validatePauseDecisionsFence(marker, changeDir, changeDir, {
+      verifyAckLogTailHash: tailHash, verifyAckLogEntryCount: count, changeId: 'c1',
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => /链校验|chain|tail|mismatch/.test(e.message))).toBe(true);
+  });
+
+  it('capture entry 的 task_ref 与 pause_decision 不匹配 → fail-closed 拒签(design §10)', async () => {
+    // capture entry task_ref ≠ marker pause_decision.task_ref → §6.4 step 4 全匹配失败,捕获数=0
+    const { changeDir, tailHash, count } = await setupCapture({
+      tasksMd: '# Tasks\n\n- [x] task-1: a\n- [x] task-3: t\n',
+      captureTaskIds: ['task-1'], captureId: 'cap-1',
+      taskRef: 'tasks.md#task-9', // ≠ marker pause_decision.task_ref(tasks.md#task-1)
+    });
+    dirs.push(changeDir);
+    const marker = opt2Marker('cap-1', 'tasks.md#task-3', tailHash, count);
+    const result = await validatePauseDecisionsFence(marker, changeDir, changeDir, {
+      verifyAckLogTailHash: tailHash, verifyAckLogEntryCount: count, changeId: 'c1',
+    });
+    expect(result.valid).toBe(false);
+  });
+
+  it('capture entry 的 change_id 与 changeId 不匹配 → fail-closed 拒签(design §10)', async () => {
+    // capture entry change_id 固定 'c1';opts.changeId 传 'other' → §6.4 step 4 全匹配失败
+    const { changeDir, tailHash, count } = await setupCapture({
+      tasksMd: '# Tasks\n\n- [x] task-1: a\n- [x] task-3: t\n',
+      captureTaskIds: ['task-1'], captureId: 'cap-1', taskRef: 'tasks.md#task-1',
+    });
+    dirs.push(changeDir);
+    const marker = opt2Marker('cap-1', 'tasks.md#task-3', tailHash, count);
+    const result = await validatePauseDecisionsFence(marker, changeDir, changeDir, {
+      verifyAckLogTailHash: tailHash, verifyAckLogEntryCount: count, changeId: 'other',
+    });
+    expect(result.valid).toBe(false);
+  });
+
+  it('marker ack_log_tail_hash / entry_count 为 null → fail-closed 拒签(B-1:挡 null,非只挡 undefined)', async () => {
+    const { changeDir, tailHash, count } = await setupCapture({
+      tasksMd: '# Tasks\n\n- [x] task-1: a\n- [x] task-3: t\n',
+      captureTaskIds: ['task-1'], captureId: 'cap-1', taskRef: 'tasks.md#task-1',
+    });
+    dirs.push(changeDir);
+    const marker = opt2Marker('cap-1', 'tasks.md#task-3', tailHash, count);
+    // AI 手写 marker 注入 null —— checkOption2TaskChecked 的 == null 检查须拒签(用 === undefined 会漏)
+    const result = await validatePauseDecisionsFence(marker, changeDir, changeDir, {
+      verifyAckLogTailHash: null, verifyAckLogEntryCount: null, changeId: 'c1',
+    });
+    expect(result.valid).toBe(false);
+  });
 });
 ```
 
@@ -1440,8 +1560,10 @@ Expected: FAIL — fence 不接受第 4 个 `opts` 参数 / `checkOption2TaskChe
 ```ts
 /** option=2 capture 链固化入参(由 archive 层从 verify marker 取出) */
 export interface PauseFenceOptions {
-  verifyAckLogTailHash?: string;
-  verifyAckLogEntryCount?: number;
+  // marker 由 AI 产出,这两字段运行时可能是 string / null / undefined(marker-schema.ts 不校验它们);
+  // 类型须含 null,fail-closed 检查方能正确收窄
+  verifyAckLogTailHash?: string | null;
+  verifyAckLogEntryCount?: number | null;
   changeId?: string;
 }
 
@@ -1473,6 +1595,14 @@ import { parseTasks } from '../parse/tasks.js';
 /**
  * option=2 校验(design §6.4):pause 新增 task 真实性的轻量 capture 校验。
  * 一律要求 added_task_ref + capture_id + 匹配的 pause-capture entry(无版本降级,design §8.1)。
+ *
+ * 【capture-input gap — 已知安全边界,design §9.2 / §9.3】
+ * 本校验能挡:option=2 无 capture entry、capture entry 事后被篡改、同 marker 内 capture 复用。
+ * 本校验【挡不住】:capture 当下喂假输入(删旧 task → pause-capture → 恢复)、AI 预先攒多条
+ * capture 后写 marker 时选择性认领、AI 完全不在 marker 记录 pause_decision。根因是 capture 的
+ * 输入(tasks.md)由 AI 控制、且 capture_id↔pause_decision 关联由 AI 写 marker 时决定,forge
+ * 没有独立于 AI 的 pre-pause tasks 可信来源。轻量 capture 对"诚实但偷懒"的 AI 有效,对蓄意构造
+ * 假输入的攻击者无效 —— 此 gap 无法在当前 forge 架构下消除(完整 hash-chain 方案同样关不掉)。
  */
 async function checkOption2TaskChecked(
   p: PauseDecision,
@@ -1499,10 +1629,14 @@ async function checkOption2TaskChecked(
   }
   captureIdSeen.set(p.capture_id, p.id);
 
-  // 2. verify marker 须有 ack_log_tail_hash + entry_count(design §6.2)
-  if (opts.verifyAckLogTailHash === undefined || opts.verifyAckLogEntryCount === undefined) {
+  // 2. verify marker 须有 ack_log_tail_hash + entry_count(design §6.2 line 132 fail-closed 契约)
+  //    用 == null 同时挡 undefined(字段缺失)与 null —— marker-schema.ts 不校验这两字段,
+  //    AI 可手写 marker 注入 `ack_log_tail_hash: null`,且 evidence.ts freeze 在空 ack-log 时本身
+  //    也会写 null。null 不是有效固化值:verifyAckLogChain 收到 null 会跳过行数/尾 hash 校验、
+  //    退化为仅链内自洽 → 挡不住"重写整条 ack-log"(design §6.2 line 124)→ 必须 fail-closed。
+  if (opts.verifyAckLogTailHash == null || opts.verifyAckLogEntryCount == null) {
     return failed({ artifact: 'marker', field: `${fieldBase}.capture_id`,
-      message: 'option=2 校验失败:verify marker 缺 ack_log_tail_hash / ack_log_entry_count,链保护不成立 — fail-closed 拒签', file });
+      message: 'option=2 校验失败:verify marker 缺 ack_log_tail_hash / ack_log_entry_count(或为 null),链保护不成立 — fail-closed 拒签', file });
   }
   // 3. 读 ack-log + verifyAckLogChain(用 verify marker 的 tail/count)
   let entries;
@@ -1573,26 +1707,31 @@ option=2 分支调用处(主循环内 `else if (p.chosen_option === 2)`)改为:
 
 注:`PauseDecision` 已在 Task 9 加 `added_task_ref`/`capture_id`。`existsSync` / `readFile` / `join` 已在文件 import。删除旧 `checkOption2TaskChecked` 里的 bold/bare 正则块(`:184-224`)。
 
-- [ ] **Step 5: 运行确认 PASS + typecheck**
+- [ ] **Step 5: 删除 `archive-pause-fence.test.ts` 的 3 个旧 option=2 测试**
 
-Run: `pnpm vitest run tests/core/archive/pause-capture-fence.test.ts && pnpm typecheck`
-Expected: PASS（5 个 capture 校验测试全绿）。
+`tests/cli/archive-pause-fence.test.ts` 现有 3 个 option=2 测试(`:142-202`:`option=2 + 已勾选 → 通过` / `未勾选 → 拒签` / `找不到 task_ref → 拒签`)测的是**旧** `checkOption2TaskChecked`(旧 bold 正则、无 capture、inline 构造 marker)。Step 4 重写 fence 后这 3 个测试必 FAIL(新 fence 要求 `added_task_ref`+`capture_id`+匹配 capture entry,旧 inline marker 没有)。option=2 的完整覆盖已由本 Task 新建的 `pause-capture-fence.test.ts` 接管。**删除这 3 个 `it()`** 及其上方 `// —— option=2 ...` 注释行,不保留旧格式兼容路径(design §8.1)。
+
+> **顺序约束(Codex round 3 B-1)**:此删除必须在本 Task 完成、**不能**留到 Task 14 —— 否则 Task 12 Step 5 跑 `archive-pause-fence.test.ts` 全文件时这 3 个旧 option=2 测试会 FAIL、CI 红。`archive-pause-fence.test.ts` 是 inline 构造 marker、不依赖 `tests/fixtures/pause-decisions/`,故删除不依赖 Task 14 的 fixture 迁移。
 
 - [ ] **Step 6: 改 `archive.ts` 调用占位(完整接线在 Task 12)**
 
-`archive.ts:452`/`:463` 两处 `validatePauseDecisionsFence` 调用 —— Task 4 已传 `process.cwd()`,现签名多了 `opts`。临时传 `{}` 占位,Task 12 填真值:
+Step 3 已把 `validatePauseDecisionsFence` 签名第 4 参改为 `opts`、`file` 移至第 5 位 —— `archive.ts:452`/`:463` 两处调用(Task 4 后形态 `(rec, changeDir, process.cwd(), path)`)此刻第 4 参 `path` 与新签名 `opts` 类型冲突,**必须在跑 typecheck(Step 7)之前更新**(Codex round 4 BLOCKER)。临时传 `{}` 占位,Task 12 填真值:
 
 ```ts
 const pdVerifyResult = await validatePauseDecisionsFence(verifyRec, changeDir, process.cwd(), {}, verifyPath);
 const pdReviewResult = await validatePauseDecisionsFence(reviewRec, changeDir, process.cwd(), {}, reviewPath);
 ```
 
-- [ ] **Step 7: typecheck + commit**
+- [ ] **Step 7: 运行确认 PASS + typecheck**
+
+Run: `pnpm vitest run tests/core/archive/pause-capture-fence.test.ts tests/cli/archive-pause-fence.test.ts && pnpm typecheck`
+Expected: PASS（`pause-capture-fence.test.ts` 10 个 capture 校验测试全绿;`archive-pause-fence.test.ts` 删旧 option=2 测试后全绿;`typecheck` 通过 —— Step 6 已同步 archive.ts 调用位)。
+
+- [ ] **Step 8: commit**
 
 ```bash
-pnpm typecheck
-git add src/core/archive/pause-decisions-fence.ts src/cli/commands/archive.ts tests/core/archive/pause-capture-fence.test.ts
-git commit -m "feat(fence): 重写 checkOption2TaskChecked 为 capture 校验(design §6.4)"
+git add src/core/archive/pause-decisions-fence.ts src/cli/commands/archive.ts tests/core/archive/pause-capture-fence.test.ts tests/cli/archive-pause-fence.test.ts
+git commit -m "feat(fence): 重写 checkOption2TaskChecked 为 capture 校验 + 删旧 option=2 测试(design §6.4)"
 ```
 
 ---
@@ -1612,8 +1751,10 @@ design §6.4(opts 传 verify marker tail/count)+ §6.5(cross-check)。
 ```ts
 // 步骤 3.7 之前:从 verify marker 取链固化值
 const pauseFenceOpts = {
-  verifyAckLogTailHash: verifyRec['ack_log_tail_hash'] as string | undefined,
-  verifyAckLogEntryCount: verifyRec['ack_log_entry_count'] as number | undefined,
+  // marker 由 AI 产出,字段运行时可能是 string / null / undefined — 断言须含 null,
+  // 否则 null 会被错误窄化为 string,绕过 checkOption2TaskChecked 的 == null fail-closed 检查
+  verifyAckLogTailHash: verifyRec['ack_log_tail_hash'] as string | null | undefined,
+  verifyAckLogEntryCount: verifyRec['ack_log_entry_count'] as number | null | undefined,
   changeId,
 };
 const pdVerifyResult = await validatePauseDecisionsFence(
@@ -1727,7 +1868,8 @@ git commit -m "feat(fence): archive 传 verify marker tail/count + verify/review
 ## Task 13: Block C — `commands/apply.md` Fluid Pause 协议更新
 
 **Files:**
-- Modify: `commands/apply.md`(Fluid Pause Decision Point 段 + Marker 持久化段)
+- Modify: `commands/apply.md`(Fluid Pause Decision Point 段 + Marker 持久化段 + capture-input gap 声明)
+- Modify: `commands/verify.md`(verify freeze 边界声明,design §8.3)
 - Build: `pnpm build`
 
 design §6.6。
@@ -1759,21 +1901,41 @@ design §6.6。
 
 并在 Fence 校验段(`:138-147`)把 option=2 行改为:`option=2:added_task_ref 指向的 task ∉ capture 快照、∈ 当前 tasks.md 且勾选 [x];capture_id 匹配 ack-log pause-capture entry;链完整`。
 
-- [ ] **Step 3: 跑 `pnpm build` 同步双源模板**
+- [ ] **Step 3: 在 `apply.md` 加 capture-input gap 已知边界声明(design §9.3)**
+
+design §9.3 要求 capture-input gap 在 `pause-decisions-fence.ts` 代码注释(Task 11 已加)、design §9、`commands/apply.md` 三处显式声明。在 `apply.md` 的 Fence 校验段之后加一段已知边界说明:
+
+```markdown
+### option=2 capture 的已知边界(capture-input gap,design §9.2/§9.3)
+
+`forge pause-capture` 是轻量锚点,**不能**密码学证明 "task 是 pause 真新增的"。它能挡:无 capture 流程的 option=2、capture entry 事后被篡改、同 marker 内 capture 复用。它**挡不住**:capture 当下喂假输入(删旧 task → capture → 恢复)、AI 预先攒多条 capture 后选择性认领、AI 完全不记录 pause_decision。轻量 capture 对 "诚实但偷懒" 的 AI 有效,对蓄意构造假输入的攻击者无效 —— 此 gap 是当前 forge 架构下的已知限制。
+```
+
+- [ ] **Step 4: 改 `commands/verify.md` 声明 verify freeze 边界(design §8.3)**
+
+design §8.3:Fluid Pause 若发生在 verify 阶段 `forge evidence freeze --kind verify` 之后,capture entry 不被 verify marker 的 tail/count 固化,archive 阶段 option=2 强校验会因 ack-log 行数 mismatch 拒签。design §8.3 要求该约束在 `commands/apply.md` 与 `commands/verify.md` 两处协议侧声明。
+
+在 `verify.md` 的 step 4.4(`forge evidence freeze --kind verify`)段落之后,加一句边界说明:
+
+```markdown
+> **Fluid Pause 边界(design §8.3)**:apply 阶段 Fluid Pause 的 `forge pause-capture` 必须在本步 `forge evidence freeze --kind verify` **之前**完成。verify freeze 之后再产生的 pause-capture entry 不被 verify marker 的 `ack_log_tail_hash`/`ack_log_entry_count` 固化,archive 阶段 option=2 强校验会因 ack-log 行数 mismatch 拒签。
+```
+
+- [ ] **Step 5: 跑 `pnpm build` 同步双源模板**
 
 Run: `pnpm build`
-Expected: exit 0;`copy-templates.mjs` 把 `commands/apply.md` 同步到 `src/core/templates/commands/apply.md` 与 `dist/`。CLAUDE.md 约束 1 — 改 `commands/` 必须 build。
+Expected: exit 0;`copy-templates.mjs` 把 `commands/apply.md`、`commands/verify.md` 同步到 `src/core/templates/commands/` 与 `dist/`。CLAUDE.md 约束 1 — 改 `commands/` 必须 build。
 
-- [ ] **Step 4: 确认模板已同步**
+- [ ] **Step 6: 确认模板已同步**
 
-Run: `git status --short src/core/templates/commands/apply.md`
-Expected: 该文件出现在 staged/modified(build 已反向同步)。
+Run: `git status --short src/core/templates/commands/apply.md src/core/templates/commands/verify.md`
+Expected: 两个文件都出现在 staged/modified(build 已反向同步)。
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add commands/apply.md src/core/templates/commands/apply.md
-git commit -m "docs(apply): Fluid Pause 协议加 forge pause-capture + option=2 schema 字段"
+git add commands/apply.md commands/verify.md src/core/templates/commands/apply.md src/core/templates/commands/verify.md
+git commit -m "docs(apply,verify): Fluid Pause 协议加 forge pause-capture + capture-input gap + verify freeze 边界"
 ```
 
 ---
@@ -1784,7 +1946,7 @@ git commit -m "docs(apply): Fluid Pause 协议加 forge pause-capture + option=2
 - Modify: `tests/fixtures/pause-decisions/*/tasks.md`(5 个 fixture:bold → `task-id: desc`)
 - Modify: `tests/fixtures/pause-decisions/option-2-add-task/.verify-passed` + `.review-passed`(加 `added_task_ref` + `capture_id`)
 - Create/Modify: `tests/fixtures/pause-decisions/option-2-add-task/.evidence/ack-log.jsonl`(加 pause-capture entry)
-- Modify: `tests/cli/archive-pause-fence.test.ts`(option=2 现有测试同步)
+- Modify(按需): `tests/integration/pause-decisions-end-to-end.test.ts`(若 fixture 迁移致其断言失败则同步修正)
 
 design §8.4。Path Pre-flight 已定:canonical 格式 = `parseTasks` 的 `- [x] task-id: desc`。
 
@@ -1819,19 +1981,15 @@ design §8.4。Path Pre-flight 已定:canonical 格式 = `parseTasks` 的 `- [x]
 
 为避免手算 hash,**用脚本生成**:写一个一次性 node 脚本(或 vitest 内的 setup),调 `appendAckLog` 把 pause-capture entry 追加到 fixture 的 ack-log,再 `readAllAckLogEntries` + `canonicalHash` 算出 tail/count,回填进两个 marker。脚本跑完即删,fixture 文件提交。
 
-- [ ] **Step 4: 同步 `archive-pause-fence.test.ts` 现有 option=2 测试**
-
-`archive-pause-fence.test.ts` 现有的 option=2 相关测试(用旧 bold 格式 + 无 capture 的)—— 改为 canonical 格式 + 新 schema,或标注为 Task 11 的 `pause-capture-fence.test.ts` 已覆盖而精简。确保整文件 `pnpm vitest run tests/cli/archive-pause-fence.test.ts` 全绿。
-
-- [ ] **Step 5: 运行全量 pause 相关测试**
+- [ ] **Step 4: 运行全量 pause 相关测试**
 
 Run: `pnpm vitest run tests/cli/archive-pause-fence.test.ts tests/integration/pause-decisions-end-to-end.test.ts tests/core/archive/pause-capture-fence.test.ts`
-Expected: PASS。若 `pause-decisions-end-to-end.test.ts` 因 fixture 迁移失败,同步修正其断言。
+Expected: PASS。`archive-pause-fence.test.ts` 的旧 option=2 测试已在 Task 11 Step 5 删除(本文件 inline 构造、不读 fixtures,本步只回归确认 fixture 迁移未波及它);若 `pause-decisions-end-to-end.test.ts` 因 fixture 迁移失败,同步修正其断言。
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add tests/fixtures/pause-decisions tests/cli/archive-pause-fence.test.ts
+git add tests/fixtures/pause-decisions tests/integration/pause-decisions-end-to-end.test.ts
 git commit -m "test(fixtures): pause fixtures 迁移 canonical task 格式 + option-2 加 capture"
 ```
 
@@ -1904,6 +2062,7 @@ git commit -m "test(release-gate): unskip option=2 attack-path todo(capture 校�
 **Files:**
 - Modify: `scripts/check-release-gate.mjs:33`(`EXPECTED_TODO_COUNT_SOFT` 6 → 0)
 - Modify: `.github/workflows/ci.yml`(加 `test:gate:release` step)
+- Modify: `CHANGELOG.md`(breaking change 声明,design §8.1)
 
 **前置**:Task 1-15 全部完成,6 个 `it.todo` 全 unskip。提前做本 task 会使 CI 变红(design §11 / round 3 MAJOR #3)。
 
@@ -1925,16 +2084,30 @@ Expected: 两条都 PASS（soft:actual=0=EXPECTED;release:actual=0 硬约束满�
         run: pnpm test:gate:release
 ```
 
-- [ ] **Step 4: 全量本地验证(沿 CLAUDE.md 5 步)**
+- [ ] **Step 4: `CHANGELOG.md` 加 breaking change 声明(design §8.1)**
+
+design §8.1 已知破坏性边界:本特性发布**前** in-flight 的 option=2 change(已 verify/review、未 archive,且 apply 期未走过 `forge pause-capture`、ack-log 无 capture entry)在用新 CLI archive 时会被 fence 拒。在 `CHANGELOG.md` 当前未发布版本段(`## [Unreleased]` 或新版本号段,沿文件现有 Keep a Changelog 格式)加 `### BREAKING` 小节:
+
+```markdown
+### BREAKING
+
+- option=2(Fluid Pause 加 task)归档校验加固:archive fence 现要求 option=2 的 pause_decision
+  携带 `added_task_ref` + `capture_id`,并在 ack-log hash-chain 中匹配一条 `forge pause-capture`
+  entry。**发布前已 verify/review 但未 archive、且 apply 期未走过 `forge pause-capture` 的
+  option=2 change 会被 archive 拒签。** 受影响 change 由用户人工处理(将该 pause_decision 改判为
+  option=4 Other 并补 `other_rationale`/`other_acked_by`,或人工接受后另行归档)— fence 不开自动放行口子。
+```
+
+- [ ] **Step 5: 全量本地验证(沿 CLAUDE.md 5 步)**
 
 Run: `pnpm lint && pnpm format:check && pnpm typecheck && pnpm build && pnpm test`
 Expected: 全 PASS。再单独 `pnpm test:gate:release` → PASS。
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add scripts/check-release-gate.mjs .github/workflows/ci.yml
-git commit -m "ci(release-gate): EXPECTED_TODO_COUNT_SOFT 归零 + CI 接入 test:gate:release"
+git add scripts/check-release-gate.mjs .github/workflows/ci.yml CHANGELOG.md
+git commit -m "ci(release-gate): EXPECTED_TODO_COUNT_SOFT 归零 + CI 接入 test:gate:release + CHANGELOG breaking change"
 ```
 
 ---
@@ -1973,13 +2146,38 @@ Expected: 全 PASS。`release-blocker-attack-path.test.ts` 0 个 `it.todo`。
 | `release-blocker-attack-path.test.ts` unskip todo 2 | Task 15 |
 | CLI 单测 + 各模块单测 | 各 Task 内含 |
 | `docs/cli-reference.md` 补 `pause-capture` | Task 10 |
-| 迁移 option=2 fixtures/tests | Task 14 |
+| 迁移 option=2 fixtures/tests | Task 14(fixtures)+ Task 11(`archive-pause-fence.test.ts` 旧 option=2 测试删除)|
 
-design §10 测试策略覆盖:Block A 4 todo(Task 1/2);option=1 attack/happy/frontmatter/非 git(Task 5/6);option=2 attack/happy/链坏/capture 缺失/缺 tail_hash/未勾选/**capture_id 复用**(Task 11)/verify-review 不一致(Task 12)/gen-0 老 marker(Task 4 保留现有测试);release gate(Task 16)。
+> **design §11 实施清单未列全的协议侧要求**(design 正文 §8.1/§8.3/§9.3 明确要求,§11 清单本身遗漏,plan 已补):
+> - design §8.3:`commands/verify.md` verify freeze 边界声明 → Task 13
+> - design §8.1:`CHANGELOG.md` breaking change 声明 → Task 16
+> - design §9.3:capture-input gap 在 `pause-decisions-fence.ts` 代码注释 + `commands/apply.md` 声明 → Task 11 / Task 13
+
+design §10 测试策略覆盖:Block A 4 todo(Task 1/2);option=1 attack/happy/frontmatter/非 git(Task 5/6);option=2 attack/happy/链坏/capture 缺失/缺 tail_hash/tail_hash=null/task_ref 不匹配/change_id 不匹配/未勾选/**capture_id 复用**(Task 11,共 10 个 case)/verify-review 不一致(Task 12)/gen-0 老 marker(Task 4 保留现有测试);release gate(Task 16)。
 
 **自检修正(已 inline 修复):**
 1. Task 11 测试补 "capture_id 复用 → 拒签" case —— 原缺失,design §6.4 step 5 / §9.1 要求。
 2. Task 4 Step 3:测试调用统一 3 参、去掉 `file` 参数 —— 否则 Task 11 在第 4 位插入 `opts` 后,旧 4 参调用(末位 `file`)会参数错位。
+
+**Codex 对抗性 review 修订(round 1,已 inline 修复):**
+3. (B-1)`checkOption2TaskChecked` 的 verify marker tail/count 缺失检查由 `=== undefined` 改 `== null` —— marker-schema.ts 不校验这两字段、AI 可手写 `ack_log_tail_hash: null`、evidence.ts freeze 空 ack-log 时也写 null;`null` 会绕过 fail-closed 使 `verifyAckLogChain` 退化为仅链内自洽。`PauseFenceOptions` 字段类型 + archive.ts 取值断言同步加 `null`。Task 11 补 tail_hash=null case。
+4. (M-1)Task 13 补改 `commands/verify.md` —— design §8.3 要求 "Fluid Pause 须在 verify freeze 之前完成" 须在 apply.md / verify.md **两处**协议侧声明。
+5. (M-2)Task 16 补 `CHANGELOG.md` breaking change 声明 —— design §8.1 要求发布前 in-flight option=2 change 会被拒须显式声明。
+6. (M-3)Task 11 fence 函数注释 + Task 13 apply.md 补 capture-input gap 声明 —— design §9.3 要求该 gap 在 `pause-decisions-fence.ts` 代码注释 / design §9 / `commands/apply.md` 三处显式声明。
+7. (M-4)Task 11 测试补 "链坏 / task_ref 不匹配 / change_id 不匹配" 3 个 case —— design §10 明列要求。
+
+**Codex 对抗性 review 修订(round 2,已 inline 修复):**
+8. (B-1)Task 2 version-retrograde fail-closed 测试改用 `vi.mock('node:child_process')` factory 注入 —— `version-retrograde-fence.ts:9` 模块顶层 `promisify(execFile)` 已按值快照 execFile,测试内 `vi.spyOn` 拦不到;改为 `vi.hoisted` mock + `beforeEach` 默认转发真实 execFile(适配 promisify callback 形态),仅 fail-closed 测试 override。Task 2 Step 1 + Step 3 同步。
+9. (M-1)Task 10 补 `buildPauseCaptureCommand` commander 层测试(`--help` / 缺 required option / unknown option)—— design §11 line 300 要求 CLI 单测含 help / 参数校验 / unknown command。
+10. (M-2 — 经核实部分采纳)Codex 建议「补 propose/apply 协议侧格式强制」**不采纳**:`parseTasks` 是 `forge validate`(`validate/change.ts:88`)现役解析器,生产 tasks.md 必然已 canonical → 走 design §8.4 分支 1,协议侧强制仅分支 2(旧格式在用)才需,加之违反 YAGNI。采纳其指出的真实弱点:Path Pre-flight §2 论证不充分 —— 已补强(明确 `forge validate` 硬证据 + design §8.4 分支判定)。
+
+**Codex 对抗性 review 修订(round 3,已 inline 修复):**
+11. (B-1)`archive-pause-fence.test.ts` 旧 option=2 测试的删除从 Task 14 前移到 Task 11(重写 fence 的 task,新增 Step 5)—— 否则 Task 12 Step 5 跑该文件全文件时 3 个旧 option=2 测试(测旧 fence)会 FAIL、CI 红。该文件 inline 构造 marker、不依赖 fixtures,删除不依赖 Task 14;Task 14 相应去掉 `archive-pause-fence.test.ts` 同步步骤。
+12. (N-1)Path Pre-flight §2 删去「`process-evidence-freeze-warnings.ts` 亦用 parseTasks」半句 —— 经核实该文件未真正调用 `parseTasks`(`:207/:213` 仅注释提及 + 自有 checkbox 正则);主论证(`validate/change.ts:88`)不受影响。
+
+**Codex 对抗性 review 修订(round 4,已 inline 修复):**
+13. (BLOCKER)Task 11 对调 Step 6/7 —— 「改 archive.ts 调用占位」提前到「运行确认 + typecheck」之前;否则 Step 3 改 fence 签名(第 4 参 `opts`)后、archive.ts 两处调用未更新,`pnpm typecheck` 必报参数类型冲突。
+14. (MINOR)Task 14 Files 补 `tests/integration/pause-decisions-end-to-end.test.ts`(标注按需修改)—— 与 Step 4/5 已涉及该文件保持一致。
 
 **类型一致性核对:** `validatePauseDecisionsFence` 签名两次演进(Task 4 加 `repoRoot`;Task 11 加 `opts: PauseFenceOptions`,`file` 移至第 5 位)—— archive.ts 调用 Task 11 Step 6 占位 `{}`、Task 12 填真值,测试调用 3 参形式不受影响。`PauseCaptureEntry`(Task 7)/ `PauseFenceOptions`、`crossCheckPauseDecisions`(Task 11/12)/ `runPauseCapture`(Task 10)跨 task 引用一致。
 

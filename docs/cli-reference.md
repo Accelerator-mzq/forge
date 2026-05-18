@@ -265,6 +265,16 @@ LLM 扫 docs/+src/ 推测 role,产 anchors-draft.yaml + draft .md 概览。
 
 校验 sync-state diffs 全部 ack 后标 resolved。
 
+### `forge legacy-bridge extract`
+
+Layer 3b:扫老文档(SRS / PRD / BACKLOG / TODO)抽需求条目,LLM 判实现状态 → `forge/legacy-requirements.yaml` → backlog 第二数据源。默认以 **emit** 模式运行(产 Task manifest,等待 agent fulfill);三个互斥 flag 切换模式:
+
+| flag | 用途 |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `--apply` | 消费 agent fulfill 写回的结果文件 → 产 `legacy-requirements-draft.yaml` + `.md` 概览 |
+| `--api` | 进程内调 Anthropic SDK(需 `ANTHROPIC_API_KEY`)→ 与 `--apply` 后等效;**注意:证据(`file:line`)精度低于 agent 模式** |
+| `--finalize` | 读用户审改后的 draft → 分配稳定 `LR-NNNN` ID → 写 `forge/legacy-requirements.yaml` → 刷新 `forge/backlog/` |
+
 退出码补充(基础码沿用已有表):
 
 | 码  | brownfield 上下文含义                                       |

@@ -34,7 +34,7 @@ import type { RunnerClient } from '../../core/legacy-bridge/runners.js';
 import { renderDiffMarkdown, renderDiffYaml } from '../../core/legacy-bridge/diff-report.js';
 import { readAnchorFile } from '../../core/legacy-bridge/encoding.js';
 import type { ForgeConfig } from '../../core/schema/types.js';
-import type { LegacyAnchorsFile } from '../../core/legacy-bridge/types.js';
+import type { LegacyAnchorsFile, SyncStateFile } from '../../core/legacy-bridge/types.js';
 import { FORGE_VERSION } from '../../index.js';
 // Task 8 (plan-9a §9): cross-cutting fence framework — 9g 实施完整 13 不变量逻辑
 import { crossCuttingFenceCheck } from '../../core/archive/fence.js';
@@ -91,6 +91,11 @@ export function buildArchiveCommand(): Command {
       // Task 6.3:--api 模式 — preflight/posthook 的 sync-check 进程内直连 API 跑完,
       // 不 emit manifest、不写暂停态、不 halt(高保证 CI 场景绕过 agent-pause)
       .option('--api', '直连 Anthropic API 跑 sync-check(不 emit manifest、不暂停)')
+      // Task 6.4:--resume — agent 履行 manifest 并跑 sync-check --apply 后,续跑 archive 主流程
+      .option(
+        '--resume',
+        'agent 履行后续跑 archive(gate 复核:produced_from 绑定 + critical 幂等重评)',
+      )
       .action(
         async (
           changeId: string | undefined,
@@ -99,6 +104,7 @@ export function buildArchiveCommand(): Command {
             recover?: boolean;
             resumeSummary?: string; // plan-9e1 Task 5
             api?: boolean; // Task 6.3:--api 进程内直连
+            resume?: boolean; // Task 6.4:agent 履行后续跑
           },
         ) => {
           const forgeRoot = join(process.cwd(), 'forge');
@@ -210,6 +216,26 @@ export function buildArchiveCommand(): Command {
             } finally {
               if (release) await release();
             }
+          }
+
+          // —— Task 6.4:--resume 独立路径(agent 履行后 gate 复核 + 续跑 archive)——
+          if (opts.resume) {
+            if (!changeId) {
+              console.error('✗ --resume 需要 changeId');
+              process.exit(1);
+            }
+            // gate 复核:produced_from 绑定 + critical 幂等重评
+            const gateResult = await resumeArchiveGateCheck(forgeRoot, changeId);
+            if (!gateResult.ok) {
+              console.error(`✗ --resume gate 复核失败:${gateResult.reason}`);
+              process.exit(2); // business-rule-fail
+            }
+            // gate 通过 → 清暂停态文件(不可逆,archive 续跑前清理)
+            const pausePath = join(forgeRoot, '.cache', `archive-pause-${changeId}.json`);
+            await rm(pausePath, { force: true });
+            console.log(`✓ --resume gate 通过,已清暂停态文件;续跑 archive ${changeId}…`);
+            // --resume 清暂停态后,直接续跑正常 archive 主流程(opts.resume=true 不影响后续 opts 读取)
+            // fall-through 到下方正常 archive 路径(changeId 已确认存在)
           }
 
           // —— 正常 archive 路径 ——
@@ -1014,4 +1040,65 @@ async function buildSyncCheckContextStandalone(
     config,
     anchors,
   );
+}
+
+/**
+ * Task 6.4:forge archive --resume 的 gate 复核。
+ *
+ * 复核两项:
+ * ① 产物绑定 — sync-state 的 produced_from 必须等于暂停态文件的 manifest_hash,
+ *              确保 sync-check --apply 产出的 sync-state 确实来自本次 preflight emit 的 manifest。
+ * ② critical 幂等重评 — sync-state 中不得有 severity=critical + status=pending 的差异;
+ *                       若有,说明 agent 未完全 resolve,不可续跑 archive。
+ *
+ * @param forgeRoot forge/ 根目录路径
+ * @param changeId  change id(e.g. 'add-pay')
+ * @returns { ok: true } 表示 gate 通过;{ ok: false, reason } 表示拒绝并附原因
+ */
+export async function resumeArchiveGateCheck(
+  forgeRoot: string,
+  changeId: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  // 读暂停态文件:forge/.cache/archive-pause-<changeId>.json
+  const pausePath = join(forgeRoot, '.cache', `archive-pause-${changeId}.json`);
+  if (!existsSync(pausePath)) {
+    return {
+      ok: false,
+      reason: `无暂停态文件 archive-pause-${changeId}.json;archive 未在 preflight 暂停,无需 --resume`,
+    };
+  }
+  // 暂停态文件格式(Task 6.3 emitPreflightSyncCheck 写入):{ changeId, paused_step, manifest_hash }
+  const pause = JSON.parse(await readFile(pausePath, 'utf8')) as { manifest_hash: string };
+
+  // 读 sync-state YAML:forge/legacy-sync-state/<changeId>.yaml
+  const statePath = join(forgeRoot, 'legacy-sync-state', `${changeId}.yaml`);
+  if (!existsSync(statePath)) {
+    return {
+      ok: false,
+      reason: `sync-state 缺失(forge/legacy-sync-state/${changeId}.yaml);请先让 agent fulfill manifest 后跑 forge legacy-bridge sync-check --apply --change-id ${changeId}`,
+    };
+  }
+  const state = parseYaml(await readFile(statePath, 'utf8')) as SyncStateFile;
+
+  // ① 产物绑定:sync-state.produced_from 必须等于暂停态的 manifest_hash
+  if (state.produced_from !== pause.manifest_hash) {
+    return {
+      ok: false,
+      reason: `produced_from(${state.produced_from ?? 'undefined'}) ≠ 暂停态 manifest_hash(${pause.manifest_hash});sync-state 非本次 --apply 产物,请重新履行 manifest 并跑 sync-check --apply`,
+    };
+  }
+
+  // ② critical 幂等重评:sync-state 中不得有 critical+pending 差异
+  // 注:archive.ts Task 6.3 已用内联 filter 而非 hasCriticalPending import,此处保持一致
+  const criticalPending = (state.diffs ?? []).filter(
+    (d) => d.severity === 'critical' && d.status === 'pending',
+  );
+  if (criticalPending.length > 0) {
+    return {
+      ok: false,
+      reason: `仍有 ${criticalPending.length} 项 critical 差异未 resolve;跑 forge legacy-bridge resolve ${changeId} 后重试`,
+    };
+  }
+
+  return { ok: true };
 }

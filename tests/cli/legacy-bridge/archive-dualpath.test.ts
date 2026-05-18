@@ -10,6 +10,7 @@ import {
   emitPreflightSyncCheck,
   emitPostHookSyncCheck,
   runArchivePreflight,
+  resumeArchiveGateCheck,
 } from '../../../src/cli/commands/archive.js';
 
 // —— SDK mock:--api 模式集成测试用例真走 ApiRunner → client.messages.create ——
@@ -151,5 +152,47 @@ describe('runArchivePreflight --api 模式(进程内直连 API)', () => {
     expect(state.diffs.some((d) => d.severity === 'critical')).toBe(true);
     // --api 不写暂停态
     expect(existsSync(join(forgeRoot, '.cache', 'archive-pause-add-pay.json'))).toBe(false);
+  });
+});
+
+describe('resumeArchiveGateCheck', () => {
+  it('produced_from 不匹配暂停态 → 拒绝 resume', async () => {
+    const forgeRoot = join(dir, 'forge');
+    await mkdir(join(forgeRoot, '.cache'), { recursive: true });
+    // 暂停态文件用 camelCase changeId(与 Task 6.3 emitPreflightSyncCheck 实际写入一致)
+    await writeFile(
+      join(forgeRoot, '.cache', 'archive-pause-add-pay.json'),
+      JSON.stringify({ changeId: 'add-pay', manifest_hash: 'EXPECTED' }),
+      'utf8',
+    );
+    await mkdir(join(forgeRoot, 'legacy-sync-state'), { recursive: true });
+    await writeFile(
+      join(forgeRoot, 'legacy-sync-state', 'add-pay.yaml'),
+      'schema: forge-legacy-sync/v1\nchange_id: add-pay\nproduced_from: WRONG\ndiffs: []\n',
+      'utf8',
+    );
+    const r = await resumeArchiveGateCheck(forgeRoot, 'add-pay');
+    expect(r.ok).toBe(false);
+    // TS narrowing:r.ok=false 时才有 reason 字段
+    if (!r.ok) expect(r.reason).toMatch(/produced_from/);
+  });
+
+  it('produced_from 匹配 + 无 critical pending → 放行', async () => {
+    const forgeRoot = join(dir, 'forge');
+    await mkdir(join(forgeRoot, '.cache'), { recursive: true });
+    // 暂停态文件用 camelCase changeId(与 Task 6.3 实际写入一致)
+    await writeFile(
+      join(forgeRoot, '.cache', 'archive-pause-add-pay.json'),
+      JSON.stringify({ changeId: 'add-pay', manifest_hash: 'H1' }),
+      'utf8',
+    );
+    await mkdir(join(forgeRoot, 'legacy-sync-state'), { recursive: true });
+    await writeFile(
+      join(forgeRoot, 'legacy-sync-state', 'add-pay.yaml'),
+      'schema: forge-legacy-sync/v1\nchange_id: add-pay\nproduced_from: H1\ndiffs: []\n',
+      'utf8',
+    );
+    const r = await resumeArchiveGateCheck(forgeRoot, 'add-pay');
+    expect(r.ok).toBe(true);
   });
 });

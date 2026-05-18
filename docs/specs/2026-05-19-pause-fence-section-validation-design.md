@@ -1,7 +1,7 @@
 # pause-fence 段级校验 design(release-blocker attack-path 闭环)
 
 - **日期**:2026-05-19
-- **状态**:design,待 writing-plans(已过 Codex 对抗性 review round 1 + round 2 + round 3)
+- **状态**:design,待 writing-plans(已过 Codex 对抗性 review round 1 + round 2 + round 3 + round 4)
 - **关联**:design `2026-05-10-v1.0-fusion-completion-design.md` §2.1.5;plan-9c §7.5;plan-9c `release-blocker-attack-path.test.ts`
 - **brainstorm 来源**:session 704adeea(2026-05-18~19)+ 本会话深入核查
 
@@ -123,7 +123,9 @@ option=1 分支在现有字段校验之外:
 
 **关键约束**:**只做链内自洽校验,挡不住"重写整条 ack-log + 重算所有 `prev_entry_hash`"** —— 攻击者可构造一条全新且内部自洽的链。真正的事后篡改防护来自固化项 2/3,而它们依赖 `marker.ack_log_tail_hash` + `ack_log_entry_count`。这两个字段在 verify 阶段 `forge evidence freeze` 时固化(`evidence.ts:815-819`)。
 
-**链校验必须用 verify marker 的 tail/count**:forge 工作流为 `apply → review → verify → archive`;review 阶段跑 `forge evidence freeze --kind review`、verify 阶段跑 `--kind verify`(`review.md` 7b / `verify.md` 4.4)。verify 是最后一次 freeze,**verify marker 的 `ack_log_tail_hash`/`ack_log_entry_count` 才是 archive 时刻全量 ack-log 的正确快照**;review marker 的是较早快照(entry 数偏少)。`verifyAckLogChain` 的行数校验是精确相等(`ack-log.ts:271`),用 review marker 的 count 校验 archive 时全量 ack-log 必然 mismatch。`process-evidence-fence.ts:401-405` 子检 9.3 也只取 verify marker 的 tail/count,印证此结论。
+**链校验必须用 verify marker 的 tail/count**:forge 工作流为 `apply → review → verify → archive`;review 阶段跑 `forge evidence freeze --kind review`、verify 阶段跑 `--kind verify`(`review.md` 7b / `verify.md` 4.4)。verify 是最后一次 freeze,**verify marker 的 `ack_log_tail_hash`/`ack_log_entry_count` 才是 archive 时刻全量 ack-log 的正确快照**;review marker 的是较早快照(entry 数偏少)。`verifyAckLogChain` 的行数校验是精确相等(`ack-log.ts:271`),用 review marker 的 count 校验 archive 时全量 ack-log 必然 mismatch。本特性 option=2 链校验**有意固定用 verify marker 的 tail/count**,不沿用 review-side 值。
+
+> Observation(writing-plans 须独立核查,与本特性无关):`process-evidence-fence` 的 cross-cutting fence 对 review ctx 会构造 `reviewCtx`,把 `markerAckLogTailHash`/`markerAckLogEntryCount` 替换为 review 侧值再跑同一套 field fence(`fence.ts:190-197`)。即子检 9.3 在 review ctx 下用 review marker 的 `ack_log_entry_count`(review freeze 时刻快照)校验 archive 时刻全量 ack-log —— 若 review freeze 早于 verify freeze 且其间 ack-log 有新增,存在 count mismatch 误拒风险。这是 forge 既有代码的潜在问题,本特性不依赖、也不修复(option=2 fence 固定用 verify marker tail/count 绕开此问题);writing-plans 阶段宜核查并决定是否单独立项。
 
 因此 **option=2 强校验固定用 verify marker 的 `ack_log_tail_hash` + `ack_log_entry_count`** 调 `verifyAckLogChain`,无论 fence 当前在校验哪个 marker(verify 或 review)。archive 层从 `verifyRec` 取出这两个值,传给 `validatePauseDecisionsFence` 的两次调用(§6.4 / §11)。
 - verify marker 两字段齐全 → 三重校验全开,capture entry 受事后篡改保护。
@@ -180,9 +182,13 @@ capture_id?: string | null;     // option=2 关联的 pause-capture entry id
 
 **`validatePauseDecisionsFence` 签名扩展**:现签名 `(marker, changeDir, file?)` 不接收 repo root,也无 verify marker 的链固化值。新增 option=1 需 repo root(§5.2)、option=2 需 verify marker 的 tail/count + `changeId`。writing-plans 定具体形态,建议 `(marker, changeDir, repoRoot, opts?, file?)`,`opts` 含 `verifyAckLogTailHash` / `verifyAckLogEntryCount`(由 archive 层从 `verifyRec` 取);`changeId` 从 `changeDir` basename 派生,不单独传。`archive.ts:452`/`:463` 两处调用同步改。
 
-`pause_decisions` 同时镜像在 `.verify-passed` / `.review-passed`(design §2.1.6)。archive 现对两个 marker 各跑一次独立 fence(`archive.ts:452`/`:463`),不做跨 marker 比对 —— 两份可写不同 `capture_id` / `added_task_ref` 各自通过,镜像语义漂移。
+### 6.5 verify/review 双 marker `pause_decisions` cross-check
 
-本特性在 archive 层加一个 verify/review `pause_decisions` cross-check(沿 `validateThreeLevelFence` 同时接 verifyRec + reviewRec 的先例):**先校验两 marker 的 `pause_decisions` 的 `id` 集合完全一致**(单侧缺某 id、单侧多某 id、或单侧 id 重复,均拒签),**再**按 `id` 配对逐条比对 `task_ref` / `chosen_option` / `added_task_ref` / `capture_id` 一致;任一不一致 → 拒签。范围限定在本特性引入/相关的字段,不扩展到整 marker 镜像校验(那是独立议题,§12 非目标)。
+`pause_decisions` 镜像在 `.verify-passed` / `.review-passed`(design §2.1.6)。archive 现对两个 marker 各跑一次独立 fence(`archive.ts:452`/`:463`),不做跨 marker 比对 —— 两份可对同一 `id` 写不同 `capture_id` / `added_task_ref` 各自通过,镜像语义漂移。
+
+**两侧 `id` 集合可合法不一致**:工作流 `review → verify`,review marker 先产;verify 阶段触发的 pause 只能进 verify marker(review marker 已产、不回改)。`summary-builder.ts:79` 的 `mergePauseDecisions(verify, review)` 按 `id` 去重合并两侧,印证"单侧独有 `id`"是合法状态。
+
+因此 cross-check 采用**共有 `id` 比对**(沿 `validateThreeLevelFence` 同时接 verifyRec + reviewRec 的先例):对 verify / review 两 marker 中 **`id` 相同**的 pause_decision,逐条比对 `task_ref` / `chosen_option` / `added_task_ref` / `capture_id` 一致;不一致 → 拒签。**单侧独有的 `id`(verify-only / review-only)不拒签**。不做"id 集合完全一致"的 strict 校验(会误拒合法的 verify-only pause);范围限定本特性引入/相关字段,不扩展到整 marker 镜像校验(§12 非目标)。
 
 ### 6.6 改 `commands/apply.md`
 
@@ -260,6 +266,8 @@ writing-plans 的 Path Pre-flight Verify 阶段**必须先核查实际 `tasks.md
 ### 9.3 取舍结论
 
 完整独立 hash-chain 方案同样关不掉 9.2 的 gap(根因在"无可信锚点",不在"链强度")。故采用轻量方案,不为消除一个无法消除的 gap 多付成本。此 gap 须在 `pause-decisions-fence.ts` 代码注释、本 design §9、`commands/apply.md` 三处显式声明。轻量 capture 的实际价值边界:**对"诚实但偷懒"的 AI 有效(逼它至少走完 capture 流程并留下进链的记录),对蓄意构造假输入的攻击者无效。**
+
+本特性也**不覆盖**"调用了 `forge pause-capture` 但漏写 marker `pause_decision`"的遗漏检测(§9.2 完全隐瞒条)—— 该类遗漏需未来独立的反向一致性校验(§12 非目标)。
 
 ## 10. 测试策略
 
@@ -344,3 +352,14 @@ Codex 裁定**同意** round 2 BLOCKER #1 的处理(固化 marker hash 不关闭
 | 4 | MINOR | §6.5 cross-check 未说明 `id` 集合差异/单侧缺失 | 属实,采纳:§6.5 先校验 `id` 集合完全一致,再逐 id 比字段 |
 | 5 | MINOR | 取消旧格式兼容会破坏现有 option=2 fixtures/tests | 属实,采纳:§11 Phase 2 加"迁移 option=2 fixtures/tests 到 canonical 格式" |
 | 6 | NIT | §6.4 未说明 `validatePauseDecisionsFence` 签名变化 | 采纳:§6.4 末补签名扩展说明,§11 注明两阶段的签名改动 |
+
+### round 4 — Codex 对抗性 review(2026-05-19)
+
+Codex 确认 round 3 BLOCKER #1 的工作流顺序纠正正确(verify 是最后一次 freeze),并**同意** round 3 MAJOR #2 反向校验不采纳的判断。新意见 4 条(2 MAJOR / 1 MINOR / 1 NIT),逐条核实:
+
+| # | 级别 | 议题 | 核实与处理 |
+| - | ---- | ---- | ---------- |
+| 1 | MAJOR | v4 §6.2 引用"`process-evidence-fence` 子检 9.3 只取 verify marker tail/count"佐证不成立 | 属实(`fence.ts:190-197` 构造 `reviewCtx` 把 tail/count 换成 review 侧值再跑同一套 field fence)。§6.2 删该错误佐证,改为"本特性有意固定用 verify marker tail/count";加 Observation 标注 forge 既有 review-side 子检 9.3 的 count mismatch 风险待 writing-plans 独立核查(与本特性无关) |
+| 2 | MAJOR | §6.5 strict"`id` 集合完全一致"是 breaking tightening,会误拒合法的 verify-only pause | 属实(`summary-builder.ts:79` `mergePauseDecisions` 证明两侧 `id` 集合可合法不一致;verify 阶段触发的 pause 只进 verify marker)。§6.5 改为"共有 `id` 比对,单侧独有 `id` 不拒签",**撤销 round 3 MINOR #4 引入的过度收紧** |
+| 3 | MINOR | §9.3 缺"调了 capture 但漏写 marker"的边界说明 | 采纳:§9.3 补一句 |
+| 4 | NIT | §6.5 cross-check 段在 round 2/3 编辑中丢失 `### 6.5` 标题 | 属实,采纳:补回 `### 6.5` 独立标题 |

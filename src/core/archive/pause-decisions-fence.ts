@@ -2,7 +2,7 @@
 // 沿 design §2.1.5 fence 五类业务校验:
 //   - CRITICAL 重定向(CRITICAL 应走 forge 强 fence,不应进 pause)
 //   - WARNING + 未 ack → 拒签(SUGGESTION 例外)
-//   - option=1:target_artifact=proposal.md + target_anchor 包含 'What Changes'
+//   - option=1:target_artifact=proposal.md + target_anchor 包含 'What Changes' + diff 段级校验
 //   - option=2:tasks.md 中 task_ref 末段对应的行已勾选 [x]
 //   - option=3:proposal.md/design.md 含 scope-entries fenced YAML 块 + entry_id 匹配 + non_blocking_rationale 非空
 //   - option=4:other_rationale + other_acked_by 非空
@@ -12,6 +12,12 @@
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { parseUnifiedDiff, addedLineNumbers } from '../parse/unified-diff.js';
+
+// promisify execFile 用于 option=1 diff 段级校验(async git diff 调用)
+const execFileAsync = promisify(execFile);
 import type { PauseDecision } from '../markers/types.js';
 import { type ValidationResult, ok, failed, mergeResults } from '../validate/types.js';
 // v2 codex MAJOR 7 修订:复用 9b parseFencedYamlBlocks,删除自写 extractYamlFencedBlocks + 直接 parseYaml
@@ -44,7 +50,6 @@ export async function validatePauseDecisionsFence(
   repoRoot: string,
   file?: string,
 ): Promise<ValidationResult> {
-  void repoRoot; // Task 5 接入 option=1 diff 校验后移除
   const decisions = marker.pause_decisions;
   if (!Array.isArray(decisions)) return ok(); // 老 marker 缺 → 通过
 
@@ -84,8 +89,9 @@ export async function validatePauseDecisionsFence(
     // —— 3. option 五分支业务校验 ——
     if (p.chosen_option === 1) {
       // option=1 扩 scope:必须改 proposal.md `## What Changes`
-      // TODO(9e1):本 task 仅校验 marker 字段一致性;design §2.1.5 line 262 要求"diff 内含 What Changes 段变更"
-      // 真实 git diff 段级校验留给 9e1 archive_summary 集成 — 沿 plan-9c §7.5 已知降级声明
+      // 字段校验:target_artifact=proposal.md + target_anchor 含 'What Changes'
+      // diff 段级校验:跑 git diff HEAD -- <changeDir>/proposal.md,验 ## What Changes 段确有新增行
+      // (沿 design §2.1.5 line 262;Task 5 plan-9c 实现)
       if (p.target_artifact !== 'proposal.md') {
         results.push(
           failed({
@@ -106,6 +112,8 @@ export async function validatePauseDecisionsFence(
           }),
         );
       }
+      // diff 段级校验:字段校验之后追加(字段校验失败时也继续累积,沿现有 results.push 模式)
+      results.push(await checkOption1WhatChangesDiff(p, changeDir, repoRoot, fieldBase, file));
     } else if (p.chosen_option === 2) {
       // option=2 加 task:tasks.md 中 task_ref 末段对应的行已勾选 [x]
       const tasksRes = await checkOption2TaskChecked(p, changeDir, fieldBase, file);
@@ -152,6 +160,81 @@ export async function validatePauseDecisionsFence(
   }
 
   return mergeResults(...results);
+}
+
+/**
+ * option=1 diff 段级校验:proposal.md 的 git diff 中,`## What Changes` 段须确有新增行。
+ * 沿 design §5.3。非 git → N/A 降级(返回 ok);git 项目内 git diff 失败 → fail-closed 拒签。
+ */
+async function checkOption1WhatChangesDiff(
+  p: PauseDecision,
+  changeDir: string,
+  repoRoot: string,
+  fieldBase: string,
+  file?: string,
+): Promise<ValidationResult> {
+  // 1. 非 git 项目 → diff 校验 N/A,降级(沿 version-retrograde-fence 先例)
+  try {
+    await execFileAsync('git', ['rev-parse', '--is-inside-work-tree'], { cwd: repoRoot });
+  } catch {
+    return ok(); // 非 git → 降级到已通过的字段校验
+  }
+  // 2. git diff HEAD -- <changeDir>/proposal.md
+  const proposalPath = join(changeDir, 'proposal.md');
+  let diffText: string;
+  try {
+    const { stdout } = await execFileAsync('git', ['diff', 'HEAD', '--', proposalPath], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      maxBuffer: 50 * 1024 * 1024,
+    });
+    diffText = stdout;
+  } catch (err) {
+    // git 项目内 git diff 失败 → fail-closed(沿 version-retrograde-fence:73-81)
+    return failed({
+      artifact: 'marker',
+      field: `${fieldBase}.target_anchor`,
+      message: `option=1 校验失败:git diff proposal.md 失败(${(err as Error).message})— fail-closed 拒签`,
+      file,
+    });
+  }
+  // 3. 求 `## What Changes` 段在 proposal.md 原始文件中的行号区间 [start, end)
+  //    直接扫原始文本(不用 parseMarkdown —— 它剥 frontmatter 后行号有偏移,design §5.3)
+  const content = await readFile(proposalPath, 'utf8');
+  const srcLines = content.split('\n');
+  let wcStart = -1;
+  let wcEnd = srcLines.length;
+  for (let i = 0; i < srcLines.length; i++) {
+    // 1-indexed 行号(git diff 行号从 1 开始)
+    if (/^##\s+What Changes\s*$/.test(srcLines[i] ?? '')) {
+      wcStart = i + 1;
+      continue;
+    }
+    if (wcStart >= 0 && /^##\s/.test(srcLines[i] ?? '') && i + 1 > wcStart) {
+      wcEnd = i + 1;
+      break;
+    }
+  }
+  if (wcStart < 0) {
+    return failed({
+      artifact: 'marker',
+      field: `${fieldBase}.target_anchor`,
+      message: `option=1 校验失败:proposal.md 找不到 \`## What Changes\` 段`,
+      file,
+    });
+  }
+  // 4. diff 新增行须有落在 [wcStart, wcEnd) 区间内的
+  const added = addedLineNumbers(parseUnifiedDiff(diffText));
+  const inSection = added.some((ln) => ln >= wcStart && ln < wcEnd);
+  if (!inSection) {
+    return failed({
+      artifact: 'marker',
+      field: `${fieldBase}.target_anchor`,
+      message: `option=1(扩 scope)校验失败:git diff 中 proposal.md \`## What Changes\` 段无新增行 — marker 声称扩 scope 但实际未改该段(沿 design §2.1.5 line 262)`,
+      file,
+    });
+  }
+  return ok();
 }
 
 /**

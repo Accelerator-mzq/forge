@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { validatePauseDecisionsFence } from '../../src/core/archive/pause-decisions-fence.js';
 
 // 合法 PauseDecision baseline(option=3 + 完整 ack + non_blocking_rationale)
@@ -334,6 +335,113 @@ describe('validatePauseDecisionsFence', () => {
     );
     expect(result.valid).toBe(false);
     expect(result.errors[0]?.message).toMatch(/option=4.*other_acked_by/);
+  });
+});
+
+// helper:在 git repo 内建 change + proposal.md,baseline commit 后按 mutate 改 proposal.md(不 commit)
+function setupGitChange(opts: {
+  proposalBaseline: string;
+  proposalMutated: string;
+  tasksBaseline: string;
+  tasksMutated?: string;
+}): { repoRoot: string; changeDir: string } {
+  const repoRoot = mkdtempSync(join(tmpdir(), 'forge-opt1-'));
+  execFileSync('git', ['init', '-q'], { cwd: repoRoot });
+  execFileSync('git', ['config', 'user.email', 't@t.com'], { cwd: repoRoot });
+  execFileSync('git', ['config', 'user.name', 't'], { cwd: repoRoot });
+  const changeDir = join(repoRoot, 'forge', 'changes', 'c1');
+  mkdirSync(changeDir, { recursive: true });
+  writeFileSync(join(changeDir, 'proposal.md'), opts.proposalBaseline);
+  writeFileSync(join(changeDir, 'tasks.md'), opts.tasksBaseline);
+  execFileSync('git', ['add', '-A'], { cwd: repoRoot });
+  execFileSync('git', ['commit', '-q', '-m', 'baseline'], { cwd: repoRoot });
+  // mutate(留工作树未提交 —— 模拟 Fluid Pause 的 proposal.md 改动)
+  writeFileSync(join(changeDir, 'proposal.md'), opts.proposalMutated);
+  if (opts.tasksMutated) writeFileSync(join(changeDir, 'tasks.md'), opts.tasksMutated);
+  return { repoRoot, changeDir };
+}
+
+// option=1 diff 段级校验专用 decision fixture
+const OPT1_DECISION = {
+  id: 1,
+  paused_at: '2026-05-12T14:30:00Z',
+  task_ref: 'tasks.md#task-1',
+  issue_summary: 'expand scope',
+  severity: 'WARNING' as const,
+  severity_acked_by: 'msc',
+  severity_acked_at: '2026-05-12T14:32:00Z',
+  chosen_option: 1 as const,
+  target_artifact: 'proposal.md',
+  target_anchor: '## What Changes',
+  non_blocking_rationale: null,
+  other_rationale: null,
+  other_acked_by: null,
+};
+
+describe('option=1 diff 段级校验', () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  it('attack:marker 声称改 proposal ## What Changes,实际 diff 只改 tasks.md → 拒签', async () => {
+    const { repoRoot, changeDir } = setupGitChange({
+      proposalBaseline: '# P\n\n## What Changes\n\n- a\n\n## Impact\n\n- x\n',
+      proposalMutated: '# P\n\n## What Changes\n\n- a\n\n## Impact\n\n- x\n', // proposal 未改
+      tasksBaseline: '# Tasks\n\n- [ ] task-1: t\n',
+      tasksMutated: '# Tasks\n\n- [x] task-1: t\n', // 只改了 tasks.md
+    });
+    dirs.push(repoRoot);
+    const result = await validatePauseDecisionsFence(
+      { pause_decisions: [OPT1_DECISION] },
+      changeDir,
+      repoRoot,
+    );
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => /What Changes.*变更|diff/.test(e.message))).toBe(true);
+  });
+
+  it('happy path:proposal ## What Changes 段确有新增行 → 通过', async () => {
+    const { repoRoot, changeDir } = setupGitChange({
+      proposalBaseline: '# P\n\n## What Changes\n\n- a\n\n## Impact\n\n- x\n',
+      proposalMutated: '# P\n\n## What Changes\n\n- a\n- b (扩 scope)\n\n## Impact\n\n- x\n',
+      tasksBaseline: '# Tasks\n\n- [x] task-1: t\n',
+    });
+    dirs.push(repoRoot);
+    const result = await validatePauseDecisionsFence(
+      { pause_decisions: [OPT1_DECISION] },
+      changeDir,
+      repoRoot,
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it('proposal.md 带 frontmatter → ## What Changes 段行号对齐正确', async () => {
+    const fm = '---\ntitle: P\n---\n';
+    const { repoRoot, changeDir } = setupGitChange({
+      proposalBaseline: fm + '# P\n\n## What Changes\n\n- a\n\n## Impact\n\n- x\n',
+      proposalMutated: fm + '# P\n\n## What Changes\n\n- a\n- b\n\n## Impact\n\n- x\n',
+      tasksBaseline: '# Tasks\n\n- [x] task-1: t\n',
+    });
+    dirs.push(repoRoot);
+    const result = await validatePauseDecisionsFence(
+      { pause_decisions: [OPT1_DECISION] },
+      changeDir,
+      repoRoot,
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it('非 git 项目 → diff 校验 N/A,降级到字段校验(通过)', async () => {
+    const changeDir = mkdtempSync(join(tmpdir(), 'forge-opt1-nogit-'));
+    dirs.push(changeDir);
+    // repoRoot 非 git → 降级;字段校验:target_artifact/target_anchor 合法 → 通过
+    const result = await validatePauseDecisionsFence(
+      { pause_decisions: [OPT1_DECISION] },
+      changeDir,
+      changeDir,
+    );
+    expect(result.valid).toBe(true);
   });
 });
 

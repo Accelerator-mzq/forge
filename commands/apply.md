@@ -134,7 +134,7 @@ pause_decisions:
     added_task_ref: tasks.md#task-7 # option=2 必填:Fluid Pause 新增的 task(与 task_ref=触发 task 区分)
     capture_id: <forge pause-capture 返回的 capture_id> # option=2 必填:关联 pause-capture entry
     target_artifact: proposal.md # option=1=proposal.md;option=2=tasks.md;option=3=proposal.md|design.md
-    target_anchor: '## Out of Scope' # option=2 仅人类可读记录,fence 不据此校验
+    target_anchor: '## Out of Scope' # 记录写到哪个段(option=2 降为仅人类可读,fence 不据此校验)
     non_blocking_rationale: 'subagent 可跳过该 issue 完成本 task 主体功能' # option=3 必填
     other_rationale: null # option=4 必填
     other_acked_by: null # option=4 必填

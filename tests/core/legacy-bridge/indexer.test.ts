@@ -1,11 +1,11 @@
 // indexer.ts 单测 — Plan 7 Phase D Task D2
-// 覆盖:chunkText / indexAnchor / buildIndex / renderIndexMarkdown / 容差校验
+// 覆盖:chunkText / indexAnchor / renderIndexMarkdown / 容差校验
+// (buildIndex 已删除,其"仅含 authoritative=true"覆盖由 indexer-dualpath.test.ts 的 buildIndexTask 替代)
 
 import { describe, it, expect } from 'vitest';
 import {
   chunkText,
   indexAnchor,
-  buildIndex,
   renderIndexMarkdown,
   isSummaryWithinTolerance,
   type IndexerClient,
@@ -56,27 +56,6 @@ describe('legacy-bridge/indexer', () => {
     expect(e.role).toBe('requirements');
     expect(e.summary).toContain('订单管理');
     expect(e.inputBytes).toBeGreaterThan(0);
-  });
-
-  it('buildIndex 仅含 authoritative=true 的 anchor', async () => {
-    const mock = makeMockIndexer('摘要文本');
-    const file = {
-      schema: 'forge-legacy-anchor/v1' as const,
-      anchors: [
-        {
-          role: 'requirements' as const,
-          path: join(FIXTURE_DIR, 'chinese-anchor/需求规格说明书.md'),
-          authoritative: true,
-        },
-        {
-          role: 'requirements' as const,
-          path: join(FIXTURE_DIR, 'chinese-anchor/需求规格说明书.md'),
-          authoritative: false, // 不被索引
-        },
-      ],
-    };
-    const r = await buildIndex(mock, file);
-    expect(r).toHaveLength(1);
   });
 
   it('renderIndexMarkdown 输出表', () => {

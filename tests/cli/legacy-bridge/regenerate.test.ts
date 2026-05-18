@@ -133,7 +133,46 @@ describe('forge legacy-bridge regenerate (CLI 集成)', () => {
     }
   });
 
-  it('--include-historical 把 authoritative=false anchors 传给 regenerateRole', async () => {
+  it('默认(无 --api/--apply)→ emit round=1 manifest 不调 LLM(Task 6.2 新行为)', async () => {
+    // Task 6.2 round-2:默认翻转 → emit manifest,不直接写产物
+    mkdirSync(join(tmp, 'forge', '.cache'), { recursive: true });
+    const lb = { allow_llm_calls: true };
+    const configHash = createHash('sha256')
+      .update(JSON.stringify(lb, Object.keys(lb).sort()))
+      .digest('hex')
+      .slice(0, 16);
+    writeFileSync(
+      join(tmp, 'forge', '.cache', 'llm-ack.yaml'),
+      `schema: forge-llm-ack/v1\nacknowledged_at: 2026-05-09T00:00:00Z\nconfig_hash: ${configHash}\n`,
+    );
+    const cwd = process.cwd();
+    try {
+      process.chdir(tmp);
+      const { buildLegacyBridgeCommand } =
+        await import('../../../src/cli/commands/legacy-bridge.js');
+      const cmd = buildLegacyBridgeCommand();
+      const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      try {
+        await cmd.parseAsync(['node', 'forge', 'regenerate', '--yes']);
+        expect(exitSpy).toHaveBeenCalledWith(0);
+        // 新行为:round=1 manifest 已 emit,产物不写
+        expect(existsSync(join(tmp, 'forge', '.cache', 'legacy-bridge-task-regenerate.json'))).toBe(
+          true,
+        );
+        expect(existsSync(join(tmp, 'forge', 'docs', 'regenerated', 'SRS.md'))).toBe(false);
+      } finally {
+        exitSpy.mockRestore();
+        logSpy.mockRestore();
+        errSpy.mockRestore();
+      }
+    } finally {
+      process.chdir(cwd);
+    }
+  });
+
+  it('--api --include-historical 把 authoritative=false anchors 传给 regenerateRole', async () => {
     // 写 ack
     mkdirSync(join(tmp, 'forge', '.cache'), { recursive: true });
     const lb = { allow_llm_calls: true };
@@ -165,17 +204,19 @@ describe('forge legacy-bridge regenerate (CLI 集成)', () => {
       const errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
       const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
       try {
+        // Task 6.2 round-2:单进程路径走 --api(默认已翻转为 emit)
         await cmd.parseAsync([
           'node',
           'forge',
           'regenerate',
+          '--api',
           '--yes',
           '--skip-quality',
           '--include-historical',
         ]);
         // authoritative=false 的 anchor 不进 regenerate 主循环(因 getAuthoritativeAnchors 过滤);
         // 但 historical 参数会传给 regenerateRole(由 mock 接,但 mock 不验证参数);
-        // 这里验证主路径正常 + 文件写入(无静默 fail)
+        // 这里验证 --api 主路径正常 + 文件写入(无静默 fail)
         const outPath = join(tmp, 'forge', 'docs', 'regenerated', 'SRS.md');
         expect(existsSync(outPath)).toBe(true);
       } finally {
@@ -188,7 +229,7 @@ describe('forge legacy-bridge regenerate (CLI 集成)', () => {
     }
   });
 
-  it('已 ack 且非 dry-run → 写 forge/docs/regenerated/SRS.md', async () => {
+  it('--api 已 ack 且非 dry-run → 写 forge/docs/regenerated/SRS.md(含 frontmatter + anchor 回写)', async () => {
     // 写 ack(用真实 computeConfigHash 算法:JSON.stringify(lb, Object.keys(lb).sort()))
     mkdirSync(join(tmp, 'forge', '.cache'), { recursive: true });
     const lb = { allow_llm_calls: true };
@@ -211,8 +252,8 @@ describe('forge legacy-bridge regenerate (CLI 集成)', () => {
       const errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
       const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
       try {
-        // --skip-quality 跳过 quality-judge,这测试只验复写主路径
-        await cmd.parseAsync(['node', 'forge', 'regenerate', '--yes', '--skip-quality']);
+        // Task 6.2 round-2:单进程路径走 --api;--skip-quality 跳过 quality-judge
+        await cmd.parseAsync(['node', 'forge', 'regenerate', '--api', '--yes', '--skip-quality']);
         const outPath = join(tmp, 'forge', 'docs', 'regenerated', 'SRS.md');
         expect(existsSync(outPath)).toBe(true);
         const content = readFileSync(outPath, 'utf8');

@@ -129,6 +129,21 @@ forge archive --resume-summary 2026-05-12-add-x
 6. **`--recover` 子模式**:扫描半归档状态(case A/B/C)并修复(沿 v0.4)
 7. **`--resume-summary <archive-id>` 子模式**(plan-9e1):处理 archive 目录半完成 `.tmp` rename(rename ok / 双份冲突拒签 / 状态损坏报错)
 
+## AI 编排步
+
+### 步骤 1:sync-check manifest fulfillment(若有)
+
+跑 `forge archive` 后,若输出提示 emit 了 sync-check manifest
+(`forge/.cache/legacy-bridge-task-sync-check.json` 存在):
+
+1. 按 `legacy-bridge-fulfillment` skill fulfill 该 manifest。
+2. 跑 `forge legacy-bridge sync-check --apply`。
+3. 跑 `forge archive --resume`:
+   - exit 2 → archive 被 critical 差异阻塞,先 `forge legacy-bridge resolve <change-id>`。
+   - exit 0 → archive 续跑完成。
+
+`enforce_sync=false` 时此步非阻塞;`enforce_sync=true` 时是硬 gate。
+
 ## 禁止行为
 
 - 不允许手工实现 Move/Sync/Rollback 原子化步骤(那是 CLI 内部实现;AI 只调 CLI,不重现 CLI 行为)

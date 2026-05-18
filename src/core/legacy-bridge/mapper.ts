@@ -1,13 +1,13 @@
 // 二阶段 mapping 第一阶段:LLM 扫 docs/+src/ → anchors-draft.yaml — Plan 7 Phase D
 // 决策 #4(二阶段 mapping)+ M-2(--merge / --overwrite 语义)
 
-import Anthropic from '@anthropic-ai/sdk';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, relative, extname } from 'node:path';
 import { stringify as stringifyYaml } from 'yaml';
 import type { LegacyAnchor, LegacyAnchorRole, LegacyAnchorsFile } from './types.js';
 import { redact } from './redact.js';
+import type { LlmTask } from './llm-task.js';
 
 const DEFAULT_DOCS_PATHS = ['docs', 'doc', 'document', 'documents', 'documentation'];
 const SKIP_DIRS = new Set([
@@ -43,13 +43,6 @@ export interface MapperOutput {
   preservedAnchors: LegacyAnchor[];
   /** 扫到但未匹配 role 的文件(让 LLM 标 'unmatched',用户后审) */
   unmatched: string[];
-}
-
-/** mapper 客户端最小接口 */
-export interface MapperClient {
-  messages: {
-    create: (args: Anthropic.Messages.MessageCreateParams) => Promise<Anthropic.Messages.Message>;
-  };
 }
 
 const DEFAULT_MODEL = 'claude-sonnet-4-6';
@@ -148,21 +141,16 @@ function parseMapperResponse(
   }
 }
 
-/** 跑 mapping(LLM 推测) */
-export async function runMapper(client: MapperClient, input: MapperInput): Promise<MapperOutput> {
+/** 确定性 prep:扫文件 + 读 preview + redact + 拼 prompt → 一个 LlmTask */
+export async function buildMapTask(input: MapperInput): Promise<LlmTask> {
   const { projectRoot } = input;
   const docsPaths = input.docsPaths ?? DEFAULT_DOCS_PATHS;
-
-  // 收集文件
   const allFiles: string[] = [];
   for (const docDir of docsPaths) {
     const full = join(projectRoot, docDir);
     if (!existsSync(full)) continue;
-    for await (const f of walk(full, projectRoot)) {
-      allFiles.push(f);
-    }
+    for await (const f of walk(full, projectRoot)) allFiles.push(f);
   }
-  // 决策 #3a 全自动扫:也扫 src/ 找测试用例(.test / .spec / 测试文件名)
   if (input.scanSrc) {
     const srcRoot = join(projectRoot, 'src');
     if (existsSync(srcRoot)) {
@@ -171,37 +159,29 @@ export async function runMapper(client: MapperClient, input: MapperInput): Promi
       }
     }
   }
-
-  // 读 preview;用 redact mask 敏感数据
   const entries: Array<{ path: string; preview: string }> = [];
   for (const f of allFiles) {
     const preview = redact(await readPreview(join(projectRoot, f))).redactedText;
     entries.push({ path: f, preview });
   }
+  return {
+    op: 'map',
+    inputs: entries.map((e) => ({ source: e.path, content: e.preview })),
+    prompt: buildMapperPrompt(entries),
+    model: DEFAULT_MODEL,
+    outputSchema: '[{ "path": string, "role": string, "modules": string[] }]',
+    outputPath: '.cache/legacy-bridge-result-map.json',
+  };
+}
 
-  // 调 LLM
-  let classifications: Array<{
-    path: string;
-    role: LegacyAnchorRole | 'unmatched';
-    modules?: string[];
-  }>;
-  if (entries.length === 0) {
-    classifications = [];
-  } else {
-    const mapPrompt = buildMapperPrompt(entries);
-    // P7-07 修复:LLM 调用前数据传输声明
-    console.log(
-      `→ sending ${Buffer.byteLength(mapPrompt, 'utf8')} bytes to Anthropic API (provider=anthropic, region: auto, model=${DEFAULT_MODEL}, op=map ${entries.length} files)`,
-    );
-    const result = await client.messages.create({
-      model: DEFAULT_MODEL,
-      max_tokens: 4096,
-      messages: [{ role: 'user', content: mapPrompt }],
-    });
-    const block = result.content.find((b): b is Anthropic.Messages.TextBlock => b.type === 'text');
-    classifications = parseMapperResponse(block?.text ?? '', allFiles);
-  }
-
+/** 确定性后处理:LLM 分类结果文本 → draft yaml/md + anchors */
+export function applyMapResult(
+  llmText: string,
+  allFiles: string[],
+  input: { mode: 'merge' | 'overwrite'; existing?: LegacyAnchorsFile },
+): MapperOutput {
+  // 解析 LLM 返回文本;解析失败则全 fallback 为 unmatched
+  const classifications = parseMapperResponse(llmText, allFiles);
   const newAnchors: LegacyAnchor[] = [];
   const unmatched: string[] = [];
   // 同 role 第一个标 authoritative=true(简化策略;用户后审)
@@ -213,37 +193,26 @@ export async function runMapper(client: MapperClient, input: MapperInput): Promi
     }
     const isFirst = !roleSeen.has(c.role);
     roleSeen.add(c.role);
-    newAnchors.push({
-      role: c.role,
-      path: c.path,
-      authoritative: isFirst,
-      modules: c.modules,
-    });
+    newAnchors.push({ role: c.role, path: c.path, authoritative: isFirst, modules: c.modules });
   }
-
-  // merge 模式:保留 existing 中的 anchor(用户审过部分)
+  // merge 模式:保留 existing 中已审过的 anchor
   let preservedAnchors: LegacyAnchor[] = [];
   if (input.mode === 'merge' && input.existing) {
     const existingPaths = new Set(input.existing.anchors.map((a) => a.path));
     preservedAnchors = input.existing.anchors;
-    // 新增的 anchor 中,如果 path 已在 existing,跳过(避免重复)
-    const filteredNew = newAnchors.filter((a) => !existingPaths.has(a.path));
+    // 新增中 path 已在 existing 的跳过(避免重复)
+    const filtered = newAnchors.filter((a) => !existingPaths.has(a.path));
     newAnchors.length = 0;
-    newAnchors.push(...filteredNew);
+    newAnchors.push(...filtered);
   }
-
   const finalFile: LegacyAnchorsFile = {
     schema: 'forge-legacy-anchor/v1',
     anchors: [...preservedAnchors, ...newAnchors],
     redact: input.existing?.redact,
   };
-
-  const draftYaml = stringifyYaml(finalFile);
-  const draftMarkdown = renderMapperOverview(finalFile, unmatched);
-
   return {
-    draftYaml,
-    draftMarkdown,
+    draftYaml: stringifyYaml(finalFile),
+    draftMarkdown: renderMapperOverview(finalFile, unmatched),
     newAnchors,
     preservedAnchors,
     unmatched,

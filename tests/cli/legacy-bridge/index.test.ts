@@ -1,5 +1,6 @@
 // CLI: forge legacy-bridge index — Plan 7 Phase D Task D3
-// happy path:已有 legacy-anchors.yaml → 写 forge/docs/index.md
+// Task 6.2 更新:index 默认走 agent 路径(emit manifest);--api 才直接写 index.md
+// happy path:已有 legacy-anchors.yaml → emit manifest(新 agent 路径)
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
@@ -55,7 +56,8 @@ describe('forge legacy-bridge index (CLI)', () => {
     vi.clearAllMocks();
   });
 
-  it('happy path → 写 forge/docs/index.md', async () => {
+  it('happy path(默认 agent 路径)→ emit manifest 到 .cache(Task 6.2 新行为)', async () => {
+    // Task 6.2:默认翻转 → emit manifest,不调 LLM,不直接写 index.md
     const cwd = process.cwd();
     try {
       process.chdir(tmp);
@@ -65,6 +67,32 @@ describe('forge legacy-bridge index (CLI)', () => {
       const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
       try {
         await cmd.parseAsync(['node', 'forge', 'index']);
+        expect(exitSpy).toHaveBeenCalledWith(0);
+        // 新行为:manifest 已写到 .cache;index.md 不写(agent 路径)
+        expect(existsSync(join(tmp, 'forge', '.cache', 'legacy-bridge-task-index.json'))).toBe(
+          true,
+        );
+        // Anthropic SDK 不被调(无 LLM 调用):index.md 不存在
+        expect(existsSync(join(tmp, 'forge', 'docs', 'index.md'))).toBe(false);
+      } finally {
+        exitSpy.mockRestore();
+      }
+    } finally {
+      process.chdir(cwd);
+    }
+  });
+
+  it('--api 路径 → 直接调 LLM → 写 forge/docs/index.md', async () => {
+    // --api 路径才直接写 index.md(与旧 happy path 等价)
+    const cwd = process.cwd();
+    try {
+      process.chdir(tmp);
+      const { buildLegacyBridgeCommand } =
+        await import('../../../src/cli/commands/legacy-bridge.js');
+      const cmd = buildLegacyBridgeCommand();
+      const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+      try {
+        await cmd.parseAsync(['node', 'forge', 'index', '--api']);
         expect(exitSpy).toHaveBeenCalledWith(0);
         expect(existsSync(join(tmp, 'forge', 'docs', 'index.md'))).toBe(true);
       } finally {

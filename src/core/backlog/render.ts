@@ -326,11 +326,8 @@ export function splitLegacyClaims(
   const tombstones: LegacyRequirementTombstone[] = [];
   const retiredIds = new Set<string>();
   for (const [entryId, g] of groups) {
-    // winner:superseded_at 最早;并列取 superseded_in_change 字典序
-    const winner = g.reduce((a, b) => {
-      if (a.superseded_at !== b.superseded_at) return a.superseded_at < b.superseded_at ? a : b;
-      return a.superseded_in_change <= b.superseded_in_change ? a : b;
-    });
+    // winner:复用 earlier helper(与 deriveWarningsAndTombstones 同口径,显式处理 'unknown' 排最后)
+    const winner = g.reduce(earlier);
     tombstones.push({
       entry_id: entryId,
       new_status: winner.new_status,

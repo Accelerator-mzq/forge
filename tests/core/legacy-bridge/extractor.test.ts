@@ -8,6 +8,7 @@ import {
   buildExtractTasks,
   parseExtractResults,
   diffAgainstConfirmed,
+  applyExtractResult,
   type ExtractedRequirement,
 } from '../../../src/core/legacy-bridge/extractor.js';
 import type { LegacyRequirement } from '../../../src/core/legacy-bridge/legacy-requirements.js';
@@ -296,5 +297,25 @@ describe('diffAgainstConfirmed', () => {
     expect(draft).toHaveLength(3);
     expect(draft.every((d) => d.change === 'conflict')).toBe(true);
     expect(draft.every((d) => d.requirement.id === '')).toBe(true);
+  });
+});
+
+describe('applyExtractResult', () => {
+  it('产 draft yaml + md 概览,md 按变化分组', () => {
+    const text = JSON.stringify([
+      {
+        title: '登录 2FA',
+        description: 'd',
+        status: 'unimplemented',
+        section: '3.2',
+        evidence: [],
+        confidence: 'high',
+      },
+    ]);
+    const out = applyExtractResult([{ text, source: 'docs/SRS.md', kind: 'srs' }], null);
+    expect(out.draftYaml).toContain('schema: forge-legacy-requirements/v1');
+    expect(out.draftYaml).toContain('登录 2FA');
+    expect(out.draftMarkdown).toContain('## New');
+    expect(out.draftMarkdown).toContain('登录 2FA');
   });
 });

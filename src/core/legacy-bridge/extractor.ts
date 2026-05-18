@@ -2,6 +2,7 @@
 import { readdir, stat, readFile } from 'node:fs/promises';
 import { join, relative, extname, basename } from 'node:path';
 import { createHash } from 'node:crypto';
+import { stringify as stringifyYaml } from 'yaml';
 import type {
   LegacyRequirementKind,
   LegacyRequirementStatus,
@@ -386,4 +387,63 @@ export function diffAgainstConfirmed(
     }
   }
   return draft;
+}
+
+/** applyExtractResult 输出 */
+export interface ExtractApplyOutput {
+  draftYaml: string;
+  draftMarkdown: string;
+}
+
+/** 渲染 draft .md 概览:按 change 分组(spec §6.1 第 3 步) */
+function renderDraftOverview(draft: DraftEntry[]): string {
+  const lines: string[] = ['# Legacy Requirements Draft 概览', ''];
+  lines.push(
+    'LLM 抽取 + 增量 diff 的草稿。请审改 `legacy-requirements-draft.yaml` 后跑 `forge legacy-bridge extract --finalize`。',
+    '',
+  );
+  const groups: Array<[ExtractChangeKind, string]> = [
+    ['new', 'New(本轮新抽)'],
+    ['changed', 'Changed(本轮有变更,待复审)'],
+    ['conflict', 'Conflict(匹配键撞,需手动认领 ID / 合并)'],
+    ['vanished', 'Vanished(既有有、本轮没抽到)'],
+    ['unchanged', 'Unchanged(未变,无需复审)'],
+  ];
+  for (const [kind, title] of groups) {
+    const items = draft.filter((d) => d.change === kind);
+    lines.push(`## ${title.split('(')[0]!.trim()} (${items.length})`, '');
+    if (items.length === 0) {
+      lines.push('(无)', '');
+      continue;
+    }
+    for (const d of items) {
+      const idLabel = d.requirement.id === '' ? '(待分配)' : d.requirement.id;
+      lines.push(
+        `- \`${idLabel}\` ${d.requirement.title} —— ${d.requirement.source.document}` +
+          (d.requirement.source.section ? `#${d.requirement.source.section}` : ''),
+      );
+    }
+    lines.push('');
+  }
+  return lines.join('\n').trimEnd() + '\n';
+}
+
+/**
+ * --apply 后处理(spec §4.4 第 3-5 步):
+ * 校验汇总 → 增量 diff → 产 draft yaml + md 概览。
+ */
+export function applyExtractResult(
+  results: ExtractResultInput[],
+  confirmed: LegacyRequirementsFile | null,
+): ExtractApplyOutput {
+  const extracted = parseExtractResults(results);
+  const draft = diffAgainstConfirmed(extracted, confirmed);
+  const draftFile: LegacyRequirementsFile = {
+    schema: 'forge-legacy-requirements/v1',
+    requirements: draft.map((d) => d.requirement),
+  };
+  return {
+    draftYaml: stringifyYaml(draftFile),
+    draftMarkdown: renderDraftOverview(draft),
+  };
 }

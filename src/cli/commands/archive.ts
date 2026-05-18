@@ -31,11 +31,7 @@ import { buildSyncCheckTask, applySyncCheckResult } from '../../core/legacy-brid
 import type { SyncCheckInput } from '../../core/legacy-bridge/sync-check.js';
 import { AgentHandoffRunner, ApiRunner } from '../../core/legacy-bridge/runners.js';
 import type { RunnerClient } from '../../core/legacy-bridge/runners.js';
-import {
-  renderDiffMarkdown,
-  renderDiffYaml,
-  hasCriticalPending,
-} from '../../core/legacy-bridge/diff-report.js';
+import { renderDiffMarkdown, renderDiffYaml } from '../../core/legacy-bridge/diff-report.js';
 import { readAnchorFile } from '../../core/legacy-bridge/encoding.js';
 import type { ForgeConfig } from '../../core/schema/types.js';
 import type { LegacyAnchorsFile } from '../../core/legacy-bridge/types.js';
@@ -723,8 +719,9 @@ export async function runArchivePreflight(
     // 进程内调 Anthropic SDK(client 构造方式与旧 archive 代码一致:forge-eval/load-env)
     const client = (await makeArchiveApiClient()) as unknown as RunnerClient;
     const results = await new ApiRunner(client).run([task]);
-    // --api 无 manifest,produced_from 传空串(results[0] 必存在:刚传入 1 个 task)
-    const syncState = applySyncCheckResult(results[0]?.text ?? '', changeId, '');
+    // --api 无 manifest,produced_from 标 'api-inline' sentinel(区别于 agent 路径的 manifest_hash;
+    // 该 sync-state 不经 resume gate,Task 6.4 据此 sentinel 可识别 --api 来源)
+    const syncState = applySyncCheckResult(results[0]?.text ?? '', changeId, 'api-inline');
     // 写 sync-state 到旧路径(沿旧 preflight 写盘方式)
     await mkdir(join(forgeRoot, 'legacy-sync-state'), { recursive: true });
     await writeFile(
@@ -738,15 +735,15 @@ export async function runArchivePreflight(
       'utf8',
     );
     // 含 critical pending → critical-pending(死变体的归宿:archive 主流程 kind!=='ok' 会 halt)
-    if (hasCriticalPending(syncState)) {
-      const criticalCount = syncState.diffs.filter(
-        (d) => d.severity === 'critical' && d.status === 'pending',
-      ).length;
+    const criticalDiffs = syncState.diffs.filter(
+      (d) => d.severity === 'critical' && d.status === 'pending',
+    );
+    if (criticalDiffs.length > 0) {
       return {
         kind: 'critical-pending',
-        criticalCount,
+        criticalCount: criticalDiffs.length,
         message:
-          `✗ ${criticalCount} 项 critical 差异未 resolve;\n` +
+          `✗ ${criticalDiffs.length} 项 critical 差异未 resolve;\n` +
           `跑 forge legacy-bridge resolve ${changeId} 后重试,或在 forge/legacy-sync-state/${changeId}.yaml 标 ack`,
       };
     }
@@ -805,25 +802,33 @@ export async function runArchivePostHook(
 
   if (opts.api) {
     // —— --api 模式:进程内直连 API 跑 sync-check + 写 sync-state(非阻塞)——
-    const task = await buildSyncCheckTask(ctx, async (p) => (await readAnchorFile(p)).text);
-    if (!task) return; // 无受影响 anchor → graceful skip
-    const client = (await makeArchiveApiClient()) as unknown as RunnerClient;
-    const results = await new ApiRunner(client).run([task]);
-    const syncState = applySyncCheckResult(results[0]?.text ?? '', changeId, '');
-    await mkdir(join(forgeRoot, 'legacy-sync-state'), { recursive: true });
-    await writeFile(
-      join(forgeRoot, 'legacy-sync-state', `${changeId}.md`),
-      renderDiffMarkdown(syncState),
-      'utf8',
-    );
-    await writeFile(
-      join(forgeRoot, 'legacy-sync-state', `${changeId}.yaml`),
-      renderDiffYaml(syncState),
-      'utf8',
-    );
-    console.log(
-      `⚠ ${syncState.diffs.length} 项老文档可能需更新,详见 forge/legacy-sync-state/${changeId}.md`,
-    );
+    // archive transaction 已完成;posthook 的 API 调用失败不应让 archive 报 exit 1 ——
+    // I-A:整段包 try/catch,失败降级为 warn(agent 模式 posthook 只写本地文件无此风险)
+    try {
+      const task = await buildSyncCheckTask(ctx, async (p) => (await readAnchorFile(p)).text);
+      if (!task) return; // 无受影响 anchor → graceful skip
+      const client = (await makeArchiveApiClient()) as unknown as RunnerClient;
+      const results = await new ApiRunner(client).run([task]);
+      const syncState = applySyncCheckResult(results[0]?.text ?? '', changeId, 'api-inline');
+      await mkdir(join(forgeRoot, 'legacy-sync-state'), { recursive: true });
+      await writeFile(
+        join(forgeRoot, 'legacy-sync-state', `${changeId}.md`),
+        renderDiffMarkdown(syncState),
+        'utf8',
+      );
+      await writeFile(
+        join(forgeRoot, 'legacy-sync-state', `${changeId}.yaml`),
+        renderDiffYaml(syncState),
+        'utf8',
+      );
+      console.log(
+        `⚠ ${syncState.diffs.length} 项老文档可能需更新,详见 forge/legacy-sync-state/${changeId}.md`,
+      );
+    } catch (e) {
+      console.warn(
+        `⚠ --api sync-check(posthook)失败,已跳过(archive 已完成):${(e as Error).message}`,
+      );
+    }
     return;
   }
 

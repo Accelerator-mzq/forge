@@ -11,7 +11,6 @@ import { existsSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
-import Anthropic from '@anthropic-ai/sdk';
 import { parseMarker } from '../../core/markers/index.js';
 import { validateMarkerSchema } from '../../core/validate/index.js';
 import {
@@ -27,14 +26,12 @@ import { promptRecoverChoice } from '../../core/archive/recover-prompt.js';
 import { applyDeltas } from '../../core/specs-sync/index.js';
 import { loadAnchorsFile } from '../../core/legacy-bridge/anchors.js';
 import { checkAck } from '../../core/legacy-bridge/ack.js';
-import { runSyncCheck, type SyncCheckClient } from '../../core/legacy-bridge/sync-check.js';
-import {
-  renderDiffMarkdown,
-  renderDiffYaml,
-  hasCriticalPending,
-} from '../../core/legacy-bridge/diff-report.js';
+import { buildSyncCheckTask } from '../../core/legacy-bridge/sync-check.js';
+import type { SyncCheckInput } from '../../core/legacy-bridge/sync-check.js';
+import { AgentHandoffRunner } from '../../core/legacy-bridge/runners.js';
 import { readAnchorFile } from '../../core/legacy-bridge/encoding.js';
 import type { ForgeConfig } from '../../core/schema/types.js';
+import { FORGE_VERSION } from '../../index.js';
 // Task 8 (plan-9a §9): cross-cutting fence framework — 9g 实施完整 13 不变量逻辑
 import { crossCuttingFenceCheck } from '../../core/archive/fence.js';
 // plan-9d Task 6:verify_findings fence + ack-log consistency
@@ -629,11 +626,13 @@ async function restoreSpecsFromBackup(backupDir: string, currentSpecsDir: string
  *
  * kind 'ok':可继续 archive(graceful skip 或 全过)
  * kind 'ack-missing' / 'critical-pending':caller 应 await release + exit 2
+ * kind 'halted-for-fulfillment':emit manifest + 暂停态文件已写,archive 应 halt(exit 2)
  */
 export type PreflightResult =
   | { kind: 'ok' }
   | { kind: 'ack-missing'; message: string }
-  | { kind: 'critical-pending'; criticalCount: number; message: string };
+  | { kind: 'critical-pending'; criticalCount: number; message: string }
+  | { kind: 'halted-for-fulfillment'; message: string };
 
 /**
  * Plan 7 §2.5:archive preflight — enforce_sync=true 时阻塞 critical 差异。
@@ -675,75 +674,20 @@ export async function runArchivePreflight(
     };
   }
 
-  // 拼 change context(同 sync-check 命令)
-  const changesDir = join(forgeRoot, 'changes', changeId);
-  let changeContext = '';
-  const affectedModules: string[] = [];
-  if (existsSync(join(changesDir, 'proposal.md'))) {
-    changeContext += await readFile(join(changesDir, 'proposal.md'), 'utf8');
+  // agent 路径:emit sync-check manifest + 写暂停态文件,halt archive(Task 6.3)
+  const emitResult = await emitPreflightSyncCheck(forgeRoot, changeId);
+  if (emitResult.kind === 'skip') {
+    // 无受影响 anchor / 全部读取失败 → graceful skip,继续 archive
+    return { kind: 'ok' };
   }
-  const specsDir = join(changesDir, 'specs');
-  if (existsSync(specsDir)) {
-    const files = await readdir(specsDir);
-    for (const f of files) {
-      changeContext += `\n## specs/${f}\n${await readFile(join(specsDir, f), 'utf8')}`;
-      affectedModules.push(f.replace(/\.md$/, ''));
-    }
-  }
-
-  // 跑 sync-check(决策 #23:复用 archive.lock,不再 acquire legacy-bridge.lock)
-  // 运行时动态加载 forge-eval/load-env(避免 src/ rootDir 静态分析边界限制)
-  const evalLoadEnvPath = new URL('../../../forge-eval/load-env.js', import.meta.url).href;
-  const { loadEnv } = (await import(/* @vite-ignore */ evalLoadEnvPath)) as {
-    loadEnv: () => { anthropicApiKey: string };
+  // halted-for-fulfillment:manifest 已写,暂停态已写,告知 caller halt
+  return {
+    kind: 'halted-for-fulfillment',
+    message:
+      `sync-check manifest 已 emit(preflight);\n` +
+      `forge agent 履行后跑 forge legacy-bridge sync-check --apply --change-id ${changeId};\n` +
+      `暂停态文件:forge/.cache/archive-pause-${changeId}.json`,
   };
-  const { anthropicApiKey } = loadEnv();
-  const client = new Anthropic({ apiKey: anthropicApiKey }) as unknown as SyncCheckClient;
-  const out = await runSyncCheck(
-    client,
-    {
-      changeId,
-      changeContext,
-      affectedModules,
-      anchors,
-      autoResolveCrossAnchor: config.legacy_bridge.auto_resolve_cross_anchor ?? false,
-      mtimeOf: (p) => {
-        try {
-          return Math.floor(statSync(p).mtimeMs / 1000);
-        } catch {
-          return 0;
-        }
-      },
-    },
-    async (path) => (await readAnchorFile(path)).text,
-  );
-
-  await mkdir(join(forgeRoot, 'legacy-sync-state'), { recursive: true });
-  await writeFile(
-    join(forgeRoot, 'legacy-sync-state', `${changeId}.md`),
-    renderDiffMarkdown(out.syncState),
-    'utf8',
-  );
-  await writeFile(
-    join(forgeRoot, 'legacy-sync-state', `${changeId}.yaml`),
-    renderDiffYaml(out.syncState),
-    'utf8',
-  );
-
-  if (hasCriticalPending(out.syncState)) {
-    const criticalCount = out.syncState.diffs.filter(
-      (d) => d.severity === 'critical' && d.status === 'pending',
-    ).length;
-    return {
-      kind: 'critical-pending',
-      criticalCount,
-      message:
-        `✗ ${criticalCount} 项 critical 差异未 resolve;\n` +
-        `跑 forge legacy-bridge resolve ${changeId} 后重试,或在 forge/legacy-sync-state/${changeId}.yaml 标 ack`,
-    };
-  }
-
-  return { kind: 'ok' };
 }
 
 /**
@@ -761,59 +705,131 @@ export async function runArchivePostHook(forgeRoot: string, changeId: string): P
   const ack = await checkAck(forgeRoot, config, anchors);
   if (!ack.ok) return; // ack 不就绪 → graceful skip
 
-  // 跑 sync-check 但不阻塞
-  const changesDir = join(
-    forgeRoot,
-    'changes',
-    'archive',
-    `${new Date().toISOString().slice(0, 10)}-${changeId}`,
-  );
-  const proposalPath = existsSync(join(changesDir, 'proposal.md'))
-    ? join(changesDir, 'proposal.md')
-    : join(forgeRoot, 'changes', changeId, 'proposal.md');
-  let changeContext = '';
-  if (existsSync(proposalPath)) {
-    changeContext = await readFile(proposalPath, 'utf8');
+  // agent 路径:emit sync-check manifest(非阻塞,archive 已完成)(Task 6.3)
+  const emitResult = await emitPostHookSyncCheck(forgeRoot, changeId);
+  if (emitResult.kind === 'emitted') {
+    console.log(
+      `⚠ sync-check manifest 已 emit(posthook);forge agent 履行后跑 forge legacy-bridge sync-check --apply --change-id ${changeId} 可得报告`,
+    );
   }
-  const affectedModules: string[] = [];
-  // 简化:从 changeId 推测 module(占位,真实环境靠 specs/<area>.md)
-  const evalLoadEnvPath = new URL('../../../forge-eval/load-env.js', import.meta.url).href;
-  const { loadEnv } = (await import(/* @vite-ignore */ evalLoadEnvPath)) as {
-    loadEnv: () => { anthropicApiKey: string };
-  };
-  const { anthropicApiKey } = loadEnv();
-  const client = new Anthropic({ apiKey: anthropicApiKey }) as unknown as SyncCheckClient;
-  const out = await runSyncCheck(
-    client,
-    {
-      changeId,
-      changeContext,
-      affectedModules,
-      anchors,
-      autoResolveCrossAnchor: config.legacy_bridge.auto_resolve_cross_anchor ?? false,
-      mtimeOf: (p) => {
-        try {
-          return Math.floor(statSync(p).mtimeMs / 1000);
-        } catch {
-          return 0;
-        }
-      },
-    },
-    async (path) => (await readAnchorFile(path)).text,
-  );
+  // kind='skip':无受影响 anchor / 全部读取失败 → graceful skip,无输出
+}
 
-  await mkdir(join(forgeRoot, 'legacy-sync-state'), { recursive: true });
+/**
+ * 抽出:合并 runArchivePreflight/runArchivePostHook 两处重复的 change context 拼装。
+ *
+ * archived=false → forge/changes/<id>/;
+ * archived=true  → forge/changes/archive/<date>-<id>/。
+ *
+ * 调用方需已确认 anchors 存在(preflight/posthook 的 gate 检查在调用前)。
+ */
+async function buildSyncCheckChangeContext(
+  forgeRoot: string,
+  changeId: string,
+  opts: { archived: boolean },
+): Promise<SyncCheckInput> {
+  // 读 config 获取 auto_resolve_cross_anchor
+  const config = parseYaml(await readFile(join(forgeRoot, 'config.yaml'), 'utf8')) as ForgeConfig;
+  // 读 anchors 文件(已确认存在,loadAnchorsFile 失败则抛异常)
+  const anchors = await loadAnchorsFile(forgeRoot);
+  // 决定 change 目录:归档后在 archive/<date>-<id>/,归档前在 changes/<id>/
+  const changesDir = opts.archived
+    ? join(forgeRoot, 'changes', 'archive', `${new Date().toISOString().slice(0, 10)}-${changeId}`)
+    : join(forgeRoot, 'changes', changeId);
+  let changeContext = '';
+  const affectedModules: string[] = [];
+  // 读 proposal.md
+  if (existsSync(join(changesDir, 'proposal.md'))) {
+    changeContext += await readFile(join(changesDir, 'proposal.md'), 'utf8');
+  }
+  // 读 specs/ 下各 .md,拼 changeContext + 收集 affectedModules
+  const specsDir = join(changesDir, 'specs');
+  if (existsSync(specsDir)) {
+    for (const f of await readdir(specsDir)) {
+      changeContext += `\n## specs/${f}\n${await readFile(join(specsDir, f), 'utf8')}`;
+      affectedModules.push(f.replace(/\.md$/, ''));
+    }
+  }
+  return {
+    changeId,
+    changeContext,
+    affectedModules,
+    anchors: anchors ?? { schema: 'forge-legacy-anchor/v1', anchors: [] },
+    autoResolveCrossAnchor: config.legacy_bridge?.auto_resolve_cross_anchor ?? false,
+    // mtime 提供者:用于 cross-anchor 决策
+    mtimeOf: (p) => {
+      try {
+        return Math.floor(statSync(p).mtimeMs / 1000);
+      } catch {
+        return 0;
+      }
+    },
+  };
+}
+
+/**
+ * agent 模式:emit preflight sync-check manifest + 暂停态文件,halt archive(Task 6.3)。
+ *
+ * 调用前 gate 检查(config 存在 + allow_llm_calls + enforce_sync + anchors + ack)由
+ * runArchivePreflight 负责;本函数专注 emit 逻辑。
+ */
+export async function emitPreflightSyncCheck(
+  forgeRoot: string,
+  changeId: string,
+): Promise<{ kind: 'halted-for-fulfillment' | 'skip' }> {
+  // 拼 change context(preflight 时 change 还在 forge/changes/<id>/)
+  const ctx = await buildSyncCheckChangeContext(forgeRoot, changeId, { archived: false });
+  // 构建 LlmTask(确定性 prep:findAffectedAnchors + redact)
+  const task = await buildSyncCheckTask(ctx, async (p) => (await readAnchorFile(p)).text);
+  // 无受影响 anchor 或全部读取失败 → graceful skip
+  if (!task) return { kind: 'skip' };
+  // emit sync-check manifest 到 forge/.cache/legacy-bridge-task-sync-check.json
+  // meta 键名与 Task 6.2 runSyncCheckCommand emit 保持一致:changeId(驼峰)
+  const manifest = await new AgentHandoffRunner(forgeRoot, FORGE_VERSION).emit(
+    'sync-check',
+    1,
+    [task],
+    { gate_context: 'archive-preflight', changeId },
+  );
+  // 写暂停态文件:archive-pause-<changeId>.json
+  await mkdir(join(forgeRoot, '.cache'), { recursive: true });
   await writeFile(
-    join(forgeRoot, 'legacy-sync-state', `${changeId}.md`),
-    renderDiffMarkdown(out.syncState),
+    join(forgeRoot, '.cache', `archive-pause-${changeId}.json`),
+    JSON.stringify(
+      {
+        changeId,
+        paused_step: 'preflight-sync-check',
+        manifest_hash: manifest.manifest_hash,
+      },
+      null,
+      2,
+    ),
     'utf8',
   );
-  await writeFile(
-    join(forgeRoot, 'legacy-sync-state', `${changeId}.yaml`),
-    renderDiffYaml(out.syncState),
-    'utf8',
-  );
-  console.log(
-    `⚠ ${out.syncState.diffs.length} 项老文档可能需更新,详见 forge/legacy-sync-state/${changeId}.md`,
-  );
+  return { kind: 'halted-for-fulfillment' };
+}
+
+/**
+ * agent 模式:enforce_sync=false 时 post-archive emit sync-check manifest(非阻塞,无暂停态)(Task 6.3)。
+ *
+ * archive 已完成;fulfill 后跑 forge legacy-bridge sync-check --apply 出报告。
+ * 调用前 gate 检查由 runArchivePostHook 负责。
+ */
+export async function emitPostHookSyncCheck(
+  forgeRoot: string,
+  changeId: string,
+): Promise<{ kind: 'emitted' | 'skip' }> {
+  // 拼 change context(posthook 时 change 已归档到 archive/<date>-<id>/)
+  const ctx = await buildSyncCheckChangeContext(forgeRoot, changeId, { archived: true });
+  // 构建 LlmTask
+  const task = await buildSyncCheckTask(ctx, async (p) => (await readAnchorFile(p)).text);
+  // 无受影响 anchor → graceful skip
+  if (!task) return { kind: 'skip' };
+  // emit sync-check manifest(meta 键名与 Task 6.2 一致:changeId 驼峰)
+  await new AgentHandoffRunner(forgeRoot, FORGE_VERSION).emit('sync-check', 1, [task], {
+    gate_context: 'archive-posthook',
+    changeId,
+  });
+  // 非阻塞:不写暂停态文件(archive 已完成)
+  return { kind: 'emitted' };
 }

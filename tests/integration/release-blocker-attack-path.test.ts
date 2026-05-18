@@ -17,7 +17,7 @@
 // 9e1 plan 若先于 9z 完成且接入 git diff parser,可直接在 9e1 实施同 attack 路径,
 // 本文件相应 unskip + 改 `EXPECTED_TODO_COUNT_SOFT`(可选)。
 
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -33,6 +33,15 @@ vi.mock('../../src/core/specs-sync/index.js', async (importOriginal) => {
   };
 });
 
+// —— mock node:child_process:让 execFile 受控 mock 拦截(todo 6 fail-closed 测试需要) ——
+// vi.hoisted + vi.mock factory:在模块加载前替换 execFile,promisify 才拿到 stub 引用
+// execFileSync 由 ...actual 保留真实实现(Task 1 transaction + option 攻击路径不受影响)
+const { execFileMock } = vi.hoisted(() => ({ execFileMock: vi.fn() }));
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return { ...actual, execFile: execFileMock };
+});
+
 import { archiveTransaction } from '../../src/core/archive/transaction.js';
 import * as specsSync from '../../src/core/specs-sync/index.js';
 import {
@@ -40,6 +49,28 @@ import {
   PLACEHOLDER_PROCESS_EVIDENCE_SUMMARY,
   type ArchiveSummary,
 } from '../../src/core/schemas/archive-summary.js';
+import { validateVersionRetrograde } from '../../src/core/archive/version-retrograde-fence.js';
+
+// 文件级 beforeEach:每个测试前把 execFileMock 转发到真实 execFile + 适配 callback 形态
+// 真实 execFile callback 签名是 (err, stdout, stderr)
+// promisify 默认期望 (err, {stdout, stderr}) — 手动适配保证 transaction / option 攻击路径正常
+beforeEach(async () => {
+  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+  execFileMock.mockImplementation(
+    (
+      cmd: string,
+      args: readonly string[],
+      opts: unknown,
+      cb: (e: Error | null, r?: { stdout: string; stderr: string }) => void,
+    ) =>
+      (actual.execFile as Function)(
+        cmd,
+        args,
+        opts,
+        (err: Error | null, stdout: string, stderr: string) => cb(err, { stdout, stderr }),
+      ),
+  );
+});
 
 describe('release-blocker: pause_decisions option=1/2 attack paths (9z gate)', () => {
   it.todo(
@@ -151,7 +182,26 @@ describe('release-blocker: 9e1 transaction failure injection paths (9z gate)', (
 });
 
 describe('release-blocker: 9j version-retrograde fail-closed git error path (9z gate)', () => {
-  it.todo(
-    'git repo 内 git log 命令失败(模拟 git binary 异常)→ version-retrograde fence fail-closed 拒签(plan-9j Task 4 v3 MAJOR 1;9z release plan 解锁 — 需要 mock spawn 或注入失败 child_process)',
-  );
+  it('9j git repo 内 git log 失败(模拟 git binary 异常)→ version-retrograde fail-closed 拒签', async () => {
+    // override 当次:rev-parse 成功(确认是 git repo),git log 失败(模拟 git binary 异常)
+    execFileMock.mockImplementation(
+      (
+        _cmd: string,
+        args: readonly string[],
+        _opts: unknown,
+        cb: (e: Error | null, r?: { stdout: string }) => void,
+      ) => {
+        if (args[0] === 'rev-parse')
+          cb(null, { stdout: 'true\n' }); // 确认是 git repo
+        else cb(new Error('git log: simulated failure')); // git log fail-closed
+        return undefined as unknown as ReturnType<typeof import('node:child_process').execFile>;
+      },
+    );
+    const result = await validateVersionRetrograde(
+      '/tmp/fake/.verify-passed',
+      { created_by_tool_version: '1.0.0' },
+      '/tmp/fake',
+    );
+    expect(result.valid).toBe(false);
+  });
 });

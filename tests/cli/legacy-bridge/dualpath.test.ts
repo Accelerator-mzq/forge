@@ -74,10 +74,17 @@ vi.mock('@anthropic-ai/sdk', () => {
             usage: { input_tokens: 100, output_tokens: 50 },
           });
         }
-        // index 摘要:返回 {path: summary} JSON 对象 / 或纯文本摘要
-        if (prompt.includes('摘要')) {
+        // index batch 摘要(buildIndexTask batch prompt):返回 {path: summary} JSON 对象
+        // applyIndexResult 期望此格式;路径取 prompt 中的 anchor path(动态),
+        // 这里返回固定占位 key,applyIndexResult 对未匹配路径降级为 role=unmatched 仍渲染
+        if (prompt.includes('请为下列每份文档产出约')) {
           return Promise.resolve({
-            content: [{ type: 'text', text: '这是一份需求文档的约 100 字摘要内容。' }],
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({ 'docs/SRS.md': '这是一份需求文档的约 100 字摘要内容。' }),
+              },
+            ],
             usage: { input_tokens: 100, output_tokens: 50 },
           });
         }
@@ -270,7 +277,8 @@ describe('runIndexCommand 双路径', () => {
   });
 
   it('--api happy path → 进程内调 LLM → 写 forge/docs/index.md', async () => {
-    // --api 走 buildIndex(client, anchors),Anthropic mock 返回摘要文本
+    // --api 走 buildIndexTask + ApiRunner + applyIndexResult(对称 agent 路径);
+    // Anthropic mock 返回 {path: summary} JSON 对象供 applyIndexResult 解析
     const code = await runIndexCommand({ projectRoot: dir, apply: false, api: true });
     expect(code).toBe(0);
     expect(existsSync(join(dir, 'forge', 'docs', 'index.md'))).toBe(true);

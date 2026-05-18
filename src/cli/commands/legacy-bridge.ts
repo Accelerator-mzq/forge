@@ -56,13 +56,7 @@ import {
   makeForgeApiClient,
   type RunnerClient,
 } from '../../core/legacy-bridge/runners.js';
-import {
-  buildIndex,
-  renderIndexMarkdown,
-  buildIndexTask,
-  applyIndexResult,
-  type IndexerClient,
-} from '../../core/legacy-bridge/indexer.js';
+import { buildIndexTask, applyIndexResult } from '../../core/legacy-bridge/indexer.js';
 import { FORGE_VERSION } from '../../index.js';
 import type { ForgeConfig } from '../../core/schema/types.js';
 import type {
@@ -333,14 +327,24 @@ export async function runIndexCommand(opts: IndexCommandOpts): Promise<number> {
   }
 
   if (opts.api) {
-    // --api 分支:进程内调 Anthropic SDK
-    const client = (await makeForgeApiClient()) as unknown as IndexerClient;
-    const entries = await buildIndex(client, anchors);
-    const md = renderIndexMarkdown(entries);
+    // --api 分支:进程内调 Anthropic SDK,走与 agent 路径对称的 buildIndexTask + applyIndexResult
+    const { task, prebuilt } = await buildIndexTask(anchors, (anchor) => readAnchorAsText(anchor));
+    let resultText = '';
+    if (task !== null) {
+      const client = (await makeForgeApiClient()) as unknown as RunnerClient;
+      const [result] = await new ApiRunner(client).run([task]);
+      if (!result) {
+        console.error('✗ ApiRunner 未返回结果');
+        return LB_EXIT_GENERAL_ERROR;
+      }
+      resultText = result.text;
+    }
+    // task===null(全 metadata-only)→ resultText 保持 ''(applyIndexResult 对空串降级,仅渲染 prebuilt)
+    const md = applyIndexResult(resultText, anchors, prebuilt);
     const indexPath = join(forgeRoot, 'docs', 'index.md');
     await mkdir(join(forgeRoot, 'docs'), { recursive: true });
     await writeFile(indexPath, md, 'utf8');
-    console.log(`✓ index.md 已写(--api 单进程,${entries.length} entries)`);
+    console.log(`✓ index.md 已写(--api 单进程)${indexPath}`);
     return LB_EXIT_OK;
   }
 

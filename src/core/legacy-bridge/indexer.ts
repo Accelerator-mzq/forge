@@ -107,19 +107,6 @@ export async function indexAnchor(
   };
 }
 
-/** 跑全部 authoritative anchor */
-export async function buildIndex(
-  client: IndexerClient,
-  file: LegacyAnchorsFile,
-): Promise<IndexEntry[]> {
-  const auth = file.anchors.filter((a) => a.authoritative);
-  const out: IndexEntry[] = [];
-  for (const a of auth) {
-    out.push(await indexAnchor(client, a));
-  }
-  return out;
-}
-
 /** 渲染索引为 markdown(forge/docs/index.md) */
 export function renderIndexMarkdown(entries: IndexEntry[]): string {
   const lines: string[] = [];

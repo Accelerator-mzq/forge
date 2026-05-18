@@ -101,7 +101,7 @@ describe('release-blocker: 9e1 transaction failure injection paths (9z gate)', (
     }
   });
 
-  it('9e1 transaction Backup 失败 → 反向 Move + unlink summary 残留', async () => {
+  it('9e1 transaction Backup 失败 → 反向 Move + unlink summary(无残留)', async () => {
     const s = setup();
     try {
       // 注入:backupDir 路径预建为普通文件,cp(dir→file) 失败
@@ -116,7 +116,8 @@ describe('release-blocker: 9e1 transaction failure injection paths (9z gate)', (
       ).rejects.toThrow(/Backup failed/);
       // 反向 Move 后 source changeDir 应恢复
       expect(existsSync(s.changeDir)).toBe(true);
-      // summary .tmp 不应残留在 source
+      // summary 正式名 + .tmp 均不应残留在 source(回滚 unlink)
+      expect(existsSync(join(s.changeDir, 'archive_summary.yaml'))).toBe(false);
       expect(existsSync(join(s.changeDir, 'archive_summary.tmp.yaml'))).toBe(false);
     } finally {
       rmSync(s.tmpRoot, { recursive: true, force: true });
@@ -140,6 +141,9 @@ describe('release-blocker: 9e1 transaction failure injection paths (9z gate)', (
       expect(existsSync(s.changeDir)).toBe(true);
       // specs restore:existing.md 应仍存在
       expect(existsSync(join(s.forgeRoot, 'specs', 'existing.md'))).toBe(true);
+      // summary 正式名 + .tmp 均不应残留在 source(回滚 unlink)
+      expect(existsSync(join(s.changeDir, 'archive_summary.yaml'))).toBe(false);
+      expect(existsSync(join(s.changeDir, 'archive_summary.tmp.yaml'))).toBe(false);
     } finally {
       rmSync(s.tmpRoot, { recursive: true, force: true });
     }

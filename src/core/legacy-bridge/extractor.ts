@@ -2,6 +2,7 @@
 import { readdir, stat, readFile } from 'node:fs/promises';
 import { join, relative, extname, basename } from 'node:path';
 import type { LegacyRequirementKind } from './legacy-requirements.js';
+import { parseWorkbook, sheetToMarkdown } from './excel.js';
 
 /** 发现时跳过的目录(沿 mapper.ts 的 SKIP_DIRS 约定 + spec §5.1) */
 const SKIP_DIRS = new Set([
@@ -82,8 +83,6 @@ export async function discoverSources(repoRoot: string): Promise<DiscoveredSourc
   out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   return out;
 }
-
-import { parseWorkbook, sheetToMarkdown } from './excel.js';
 
 /**
  * 按扩展名抽纯文本(spec §5.2)。

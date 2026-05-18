@@ -5,7 +5,7 @@ import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { scanArchivedFollowups } from '../scope/aggregator.js';
+import { scanArchivedFollowups, type AggregatorResult } from '../scope/aggregator.js';
 import {
   deriveWarningsAndTombstones,
   renderActiveMarkdown,
@@ -31,11 +31,16 @@ export interface GenerateBacklogResult {
 
 /** 聚合 + 渲染,返回两份 markdown(纯计算,不写盘) */
 export async function buildBacklog(forgeRoot: string): Promise<GenerateBacklogResult> {
-  const agg = await scanArchivedFollowups(forgeRoot);
+  // 源一:archived scope-entry —— 空 archive 容错(spec §7.1)
+  let agg: AggregatorResult;
+  if (existsSync(join(forgeRoot, 'changes', 'archive'))) {
+    agg = await scanArchivedFollowups(forgeRoot);
+  } else {
+    agg = { entries: [], superseding: [], skipped: [] };
+  }
   const { warnings, tombstones } = deriveWarningsAndTombstones(agg.superseding, agg.skipped);
   const activeMd = renderActiveMarkdown(agg.entries, warnings);
   const archivedMd = renderArchivedMarkdown(tombstones);
-  // 待办计数口径由 render.ts 的 countOpenBacklog 统一(避免与 renderActiveMarkdown 各写一份)
   const openCount = countOpenBacklog(agg.entries);
   return { openCount, warningCount: warnings.length, activeMd, archivedMd };
 }

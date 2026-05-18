@@ -1,11 +1,11 @@
-// forge legacy-bridge 主命令 + 5 子命令骨架 — Plan 7 Phase A
+// forge legacy-bridge 主命令 + 6 子命令 — Plan 7 Phase A / Layer 3b extract(D2)
 // 各子命令在后续 Phase B-D 填实;本 Task 仅完成骨架 + commander 结构
 // spec §2.1 子命令一览 + 决策 #22 LLM opt-in 流程
 
 import { Command } from 'commander';
 import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
 import { existsSync, statSync, type Dirent } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join, relative, basename } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { acquireLockByPath, LockHeldError } from '../../core/archive/lock.js';
 import { loadAnchorsFile, getAuthoritativeAnchors } from '../../core/legacy-bridge/anchors.js';
@@ -415,11 +415,12 @@ async function runExtractApply(forgeRoot: string): Promise<number> {
   return LB_EXIT_OK;
 }
 
-/** 据文件名反查 kind(与 extractor.classifyKind 同规则) */
+/** 据文件名反查 kind(与 extractor.classifyKind 同口径:只看 basename) */
 function inferKind(relPath: string): 'srs' | 'backlog-file' | 'issue-export' {
-  const name = relPath.toLowerCase();
+  // 只看文件名本体 —— 否则 docs/issues/SRS.md 这类路径会被整路径里的 'issue' 误判为 issue-export
+  const name = basename(relPath).toLowerCase();
   if (/issue/.test(name)) return 'issue-export';
-  if (/(^|\/)(backlog|todo|roadmap)/.test(name)) return 'backlog-file';
+  if (/^(backlog|todo|roadmap)/.test(name)) return 'backlog-file';
   return 'srs';
 }
 

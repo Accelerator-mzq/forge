@@ -67,3 +67,18 @@ describe('computeManifestHash + verifyManifest', () => {
     expect(verifyManifest({ ...m, round: 2 }).ok).toBe(false);
   });
 });
+
+describe('LlmOp 含 extract', () => {
+  it('extract 可作合法 op 构造 manifest', () => {
+    const task: LlmTask = {
+      op: 'extract',
+      inputs: [],
+      prompt: 'p',
+      model: 'claude-sonnet-4-6',
+      outputSchema: '[]',
+      outputPath: '.cache/extract-result-0.json',
+    };
+    const m = buildManifest({ op: 'extract', round: 1, tasks: [task], forgeVersion: '1.4.0' });
+    expect(verifyManifest(m).ok).toBe(true);
+  });
+});

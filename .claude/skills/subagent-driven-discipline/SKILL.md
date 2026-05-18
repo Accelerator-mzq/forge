@@ -7,7 +7,7 @@ metadata:
   author: forgeue project (extracted to generic)
   version: "1.0-generic"
   scenario_subtype_count: 28
-  case_study_count: 10
+  case_study_count: 11
   retrospect_protocol: trigger-type-matrix(5 types × per-type intensity)
 ---
 
@@ -1440,6 +1440,72 @@ git update-ref refs/heads/<wrong-branch> <prior-base-sha>
 
 ---
 
+### Case 11: forge-repo / plan-legacy-bridge-layer3b-extraction / 全 16-task SDD 执行
+
+**Date**:2026-05-18
+**Trigger Type**:Type 1(3-stage full retrospect)
+**Project context**:TS/Node monorepo(opsp/forge-repo),legacy-bridge Layer 3b —— 第 6 个 `forge legacy-bridge` 子命令 `extract`(扫老文档 → LLM 抽需求 + 判实现 → `legacy-requirements.yaml` → backlog 第二数据源)。16 task(A1-A2 / B1-B4 / C1-C3 / D1-D2 / E1-E3 / F1-F2),plan 经 Codex 7 轮对抗审查收敛(0 HIGH / 0 MEDIUM)。24 commit(16 task commit + 8 controller inline fix/chore);CI 五步全绿(lint/format/typecheck/build/test 1367 pass);分支 `design/legacy-bridge-layer3b-extraction`。
+
+**Subagent dispatch**(16 task,condensed):
+| Subagent 组 | Scenario subtype(§1.X.Y)| Model | Verdict |
+|---|---|---|---|
+| A1/A2/B2/B4/C1/C2/C3/E1/E2 implementer × 9 | §1.1.1 Mechanical(plan 全 inline)| haiku | DONE × 9 一次过 |
+| B3 implementer | §1.1.2 pattern + 第三方 API 适配 | sonnet | DONE(pdf-parse v2 适配)|
+| D1 implementer(union 加 1 成员)| §1.1.1 trivial | haiku | DONE — controller-direct verify,跳 subagent review(§1.5.1/§1.7.1 trivial 豁免)|
+| B1 implementer(加 2 依赖)| §1.5.1-tier | haiku | DONE — controller-direct verify |
+| D2/E3 implementer × 2 | §1.1.3 Multi-file integration | sonnet | DONE(各 1 authorized 适配)|
+| F1 implementer(skill + build 双源)| §1.5.1 doc sync | haiku | DONE — controller-direct verify |
+| F2 implementer(4 doc 文件)| §1.5.2 doc rewrite | sonnet | DONE — controller-direct verify |
+| spec_reviewer × 12 | §1.2.1 / §1.2.4 | sonnet | ✅ × 12 |
+| code_quality_reviewer × 12 | §1.3.3 / §1.3.4 | sonnet | ⚠️ Approved with concerns(over-escalate 频发,见 Lesson 3)|
+| final reviewer | cross-task synthesis | sonnet | ⚠️ Ready with noted follow-ups(0 release blocker)|
+| retrospect(本次)| Type 1 mandatory(§3.4.1)| controller(opus 4.7)| Q2/Q3/Q4 YES → add Case 11 + §6 2 rows |
+
+**Real issues caught / failed**:
+| Issue | Severity | Caught by | Scenario subtype 验证 |
+|---|---|---|---|
+| **plan B3 `.pdf` inline 代码按 pdf-parse v1 API 写,但 B1 `pnpm add pdf-parse`(未 pin)装入 v2.4.5 —— v2 是 class API 重写,API 完全不兼容;`@types/pdf-parse@1` 也成错版本类型** | **Important(typecheck blocker if 照搬)** | controller dispatch B3 前 inspect `node_modules/pdf-parse/package.json` + 类型文件 | **NEW Pattern BB** — 依赖未 pin → install 漂移到比 plan 假设更新的 major 版本(详 Lesson 1)|
+| **E1 按 spec §7.1 让 buildBacklog 对缺失 archive 容错(有意行为变更);E1 的 spec/quality reviewer + controller cross-verify 只跑 `tests/core/backlog/` 全绿,但 `tests/cli/backlog.test.ts` 2 个测旧行为(无 archive → exit 2)的 test 回归** | **Important(CI 回归)** | E3 implementer 跑全量 suite 自报 + final review | **NEW Pattern CC** — task 改既有行为,per-task review 限于 task 自身 test 目录漏别目录 test(详 Lesson 2)|
+| C1 `parseExtractResults` plan inline 对 `[null]` 数组元素 `o.title` 访问 → 无 source 的 TypeError | Important | C1 sonnet code_quality reviewer | §1.3.4 —— Sonnet code_quality 兜底 plan-inline latent bug(REINFORCE Case 01/02/03)|
+| code_quality reviewer 多个 over-escalated finding(B2 symlink/`.csv`、B4 "Critical" index-outputPath + 正则误判、D2 readManifest verify 漏看 + unguarded writeFile、E3 删 malformed-dirname)| 各 claim 经 controller 实测/对照驳回 | controller §3.2 cross-verify(`node -e` 跑正则 / grep sister 文件 / 读源码)| REINFORCE Case 01 Lesson 3(详 Lesson 3)|
+
+**Lesson**(reinforce / new pattern / 边界 refinement):
+
+1. **NEW Pattern BB —— 依赖未 pin,`pnpm add` 装入比 plan 假设更新的 major 版本,plan inline code 对不上新 API**
+   - 实证:plan B3 `.pdf` 分支按 pdf-parse **v1** 写(`(await import('pdf-parse')).default` → `pdfParse(buf)` → `{ text }`);plan B1 `pnpm add pdf-parse`(无版本约束)装入 **v2.4.5** —— v2 是 TypeScript class-API 重写(`new PDFParse({ data }).getText()` → `TextResult`),与 v1 完全不兼容。`@types/pdf-parse@1`(v1 类型)也成了错版本(v2 自带类型)。
+   - **与 §6「Plan inline 跨 build/runtime 边界」(Pattern D)/ Case 02 exceljs API 不符 区别**:那些是 plan 用了**已 pin 版本**的不存在 API;Pattern BB 是 **plan 写时的版本 ≠ `pnpm add` 装时的最新 major**(依赖未 pin 时 install-time 漂移)。
+   - **fix 模式**:controller dispatch「新加依赖 + 用其 API」的 task 前,**先 `cat node_modules/<pkg>/package.json` 看实装 version + inspect 真实 API surface**(`.d.ts`);若 major ≠ plan 假设 → **AskUserQuestion 升级 user**(pin 旧版 vs 适配新版是 dependency-architecture 决策,不可 controller 独断)。本例用户选「保留 v2 适配」→ controller 给 B3 implementer 修正后的 v2 代码 + B1 移除 `@types/pdf-parse`。
+   - **dispatch prompt 加**:涉及第三方包 API 的 task,Pre-verified Data 段标「实装版本 X.Y.Z(已 inspect)+ 正确 API 形态」,不让 implementer 照搬 plan 字面。
+
+2. **NEW Pattern CC —— task 改既有行为,per-task spec/quality reviewer 限于该 task 自身 test 目录,漏别目录里测旧行为的 test 回归**
+   - 实证:E1 按 spec §7.1 让 `buildBacklog` 对缺失 `forge/changes/archive` 容错(**有意行为变更**:旧行为缺失即抛错)。E1 spec_reviewer + code_quality_reviewer + controller cross-verify 都只跑 `tests/core/backlog/` → 全绿。但 `tests/cli/backlog.test.ts` 有 2 个 test 编码旧行为(「无 archive → exit 2」)→ E1 阶段无人跑到 → 漏。直到 E3 implementer 跑全量 suite + final review 才暴露。
+   - **与 Case 05 Pattern K(cross-Task test interaction)区别**:K 是 N task 的 test 在 N+1 task enable real logic 后 timeout;Pattern CC 是 **task 有意改既有行为,使别处(别 test 目录)测旧行为的 test 失效**。
+   - **fix 模式**:任何 task **改既有函数 / 既有行为**(非纯新增)时 ——
+     - dispatch prompt + reviewer prompt 必标「这是 behavior change」并要求 `grep -rl '<函数名>' tests/` 找全仓库该行为的 test 引用;
+     - controller cross-verify **不能只跑该 task 的 test 目录** —— 改既有行为的 task 必跑全量 suite 或至少 grep 别目录的相关 test;
+     - 过时 test(编码旧行为)→ controller inline 更新对齐新 spec 行为 + 单独 test commit(本例 `tests/cli/backlog.test.ts` 2 用例 exit 2 → exit 0)。
+   - **§3.2 cross-verify 加一类**:「task 改既有行为 → 全量 suite verify(或 grep `<行为符号>` 全 `tests/`),不止该 task 的新 test 目录」。
+
+3. **REINFORCE Case 01 Lesson 3 —— code_quality reviewer over-escalate / 假设最坏,controller 持 plan ground-truth 逐条实测驳回**
+   - 本次 16 task 中 code_quality reviewer 报多个 over-escalated finding,controller 实测 / 对照 plan + sister 文件后**驳回**:B2 I-1(symlink 递归 —— `mapper.ts` 同 `stat` pattern,repo-wide 既有约定)/ B2 I-2(`.csv` —— 加进 DOC_EXTS 会让 B3 `extractText` 对 `.csv` throw)/ B4 "Critical" C-1(index-based `outputPath` —— 是既有 manifest 契约,D2 按 index join)/ B4 I-2(`node -e` 实测正则确实命中,reviewer 正则分析错)/ D2 I-1(漏看 `readManifest` 实际调 `verifyManifest`)/ D2 I-4(unguarded `writeFile` —— `index` 子命令 537/566/580 同 pattern,repo 既有约定)/ E3 "Important"(删 `malformed-dirname` 会破 `splitLegacyClaims` 的 `LegacyBacklogWarning[]` 返回类型)。
+   - **takeaway(强化)**:code_quality reviewer(Sonnet)不持 plan 全局上下文 + 不持 repo 既有 pattern 知识,reasoning 时倾向「假设最坏」;controller 的 §3.2 cross-verify 是唯一防线。涉及 ①与既有 repo pattern 一致性 ②正则 / 类型的**实际**运行行为 ③下游函数依赖 时,reviewer claim **必 controller 实测**(`node -e` 跑正则 / grep sister 文件 / 读被依赖函数源码)再决定采纳。本次真实被采纳的 code_quality finding 只有 C1 null-guard(§1.3.4 真 latent bug 兜底)+ 少量 trivial polish(import 合并 / `earlier` helper 复用 / `## New (1)` 断言精确化 / `inferKind` basename+`\b`)。
+
+4. **REINFORCE §1.3.4 + §1.5.1/§1.7.1 trivial 豁免边界有效**
+   - §1.3.4:C1 `[null]` 元素 → 无 source TypeError 是真 plan-inline latent bug,只 Sonnet code_quality 抓到 —— §1.3.4 MANDATORY Sonnet 再次兑现(Case 01-05/10 累计)。
+   - §1.5.1/§1.7.1 trivial 豁免:D1(union 加 1 成员)/ B1(加依赖)/ F1(doc sync)/ F2(doc rewrite)4 个 task controller-direct cross-verify 取代 subagent review —— 这 4 个 task 无 code logic 可供 §1.3.4 runtime review 审,dispatch 2 个 review subagent 是纯噪声。controller 直接验证(diff = 预期 / format:check / 同步 template 入 commit)是恰当深度,与 §1.5.1「direct(no subagent)」一致。**边界**:有真实 code logic / 算法 / 控制流的 task(本次 A/B/C/D2/E 全部)不豁免,3-stage review 照跑。
+
+**Cost vs all-Opus alternative**:
+- 实际:9 haiku implementer(~$0.10 ea)+ 7 sonnet implementer/复杂 implementer(~$0.30 ea)+ 12 spec_reviewer(sonnet ~$0.12 ea)+ 12 code_quality_reviewer(sonnet ~$0.20 ea)+ final reviewer(sonnet ~$0.50)+ ~9 controller inline fix(opus ~$0.05 ea)+ retrospect(opus ~$0.50)≈ **~$8.5**
+- 全 Opus 假设:16 implementer + 24 reviewer + final + retrospect ≈ **~$32**
+- 节省 ratio:~73%
+- **质量**:24 commit 全 commit;CI 五步全绿(lint/format/typecheck/build/test 1367 pass / 178 test files);final review 0 release blocker;16 task 全 3-stage ✅(trivial 4 个 controller-direct);plan(Codex 7 轮 0 HIGH/0 MEDIUM)实现完整。
+
+**Followup 建议**(由后续 sub-plan 或 PR review 消化;本次 retrospect 仅沉淀 lesson):
+- `.pdf` / `.docx` 路径零测试覆盖(plan 只定义 `.md`/`.txt` 测试)—— final review I-1 标;建议后续补 `.docx` 烟雾测试(mammoth 可在 CI 测),`.pdf` 文档注明 pdfjs worker 依赖。
+- `collectCodeIndex`(legacy-bridge.ts)与 `extractor.walk` 两处 walk 实现 DRY —— final review M-1 标;后续可抽 `extractor.ts` 导出通用 `walkFiles`。
+
+---
+
 ## §6 Pattern Catalog(failure mode → scenario subtype + recovery)
 
 | Subagent failure mode | Root cause(scenario subtype 误配)| Prevention | Recovery |
@@ -1470,6 +1536,8 @@ git update-ref refs/heads/<wrong-branch> <prior-base-sha>
 | **implementer "acceptable risk"/"flaky" 自报 → controller final review 必实测 verify(see §5 Case 05 Pattern L)**| per-task code_quality reviewer 标 Important 但 implementer self-report "acceptable risk" / "flaky 与 X 无关" / "low priority" 误导 final review 阶段。Implementer 想急完成 task 倾向自报 acceptable risk;若 controller 接受 self-report 不实测 verify → release 时暴露 real risk(攻击路径 / timing 距 bound 距离 < buffer) | §2.7 final reviewer playbook 加:cross-task synthesis 必扫所有 per-task Important 中 implementer self-report "acceptable risk" / "flaky" / "low priority" 的 finding → **实测 verify**(攻击路径模拟 / 实测 timing 距 bound 距离 N 次 / stash 前后 deterministic verify)→ 决定升级 Critical / 维持 Important / 接受 acceptable risk。**Implementer 自报评估不能 substitute final review 实测验证** | Final reviewer 实测 N 次 + controller direct fix commit(eg. catch 块加 else 转 CRITICAL finding + timeout buffer 加大);PR description 必标"final review 实测升级"留 audit trail |
 | **CI 环境 env var 累积 latent bug(long-lived feature branch first CI run)(see §5 Case 05 Pattern M)**| 老 test 不 override `CI` env / 其他 CI-sensitive env var(GH_TOKEN / TZ / LANG);GitHub runner 默认 `CI=true` → child process 检 `process.env.CI` 调整行为(如 ack propose exit 2 拒);本地 `process.env.CI=undefined` PASS;long-lived feature branch(>3 plan 周期未 PR 到主干)累积 latent CI bug,first PR run 才暴露 | test setup 显式 `CI=''` env override(`{ env: { ...process.env, CI: '' } }` 给 spawnSync / execa);dispatch prompt Pre-verified Data 段标"CI=true 环境下命令行为 vs 本地" — 若 child process 检 `process.env.CI` 调整行为,test setup 必显式 override。§3.2 cross-verify 加:**long-lived feature branch(>3 plan 周期未 PR 到主干)PR 前必跑 `gh pr create --draft` 触发 CI dry run** — 累积 latent CI bug 早发现 | chore commit `chore(<old plan> test fix): 加 CI='' env override`(本地 + CI 双 PASS 验证);PR description 标"累积 N plan 周期 latent CI bug,first CI run 暴露" |
 | **plan 增量修订加功能但漏加 test scenario → 该功能代码路径零覆盖,bug 穿透 implementer 自检 + spec review(see §5 Case 10 Pattern AA)**| plan 在多轮 review 收敛**之后**追加新 Step / helper(本例 v10 加 parseCodexOutput markdown 解析),但固定的 integration scenario 集是修订前定稿的,无一覆盖新路径;implementer 自写实现(plan 只给格式说明不给代码)含 bug(本例 `\Z` cross-language false-cognate 锚 → 整条 markdown 路径全量 breakage);零覆盖 → implementer 自检(原 scenario 全过)+ spec compliance review(只比对 spec 字面)双漏 | controller dispatch 前检查「plan vN→vN+1 增量加的每个代码路径是否有对应 test scenario」,无则 dispatch prompt 显式要求 implementer 补测试(不被固定 scenario 计数束缚,计数交 test inventory 统一 Task 校准);implementer self-review checklist 加「自写的解析器/正则/状态机是否有专门测试」;涉及 implementer 自写正则 → code_quality reviewer 必 `node -e` 实测 repro 而非读码判断 | §1.3.4 Sonnet code_quality runtime review 兜底(读码 + adversarial 实测);TDD 补测试(markdown 测试 RED → 修 parser → GREEN,一举暴露连带的第二个 bug)|
+| **依赖未 pin,`pnpm add` 装入比 plan 假设更新的 major 版本,plan inline code 对不上新 API(see §5 Case 11 Pattern BB)**| plan 写 inline code 时按某依赖的旧 major API(本例 pdf-parse v1 `default fn`),但 plan 的「加依赖」task 用无版本约束的 `pnpm add <pkg>` → 装入更新的 major(本例 v2.4.5 class API),两者不兼容;`@types/<pkg>` 也可能成错版本。与 Case 02/Pattern D「已 pin 版本的不存在 API」区别:此处是 **install-time 版本漂移** | controller dispatch「新加依赖 + 用其 API」的 task 前,**先 `cat node_modules/<pkg>/package.json` 看实装 version + inspect `.d.ts` 真实 API surface**;若 major ≠ plan 假设 → **AskUserQuestion 升级 user**(pin 旧版 vs 适配新版是 dependency-architecture 决策);dispatch prompt Pre-verified Data 段标实装版本 + 正确 API 形态,不让 implementer 照搬 plan 字面 | 用户决策后:适配新版 → controller 给 implementer 修正 API 代码 + 清理错版本 `@types`;或 pin 旧版 → `pnpm add <pkg>@<major>` |
+| **task 改既有行为,per-task spec/quality reviewer 限于该 task 自身 test 目录,漏别目录测旧行为的 test 回归(see §5 Case 11 Pattern CC)**| task 按 spec 改既有函数行为(本例 E1 让 buildBacklog 对缺失 archive 容错,旧行为是抛错);per-task spec/quality reviewer + controller cross-verify 只跑该 task 的 test 目录(`tests/core/backlog/`)→ 全绿;但别目录(`tests/cli/backlog.test.ts`)有 test 编码旧行为 → 漏,直到全量 suite / final review 才暴露。与 Case 05 Pattern K 区别:K 是 N+1 task enable logic 后 N task test timeout;CC 是有意行为变更使别目录测旧行为的 test 失效 | 任何 task **改既有函数/行为**(非纯新增)时:dispatch + reviewer prompt 标「behavior change」并要求 `grep -rl '<符号>' tests/` 找全仓库引用;controller cross-verify **不止跑该 task 的 test 目录** —— 改既有行为的 task 必跑全量 suite 或 grep 别目录相关 test。§3.2 cross-verify 加此类 | controller inline 更新过时 test 对齐新 spec 行为 + 单独 test commit(本例 `tests/cli/backlog.test.ts` 2 用例 exit 2 → exit 0)|
 
 ---
 

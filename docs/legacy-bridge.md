@@ -11,6 +11,7 @@
 | Layer 1 | `forge legacy-bridge sync-check` | 每次 archive 自动跑,检测本次 change 是否需更新老文档 |
 | Layer 2 | `forge legacy-bridge index` | one-shot 初始化,为每份老锚点生成 ~100 字摘要 |
 | Layer 3a | `forge legacy-bridge regenerate` | one-shot 复写器,LLM 读老锚点 + 代码 → 规范化 SRS/HLD/LLD/system-tests |
+| Layer 3b | `forge legacy-bridge extract` | 扫老文档(SRS/PRD/BACKLOG/TODO)抽需求条目 + LLM 判实现状态 → legacy-requirements.yaml → backlog 第二数据源 |
 
 老文档**长期保留**,forge 只做**单向同步**(archive → legacy)。反向 sync 推 v0.3。
 
@@ -172,6 +173,67 @@ git commit 跟其他源代码一起进版本控制。
 
 罕见场景:用户彻底重生成 → `forge legacy-bridge regenerate`(等同 T0 重跑,**会覆盖手编辑**;
 重跑前请 `git commit` 当前版以便对比 / 还原)。
+
+## Layer 3b:老文档需求抽取(`forge legacy-bridge extract`)
+
+> v0.3 新增。从 SRS / PRD / BACKLOG / TODO 等老文档中抽取需求条目,由 LLM 判断每条的实现状态,用户审改后写入 `forge/legacy-requirements.yaml`,并作为 backlog 注册表的**第二数据源**。
+
+### 四种模式
+
+`--apply` / `--api` / `--finalize` 三个 flag 互斥。
+
+#### 默认(emit)
+
+```bash
+forge legacy-bridge extract
+```
+
+发现老文档 → 构建 LLM Task manifest → 写入 `forge/.cache/legacy-bridge-task-extract.json` 后挂起,等待 agent fulfill。
+
+#### `--apply`:消费 agent fulfill 结果
+
+```bash
+forge legacy-bridge extract --apply
+```
+
+读取 agent 写回的结果文件 → 产出 `forge/legacy-requirements-draft.yaml` + `.md` 概览。
+
+#### `--api`:进程内调用 Anthropic SDK
+
+```bash
+forge legacy-bridge extract --api   # 需 ANTHROPIC_API_KEY
+```
+
+跳过 emit/fulfill 两步,直接在进程内调 Anthropic SDK,输出与 `--apply` 后相同。
+
+> **注意(spec §4.5)**:与 agent 模式相比,`--api` 模式让 LLM 产出的 `evidence`(即 `file:line` 代码引用)**更粗粒度、可靠性较低**。若对证据精度有要求,推荐使用默认 emit → fulfill → `--apply` 的 agent 流程。
+
+#### `--finalize`:升级草稿为正式文件
+
+```bash
+forge legacy-bridge extract --finalize
+```
+
+读取用户审改后的 `forge/legacy-requirements-draft.yaml` → 分配稳定 `LR-NNNN` ID → 写入 `forge/legacy-requirements.yaml` → 刷新 `forge/backlog/`。
+
+### 推荐工作流
+
+```
+# 1. emit:发现文档,产 manifest
+forge legacy-bridge extract
+
+# 2. fulfill:AI agent 按 legacy-bridge-fulfillment skill 读 manifest 执行
+
+# 3. apply:消费 agent 结果,产草稿
+forge legacy-bridge extract --apply
+
+# 4. 用户审改 forge/legacy-requirements-draft.yaml
+
+# 5. finalize:升级为正式需求 + 刷新 backlog
+forge legacy-bridge extract --finalize
+```
+
+---
 
 ## 关键 yaml 字段参考
 

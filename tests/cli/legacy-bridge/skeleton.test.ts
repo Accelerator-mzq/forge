@@ -1,5 +1,5 @@
 // legacy-bridge CLI 骨架测试 — Plan 7 Phase A
-// 验证 5 子命令 + --acknowledge-data-transfer 全部注册到 commander
+// 验证 6 子命令 + --acknowledge-data-transfer 全部注册到 commander(D2 加入 extract)
 
 import { describe, it, expect } from 'vitest';
 import { buildLegacyBridgeCommand } from '../../../src/cli/commands/legacy-bridge.js';
@@ -7,9 +7,9 @@ import { buildLegacyBridgeCommand } from '../../../src/cli/commands/legacy-bridg
 describe('legacy-bridge CLI 骨架', () => {
   const cmd = buildLegacyBridgeCommand();
 
-  it('注册 5 个子命令', () => {
+  it('注册 6 个子命令', () => {
     const subNames = cmd.commands.map((c) => c.name());
-    expect(subNames).toEqual(['map', 'regenerate', 'index', 'sync-check', 'resolve']);
+    expect(subNames).toEqual(['map', 'regenerate', 'index', 'sync-check', 'resolve', 'extract']);
   });
 
   it('主命令含 --acknowledge-data-transfer 选项', () => {

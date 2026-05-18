@@ -52,6 +52,7 @@ export function parseUnifiedDiff(diffText: string): DiffHunk[] {
       continue;
     }
     if (line.startsWith('+++') || line.startsWith('---')) continue; // 文件头,非内容
+    if (line.startsWith('\\')) continue; // '\ No newline at end of file' git 元数据行,不占新文件行号
 
     if (line.startsWith('+')) {
       current.added.push({ kind: '+', content: line.slice(1), newLineNumber: newCursor });

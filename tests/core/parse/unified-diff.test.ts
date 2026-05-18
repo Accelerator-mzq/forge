@@ -52,4 +52,38 @@ describe('parseUnifiedDiff', () => {
     const hunks = parseUnifiedDiff(multi);
     expect(hunks.length).toBe(2);
   });
+
+  it('\\ No newline at end of file 元数据行不占新文件行号', () => {
+    const diff = `diff --git a/f.txt b/f.txt
+--- a/f.txt
++++ b/f.txt
+@@ -1 +1,2 @@
+-old
+\\ No newline at end of file
++new
++added second
+`;
+    const hunks = parseUnifiedDiff(diff);
+    // newStart=1;-old 删除不占;\ No newline 元数据不占;+new=1、+added second=2
+    expect(addedLineNumbers(hunks)).toEqual([1, 2]);
+  });
+
+  it('同一文件连续多 hunk → 第二 hunk newCursor 从 newStart 重置', () => {
+    const diff = `diff --git a/f.md b/f.md
+--- a/f.md
++++ b/f.md
+@@ -1,2 +1,3 @@
+ line 1
++inserted at 2
+ line 2
+@@ -20,2 +21,3 @@
+ line 20
++inserted at 22
+ line 21
+`;
+    const hunks = parseUnifiedDiff(diff);
+    expect(hunks).toHaveLength(2);
+    // hunk1 newStart=1:line1(1)→2,+inserted(2)→3,line2(3);hunk2 newStart=21:line20(21)→22,+inserted(22)→23
+    expect(addedLineNumbers(hunks)).toEqual([2, 22]);
+  });
 });

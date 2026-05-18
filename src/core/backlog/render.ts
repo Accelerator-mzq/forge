@@ -5,6 +5,7 @@
 import type { SupersedingDetail, SkippedBlock, AggregatedScopeEntry } from '../scope/aggregator.js';
 import { VALID_SUPERSEDING_NEW_STATUS } from '../schemas/scope-entries.js';
 import type { ScopeCategory } from '../schemas/scope-entries.js';
+import type { LegacyRequirement } from '../legacy-bridge/legacy-requirements.js';
 
 /** render 层呈现类型 —— 由 superseding[] / skipped[] 派生(spec §7.1) */
 export type BacklogWarning =
@@ -237,4 +238,118 @@ export function renderArchivedMarkdown(tombstones: SupersedingDetail[]): string 
     lines.push('');
   }
   return lines.join('\n').trimEnd() + '\n';
+}
+
+/** legacy requirement 退役墓碑(spec §8.2,不复用 SupersedingDetail/ScopeEntry) */
+export interface LegacyRequirementTombstone {
+  entry_id: string;
+  new_status: string;
+  rationale: string;
+  superseded_in_change: string;
+  superseded_at: string;
+  requirement_snapshot: LegacyRequirement | null;
+}
+
+/** legacy 专属 warning(spec §8.5);并入 BacklogWarning 联合 —— 见下方扩展 */
+export type LegacyBacklogWarning =
+  | { kind: 'dangling-legacy-claim'; entry_id: string; superseded_in_change: string }
+  | { kind: 'invalid-legacy-status'; entry_id: string; superseded_in_change: string; raw: string }
+  | {
+      kind: 'duplicate-legacy-claim';
+      entry_id: string;
+      winner_superseded_in_change: string;
+      claimants: string[];
+    }
+  | { kind: 'malformed-dirname'; superseded_in_change: string }
+  | { kind: 'reserved-archive-dirname' };
+
+/** legacy 退役允许的 new_status(spec §8.1 收紧子集) */
+const LEGACY_VALID_STATUS = new Set(['completed', 'obsolete']);
+
+/** splitLegacyClaims 输出 */
+export interface SplitLegacyResult {
+  tombstones: LegacyRequirementTombstone[];
+  warnings: LegacyBacklogWarning[];
+  /** 已退役的 legacy requirement id 集(供 active.md 过滤) */
+  retiredIds: Set<string>;
+}
+
+/**
+ * 分流处理 source_change='legacy-requirements' 的 superseding 明细(spec §8.5)。
+ * 三步:① 校验剔除 dangling/invalid ② 有效 claim 按 entry_id 选 winner ③ 目录名异常。
+ * @param legacyClaims 已分流出的 legacy superseding 明细
+ * @param legacyReqs   legacy-requirements.yaml 的 requirements(查 snapshot 用)
+ */
+export function splitLegacyClaims(
+  legacyClaims: SupersedingDetail[],
+  legacyReqs: LegacyRequirement[],
+): SplitLegacyResult {
+  const byId = new Map(legacyReqs.map((r) => [r.id, r]));
+  const warnings: LegacyBacklogWarning[] = [];
+  const valid: SupersedingDetail[] = [];
+
+  // 第 1 步:校验,剔除无效 claim
+  for (const c of legacyClaims) {
+    const snapshot = byId.get(c.entry_id);
+    if (!snapshot) {
+      warnings.push({
+        kind: 'dangling-legacy-claim',
+        entry_id: c.entry_id,
+        superseded_in_change: c.superseded_in_change,
+      });
+      continue;
+    }
+    if (!LEGACY_VALID_STATUS.has(c.new_status)) {
+      warnings.push({
+        kind: 'invalid-legacy-status',
+        entry_id: c.entry_id,
+        superseded_in_change: c.superseded_in_change,
+        raw: c.new_status,
+      });
+      continue;
+    }
+    valid.push(c);
+  }
+
+  // 第 3 步(与有效性无关,对全部 claim 查目录名异常)
+  for (const c of legacyClaims) {
+    if (c.superseded_at === 'unknown') {
+      warnings.push({ kind: 'malformed-dirname', superseded_in_change: c.superseded_in_change });
+    }
+  }
+
+  // 第 2 步:有效 claim 按 entry_id 分组选 winner
+  const groups = new Map<string, SupersedingDetail[]>();
+  for (const c of valid) {
+    (groups.get(c.entry_id) ?? groups.set(c.entry_id, []).get(c.entry_id)!).push(c);
+  }
+  const tombstones: LegacyRequirementTombstone[] = [];
+  const retiredIds = new Set<string>();
+  for (const [entryId, g] of groups) {
+    // winner:superseded_at 最早;并列取 superseded_in_change 字典序
+    const winner = g.reduce((a, b) => {
+      if (a.superseded_at !== b.superseded_at) return a.superseded_at < b.superseded_at ? a : b;
+      return a.superseded_in_change <= b.superseded_in_change ? a : b;
+    });
+    tombstones.push({
+      entry_id: entryId,
+      new_status: winner.new_status,
+      rationale: winner.rationale,
+      superseded_in_change: winner.superseded_in_change,
+      superseded_at: winner.superseded_at,
+      requirement_snapshot: byId.get(entryId) ?? null,
+    });
+    retiredIds.add(entryId);
+    if (g.length > 1) {
+      warnings.push({
+        kind: 'duplicate-legacy-claim',
+        entry_id: entryId,
+        winner_superseded_in_change: winner.superseded_in_change,
+        claimants: g.map((c) => c.superseded_in_change),
+      });
+    }
+  }
+  // tombstone 排序:跨平台确定
+  tombstones.sort((a, b) => (a.entry_id < b.entry_id ? -1 : a.entry_id > b.entry_id ? 1 : 0));
+  return { tombstones, warnings, retiredIds };
 }

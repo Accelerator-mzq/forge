@@ -454,7 +454,7 @@ export function crossCheckPauseDecisions(
   ];
   for (const v of verifyDecisions) {
     const r = reviewById.get(v.id);
-    if (!r) continue; // 单侧独有 id(verify-only)→ 合法,不拒
+    if (!r) continue; // verify-only id → 合法不拒(design §6.5);review-only id 因不进本循环天然跳过
     for (const f of FIELDS) {
       if (v[f] !== r[f]) {
         results.push(

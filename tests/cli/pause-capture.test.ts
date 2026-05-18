@@ -29,6 +29,7 @@ describe('forge pause-capture', () => {
       expect(cap.change_id).toBe('c1');
       expect(cap.task_ref).toBe('tasks.md#task-2');
       expect(cap.tasks_md_task_ids).toEqual(['task-1', 'task-2']);
+      expect(cap.pause_issue_summary).toBe('OAuth refresh');
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }

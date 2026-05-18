@@ -3,6 +3,8 @@ import { readdir, stat, readFile } from 'node:fs/promises';
 import { join, relative, extname, basename } from 'node:path';
 import type { LegacyRequirementKind } from './legacy-requirements.js';
 import { parseWorkbook, sheetToMarkdown } from './excel.js';
+import { redact } from './redact.js';
+import type { LlmTask } from './llm-task.js';
 
 /** 发现时跳过的目录(沿 mapper.ts 的 SKIP_DIRS 约定 + spec §5.1) */
 const SKIP_DIRS = new Set([
@@ -122,4 +124,79 @@ export async function extractText(repoRoot: string, relPath: string): Promise<st
   } catch (err) {
     throw new Error(`文本抽取失败 ${relPath}:${(err as Error).message}`);
   }
+}
+
+const DEFAULT_MODEL = 'claude-sonnet-4-6';
+
+/** 抽取条目数组的 outputSchema 描述(供 agent 自校验,spec §4.2) */
+const EXTRACT_OUTPUT_SCHEMA =
+  '[{ "title": string, "description": string, "status": "implemented"|"unimplemented", ' +
+  '"section": string, "evidence": string[], "confidence": "high"|"medium"|"low" }]';
+
+/** 单文档抽取 prompt:内嵌 redact 后文本 + redact 后代码索引(spec §4.2) */
+function buildExtractPrompt(args: {
+  docPath: string;
+  docKind: LegacyRequirementKind;
+  redactedText: string;
+  redactedCodeIndex: string;
+}): string {
+  return `你是一名需求抽取员。从下面这份老文档抽取需求条目,逐条判定其在当前代码库里是否已实现。
+
+# 文档
+路径:${args.docPath}(kind=${args.docKind})
+---
+${args.redactedText}
+---
+
+# 当前代码库结构索引(file tree;判 implemented 时参考)
+${args.redactedCodeIndex}
+
+# 任务
+- 抽取该文档里的每条需求,给 title(一行)+ description(正文)。
+- 逐条判 status:implemented(代码已实现)或 unimplemented。
+- 判 implemented 必须在 evidence 给出代码依据(形如 "src/foo.ts:42 ...");unimplemented 时 evidence 为 []。
+- section:该条所在章节锚 / 标题;无则空字符串。
+- confidence:你对 status 判定的置信度 high/medium/low。
+
+# 输出格式(严格 JSON,无 preamble)
+${EXTRACT_OUTPUT_SCHEMA}`;
+}
+
+/**
+ * prep:每来源文档建一个 LlmTask(spec §4.1 第 4 步 / §4.2)。
+ * redact 对**全部输入**(文档文本 + 代码索引);prompt 内嵌 redact 后两者(ApiRunner 只发 prompt)。
+ * @param codeIndex whole-repo 代码文件路径列表(file tree),由调用方传入
+ */
+export async function buildExtractTasks(
+  repoRoot: string,
+  sources: DiscoveredSource[],
+  codeIndex: string[],
+): Promise<LlmTask[]> {
+  // 代码索引对全部 task 相同,redact 一次(spec §4.1 第 3 步:全部输入都 redact,含代码索引)
+  const redactedCodeIndex = redact(codeIndex.join('\n')).redactedText;
+  const tasks: LlmTask[] = [];
+  for (let i = 0; i < sources.length; i++) {
+    const src = sources[i]!;
+    const rawText = await extractText(repoRoot, src.path);
+    const redactedText = redact(rawText).redactedText;
+    const prompt = buildExtractPrompt({
+      docPath: src.path,
+      docKind: src.kind,
+      redactedText,
+      redactedCodeIndex,
+    });
+    tasks.push({
+      op: 'extract',
+      // inputs:与 prompt 并列的 redact 快照(文档 + 代码索引;非送 LLM 通道,spec §4.2)
+      inputs: [
+        { source: src.path, content: redactedText },
+        { source: '<code-index>', content: redactedCodeIndex },
+      ],
+      prompt,
+      model: DEFAULT_MODEL,
+      outputSchema: EXTRACT_OUTPUT_SCHEMA,
+      outputPath: `.cache/extract-result-${i}.json`,
+    });
+  }
+  return tasks;
 }

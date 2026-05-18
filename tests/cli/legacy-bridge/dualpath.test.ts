@@ -16,26 +16,44 @@ import { buildManifest } from '../../../src/core/legacy-bridge/llm-task.js';
 import type { ForgeConfig } from '../../../src/core/schema/types.js';
 import type { LegacyAnchorRole } from '../../../src/core/legacy-bridge/types.js';
 
+// m-2:可变 mock 状态 —— quality-judge 默认返回全 preserved;
+// 测试可置 judgeVerdict='lost' 模拟 quality-fail 路径。用 vi.hoisted 让 vi.mock(被提升)能引用。
+const mockState = vi.hoisted(() => ({ judgeVerdict: 'preserved' as 'preserved' | 'lost' }));
+
 // --api 路径需要 mock:Anthropic SDK + forge-eval/load-env
-// regenerate --api 串两轮(regenerate→extract-facts→quality-judge),每轮 messages.create 返回不同内容;
-// 这里用一个能按 prompt 关键词分支的 mock,index/sync-check 也用同一 mock。
+// 双路径两套 quality-judge prompt 形态:
+//   agent 路径(applyRound1AndBuildRound2)→ quality-judge task prompt 含「三态判定」→ 输出 JSON 数组;
+//   --api 路径(judgeSingleFact 逐 fact)→ prompt 含「复写质量评估员」→ 输出纯文本首行 verdict。
+// extract-facts 两变体(--api 的 extractFactsFromOriginal / agent 的 buildRegenerateRound1Tasks)
+//   prompt 都含「关键事实」→ 同一 JSON 数组应答。index/sync-check 也用同一 mock。
 vi.mock('@anthropic-ai/sdk', () => {
   const Anthropic = vi.fn().mockImplementation(() => ({
     messages: {
       create: vi.fn().mockImplementation((args: { messages: Array<{ content: string }> }) => {
         const prompt = args.messages?.[0]?.content ?? '';
-        // quality-judge:三态判定 → 全 preserved(JSON 数组)
+        // quality-judge(agent 路径,applyRound1AndBuildRound2 的 task):三态判定 → JSON 数组
         if (prompt.includes('三态判定')) {
-          // 抽样数不定,返回足量 preserved(applyRound2 对越界 fact 视 lost,这里给够)
+          // 抽样数不定,返回足量 verdict(applyRound2 对越界 fact 视 lost,这里给够)
           return Promise.resolve({
             content: [
-              { type: 'text', text: JSON.stringify(Array(40).fill({ state: 'preserved' })) },
+              {
+                type: 'text',
+                text: JSON.stringify(Array(40).fill({ state: mockState.judgeVerdict })),
+              },
             ],
             usage: { input_tokens: 100, output_tokens: 50 },
           });
         }
-        // extract-facts:抽取关键事实 → JSON 数组
-        if (prompt.includes('抽取关键事实')) {
+        // quality-judge(--api 路径,judgeSingleFact 逐 fact):复写质量评估员 → 纯文本首行 verdict
+        if (prompt.includes('复写质量评估员')) {
+          return Promise.resolve({
+            content: [{ type: 'text', text: `${mockState.judgeVerdict}\n理由:测试 mock` }],
+            usage: { input_tokens: 100, output_tokens: 50 },
+          });
+        }
+        // extract-facts(--api 的 extractFactsFromOriginal + agent 的 buildRegenerateRound1Tasks
+        // 两个变体 prompt 都含「关键事实」)→ JSON 数组
+        if (prompt.includes('关键事实')) {
           return Promise.resolve({
             content: [
               {
@@ -98,6 +116,8 @@ beforeEach(async () => {
   await mkdir(join(dir, 'forge'), { recursive: true });
   await writeFile(join(dir, 'forge', 'config.yaml'), CONFIG_YAML, 'utf8');
   await writeAck(join(dir, 'forge'), parseYaml(CONFIG_YAML) as ForgeConfig);
+  // m-2:每个用例前重置 mock judge verdict,保证测试隔离
+  mockState.judgeVerdict = 'preserved';
 });
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
@@ -630,6 +650,28 @@ describe('runRegenerateCommand 双路径', () => {
     const anchorsContent = await readFile(join(dir, 'forge', 'legacy-anchors.yaml'), 'utf8');
     expect(anchorsContent).toContain('hash:');
     expect(anchorsContent).toContain('last_regenerated:');
+  });
+
+  it('--api quality-fail(quality-judge 全 lost)→ 写 .partial + exit 3 + anchor 不回写', async () => {
+    // m-2:置 mock judge 全 lost → critical fact 丢失 → quality.passed=false
+    mockState.judgeVerdict = 'lost';
+    const code = await runRegenerateCommand({
+      projectRoot: dir,
+      role: ROLE,
+      apply: false,
+      api: true,
+      yes: true, // 跳过 countdown
+    });
+    // ① 返回 LB_EXIT_PARTIAL_SUCCESS(exit 3)
+    expect(code).toBe(3);
+    const outPath = join(dir, 'forge', 'docs', 'regenerated', 'SRS.md');
+    // ② .partial 文件被写,正式产物不写
+    expect(existsSync(`${outPath}.partial`)).toBe(true);
+    expect(existsSync(outPath)).toBe(false);
+    // ③ legacy-anchors.yaml 不含新 hash(quality-fail 路径不回写 anchor)
+    const anchorsContent = await readFile(join(dir, 'forge', 'legacy-anchors.yaml'), 'utf8');
+    expect(anchorsContent).not.toContain('hash:');
+    expect(anchorsContent).not.toContain('last_regenerated:');
   });
 
   it('--apply 与 --api 互斥 → 返回非 0', async () => {

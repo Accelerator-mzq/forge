@@ -909,22 +909,22 @@ export async function runRegenerateCommand(opts: RegenerateCommandOpts): Promise
   }
 
   // ----------------------------------------------------------------------
-  // 成本闸 + countdown(emit / --api 都过;旧 action 行为忠实移植)
-  // ----------------------------------------------------------------------
-  const estimated = estimateRegenerateCost(authoritativeAnchors.length);
-  const gate = checkBudgetGate(estimated, REGEN_WARN_USD, opts.yes ?? false);
-  console.error(gate.message);
-  if (!gate.proceed) {
-    return gate.exitCode;
-  }
-  if (gate.requiresCountdown) {
-    await countdown(5);
-  }
-
-  // ----------------------------------------------------------------------
   // --api 分支:旧单进程行为忠实移植(regenerateRole + P7-02 双 LLM 抽样)
   // ----------------------------------------------------------------------
   if (opts.api) {
+    // I-1 修:成本闸 + countdown 只对 --api 触发 —— 默认 emit 路径只写 manifest JSON
+    // 到 .cache/,不发任何 LLM 请求、不耗 API 额度(agent 路径走会话额度),
+    // 故 emit / --apply 路径完全不经成本闸。--api 真在进程内调 API,成本闸语义对它正确。
+    const estimated = estimateRegenerateCost(authoritativeAnchors.length);
+    const gate = checkBudgetGate(estimated, REGEN_WARN_USD, opts.yes ?? false);
+    console.error(gate.message);
+    if (!gate.proceed) {
+      return gate.exitCode;
+    }
+    if (gate.requiresCountdown) {
+      await countdown(5);
+    }
+
     // 锁(决策 #23):同时获 archive.lock + legacy-bridge.lock,顺序固定
     let releaseArchive: (() => Promise<void>) | undefined;
     let releaseLb: (() => Promise<void>) | undefined;
@@ -940,9 +940,11 @@ export async function runRegenerateCommand(opts: RegenerateCommandOpts): Promise
         'legacy-bridge.lock',
       );
     } catch (err) {
+      // C-1 修:第二把锁(legacy-bridge.lock)获取若抛非 LockHeldError(权限错 / 磁盘满),
+      // 第一把 archive.lock 已持有 —— 任何 catch 路径 rethrow / return 前都先释放它,防永久泄漏。
+      if (releaseArchive) await releaseArchive();
       if (err instanceof LockHeldError) {
         console.error(`✗ ${err.message}`);
-        if (releaseArchive) await releaseArchive();
         return LB_EXIT_LOCK_HELD;
       }
       throw err;

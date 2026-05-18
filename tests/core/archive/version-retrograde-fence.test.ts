@@ -1,5 +1,5 @@
 // version-retrograde-fence.test.ts — plan-9j Task 4 单测
-// 7 case 实测 + 1 it.todo:retrograde 拒签 / 非 git 跳过 / 合法 semver / tamper 检测 / 缺字段 / 上升路径 / **non-git fake gitDir best-effort**(v7 MAJOR 1 真名实对齐)+ it.todo: git repo 内 log 失败 fail-closed
+// 8 case 实测:retrograde 拒签 / 非 git 跳过 / 合法 semver / tamper 检测 / 缺字段 / 上升路径 / **non-git fake gitDir best-effort**(v7 MAJOR 1 真名实对齐)/ git repo 内 git log 失败 fail-closed(Task 2 解锁)
 
 // vi.mock 必须在模块加载前执行(vitest 自动 hoist);
 // factory 把 execFile 换成受控 mock,execFileSync 由 ...actual 保留真实 → setupGitRepoWithMarker 不受影响
@@ -118,7 +118,7 @@ describe('validateVersionRetrograde', () => {
   });
 
   // v7 MAJOR 1 修订(名实对齐):case 7 改为 non-git best-effort 真实测;
-  //   真 git repo 内 git log 失败的 fail-closed 路径留作 it.todo + 9z release 解锁
+  //   真 git repo 内 git log 失败的 fail-closed 路径见下一 it()(Task 2 解锁)
   it('非 git path(fake gitDir,rev-parse 失败)→ best-effort 跳过(返 ok)— v3 MAJOR 1 非 git 路径', async () => {
     const fakeGitDir = mkdtempSync(join(tmpdir(), 'forge-9j-fake-git-'));
     cleanupDirs.push(fakeGitDir);

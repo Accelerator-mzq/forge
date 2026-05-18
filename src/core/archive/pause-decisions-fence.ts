@@ -326,6 +326,16 @@ async function checkOption2TaskChecked(
       file,
     });
   }
+  // 2b. changeId 须传入(step 4 capture entry 定位的必要匹配键,archive 层从 verifyRec 取)。
+  //     缺失 → 显式 fail-closed,不靠 step 4 的 change_id 不匹配隐式兜底(code review)。
+  if (!opts.changeId) {
+    return failed({
+      artifact: 'marker',
+      field: `${fieldBase}.capture_id`,
+      message: 'option=2 校验失败:changeId 未传入(archive 层未接线)— fail-closed 拒签',
+      file,
+    });
+  }
   // 3. 读 ack-log + verifyAckLogChain(用 verify marker 的 tail/count)
   let entries;
   try {
@@ -352,7 +362,7 @@ async function checkOption2TaskChecked(
     (e): e is PauseCaptureEntry =>
       e.kind === 'pause-capture' &&
       (e as PauseCaptureEntry).capture_id === p.capture_id &&
-      (e as PauseCaptureEntry).change_id === (opts.changeId ?? '') &&
+      (e as PauseCaptureEntry).change_id === opts.changeId &&
       (e as PauseCaptureEntry).task_ref === p.task_ref,
   );
   if (captures.length !== 1) {

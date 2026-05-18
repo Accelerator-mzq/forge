@@ -40,8 +40,10 @@ import {
 export async function validatePauseDecisionsFence(
   marker: Record<string, unknown>,
   changeDir: string,
+  repoRoot: string,
   file?: string,
 ): Promise<ValidationResult> {
+  void repoRoot; // Task 5 接入 option=1 diff 校验后移除
   const decisions = marker.pause_decisions;
   if (!Array.isArray(decisions)) return ok(); // 老 marker 缺 → 通过
 

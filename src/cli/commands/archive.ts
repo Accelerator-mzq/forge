@@ -452,6 +452,7 @@ export function buildArchiveCommand(): Command {
             const pdVerifyResult = await validatePauseDecisionsFence(
               verifyRec,
               changeDir,
+              process.cwd(),
               verifyPath,
             );
             if (!pdVerifyResult.valid) {
@@ -463,6 +464,7 @@ export function buildArchiveCommand(): Command {
             const pdReviewResult = await validatePauseDecisionsFence(
               reviewRec,
               changeDir,
+              process.cwd(),
               reviewPath,
             );
             if (!pdReviewResult.valid) {

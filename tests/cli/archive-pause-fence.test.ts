@@ -41,12 +41,12 @@ describe('validatePauseDecisionsFence', () => {
 
   // —— Superset additive:marker 缺 pause_decisions → 老兼容通过 ——
   it('marker 缺 pause_decisions 字段 → 老兼容 ok', async () => {
-    const result = await validatePauseDecisionsFence({}, changeDir);
+    const result = await validatePauseDecisionsFence({}, changeDir, changeDir);
     expect(result.valid).toBe(true);
   });
 
   it('pause_decisions: [] → 通过', async () => {
-    const result = await validatePauseDecisionsFence({ pause_decisions: [] }, changeDir);
+    const result = await validatePauseDecisionsFence({ pause_decisions: [] }, changeDir, changeDir);
     expect(result.valid).toBe(true);
   });
 
@@ -54,6 +54,7 @@ describe('validatePauseDecisionsFence', () => {
   it('CRITICAL severity → 拒签(CRITICAL 应走 forge 强 fence,不应进 pause)', async () => {
     const result = await validatePauseDecisionsFence(
       { pause_decisions: [{ ...basePauseDecision, severity: 'CRITICAL' }] },
+      changeDir,
       changeDir,
     );
     expect(result.valid).toBe(false);
@@ -66,6 +67,7 @@ describe('validatePauseDecisionsFence', () => {
       {
         pause_decisions: [{ ...basePauseDecision, severity: 'WARNING', severity_acked_by: null }],
       },
+      changeDir,
       changeDir,
     );
     expect(result.valid).toBe(false);
@@ -96,6 +98,7 @@ describe('validatePauseDecisionsFence', () => {
         ],
       },
       changeDir,
+      changeDir,
     );
     expect(result.valid).toBe(true);
   });
@@ -115,6 +118,7 @@ describe('validatePauseDecisionsFence', () => {
         ],
       },
       changeDir,
+      changeDir,
     );
     expect(result.valid).toBe(true);
   });
@@ -132,6 +136,7 @@ describe('validatePauseDecisionsFence', () => {
           },
         ],
       },
+      changeDir,
       changeDir,
     );
     expect(result.valid).toBe(false);
@@ -155,6 +160,7 @@ describe('validatePauseDecisionsFence', () => {
         ],
       },
       changeDir,
+      changeDir,
     );
     expect(result.valid).toBe(true);
   });
@@ -174,6 +180,7 @@ describe('validatePauseDecisionsFence', () => {
           },
         ],
       },
+      changeDir,
       changeDir,
     );
     expect(result.valid).toBe(false);
@@ -196,6 +203,7 @@ describe('validatePauseDecisionsFence', () => {
         ],
       },
       changeDir,
+      changeDir,
     );
     expect(result.valid).toBe(false);
     expect(result.errors[0]?.message).toMatch(/找不到.*task-3/);
@@ -211,6 +219,7 @@ describe('validatePauseDecisionsFence', () => {
       {
         pause_decisions: [{ ...basePauseDecision, task_ref: 'tasks.md#issue-1' }],
       },
+      changeDir,
       changeDir,
     );
     expect(result.valid).toBe(true);
@@ -231,6 +240,7 @@ describe('validatePauseDecisionsFence', () => {
           },
         ],
       },
+      changeDir,
       changeDir,
     );
     expect(result.valid).toBe(false);
@@ -254,6 +264,7 @@ describe('validatePauseDecisionsFence', () => {
         ],
       },
       changeDir,
+      changeDir,
     );
     expect(result.valid).toBe(false);
     expect(result.errors[0]?.message).toMatch(/scope-entries.*triggered_by.*pause_decision/);
@@ -276,6 +287,7 @@ describe('validatePauseDecisionsFence', () => {
         ],
       },
       changeDir,
+      changeDir,
     );
     expect(result.valid).toBe(true);
   });
@@ -295,6 +307,7 @@ describe('validatePauseDecisionsFence', () => {
           },
         ],
       },
+      changeDir,
       changeDir,
     );
     expect(result.valid).toBe(false);
@@ -316,6 +329,7 @@ describe('validatePauseDecisionsFence', () => {
           },
         ],
       },
+      changeDir,
       changeDir,
     );
     expect(result.valid).toBe(false);

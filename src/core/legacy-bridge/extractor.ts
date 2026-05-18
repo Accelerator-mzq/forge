@@ -242,14 +242,19 @@ export function parseExtractResults(inputs: ExtractResultInput[]): ExtractedRequ
       throw new Error(`extract 结果 ${input.source}:顶层不是数组`);
     }
     arr.forEach((e, i) => {
-      const o = e as Record<string, unknown>;
       const at = `${input.source}[${i}]`;
+      // 元素守卫:null / 非对象 / 数组提前报错 —— 否则下面 o.title 访问 null 抛无 source 的 TypeError
+      if (e === null || typeof e !== 'object' || Array.isArray(e)) {
+        throw new Error(`${at} 须为 object,实得 ${e === null ? 'null' : typeof e}`);
+      }
+      const o = e as Record<string, unknown>;
       if (typeof o.title !== 'string' || o.title === '')
         throw new Error(`${at}.title 须为非空字符串`);
       if (typeof o.description !== 'string') throw new Error(`${at}.description 须为字符串`);
       if (!STATUS_SET.has(o.status as string))
         throw new Error(`${at}.status 越界:${String(o.status)}`);
-      if (!CONFIDENCE_SET.has(o.confidence as string)) throw new Error(`${at}.confidence 越界`);
+      if (!CONFIDENCE_SET.has(o.confidence as string))
+        throw new Error(`${at}.confidence 越界:${String(o.confidence)}`);
       if (!Array.isArray(o.evidence) || !o.evidence.every((x) => typeof x === 'string')) {
         throw new Error(`${at}.evidence 须为 string[]`);
       }

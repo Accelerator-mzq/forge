@@ -139,4 +139,10 @@ describe('parseExtractResults', () => {
       /status/,
     );
   });
+
+  it('数组元素为 null → 抛带 source 的错误(不漏成无上下文 TypeError)', () => {
+    expect(() =>
+      parseExtractResults([{ text: '[null]', source: 'docs/SRS.md', kind: 'srs' }]),
+    ).toThrow(/docs\/SRS\.md\[0\]/);
+  });
 });

@@ -1,7 +1,7 @@
 # pause-fence 段级校验 design(release-blocker attack-path 闭环)
 
 - **日期**:2026-05-19
-- **状态**:design,待 writing-plans(已过 Codex 对抗性 review round 1 + round 2 + round 3 + round 4)
+- **状态**:design 定稿,待 writing-plans(Codex 对抗性 review 5 轮收敛 —— round 5 无 BLOCKER / MAJOR)
 - **关联**:design `2026-05-10-v1.0-fusion-completion-design.md` §2.1.5;plan-9c §7.5;plan-9c `release-blocker-attack-path.test.ts`
 - **brainstorm 来源**:session 704adeea(2026-05-18~19)+ 本会话深入核查
 
@@ -273,7 +273,7 @@ writing-plans 的 Path Pre-flight Verify 阶段**必须先核查实际 `tasks.md
 
 - **Block A**:4 个 TEST-ONLY todo unskip 为真 `it()`,注入失败断言回滚 / fail-closed。
 - **Block B**:option=1 attack todo unskip —— fixture:marker 声称改 proposal `## What Changes` 但实际 diff 只动 tasks.md → 断言拒签;happy path(确有 What Changes 段新增行)断言通过;另测 proposal.md 带 frontmatter 时行号对齐正确。
-- **Block C**:option=2 attack todo unskip —— fixture:`added_task_ref` 出现在 capture entry 的 `tasks_md_task_ids` 里(非新增)→ 拒签;happy path:`added_task_ref` ∉ capture 快照、∈ 当前 tasks.md 且勾选 → 通过;链坏 / capture entry 缺失 / `capture_id` 被复用 / 缺 `ack_log_tail_hash` / `change_id`/`task_ref` 不匹配 → 拒签;verify/review 两份 `pause_decisions` 不一致 → 拒签;gen-0 老 marker(无 `pause_decisions`)→ 通过。
+- **Block C**:option=2 attack todo unskip —— fixture:`added_task_ref` 出现在 capture entry 的 `tasks_md_task_ids` 里(非新增)→ 拒签;happy path:`added_task_ref` ∉ capture 快照、∈ 当前 tasks.md 且勾选 → 通过;链坏 / capture entry 缺失 / `capture_id` 被复用 / 缺 `ack_log_tail_hash` / `change_id`/`task_ref` 不匹配 → 拒签;verify/review 共有 `id` 的 `pause_decision` 字段不一致 → 拒签、单侧独有 `id` → 不拒签(§6.5);gen-0 老 marker(无 `pause_decisions`)→ 通过。
 - **release gate**:全 6 todo unskip 后 `pnpm test:gate:release` actual=0 → PASS;release CI 接入 `test:gate:release`。
 - 推 commit 前本地跑全 5 步(lint → format:check → typecheck → build → test),沿 CLAUDE.md。
 
@@ -363,3 +363,15 @@ Codex 确认 round 3 BLOCKER #1 的工作流顺序纠正正确(verify 是最后�
 | 2 | MAJOR | §6.5 strict"`id` 集合完全一致"是 breaking tightening,会误拒合法的 verify-only pause | 属实(`summary-builder.ts:79` `mergePauseDecisions` 证明两侧 `id` 集合可合法不一致;verify 阶段触发的 pause 只进 verify marker)。§6.5 改为"共有 `id` 比对,单侧独有 `id` 不拒签",**撤销 round 3 MINOR #4 引入的过度收紧** |
 | 3 | MINOR | §9.3 缺"调了 capture 但漏写 marker"的边界说明 | 采纳:§9.3 补一句 |
 | 4 | NIT | §6.5 cross-check 段在 round 2/3 编辑中丢失 `### 6.5` 标题 | 属实,采纳:补回 `### 6.5` 独立标题 |
+
+### round 5 — Codex 对抗性 review(2026-05-19)
+
+Codex 复核确认 round 4 的 4 条修订全部到位,结论:**design 可定稿,已无 BLOCKER / MAJOR**。新意见 1 条(MINOR):
+
+| # | 级别 | 议题 | 核实与处理 |
+| - | ---- | ---- | ---------- |
+| 1 | MINOR | §10 测试策略"verify/review 两份 `pause_decisions` 不一致 → 拒签"与 §6.5 共有 `id` 比对语义矛盾 | 属实,采纳:§10 改为"共有 `id` 字段不一致 → 拒签、单侧独有 `id` → 不拒签" |
+
+### 收敛小结
+
+5 轮 Codex 对抗性 review 累计 26 条意见(6 BLOCKER / 10 MAJOR / 6 MINOR / 4 NIT),逐条独立对照代码核实。**24 条采纳修订**;2 条仅采纳"现象 + 边界声明"、不采纳其修复机制(经论证):round 2 BLOCKER #1"固化 marker pause hash"(挡不住 AI 首次写 marker 即填假 `capture_id`)、round 3 MAJOR #2"反向一致性校验"(只挡理性攻击者不走的半遵守路径 + scope 扩张)。round 5 无 BLOCKER / MAJOR,**design 定稿**。

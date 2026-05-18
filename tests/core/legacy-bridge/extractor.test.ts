@@ -6,6 +6,7 @@ import {
   discoverSources,
   extractText,
   buildExtractTasks,
+  parseExtractResults,
 } from '../../../src/core/legacy-bridge/extractor.js';
 
 async function tmpRepo(files: Record<string, string>): Promise<string> {
@@ -83,5 +84,59 @@ describe('buildExtractTasks', () => {
     expect(srsTask?.prompt).not.toContain('AKIAIOSFODNN7EXAMPLE');
     // 代码索引内嵌进 prompt(spec §4.2 关键约定)
     expect(srsTask?.prompt).toContain('src/app.ts');
+  });
+});
+
+describe('parseExtractResults', () => {
+  it('解析多 task 的 JSON 字符串结果,汇总成统一条目集', () => {
+    const t1 = JSON.stringify([
+      {
+        title: '登录 2FA',
+        description: 'd',
+        status: 'unimplemented',
+        section: '3.2',
+        evidence: [],
+        confidence: 'high',
+      },
+    ]);
+    const t2 = JSON.stringify([
+      {
+        title: '日志',
+        description: 'd2',
+        status: 'implemented',
+        section: '',
+        evidence: ['src/log.ts:1'],
+        confidence: 'medium',
+      },
+    ]);
+    const out = parseExtractResults([
+      { text: t1, source: 'docs/SRS.md', kind: 'srs' },
+      { text: t2, source: 'docs/SRS.md', kind: 'srs' },
+    ]);
+    expect(out).toHaveLength(2);
+    expect(out[0]?.title).toBe('登录 2FA');
+    expect(out[1]?.status).toBe('implemented');
+  });
+
+  it('某 task 文本非法 JSON → 抛带 source 的错误', () => {
+    expect(() =>
+      parseExtractResults([{ text: 'not json', source: 'TODO.md', kind: 'backlog-file' }]),
+    ).toThrow(/TODO\.md/);
+  });
+
+  it('条目 status 越界 → 抛错', () => {
+    const bad = JSON.stringify([
+      {
+        title: 't',
+        description: 'd',
+        status: 'maybe',
+        section: '',
+        evidence: [],
+        confidence: 'low',
+      },
+    ]);
+    expect(() => parseExtractResults([{ text: bad, source: 'a.md', kind: 'srs' }])).toThrow(
+      /status/,
+    );
   });
 });

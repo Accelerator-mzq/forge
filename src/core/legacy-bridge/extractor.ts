@@ -1,7 +1,7 @@
 // Layer 3b:whole-repo 发现 + 文本抽取 + prep + apply + 增量 diff(spec §4/§5/§6)
 import { readdir, stat, readFile } from 'node:fs/promises';
 import { join, relative, extname, basename } from 'node:path';
-import type { LegacyRequirementKind } from './legacy-requirements.js';
+import type { LegacyRequirementKind, LegacyRequirementStatus } from './legacy-requirements.js';
 import { parseWorkbook, sheetToMarkdown } from './excel.js';
 import { redact } from './redact.js';
 import type { LlmTask } from './llm-task.js';
@@ -199,4 +199,70 @@ export async function buildExtractTasks(
     });
   }
   return tasks;
+}
+
+/** 一个 task 的原始结果 + 来源元信息 */
+export interface ExtractResultInput {
+  /** readTaskResults 取出的 { text } 信封里的 text 字符串 */
+  text: string;
+  /** 该 task 对应的来源文档路径 */
+  source: string;
+  kind: LegacyRequirementKind;
+}
+
+/** LLM 抽出的一条需求(尚未分配 id / review) */
+export interface ExtractedRequirement {
+  title: string;
+  description: string;
+  status: LegacyRequirementStatus;
+  /** 来源文档 + 章节(section 来自 LLM,document/kind 来自 ExtractResultInput) */
+  source: { document: string; section: string; kind: LegacyRequirementKind };
+  evidence: string[];
+  confidence: 'high' | 'medium' | 'low';
+}
+
+const STATUS_SET = new Set(['implemented', 'unimplemented']);
+const CONFIDENCE_SET = new Set(['high', 'medium', 'low']);
+
+/**
+ * 解析 + 校验各 task 结果(spec §4.4 第 2-3 步)。
+ * 每个 ExtractResultInput.text 是需求条目数组的 JSON 字符串。
+ * 非法 JSON / schema 不符 → 抛带 source 的错误。
+ */
+export function parseExtractResults(inputs: ExtractResultInput[]): ExtractedRequirement[] {
+  const out: ExtractedRequirement[] = [];
+  for (const input of inputs) {
+    let arr: unknown;
+    try {
+      arr = JSON.parse(input.text.trim());
+    } catch (err) {
+      throw new Error(`extract 结果解析失败 ${input.source}:${(err as Error).message}`);
+    }
+    if (!Array.isArray(arr)) {
+      throw new Error(`extract 结果 ${input.source}:顶层不是数组`);
+    }
+    arr.forEach((e, i) => {
+      const o = e as Record<string, unknown>;
+      const at = `${input.source}[${i}]`;
+      if (typeof o.title !== 'string' || o.title === '')
+        throw new Error(`${at}.title 须为非空字符串`);
+      if (typeof o.description !== 'string') throw new Error(`${at}.description 须为字符串`);
+      if (!STATUS_SET.has(o.status as string))
+        throw new Error(`${at}.status 越界:${String(o.status)}`);
+      if (!CONFIDENCE_SET.has(o.confidence as string)) throw new Error(`${at}.confidence 越界`);
+      if (!Array.isArray(o.evidence) || !o.evidence.every((x) => typeof x === 'string')) {
+        throw new Error(`${at}.evidence 须为 string[]`);
+      }
+      const section = typeof o.section === 'string' ? o.section : '';
+      out.push({
+        title: o.title,
+        description: o.description,
+        status: o.status as LegacyRequirementStatus,
+        source: { document: input.source, section, kind: input.kind },
+        evidence: o.evidence as string[],
+        confidence: o.confidence as 'high' | 'medium' | 'low',
+      });
+    });
+  }
+  return out;
 }

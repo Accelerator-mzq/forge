@@ -315,7 +315,7 @@ describe('applyExtractResult', () => {
     const out = applyExtractResult([{ text, source: 'docs/SRS.md', kind: 'srs' }], null);
     expect(out.draftYaml).toContain('schema: forge-legacy-requirements/v1');
     expect(out.draftYaml).toContain('登录 2FA');
-    expect(out.draftMarkdown).toContain('## New');
+    expect(out.draftMarkdown).toContain('## New (1)');
     expect(out.draftMarkdown).toContain('登录 2FA');
   });
 });

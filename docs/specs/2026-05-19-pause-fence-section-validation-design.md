@@ -1,7 +1,7 @@
 # pause-fence 段级校验 design(release-blocker attack-path 闭环)
 
 - **日期**:2026-05-19
-- **状态**:design,待 writing-plans(已过 Codex 对抗性 review round 1 + round 2)
+- **状态**:design,待 writing-plans(已过 Codex 对抗性 review round 1 + round 2 + round 3)
 - **关联**:design `2026-05-10-v1.0-fusion-completion-design.md` §2.1.5;plan-9c §7.5;plan-9c `release-blocker-attack-path.test.ts`
 - **brainstorm 来源**:session 704adeea(2026-05-18~19)+ 本会话深入核查
 
@@ -123,12 +123,14 @@ option=1 分支在现有字段校验之外:
 
 **关键约束**:**只做链内自洽校验,挡不住"重写整条 ack-log + 重算所有 `prev_entry_hash`"** —— 攻击者可构造一条全新且内部自洽的链。真正的事后篡改防护来自固化项 2/3,而它们依赖 `marker.ack_log_tail_hash` + `ack_log_entry_count`。这两个字段在 verify 阶段 `forge evidence freeze` 时固化(`evidence.ts:815-819`)。
 
-因此 **option=2 强校验要求 marker 同时有 `ack_log_tail_hash` + `ack_log_entry_count`**:
-- 两者齐全 → fence 把它们传入 `verifyAckLogChain`,三重校验全开,capture entry 受事后篡改保护。
-- 缺任一 → 链保护不成立 → **fail-closed 拒签**(option=2 一律要求 capture,见 §8.1)。
-- `writing-plans` 须先核实:forge 主流程是否所有过 verify 的 change 都必产 `process_evidence` + freeze(即必有 `ack_log_tail_hash`/`ack_log_entry_count`)。若存在合法的"无 process_evidence"路径,需在 writing-plans 阶段把它作为 design 缺口上报、重新评估。
+**链校验必须用 verify marker 的 tail/count**:forge 工作流为 `apply → review → verify → archive`;review 阶段跑 `forge evidence freeze --kind review`、verify 阶段跑 `--kind verify`(`review.md` 7b / `verify.md` 4.4)。verify 是最后一次 freeze,**verify marker 的 `ack_log_tail_hash`/`ack_log_entry_count` 才是 archive 时刻全量 ack-log 的正确快照**;review marker 的是较早快照(entry 数偏少)。`verifyAckLogChain` 的行数校验是精确相等(`ack-log.ts:271`),用 review marker 的 count 校验 archive 时全量 ack-log 必然 mismatch。`process-evidence-fence.ts:401-405` 子检 9.3 也只取 verify marker 的 tail/count,印证此结论。
 
-Fluid Pause 在 apply 阶段(`forge evidence freeze` 之前)发生,故正常路径下 capture entry 会被 freeze 的 tail/count 一并固化。边界(pause 发生在 freeze 之后)见 §8.3。
+因此 **option=2 强校验固定用 verify marker 的 `ack_log_tail_hash` + `ack_log_entry_count`** 调 `verifyAckLogChain`,无论 fence 当前在校验哪个 marker(verify 或 review)。archive 层从 `verifyRec` 取出这两个值,传给 `validatePauseDecisionsFence` 的两次调用(§6.4 / §11)。
+- verify marker 两字段齐全 → 三重校验全开,capture entry 受事后篡改保护。
+- verify marker 缺任一 → 链保护不成立 → **fail-closed 拒签**(option=2 一律要求 capture,见 §8.1)。
+- `writing-plans` 须先核实:forge 主流程是否所有过 verify 的 change 都必产 `process_evidence` + freeze(即 verify marker 必有这两个字段)。若存在合法的"无 process_evidence"路径,需在 writing-plans 阶段把它作为 design 缺口上报、重新评估。
+
+Fluid Pause 在 apply 阶段(早于 review/verify 的 freeze)发生,故正常路径下 capture entry 会被 verify freeze 的 tail/count 一并固化。边界(pause 发生在 verify freeze 之后)见 §8.3。
 
 ### 6.3 schema 扩展(均 superset additive)
 
@@ -168,19 +170,19 @@ capture_id?: string | null;     // option=2 关联的 pause-capture entry id
 对**任何** `chosen_option===2` 的 pause_decision(不分 marker 版本,见 §8.1):
 
 1. 校验该 pause_decision 有非空 `added_task_ref` + `capture_id`;缺任一 → 拒签。
-2. 校验 marker 有 `ack_log_tail_hash` + `ack_log_entry_count`(§6.2);缺 → 拒签。
-3. 读 `.evidence/ack-log.jsonl`(`readAllAckLogEntries`),调 `verifyAckLogChain(entries, marker.ack_log_tail_hash, marker.ack_log_entry_count)`;链校验失败 → 拒签。
-4. 在 ack-log 里定位 capture entry:`kind==='pause-capture'` **且** `capture_id` 匹配 **且** `change_id===changeId` **且** `task_ref===pause_decision.task_ref`(全部匹配,defense-in-depth);找不到 / 找到多条 → fail-closed 拒签。
+2. 校验 **verify marker** 有 `ack_log_tail_hash` + `ack_log_entry_count`(§6.2);缺 → 拒签。
+3. 读 `.evidence/ack-log.jsonl`(`readAllAckLogEntries`),用 **verify marker** 的 `ack_log_tail_hash`/`ack_log_entry_count`(由 archive 层传入,见下方签名)调 `verifyAckLogChain`;链校验失败 → 拒签。
+4. 在 ack-log 里定位 capture entry:`kind==='pause-capture'` **且** `capture_id` 匹配 **且** `change_id===changeId` **且** `task_ref===pause_decision.task_ref`(全部匹配,defense-in-depth);找不到 / 找到多条 → fail-closed 拒签。`changeId` 由 `changeDir` 的 basename 派生。
 5. 同一 marker 内,校验 `capture_id` 未被多个 pause_decision 复用(防一条 capture 被多次认领)。
 6. 校验:`added_task_ref` 末段 ∉ capture entry 的 `tasks_md_task_ids`(pause 时不存在)。
 7. 校验:`added_task_ref` 末段 ∈ 当前 `tasks.md` 且已勾选 `[x]`。
 8. 解析器:用 `parseTasks`(`tasks.ts:32`,`TASK_RE` = `^\s*- \[([ x])\]\s+([\w-]+)\s*:\s*(.+)$`,即 `- [x] task-id: desc` 格式)作 canonical 解析器。**注意格式收窄**:`parseTasks` 只认 `task-id: desc`,现有 fence 的旧正则还认 `- [x] **task-2**` bold / bare key。见 §8.4。
 
-### 6.5 verify/review 双 marker `pause_decisions` cross-check
+**`validatePauseDecisionsFence` 签名扩展**:现签名 `(marker, changeDir, file?)` 不接收 repo root,也无 verify marker 的链固化值。新增 option=1 需 repo root(§5.2)、option=2 需 verify marker 的 tail/count + `changeId`。writing-plans 定具体形态,建议 `(marker, changeDir, repoRoot, opts?, file?)`,`opts` 含 `verifyAckLogTailHash` / `verifyAckLogEntryCount`(由 archive 层从 `verifyRec` 取);`changeId` 从 `changeDir` basename 派生,不单独传。`archive.ts:452`/`:463` 两处调用同步改。
 
 `pause_decisions` 同时镜像在 `.verify-passed` / `.review-passed`(design §2.1.6)。archive 现对两个 marker 各跑一次独立 fence(`archive.ts:452`/`:463`),不做跨 marker 比对 —— 两份可写不同 `capture_id` / `added_task_ref` 各自通过,镜像语义漂移。
 
-本特性在 archive 层加一个 verify/review `pause_decisions` cross-check(沿 `validateThreeLevelFence` 同时接 verifyRec + reviewRec 的先例):按 `id` 配对,比对 `task_ref` / `chosen_option` / `added_task_ref` / `capture_id` 一致;不一致 → 拒签。范围限定在本特性引入/相关的字段,不扩展到整 marker 镜像校验(那是独立议题,§12 非目标)。
+本特性在 archive 层加一个 verify/review `pause_decisions` cross-check(沿 `validateThreeLevelFence` 同时接 verifyRec + reviewRec 的先例):**先校验两 marker 的 `pause_decisions` 的 `id` 集合完全一致**(单侧缺某 id、单侧多某 id、或单侧 id 重复,均拒签),**再**按 `id` 配对逐条比对 `task_ref` / `chosen_option` / `added_task_ref` / `capture_id` 一致;任一不一致 → 拒签。范围限定在本特性引入/相关的字段,不扩展到整 marker 镜像校验(那是独立议题,§12 非目标)。
 
 ### 6.6 改 `commands/apply.md`
 
@@ -219,9 +221,9 @@ option=2 fence **不**按 `marker.created_by_tool_version` 做降级 —— 版�
 
 ### 8.3 capture entry 在 freeze 之后写入(罕见边界)
 
-design `2026-05-10` line 375 提到"verify 阶段也可触发 pause"。若 pause 发生在 `forge evidence freeze` 之后,capture entry 不被 `ack_log_tail_hash`/`entry_count` 固化 —— §6.4 step 2 要求 marker 有这两个字段,但它们固化的是 freeze 时刻的链尾;freeze 后追加的 capture entry 会使实际 entry count 超过 `ack_log_entry_count` → `verifyAckLogChain` 行数校验失败 → 拒签。
+design `2026-05-10` line 375 提到"verify 阶段也可触发 pause"。若 pause 发生在 verify 阶段的 `forge evidence freeze --kind verify` 之后,capture entry 不被 verify marker 的 `ack_log_tail_hash`/`entry_count` 固化 —— 它们固化的是 verify freeze 时刻的链尾;之后追加的 capture entry 会使 archive 时实际 entry count 超过 verify marker 的 `ack_log_entry_count` → `verifyAckLogChain` 行数校验失败 → 拒签。
 
-即:freeze 后再 pause-capture 的 change,option=2 强校验会拒签。writing-plans 须明确此约束并在 `commands/apply.md` / `verify.md` 协议侧声明"Fluid Pause 须在 verify freeze 之前完成"。作为已知边界。
+即:verify freeze 后再 pause-capture 的 change,option=2 强校验会拒签。writing-plans 须明确此约束并在 `commands/apply.md` / `verify.md` 协议侧声明"Fluid Pause 须在 verify freeze 之前完成"。作为已知边界。
 
 ### 8.4 `parseTasks` 格式收窄
 
@@ -247,8 +249,11 @@ writing-plans 的 Path Pre-flight Verify 阶段**必须先核查实际 `tasks.md
 
 - **喂假输入**:`删掉目标旧 task → forge pause-capture(快照不含该 task)→ 恢复目标旧 task`,使 capture entry 的 `tasks_md_task_ids` 不含目标 task。
 - **选择性认领**:**预先攒**多条 capture entry,写 marker 时为 option=2 的 pause_decision 挑一条 `tasks_md_task_ids` 不含目标 task 的,把其 `capture_id` 填进去。`pause_decision.capture_id` 指向哪条 capture,由 AI 写 marker 时决定 —— marker `pause_decisions` 不被任何 hash-chain 保护(§2.2),无论 AI 在 freeze 前还是 freeze 后定稿 marker,都能自由选择 `capture_id`。
+- **完全隐瞒 pause**:AI 经历了一次本该 option=2 的 pause,但**根本不在 marker 写对应 `pause_decision`**(`pause-decisions-fence.ts:45-46` 对缺 `pause_decisions` 直接 `ok()`)→ fence 无从知道该 pause 发生过。**本特性的 option=2 强校验只覆盖"marker 已声明 `chosen_option===2` 的 pause_decision"的路径**;对"AI 完全不记录 pause"无能为力。
 
 > 关于"freeze 时固化 marker `pause_decisions` hash"(Codex round 2 BLOCKER #1 建议):该机制只能阻止"freeze 后改 marker",但 AI 在 verify 阶段**首次写** marker `pause_decisions` 时,apply 期产生的全部 capture entry 早已在 ack-log 里 —— AI 在定稿那一刻即可填入指向"不含目标 task 的 capture"的 `capture_id`。固化 marker hash 只封堵一条 AI 本就不需要走的路径,不关闭本 gap,故不采纳(详见 §13 round 2 #1)。
+
+> 关于"反向一致性校验"(Codex round 3 MAJOR #2 建议:ack-log 有 `pause-capture` entry 但 marker 无对应 `pause_decision` 时拒签):它只能挡"AI 调了 capture 又隐瞒 `pause_decision`"——而理性攻击者要隐瞒 pause 会从一开始就不调 capture(更省事),这条"半遵守"路径无人会走;且实现它需把 `capture_id` 扩成所有 `chosen_option` 必填、fence 反向扫描 option=1/3/4,scope 显著扩张。"完全不调 capture"则无论如何无法检测。故不做反向校验,仅显式声明边界(详见 §13 round 3 #2、§12)。
 
 根因:capture *当下*喂入的 `tasks.md` 由 AI 控制,且 `pause_decision → capture entry` 的关联由 AI 写 marker 时决定;forge 没有独立于 AI 文件系统/marker 输入的 pre-pause tasks 可信来源(`tasks.md` 不 commit、无 propose marker)。
 
@@ -269,9 +274,8 @@ writing-plans 的 Path Pre-flight Verify 阶段**必须先核查实际 `tasks.md
 **Phase 1(Block A + B):**
 - `tests/integration/release-blocker-attack-path.test.ts` —— unskip todo 1/3/4/5/6
 - `src/core/parse/unified-diff.ts`(新)+ 单测
-- `src/core/archive/pause-decisions-fence.ts` —— fence 加 repo root 参数 + option=1 diff 校验(含 frontmatter 行号对齐)
+- `src/core/archive/pause-decisions-fence.ts` —— fence 签名扩展(加 repo root 参数)+ option=1 diff 校验(含 frontmatter 行号对齐)
 - `src/cli/commands/archive.ts` —— 两处 fence 调用传 `process.cwd()`
-- release CI 配置 —— 接入 `pnpm test:gate:release`
 
 **Phase 2(Block C):**
 - `src/cli/commands/pause-capture.ts`(新)—— 子命令实现
@@ -280,12 +284,14 @@ writing-plans 的 Path Pre-flight Verify 阶段**必须先核查实际 `tasks.md
 - `src/core/ack-log.ts` —— `PauseCaptureEntry` + union 扩展
 - `src/core/archive/ack-log-consistency.ts` —— 删本地 `AckLogEntry`,改 import + type guard
 - `src/core/markers/types.ts` + `src/core/validate/marker-schema.ts` —— `added_task_ref` + `capture_id`(schema 层 optional + `undefined` 分支)
-- `src/core/archive/pause-decisions-fence.ts` —— 重写 `checkOption2TaskChecked`(§6.4)
-- `src/cli/commands/archive.ts` —— 加 verify/review `pause_decisions` cross-check(§6.5)
+- `src/core/archive/pause-decisions-fence.ts` —— 重写 `checkOption2TaskChecked`(§6.4);fence 签名再扩展(verify marker tail/count 入参)
+- `src/cli/commands/archive.ts` —— fence 调用传 verify marker 的 tail/count;加 verify/review `pause_decisions` cross-check(§6.5)
 - `commands/apply.md` —— Fluid Pause 协议 + `pnpm build`
 - `tests/integration/release-blocker-attack-path.test.ts` —— unskip todo 2
+- 迁移现有 option=2 fixtures/tests 到 canonical task 格式 —— `tests/fixtures/pause-decisions/option-2-add-task/tasks.md` 等用 bold 格式的 fixture + `tests/cli/archive-pause-fence.test.ts` 相关断言,改为 `- [x] task-id: desc`(§8.4)
 - CLI 单测(`pause-capture` help / 参数校验 / unknown command)+ 各模块单测
 - `docs/cli-reference.md` —— 补 `pause-capture` 子命令
+- **release CI 配置 —— 接入 `pnpm test:gate:release`(必须在全 6 个 todo 都 unskip 之后做 —— Phase 1 时 todo 2 未清零,提前接入会使 CI 变红)**
 
 ## 12. 非目标(out of scope)
 
@@ -293,6 +299,7 @@ writing-plans 的 Path Pre-flight Verify 阶段**必须先核查实际 `tasks.md
 - 不追求 option=2 的密码学强度证明(§9.2 gap 接受)。
 - 不引入独立于 ack-log 的新 hash-chain。
 - 不做整 marker 的 verify/review 镜像 cross-check(本特性只 cross-check `pause_decisions` 相关字段,§6.5)。
+- 不做 ack-log `pause-capture` entry ↔ marker `pause_decision` 的反向一致性校验(理由见 §9.2 引用块、§13 round 3 #2)。
 
 ## 13. 修订记录
 
@@ -324,3 +331,16 @@ writing-plans 的 Path Pre-flight Verify 阶段**必须先核查实际 `tasks.md
 | 4 | MAJOR | verify/review 双 marker `pause_decisions` 无 cross-check | 属实,采纳:新增 §6.5,archive 层加 verify/review `pause_decisions` cross-check(沿 `validateThreeLevelFence` 先例) |
 | 5 | MINOR | §6.4 未校验 capture entry 的 `change_id`/`task_ref` | 采纳:§6.4 step 4 改为 `capture_id`+`change_id`+`task_ref` 全匹配 |
 | 6 | NIT | §5.2 "archive 已具备 repoRoot" 措辞不准 | 属实(`archive.ts:555` 传 `process.cwd()`),采纳:§5.2 改措辞 |
+
+### round 3 — Codex 对抗性 review(2026-05-19)
+
+Codex 裁定**同意** round 2 BLOCKER #1 的处理(固化 marker hash 不关闭 §9.2 gap,§9.2 论证正确)。新意见 6 条(1 BLOCKER / 2 MAJOR / 2 MINOR / 1 NIT),逐条核实:
+
+| # | 级别 | 议题 | 核实与处理 |
+| - | ---- | ---- | ---------- |
+| 1 | BLOCKER | per-marker 用各自 tail/count 调 `verifyAckLogChain` 校验全量 ack-log,较早 freeze 的 marker 那次必 count mismatch 误拒 happy path | **本质属实**;但 Codex 误把 review 当"最终 marker"——工作流 `apply→review→verify`,**verify** 才是最后 freeze(`process-evidence-fence.ts:401-405` 只用 verify marker 印证)。修:§6.2/§6.4 链校验固定用 **verify marker** 的 tail/count,archive 层从 `verifyRec` 取出传入两次调用 |
+| 2 | MAJOR | §8.1 取消版本降级后,"无 `pause_decisions` 直接通过"仍是绕过口 | 现象属实。封堵建议(反向一致性校验)经评估:只挡"调 capture 又隐瞒"这条理性攻击者不走的"半遵守"路径,"完全不调 capture"Codex 自己也承认无法检测;且需把 `capture_id` 扩成全 option 必填、scope 显著扩张。**不采纳封堵**,§9.2 显式声明安全边界为已知 gap,§12 列入非目标 |
+| 3 | MAJOR | Phase 1 接入 release CI 会在 option=2 todo 未清零时把 CI 弄红 | 属实,采纳:§11 release CI 接入移到 Phase 2 末(全 6 todo unskip 后) |
+| 4 | MINOR | §6.5 cross-check 未说明 `id` 集合差异/单侧缺失 | 属实,采纳:§6.5 先校验 `id` 集合完全一致,再逐 id 比字段 |
+| 5 | MINOR | 取消旧格式兼容会破坏现有 option=2 fixtures/tests | 属实,采纳:§11 Phase 2 加"迁移 option=2 fixtures/tests 到 canonical 格式" |
+| 6 | NIT | §6.4 未说明 `validatePauseDecisionsFence` 签名变化 | 采纳:§6.4 末补签名扩展说明,§11 注明两阶段的签名改动 |

@@ -20,6 +20,20 @@ describe('buildIndexTask', () => {
     expect(task!.prompt).not.toContain('docs/UAT.md'); // acceptance-report 不进 LLM
     expect(prebuilt.find((e) => e.path === 'docs/UAT.md')).toBeTruthy();
   });
+
+  it('non-authoritative anchor 被过滤,不进 LLM task 也不进 prebuilt', async () => {
+    const withNonAuth: LegacyAnchorsFile = {
+      schema: 'forge-legacy-anchor/v1',
+      anchors: [
+        { role: 'requirements', path: 'docs/SRS.md', authoritative: true },
+        { role: 'requirements', path: 'docs/SRS-old.md', authoritative: false },
+      ],
+    };
+    const { task, prebuilt } = await buildIndexTask(withNonAuth, async () => '正文内容若干');
+    expect(task!.prompt).toContain('docs/SRS.md');
+    expect(task!.prompt).not.toContain('docs/SRS-old.md'); // authoritative=false 被过滤
+    expect(prebuilt.find((e) => e.path === 'docs/SRS-old.md')).toBeUndefined();
+  });
 });
 
 describe('applyIndexResult', () => {

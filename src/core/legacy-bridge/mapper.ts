@@ -1,7 +1,6 @@
 // 二阶段 mapping 第一阶段:LLM 扫 docs/+src/ → anchors-draft.yaml — Plan 7 Phase D
 // 决策 #4(二阶段 mapping)+ M-2(--merge / --overwrite 语义)
 
-import Anthropic from '@anthropic-ai/sdk';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, relative, extname } from 'node:path';
@@ -44,13 +43,6 @@ export interface MapperOutput {
   preservedAnchors: LegacyAnchor[];
   /** 扫到但未匹配 role 的文件(让 LLM 标 'unmatched',用户后审) */
   unmatched: string[];
-}
-
-/** mapper 客户端最小接口 */
-export interface MapperClient {
-  messages: {
-    create: (args: Anthropic.Messages.MessageCreateParams) => Promise<Anthropic.Messages.Message>;
-  };
 }
 
 const DEFAULT_MODEL = 'claude-sonnet-4-6';
@@ -225,25 +217,6 @@ export function applyMapResult(
     preservedAnchors,
     unmatched,
   };
-}
-
-/** 跑 mapping(LLM 推测)—— 内部复用 buildMapTask + applyMapResult */
-export async function runMapper(client: MapperClient, input: MapperInput): Promise<MapperOutput> {
-  const task = await buildMapTask(input);
-  const allFiles = task.inputs.map((i) => i.source);
-  // 无文件时直接返回空结果
-  if (task.inputs.length === 0) return applyMapResult('[]', [], input);
-  // P7-07 修复:LLM 调用前数据传输声明
-  console.log(
-    `→ sending ${Buffer.byteLength(task.prompt, 'utf8')} bytes to Anthropic API (provider=anthropic, region: auto, model=${DEFAULT_MODEL}, op=map ${task.inputs.length} files)`,
-  );
-  const result = await client.messages.create({
-    model: DEFAULT_MODEL,
-    max_tokens: 4096,
-    messages: [{ role: 'user', content: task.prompt }],
-  });
-  const block = result.content.find((b): b is Anthropic.Messages.TextBlock => b.type === 'text');
-  return applyMapResult(block?.text ?? '', allFiles, input);
 }
 
 /** 渲染概览 markdown(给用户审) */

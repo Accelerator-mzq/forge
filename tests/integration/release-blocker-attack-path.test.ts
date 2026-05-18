@@ -50,6 +50,8 @@ import {
   type ArchiveSummary,
 } from '../../src/core/schemas/archive-summary.js';
 import { validateVersionRetrograde } from '../../src/core/archive/version-retrograde-fence.js';
+import { validatePauseDecisionsFence } from '../../src/core/archive/pause-decisions-fence.js';
+import { execFileSync } from 'node:child_process';
 
 // 文件级 beforeEach:每个测试前把 execFileMock 转发到真实 execFile + 适配 callback 形态
 // 真实 execFile callback 签名是 (err, stdout, stderr)
@@ -73,9 +75,54 @@ beforeEach(async () => {
 });
 
 describe('release-blocker: pause_decisions option=1/2 attack paths (9z gate)', () => {
-  it.todo(
-    'option=1 attack: marker 写 target_artifact=proposal.md / target_anchor=## What Changes,但实际 git diff 只改了 tasks.md → fence 应拒签(沿 9c §7.5.1 + design §2.1.5 line 262)',
-  );
+  it('option=1 attack:marker 写 target_anchor=## What Changes 但 diff 只改 tasks.md → fence 拒签', async () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), 'forge-relblk-opt1-'));
+    try {
+      // 初始化 git 仓库并建立 baseline commit
+      execFileSync('git', ['init', '-q'], { cwd: repoRoot });
+      execFileSync('git', ['config', 'user.email', 't@t.com'], { cwd: repoRoot });
+      execFileSync('git', ['config', 'user.name', 't'], { cwd: repoRoot });
+      const changeDir = join(repoRoot, 'forge', 'changes', 'c1');
+      mkdirSync(changeDir, { recursive: true });
+      // baseline:写入 proposal.md(含 ## What Changes 段)和 tasks.md
+      writeFileSync(
+        join(changeDir, 'proposal.md'),
+        '# P\n\n## What Changes\n\n- a\n\n## Impact\n\n- x\n',
+      );
+      writeFileSync(join(changeDir, 'tasks.md'), '# Tasks\n\n- [ ] task-1: t\n');
+      execFileSync('git', ['add', '-A'], { cwd: repoRoot });
+      execFileSync('git', ['commit', '-q', '-m', 'baseline'], { cwd: repoRoot });
+      // attack:只改 tasks.md,proposal.md 不动,但 marker 声称 option=1 改了 ## What Changes
+      writeFileSync(join(changeDir, 'tasks.md'), '# Tasks\n\n- [x] task-1: t\n');
+      const result = await validatePauseDecisionsFence(
+        {
+          pause_decisions: [
+            {
+              id: 1,
+              paused_at: '2026-05-12T14:30:00Z',
+              task_ref: 'tasks.md#task-1',
+              issue_summary: 'x',
+              severity: 'WARNING',
+              severity_acked_by: 'msc',
+              severity_acked_at: '2026-05-12T14:32:00Z',
+              chosen_option: 1,
+              target_artifact: 'proposal.md',
+              target_anchor: '## What Changes',
+              non_blocking_rationale: null,
+              other_rationale: null,
+              other_acked_by: null,
+            },
+          ],
+        },
+        changeDir,
+        repoRoot,
+      );
+      // proposal.md 未改 → git diff 空 → What Changes 段无新增行 → fence 拒签
+      expect(result.valid).toBe(false);
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
 
   it.todo(
     'option=2 attack: marker 写 task_ref=tasks.md#task-2 + 该 task 已勾选,但 git log 显示该 task 在 paused_at 之前已存在(非新增) → fence 应拒签(沿 9c §7.5.2 + design §2.1.5 line 263)',

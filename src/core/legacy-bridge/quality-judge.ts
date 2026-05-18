@@ -265,6 +265,42 @@ export function parseFactJudgeResponse(text: string, fact: KeyFact): FactJudgeRe
   return { fact, state, reasoning };
 }
 
+/** 纯函数:三态 judge 结果 + 抽样 → QualityResult。critical 必须 100% 的 gate 在此。
+ *  行为等价于原 judgeAllFacts 算分段;抽出后供 judgeAllFacts(LLM 路径) 和
+ *  applyRound2(agent 路径) 共同复用,不因走 agent 路径软化质量模型。
+ */
+export function computeQualityResult(
+  judged: FactJudgeResult[],
+  sampling: SamplingOutput,
+  threshold: number = DEFAULT_FIDELITY_THRESHOLD,
+): QualityResult {
+  const critical = judged.filter((r) => r.fact.critical);
+  const nonCritical = judged.filter((r) => !r.fact.critical);
+  // critical 必须 100%
+  const criticalRate =
+    critical.length === 0
+      ? 1.0
+      : critical.filter((r) => r.state !== 'lost').length / critical.length;
+  // 总体保真率
+  const totalRate =
+    judged.length === 0 ? 1.0 : judged.filter((r) => r.state !== 'lost').length / judged.length;
+  // per_section_rates
+  const perSectionRates: Record<string, number> = {};
+  for (const [section, totalInSection] of Object.entries(sampling.perSectionSampled)) {
+    const preserved = judged.filter((r) => r.fact.section === section && r.state !== 'lost').length;
+    perSectionRates[section] = totalInSection === 0 ? 1.0 : preserved / totalInSection;
+  }
+  return {
+    total_rate: totalRate,
+    critical_rate: criticalRate,
+    per_section_rates: perSectionRates,
+    lost_critical: critical.filter((r) => r.state === 'lost').map((r) => r.fact),
+    lost_non_critical: nonCritical.filter((r) => r.state === 'lost').map((r) => r.fact),
+    uncovered_sections: sampling.uncoveredSections,
+    passed: criticalRate >= 1.0 && totalRate >= threshold,
+  };
+}
+
 /** 跑全部 sampled facts 的判定 + 计算 QualityResult。
  *  注:Promise.all 不 wrap try/catch — 单条 judgeSingleFact API 失败(网络 / 429)时整个 reject;
  *  caller(CLI 层)需自行 wrap try/catch 并归类到 .partial 路径。
@@ -281,40 +317,8 @@ export async function judgeAllFacts(
   const judged = await Promise.all(
     sampling.sampled.map((f) => judgeSingleFact(client, regeneratedBody, f)),
   );
-
-  const critical = judged.filter((r) => r.fact.critical);
-  const nonCritical = judged.filter((r) => !r.fact.critical);
-
-  const critPreserved = critical.filter((r) => r.state !== 'lost');
-  const totalPreserved = judged.filter((r) => r.state !== 'lost');
-
-  // critical 必须 100%
-  const criticalRate = critical.length === 0 ? 1.0 : critPreserved.length / critical.length;
-  // 总体保真率
-  const totalRate = judged.length === 0 ? 1.0 : totalPreserved.length / judged.length;
-
-  // per_section_rates
-  const perSectionRates: Record<string, number> = {};
-  for (const [section, totalInSection] of Object.entries(sampling.perSectionSampled)) {
-    const sectionJudged = judged.filter((r) => r.fact.section === section);
-    const preserved = sectionJudged.filter((r) => r.state !== 'lost');
-    perSectionRates[section] = totalInSection === 0 ? 1.0 : preserved.length / totalInSection;
-  }
-
-  const lostCritical = critical.filter((r) => r.state === 'lost').map((r) => r.fact);
-  const lostNonCritical = nonCritical.filter((r) => r.state === 'lost').map((r) => r.fact);
-
-  const passed = criticalRate >= 1.0 && totalRate >= threshold;
-
-  return {
-    total_rate: totalRate,
-    critical_rate: criticalRate,
-    per_section_rates: perSectionRates,
-    lost_critical: lostCritical,
-    lost_non_critical: lostNonCritical,
-    uncovered_sections: sampling.uncoveredSections,
-    passed,
-  };
+  // DRY:算分委托 computeQualityResult,行为与重构前完全一致
+  return computeQualityResult(judged, sampling, threshold);
 }
 
 /** 把 QualityResult 渲染为给用户看的报告 */

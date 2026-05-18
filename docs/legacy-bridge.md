@@ -49,6 +49,60 @@ archive sync-check 自动 graceful skip,forge 主工作流不变。
 
 ## 完整工作流
 
+### 双路径执行模型(**BREAKING**)
+
+> **BREAKING**:`forge legacy-bridge` 的 map / index / regenerate / sync-check 四命令默认行为已变更:从进程内直接调用 Anthropic SDK → **agent 模式**。升级后首次运行请阅读本节。
+
+#### 默认:agent 模式
+
+四命令(map / index / regenerate / sync-check)默认以 agent 模式运行,分三步:
+
+1. **emit**:命令将 Task manifest 写入 `forge/.cache/legacy-bridge-task-<op>.json`(含操作参数、锚点路径、config 快照),然后挂起等待。
+2. **fulfill**:AI agent 读取 manifest,按 `legacy-bridge-fulfillment` skill 执行(LLM 推理、文件读写、结果写回 cache)。
+3. **apply**:跑 `forge legacy-bridge <op> --apply`,消费 agent fulfill 写回的结果文件,完成最终落盘。
+
+#### `--api` flag:切回进程内 SDK(CI / 高保证场景)
+
+四命令(map / index / regenerate / sync-check)均支持 `--api`,例如:
+
+```bash
+forge legacy-bridge map --api
+forge legacy-bridge regenerate --api
+```
+
+`--api` 保留原进程内行为——直接调 Anthropic SDK,不产生 manifest,不暂停,适合 CI pipeline 或需要确定性输出的场景。
+
+#### `--apply`:消费 agent fulfill 结果
+
+```bash
+forge legacy-bridge <op> --apply
+```
+
+fulfill 完成后手动触发(或由 agent 自动触发):CLI 读取 manifest 中各 task 的 `outputPath` 所指向的**结果文件**(agent 只往 `outputPath` 写结果,不改 manifest 本身),校验 manifest 的 `manifest_hash` 完整性,完成确定性后处理与落盘,最后消费(移除)manifest。
+
+#### regenerate 两轮流
+
+regenerate 分两轮进行:
+
+- **Round 1**:emit round1 manifest → fulfill → `regenerate --apply`(自动 emit round2 manifest)。
+- **Round 2**:fulfill round2 → `regenerate --apply`(最终落盘复写产物)。
+
+两轮之间 agent 可校验 round1 产物后再 fulfill round2,保证保真率。
+
+#### archive 集成(enforce\_sync=true)
+
+当 `enforce_sync=true` 时,`forge archive` 在 preflight 阶段:
+
+1. emit sync-check manifest + 写暂停态文件 `forge/.cache/archive-pause-<changeId>.json` 并**暂停**(`archive` 进程挂起,exit 0,不继续)。
+2. 用户 / agent fulfill sync-check,跑 `forge legacy-bridge sync-check --apply`。
+3. 跑 `forge archive --resume` 续跑:CLI 复核 sync-state 由本次 manifest 产生(`produced_from` 绑定校验)+ 重跑 critical pending 判定——仍有 critical pending 则拒绝 resume(exit 2);通过后续跑后续 archive fence。
+
+`forge archive --api` 则在 preflight 进程内直连 SDK 跑 sync-check,不 emit、不暂停。
+
+`enforce_sync=false`(默认)时 archive 正常完成,在 post-archive 点仍 emit 一个 sync-check manifest(非阻塞,agent 可异步 fulfill 出报告)。
+
+---
+
 ### T0:初始化(~30 分钟人工 + ~$10-20 LLM 成本)
 
 ```bash

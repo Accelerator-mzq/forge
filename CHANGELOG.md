@@ -6,6 +6,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING** `forge legacy-bridge` 的 map/index/regenerate/sync-check 四命令默认改为 agent 模式(emit Task manifest,需 fulfill 后跑 `--apply`)。`--api` flag 切回原进程内 SDK 行为。详见 docs/specs/2026-05-18-legacy-bridge-dual-path-exec-design.md。
+
 ## [1.4.0] - 2026-05-17
 
 ### Fixed

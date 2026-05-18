@@ -5,6 +5,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { readAnchorAsText } from './encoding.js';
 import { redact } from './redact.js';
 import type { LegacyAnchor, LegacyAnchorsFile } from './types.js';
+import type { LlmTask } from './llm-task.js';
 
 /** 单 anchor 索引项 */
 export interface IndexEntry {
@@ -106,19 +107,6 @@ export async function indexAnchor(
   };
 }
 
-/** 跑全部 authoritative anchor */
-export async function buildIndex(
-  client: IndexerClient,
-  file: LegacyAnchorsFile,
-): Promise<IndexEntry[]> {
-  const auth = file.anchors.filter((a) => a.authoritative);
-  const out: IndexEntry[] = [];
-  for (const a of auth) {
-    out.push(await indexAnchor(client, a));
-  }
-  return out;
-}
-
 /** 渲染索引为 markdown(forge/docs/index.md) */
 export function renderIndexMarkdown(entries: IndexEntry[]): string {
   const lines: string[] = [];
@@ -140,6 +128,74 @@ export function isSummaryWithinTolerance(summary: string): boolean {
     len >= SUMMARY_TARGET_LEN - SUMMARY_TOLERANCE * 2 &&
     len <= SUMMARY_TARGET_LEN + SUMMARY_TOLERANCE * 4
   );
+}
+
+/** 确定性 prep:产 batch 摘要 LlmTask + metadata-only 的 prebuilt 项 */
+export async function buildIndexTask(
+  file: LegacyAnchorsFile,
+  readText: (anchor: LegacyAnchor) => Promise<string>,
+): Promise<{ task: LlmTask | null; prebuilt: IndexEntry[] }> {
+  // 只处理 authoritative anchor
+  const auth = file.anchors.filter((a) => a.authoritative);
+  const prebuilt: IndexEntry[] = [];
+  const llmAnchors: Array<{ anchor: LegacyAnchor; masked: string }> = [];
+  for (const a of auth) {
+    // metadata-only role 不进 LLM,走 prebuilt 路径
+    if (METADATA_ONLY_INDEX_ROLES.has(a.role)) {
+      prebuilt.push(await indexAnchorMetadataOnly(a));
+      continue;
+    }
+    // 读文件内容并 redact 敏感数据
+    const masked = redact(await readText(a)).redactedText;
+    llmAnchors.push({ anchor: a, masked });
+  }
+  // 所有 anchor 均为 metadata-only,不需要 LLM
+  if (llmAnchors.length === 0) return { task: null, prebuilt };
+  // 构造 batch prompt:合并所有需要 LLM 的 anchor
+  const prompt =
+    `请为下列每份文档产出约 ${SUMMARY_TARGET_LEN} 字摘要。\n严格输出 JSON 对象 {"<path>": "<摘要>"},不加 preamble。\n\n` +
+    llmAnchors.map((x) => `## ${x.anchor.path}(role=${x.anchor.role})\n${x.masked}`).join('\n\n');
+  return {
+    task: {
+      op: 'index',
+      inputs: llmAnchors.map((x) => ({ source: x.anchor.path, content: x.masked })),
+      prompt,
+      model: DEFAULT_MODEL,
+      outputSchema: '{ "<anchor-path>": "<约 100 字摘要>" }',
+      outputPath: '.cache/legacy-bridge-result-index.json',
+    },
+    prebuilt,
+  };
+}
+
+/** 确定性后处理:LLM 的 {path:summary} map + prebuilt → index markdown */
+export function applyIndexResult(
+  llmText: string,
+  file: LegacyAnchorsFile,
+  prebuilt: IndexEntry[],
+): string {
+  // 解析 LLM 返回的 {path: summary} JSON 对象
+  let summaries: Record<string, string> = {};
+  try {
+    const parsed = JSON.parse(llmText.trim()) as Record<string, string>;
+    // 排除 JSON 数组:typeof [] === 'object' 亦为 true,放行会产 numeric-key 垃圾条目
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) summaries = parsed;
+  } catch {
+    // 解析失败:LLM 摘要全空,prebuilt 仍渲染
+  }
+  // 建立 path → role 的反查 map
+  const roleOf = new Map(file.anchors.map((a) => [a.path, a.role]));
+  // 合并 prebuilt 与 LLM 摘要,统一渲染 markdown
+  const entries: IndexEntry[] = [
+    ...prebuilt,
+    ...Object.entries(summaries).map(([path, summary]) => ({
+      path,
+      role: roleOf.get(path) ?? 'unmatched',
+      summary,
+      inputBytes: 0,
+    })),
+  ];
+  return renderIndexMarkdown(entries);
 }
 
 /** P7-03 修复:metadata-only 索引(不发 LLM,只读文件名 + 可选 frontmatter)

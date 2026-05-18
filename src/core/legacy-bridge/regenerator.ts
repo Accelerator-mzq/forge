@@ -3,9 +3,23 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import matter from 'gray-matter';
-import type { LegacyAnchor, LegacyAnchorRole, LegacyAnchorsFile } from './types.js';
+import type {
+  KeyFact,
+  LegacyAnchor,
+  LegacyAnchorRole,
+  LegacyAnchorsFile,
+  QualityResult,
+} from './types.js';
 import { redact, type RedactReport } from './redact.js';
 import { readAnchorAsText } from './encoding.js';
+import type { LlmTask, LlmTaskInput } from './llm-task.js';
+import {
+  stratifiedSample,
+  computeQualityResult,
+  type SamplingOutput,
+  type FactState,
+  type FactJudgeResult,
+} from './quality-judge.js';
 
 /** 复写参数 */
 export interface RegenerateInput {
@@ -231,8 +245,12 @@ export class RegenOutputError extends Error {
   }
 }
 
-/** 加 frontmatter + 顶部 disclaimer(决策 #21 / §9) */
-function wrapWithFrontmatterAndDisclaimer(body: string, input: RegenerateInput): string {
+/**
+ * 加 frontmatter + 顶部 disclaimer(决策 #21 / §9)。
+ * Task 6.2 round-2:export 供双路径 CLI(--api / --apply 成功路径)复用,
+ * 与 regenerateRole 单进程路径产物保持一致(同一 frontmatter/disclaimer)。
+ */
+export function wrapWithFrontmatterAndDisclaimer(body: string, input: RegenerateInput): string {
   const generatedAt = new Date().toISOString();
   // 用 JSON.stringify 包裹路径,确保含特殊 yaml 字符(`: ` / `#` / `\n` 等)的路径不破 yaml 结构
   // (JSON 字符串字面量是 yaml 双引号字符串的合法子集)
@@ -275,4 +293,157 @@ function mergeHits(a: Record<string, number>, b: Record<string, number>): Record
     merged[name] = (merged[name] ?? 0) + count;
   }
   return merged;
+}
+
+/** 轮1 校验后处理:解析 facts(KeyFact)→ 确定性分层抽样 → 产轮2 quality-judge LlmTask + SamplingOutput */
+export function applyRound1AndBuildRound2(
+  regenBody: string,
+  extractFactsText: string,
+  role: LegacyAnchorRole,
+): { task: LlmTask; sampling: SamplingOutput } {
+  // 复用既有 markdown 合法性校验
+  validateRegenOutput(regenBody, role);
+  let facts: KeyFact[] = [];
+  try {
+    // LLM 偶尔违反 prompt 输出 ```json ... ``` fence;先剥再 parse(对齐 quality-judge.ts I-3 修)
+    const cleanText = extractFactsText
+      .trim()
+      .replace(/^```(?:json|JSON)?\r?\n/, '')
+      .replace(/\r?\n```\s*$/, '')
+      .trim();
+    const parsed = JSON.parse(cleanText);
+    if (Array.isArray(parsed)) {
+      facts = (parsed as Array<Partial<KeyFact>>)
+        .map((o) => ({
+          text: typeof o.text === 'string' ? o.text : '',
+          section: typeof o.section === 'string' ? o.section : '(unstructured)',
+          critical: typeof o.critical === 'boolean' ? o.critical : false,
+        }))
+        .filter((f) => f.text.trim().length > 0);
+    }
+  } catch {
+    // JSON.parse 失败 → facts 保持空数组,后续统一走 facts.length === 0 错误路径
+    facts = [];
+  }
+  // extract-facts 失败 / 空 → 无法验证保真率;不静默走「空抽样=passed」,显式抛错(下游写 .partial)
+  if (facts.length === 0) {
+    throw new RegenOutputError(
+      'extract-facts 未抽出任何 fact(LLM 输出非法或为空);无法验证保真率',
+      role,
+    );
+  }
+  // 确定性分层抽样,留 CLI 侧
+  const sampling = stratifiedSample({ allFacts: facts });
+  // 将抽样 fact 编号排列,供 LLM 三态判定
+  const numbered = sampling.sampled
+    .map((f, i) => `${i + 1}. [${f.section}${f.critical ? ',critical' : ''}] ${f.text}`)
+    .join('\n');
+  const prompt =
+    `下面是一份「复写产物」和一组「原文 fact」。对每个 fact 三态判定它是否在复写产物里被保留:\n` +
+    `- preserved:字面/数值完全一致\n` +
+    `- paraphrased:同义改写但语义+数值+约束完全等价\n` +
+    `- lost:漏掉 / 数值错 / 约束丢\n\n` +
+    `严格输出 JSON 数组,**顺序与 fact 编号一一对应**,每项 { "state": "preserved"|"paraphrased"|"lost" }。不加 preamble。\n\n` +
+    `# 复写产物\n${regenBody}\n\n# 待判 fact\n${numbered}`;
+  const inputs: LlmTaskInput[] = [{ source: 'regen-body', content: regenBody }];
+  return {
+    task: {
+      op: 'quality-judge',
+      inputs,
+      prompt,
+      model: DEFAULT_MODEL,
+      outputSchema: '[{ "state": "preserved"|"paraphrased"|"lost" }](顺序对应 fact 编号)',
+      outputPath: '.cache/legacy-bridge-result-quality-judge.json',
+    },
+    sampling,
+  };
+}
+
+/** 轮1:产 regenerate + extract-facts 两个 LlmTask */
+export async function buildRegenerateRound1Tasks(
+  input: RegenerateInput,
+  // 默认用 readAnchorAsText;测试可注入 mock
+  readText: (anchor: LegacyAnchor) => Promise<string> = readAnchorAsText,
+): Promise<LlmTask[]> {
+  // metadata-only role 不发 LLM(spec §7 line 909 / P7-03 修复)
+  if (METADATA_ONLY_ROLES.includes(input.role)) {
+    throw new RegenOutputError(
+      `role=${input.role} 是 metadata-only(spec §7 line 909);不复写。`,
+      input.role,
+    );
+  }
+
+  // 合并全局 redact 规则和 anchor 级别规则,然后对权威源文本 mask
+  const redactRules = [...(input.globalRedactRules ?? []), ...(input.authoritative.redact ?? [])];
+  const maskedAuth = redact(await readText(input.authoritative), redactRules).redactedText;
+
+  // 复写 prompt(复用既有 buildRegeneratePrompt)
+  const regeneratePrompt = buildRegeneratePrompt(input, maskedAuth);
+
+  // 关键事实抽取 prompt:从老文档提取结构化 JSON 事实列表
+  const extractFactsPrompt = `从下列老文档抽取关键事实(数字 / 字段约束 / 业务规则 / 合规条款 / 设计决策)。\n严格输出 JSON 数组,每项含 { "text": string(<=80 字单句), "section": string(章节锚如 "§4.5",无则 "(unstructured)"), "critical": boolean(合规/安全/业务硬约束=true) }。不加 preamble、不带 code fence。\n\n# 老文档\n${maskedAuth}`;
+
+  // 两个 task 共用的公共字段
+  const common = {
+    model: DEFAULT_MODEL,
+    inputs: [{ source: input.authoritative.path, content: maskedAuth }],
+  };
+
+  return [
+    {
+      ...common,
+      op: 'regenerate' as const,
+      prompt: regeneratePrompt,
+      outputSchema: 'markdown 正文',
+      outputPath: `.cache/legacy-bridge-result-regenerate.json`,
+    },
+    {
+      ...common,
+      op: 'extract-facts' as const,
+      prompt: extractFactsPrompt,
+      outputSchema: '[{ "text": string, "section": string, "critical": boolean }]',
+      outputPath: `.cache/legacy-bridge-result-extract-facts.json`,
+    },
+  ];
+}
+
+/** 轮2 后处理:agent 三态 judge 结果(JSON 字符串) + 轮1 抽样 → QualityResult。
+ *  critical 必须 100% 的 gate 在 computeQualityResult 内,不因走 agent 路径软化。
+ *  agent 漏判的 fact(数组越界)保守视为 lost。
+ */
+export function applyRound2(
+  judgeText: string,
+  sampling: SamplingOutput,
+  threshold: number,
+): QualityResult {
+  // 解析 agent 输出的三态 JSON 数组;解析失败 → 所有 fact 保守视为 lost
+  let states: FactState[] = [];
+  try {
+    const parsed = JSON.parse(judgeText.trim());
+    if (Array.isArray(parsed)) {
+      states = (parsed as Array<{ state?: string }>).map((o) =>
+        o.state === 'preserved' || o.state === 'paraphrased' || o.state === 'lost'
+          ? o.state
+          : 'lost',
+      );
+    } else {
+      // 合法 JSON 但非数组 → 无法逐 fact 对应,所有 fact 保守视为 lost(fail-closed)
+      console.warn(
+        `[applyRound2] agent judge 输出非 JSON 数组(type=${typeof parsed});所有 fact 保守视为 lost`,
+      );
+    }
+  } catch {
+    // JSON 解析失败 → states 保持空数组,下面逐条 fallback 为 lost(fail-closed)
+    console.warn(
+      `[applyRound2] agent judge 输出非合法 JSON;所有 fact 保守视为 lost。原文(head 200):\n${judgeText.slice(0, 200)}`,
+    );
+    states = [];
+  }
+  // 按编号与轮1 抽样 fact 一一对应;agent 漏判的 fact 保守视为 lost
+  const judged: FactJudgeResult[] = sampling.sampled.map((fact, i) => ({
+    fact,
+    state: states[i] ?? 'lost',
+  }));
+  // 复用纯函数算分 gate,行为与 LLM 路径完全一致
+  return computeQualityResult(judged, sampling, threshold);
 }

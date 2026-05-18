@@ -3,6 +3,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { redact } from './redact.js';
+import type { LlmTask } from './llm-task.js';
 import { checkAnchorHash } from './hash-anchor.js';
 import { decideCrossRole, type CrossRoleInput } from './conflict.js';
 import { normalizeDiffsFromLlm } from './diff-report.js';
@@ -267,4 +268,98 @@ function extractKeywords(text: string): string[] {
 function extractText(result: Anthropic.Messages.Message): string {
   const block = result.content.find((b): b is Anthropic.Messages.TextBlock => b.type === 'text');
   return block?.text ?? '';
+}
+
+/** 确定性后处理:LLM diff 数组文本 → SyncStateFile(带 produced_from) */
+export function applySyncCheckResult(
+  llmText: string,
+  changeId: string,
+  producedFromHash: string,
+): SyncStateFile {
+  let raw: Array<Partial<SyncStateDiff>> = [];
+  try {
+    const parsed = JSON.parse(llmText.trim());
+    if (Array.isArray(parsed)) {
+      raw = parsed as Array<Partial<SyncStateDiff>>;
+    } else {
+      // valid JSON 但形态非数组 —— 同等视为输出异常,写告警 diff,不静默漏报
+      raw = [
+        {
+          severity: 'info',
+          description: `LLM 输出格式非数组:${JSON.stringify(parsed).slice(0, 200)}`,
+        },
+      ];
+    }
+  } catch {
+    raw = [{ severity: 'info', description: `LLM 输出非合法 JSON:${llmText.slice(0, 200)}` }];
+  }
+  const diffs: SyncStateDiff[] = normalizeDiffsFromLlm(raw).map((d, i) => ({ ...d, id: i + 1 }));
+  return {
+    schema: 'forge-legacy-sync/v1',
+    change_id: changeId,
+    generated_at: new Date().toISOString(),
+    diffs,
+    produced_from: producedFromHash,
+  };
+}
+
+/** 确定性 prep:findAffectedAnchors + redact(含 changeContext,补盲区)→ 一个 LlmTask */
+export async function buildSyncCheckTask(
+  input: SyncCheckInput,
+  readAnchorText: (path: string) => Promise<string>,
+  indexEntries?: Array<{ path: string; summary: string }>,
+): Promise<LlmTask | null> {
+  // 找到受本次 change 影响的 anchor
+  let affected = findAffectedAnchors(input.anchors, input.affectedModules);
+  // 取全局 redact 规则
+  const redactRules = input.anchors.redact ?? [];
+
+  // 可选索引摘要过滤:仅"高分"摘要的 anchor 才打开原文
+  if (indexEntries && indexEntries.length > 0) {
+    const keywords = extractKeywords(input.changeContext);
+    const filtered = affected.filter((a) => {
+      const entry = indexEntries.find((e) => e.path === a.path);
+      if (!entry) return true; // 无摘要 → 默认打开(保守)
+      return keywords.some((k) => entry.summary.includes(k));
+    });
+    if (filtered.length > 0) affected = filtered;
+  }
+
+  // 无受影响 anchor → 不 emit 任务
+  if (affected.length === 0) return null;
+
+  // 修盲区:changeContext 也 redact 后再进 prompt
+  const maskedContext = redact(input.changeContext, redactRules).redactedText;
+  const blocks: string[] = [];
+  const inputs: LlmTask['inputs'] = [{ source: 'change-context', content: maskedContext }];
+
+  for (const anchor of affected) {
+    let masked: string;
+    try {
+      // 锚点正文也走 redact,与 runSyncCheck 行为对齐
+      masked = redact(await readAnchorText(anchor.path), redactRules).redactedText;
+    } catch (err) {
+      // 缺失锚点不阻塞(对齐现 runSyncCheck P7-10)
+      console.warn(`⚠ anchor ${anchor.path} 读取失败:${(err as Error).message};跳过该项继续`);
+      continue;
+    }
+    blocks.push(`# 锚点 role=${anchor.role} path=${anchor.path}\n${masked}`);
+    inputs.push({ source: anchor.path, content: masked });
+  }
+
+  // affected 存在但全部读取失败 → 无锚点内容,不 emit 空 sync-check task
+  if (blocks.length === 0) return null;
+
+  // 拼整合 prompt(多 anchor 聚合,对齐 spec §5 buildSyncCheckTask 设计)
+  const prompt = `你是 brownfield sync 审计员。判断"本次 change"是否要求更新各"老文档锚点"。\n\n# 本次 change 上下文\n${maskedContext}\n\n${blocks.join('\n\n')}\n\n# 输出\n严格 JSON 数组,每项 { "anchor_path": string, "severity": "critical|major|minor|style|info", "section": string, "description": string }。无更新输出 []。`;
+
+  return {
+    op: 'sync-check',
+    inputs,
+    prompt,
+    model: DEFAULT_MODEL,
+    outputSchema:
+      '[{ "anchor_path": string, "severity": string, "section": string, "description": string }]',
+    outputPath: '.cache/legacy-bridge-result-sync-check.json',
+  };
 }

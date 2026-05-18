@@ -1,5 +1,6 @@
-// CLI: forge legacy-bridge map — Plan 7 Phase D Task D3
-// happy path:无 existing anchors → --overwrite → 写 draft yaml + md
+// CLI: forge legacy-bridge map — Plan 7 Phase D Task D3 + Task 6.1(默认翻转 agent 模式)
+// 默认行为已翻转:map --overwrite → emit manifest(agent 路径);
+// --api flag → 进程内调 Anthropic SDK 写 draft yaml + md。
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
@@ -56,7 +57,8 @@ describe('forge legacy-bridge map (CLI)', () => {
     vi.clearAllMocks();
   });
 
-  it('happy path → 写 legacy-anchors-draft.yaml + .md', async () => {
+  it('默认(无 flag)→ emit manifest 到 .cache,不写 draft yaml(agent 路径)', async () => {
+    // Task 6.1:默认行为翻转为 emit manifest;draft yaml 在 --apply 阶段才产出
     const cwd = process.cwd();
     try {
       process.chdir(tmp);
@@ -67,6 +69,32 @@ describe('forge legacy-bridge map (CLI)', () => {
       const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
       try {
         await cmd.parseAsync(['node', 'forge', 'map', '--overwrite']);
+        expect(exitSpy).toHaveBeenCalledWith(0);
+        // 默认模式:manifest 已写到 .cache
+        expect(existsSync(join(tmp, 'forge', '.cache', 'legacy-bridge-task-map.json'))).toBe(true);
+        // 默认模式:不直接写 draft yaml(需 --apply 消费结果后才写)
+        expect(existsSync(join(tmp, 'forge', 'legacy-anchors-draft.yaml'))).toBe(false);
+      } finally {
+        exitSpy.mockRestore();
+        logSpy.mockRestore();
+      }
+    } finally {
+      process.chdir(cwd);
+    }
+  });
+
+  it('--api flag → 进程内调 SDK → 写 legacy-anchors-draft.yaml + .md', async () => {
+    // Task 6.1:--api 模式走进程内 SDK 路径,产出 draft yaml + md
+    const cwd = process.cwd();
+    try {
+      process.chdir(tmp);
+      const { buildLegacyBridgeCommand } =
+        await import('../../../src/cli/commands/legacy-bridge.js');
+      const cmd = buildLegacyBridgeCommand();
+      const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+      try {
+        await cmd.parseAsync(['node', 'forge', 'map', '--overwrite', '--api']);
         expect(exitSpy).toHaveBeenCalledWith(0);
         expect(existsSync(join(tmp, 'forge', 'legacy-anchors-draft.yaml'))).toBe(true);
         expect(existsSync(join(tmp, 'forge', 'legacy-anchors-draft.md'))).toBe(true);

@@ -1,6 +1,6 @@
 // ack-confirm-marker.test.ts: Task A2/A3 TDD — ack confirm 写 marker ack 字段 + ack-log finding_hash
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -361,5 +361,120 @@ describe('ack confirm 写 marker —— ack-pause-warning', () => {
     const ackEntry = JSON.parse(log[log.length - 1]!) as Record<string, unknown>;
     expect(ackEntry.finding_id).toBe('pause_decisions:1');
     expect(ackEntry.finding_hash).toBeNull();
+  });
+});
+
+describe('ack confirm 事务 —— rollback + 幂等', () => {
+  let proj: string;
+  let changeDir: string;
+
+  // 构造标准 ack-warning fixture
+  function buildWarningFixture(): void {
+    mkdirSync(join(changeDir, '.evidence', 'pending-acks'), { recursive: true });
+    const finding: Record<string, unknown> = {
+      id: 1,
+      dimension: 'correctness',
+      check_type: 'requirement-mapping',
+      severity: 'WARNING',
+      automated: false,
+      content_hash: 'sha256:abc',
+      git_head: 'd4e5f6',
+      evidence: 'ev',
+      recommendation: 'rec',
+      resolved: false,
+      severity_acked_by: null,
+      severity_acked_at: null,
+    };
+    finding.finding_hash = computeFindingHash(extractHashPayload(finding as unknown as Finding));
+    writeFileSync(
+      join(changeDir, '.verify-passed'),
+      stringifyYaml({ schema: 'forge-verify/v1', verify_findings: [finding] }),
+    );
+  }
+
+  beforeEach(() => {
+    proj = mkdtempSync(join(tmpdir(), 'ackproj-txn-'));
+    changeDir = join(proj, 'forge', 'changes', 'add-x');
+  });
+
+  it('(a) rollback: ack-log 路径是目录时, marker 从 .bak 恢复, pending 未删, confirm exit 非 0', () => {
+    buildWarningFixture();
+
+    // propose 阶段(AI 写 pending,exit 1)
+    expect(
+      runForge(proj, ['ack', 'propose', 'add-x', '--finding', '1', '--action', 'ack-warning']).code,
+    ).toBe(1);
+
+    // 把 ack-log.jsonl 路径创建为目录 → readAllAckLogEntries/appendAckLog 读/写时 EISDIR
+    const evidenceDir = join(changeDir, '.evidence');
+    const ackLogPath = join(evidenceDir, 'ack-log.jsonl');
+    mkdirSync(ackLogPath, { recursive: true }); // 目录名就是 ack-log.jsonl
+
+    // confirm 应 exit 非 0(rollback 触发)
+    const r = runForge(proj, ['ack', 'confirm', 'add-x', '1']);
+    expect(r.code, `confirm 应 exit 非 0,但返回 ${r.code},stderr: ${r.stderr}`).not.toBe(0);
+
+    // marker 应从 .bak 恢复:severity_acked_by 回到 null
+    const marker = parseYaml(
+      readFileSync(join(changeDir, '.verify-passed'), 'utf8'),
+    ) as Record<string, unknown>;
+    const findings = marker.verify_findings as Array<Record<string, unknown>>;
+    expect(
+      findings[0]!.severity_acked_by,
+      'rollback 后 severity_acked_by 应为 null(已从 .bak 恢复)',
+    ).toBeNull();
+
+    // pending 文件未被删除(confirm 失败保留 pending 供 retry)
+    const pendingDir = join(changeDir, '.evidence', 'pending-acks');
+    const pendingFiles = (() => {
+      try {
+        const { readdirSync } = require('node:fs') as typeof import('node:fs');
+        return readdirSync(pendingDir).filter((f: string) => f.endsWith('.yaml'));
+      } catch {
+        return [];
+      }
+    })();
+    expect(pendingFiles.length, 'rollback 后 pending 文件应保留').toBeGreaterThan(0);
+  });
+
+  it('(b) 幂等: 同一 finding 二次 confirm 后 ack-log 不出现重复 ack entry', () => {
+    buildWarningFixture();
+
+    // 第一次 propose + confirm(应成功)
+    expect(
+      runForge(proj, ['ack', 'propose', 'add-x', '--finding', '1', '--action', 'ack-warning']).code,
+    ).toBe(1);
+    const r1 = runForge(proj, ['ack', 'confirm', 'add-x', '1']);
+    expect(r1.code, `第一次 confirm 应成功,stderr: ${r1.stderr}`).toBe(0);
+
+    // 第二次 propose 同 finding+action
+    expect(
+      runForge(proj, ['ack', 'propose', 'add-x', '--finding', '1', '--action', 'ack-warning']).code,
+    ).toBe(1);
+
+    // 第二次 confirm
+    const r2 = runForge(proj, ['ack', 'confirm', 'add-x', '1']);
+    expect(r2.code, `第二次 confirm 应成功(幂等),stderr: ${r2.stderr}`).toBe(0);
+
+    // 读 ack-log,断言 kind=ack 的 entry 中没有完全相同的 (change_id, finding_id, action, user, finding_hash)
+    const ackLogPath = join(changeDir, '.evidence', 'ack-log.jsonl');
+    expect(existsSync(ackLogPath), 'ack-log.jsonl 应存在').toBe(true);
+    const lines = readFileSync(ackLogPath, 'utf8')
+      .split('\n')
+      .filter((l) => l.trim().length > 0);
+    const ackEntries = lines
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+      .filter((e) => e['kind'] === 'ack');
+
+    // 构造去重 key,确认无重复
+    const keys = ackEntries.map(
+      (e) =>
+        `${String(e['change_id'])}|${String(e['finding_id'])}|${String(e['action'])}|${String(e['user'])}|${String(e['finding_hash'])}`,
+    );
+    const uniqueKeys = new Set(keys);
+    expect(
+      uniqueKeys.size,
+      `ack-log 中存在重复 ack entry(keys: ${keys.join(', ')})`,
+    ).toBe(keys.length);
   });
 });

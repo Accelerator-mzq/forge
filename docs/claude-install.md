@@ -61,7 +61,7 @@ session 内输入:
 /forge:ack-confirm            # confirm 待 ack 的 WARNING finding
 ```
 
-每个 command 内部调 `node "${CLAUDE_PLUGIN_ROOT}/scripts/run-forge.mjs"` helper,helper 内 spawn `npx -y --package @accelerator-mzq/forge@^1.4.0 -- forge ...` 拉 forge CLI(避开 v0.2 P1 全局 PATH 问题)。
+每个 command 内部调 `node "${CLAUDE_PLUGIN_ROOT}/scripts/run-forge.mjs"` helper,helper 内 spawn `npx -y --package @accelerator-mzq/forge@^3.0.0 -- forge ...` 拉 forge CLI(避开 v0.2 P1 全局 PATH 问题)。
 
 ## Troubleshooting
 

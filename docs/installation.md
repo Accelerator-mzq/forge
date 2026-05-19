@@ -29,3 +29,7 @@ forge plugin 与 superpowers plugin **可以同装**。Plugin namespace 隔离(`
 
 详见各 harness 安装文档对应段。
 
+## 升级到新版本
+
+已装好 forge、要升级到更高版本(含跨 major)的项目,见 [migration/upgrading.md](migration/upgrading.md) —— 通用 plugin 版本升级指南(三 harness 升级步骤 + `forge upgrade` 命令辨析 + 跨 major BREAKING 核对 + 升级安全性)。
+

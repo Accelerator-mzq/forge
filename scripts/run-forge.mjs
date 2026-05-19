@@ -3,7 +3,7 @@
 // 调用形态:
 //   - Claude Code commands.md:`node ${CLAUDE_PLUGIN_ROOT}/scripts/run-forge.mjs <subcmd> <args>`
 //   - OpenCode/Codex skill 文本内嵌:`node <plugin_dir>/scripts/run-forge.mjs <subcmd> <args>`
-// 内部用 npx 拉 npm 包(@accelerator-mzq/forge@^2.0.0)调 forge CLI,避开 v0.2 P1
+// 内部用 npx 拉 npm 包(@accelerator-mzq/forge@^3.0.0)调 forge CLI,避开 v0.2 P1
 // (forge CLI 不在用户全局 PATH)
 //
 // bundled plugin 变体(Plan 5):build 期 patch 本文件,把 spawn npx 改为

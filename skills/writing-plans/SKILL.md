@@ -251,7 +251,7 @@ node "${FORGE_HELPER}" validate <change-id>
 
 - OpenCode:`FORGE_HELPER = <plugin_dir>/scripts/run-forge.mjs`(`__dirname` reachable from plugin entry)
 - Codex:`FORGE_HELPER = $HOME/.codex/forge/scripts/run-forge.mjs`(`os.homedir()` 解析,Windows USERPROFILE OK)
-- 找不到 helper(用户路径不标准)→ fallback `npx -y --package @accelerator-mzq/forge@^1.4.0 -- forge validate <change-id>`(直接调 npx)
+- 找不到 helper(用户路径不标准)→ fallback `npx -y --package @accelerator-mzq/forge@^3.0.0 -- forge validate <change-id>`(直接调 npx)
 
 **失败处理**:
 

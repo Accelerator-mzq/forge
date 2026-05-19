@@ -110,11 +110,11 @@ Instructions say WHAT, not HOW. "Add X" or "Fix Y" doesn't mean skip workflows.
 
 forge 在三 harness 下的协议支持:
 
-| Tier | Harness     | skill auto-trigger | `/forge:*` slash commands | CLI 调用形态                                                 |
-| ---- | ----------- | ------------------ | ------------------------- | ------------------------------------------------------------ |
-| 1    | Claude Code | ✅ 全 PASS         | ✅ 全 PASS                | commands.md 调 `${CLAUDE_PLUGIN_ROOT}/scripts/run-forge.mjs` |
-| 2    | OpenCode    | ✅ PASS            | ❌ FAIL(plugin 不支持)    | skill 文本内嵌 fenced bash + must-execute 调 helper          |
-| 3    | Codex       | ✅ PASS            | ❌ FAIL(plugin 不支持)    | 同上                                                         |
+| Tier | Harness     | skill auto-trigger | slash command 注册     | workflow bridge                                     | CLI 调用形态                                                                              |
+| ---- | ----------- | ------------------ | ---------------------- | --------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| 1    | Claude Code | ✅ 全 PASS         | ✅ 全 PASS             | —(slash 直驱,无需桥接)                              | commands.md 调 `${CLAUDE_PLUGIN_ROOT}/scripts/run-forge.mjs`                              |
+| 2    | OpenCode    | ✅ PASS            | ❌ FAIL(plugin 不注册) | ✅ 经 stage skill 桥接段 Read `commands/<stage>.md` | 桥接段按 `tier23-command-bridge.md` 替换为 `node "<ROOT>/scripts/run-forge.mjs" <subcmd>` |
+| 3    | Codex       | ✅ PASS            | ❌ FAIL(plugin 不注册) | ✅ 同上                                             | 同上                                                                                      |
 
 **OpenCode + Codex 用户提示**:即使 `/forge:*` 不可用,brainstorming / writing-plans / verify 等 skill **会按 description 自动触发**,你只需:
 
@@ -122,7 +122,7 @@ forge 在三 harness 下的协议支持:
 - 输入 "完成验证 / verify" → AI 自动 invoke `forge:verification-before-completion`
 - 等等
 
-跟 Claude Code 体验一致,只是没有 `/forge:propose` 这种"显式入口"按钮。
+Tier 2/3 经 stage skill 的桥接段 Read `commands/<stage>.md` 执行,功能闭环但属 best-effort skill orchestration。
 
 ## forge slash commands(本 bootstrap 携带的 7 个工作流入口)
 

@@ -11,6 +11,7 @@ import { resolve, dirname } from 'node:path';
 import { stringify as stringifyYaml, parse as parseYaml } from 'yaml';
 import { appendAckLog, getPendingPath, listPending } from '../../core/ack-log.js';
 import type { AckEntry } from '../../core/ack-log.js';
+import { applyMarkerAck } from '../../core/ack/marker-ack.js';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // 内部 helper
@@ -200,17 +201,38 @@ export function buildAckCommand(): Command {
         process.exit(2);
       }
 
+      // Task A2: marker ack 字段写入 — user/ackedAt 与 ack-log entry 共用同一值保证一致性
+      const ackedAt = new Date().toISOString();
+      const user = process.env['USER'] ?? process.env['USERNAME'] ?? 'unknown';
+      const markerResult = await applyMarkerAck({
+        changeDir: changeRoot,
+        action: payload.action,
+        findingId,
+        user,
+        ackedAt,
+        rationale: payload.rationale ?? null,
+        targetSeverity:
+          resolvedTargetSeverity === 'WARNING' || resolvedTargetSeverity === 'SUGGESTION'
+            ? resolvedTargetSeverity
+            : null,
+      });
+      if (!markerResult.ok) {
+        // marker 写失败(已自恢复) → 不 append ack-log,不删 pending,exit 2
+        process.stderr.write(`forge ack confirm: ${markerResult.reason}\n`);
+        process.exit(2);
+      }
+
       const ackEntry: AckEntry = {
         schema: 'forge-ack-log/v1',
         kind: 'ack',
-        timestamp: new Date().toISOString(),
+        timestamp: ackedAt,
         action: payload.action,
         change_id: changeId,
         finding_id: findingId,
-        user: process.env['USER'] ?? process.env['USERNAME'] ?? 'unknown',
+        user,
         rationale: payload.rationale ?? null,
         git_head: getGitHead(changeRoot),
-        finding_hash: null,
+        finding_hash: markerResult.ackLogFindingHash,
         target_severity:
           resolvedTargetSeverity === 'WARNING' || resolvedTargetSeverity === 'SUGGESTION'
             ? resolvedTargetSeverity

@@ -3,20 +3,58 @@
 // 覆盖:propose 写 pending YAML / CI 模式拒绝 / confirm 消费 pending / reject 消费 pending / 缺 rationale
 
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, readFileSync, readdirSync, existsSync } from 'node:fs';
+import {
+  mkdtempSync,
+  rmSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  existsSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { stringify as stringifyYaml } from 'yaml';
 import { runCli } from './helpers.js';
+import { computeFindingHash, extractHashPayload } from '../../src/core/validate/finding-hash.js';
+import type { Finding } from '../../src/core/schemas/severity.js';
 
 // ─── Helper:搭建 change 目录骨架 ────────────────────────────────────────────
 
 /**
  * 在临时目录下创建 forge/changes/test-change 子目录,返回项目根路径。
  * tests 以该目录为 cwd 运行,forge ack 命令会在 cwd 内解析 changeRoot。
+ *
+ * Task A2 修订:同时写 .verify-passed(含 finding id=7 WARNING),
+ * 因为 ack confirm ack-warning 现在需要 marker 文件存在才能写 severity_acked_by/at。
  */
 function setupChange(): string {
   const root = mkdtempSync(join(tmpdir(), 'forge-ack-cli-'));
-  mkdirSync(join(root, 'forge', 'changes', 'test-change'), { recursive: true });
+  const changeDir = join(root, 'forge', 'changes', 'test-change');
+  mkdirSync(changeDir, { recursive: true });
+
+  // 准备 .verify-passed 含 finding id=7(ack-warning action 需要定位此 finding)
+  const finding: Record<string, unknown> = {
+    id: 7,
+    dimension: 'correctness',
+    check_type: 'requirement-mapping',
+    severity: 'WARNING',
+    automated: false,
+    content_hash: 'sha256:testcontent',
+    git_head: 'abc123',
+    evidence: 'test evidence',
+    recommendation: 'test recommendation',
+    resolved: false,
+    severity_acked_by: null,
+    severity_acked_at: null,
+  };
+  finding.finding_hash = computeFindingHash(extractHashPayload(finding as unknown as Finding));
+
+  writeFileSync(
+    join(changeDir, '.verify-passed'),
+    stringifyYaml({ schema: 'forge-verify/v1', verify_findings: [finding] }),
+  );
+
   return root;
 }
 

@@ -415,9 +415,10 @@ describe('ack confirm 事务 —— rollback + 幂等', () => {
     expect(r.code, `confirm 应 exit 非 0,但返回 ${r.code},stderr: ${r.stderr}`).not.toBe(0);
 
     // marker 应从 .bak 恢复:severity_acked_by 回到 null
-    const marker = parseYaml(
-      readFileSync(join(changeDir, '.verify-passed'), 'utf8'),
-    ) as Record<string, unknown>;
+    const marker = parseYaml(readFileSync(join(changeDir, '.verify-passed'), 'utf8')) as Record<
+      string,
+      unknown
+    >;
     const findings = marker.verify_findings as Array<Record<string, unknown>>;
     expect(
       findings[0]!.severity_acked_by,
@@ -472,9 +473,8 @@ describe('ack confirm 事务 —— rollback + 幂等', () => {
         `${String(e['change_id'])}|${String(e['finding_id'])}|${String(e['action'])}|${String(e['user'])}|${String(e['finding_hash'])}`,
     );
     const uniqueKeys = new Set(keys);
-    expect(
-      uniqueKeys.size,
-      `ack-log 中存在重复 ack entry(keys: ${keys.join(', ')})`,
-    ).toBe(keys.length);
+    expect(uniqueKeys.size, `ack-log 中存在重复 ack entry(keys: ${keys.join(', ')})`).toBe(
+      keys.length,
+    );
   });
 });

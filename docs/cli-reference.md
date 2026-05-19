@@ -452,10 +452,12 @@ forge ack reject  <changeId> <findingId> --rationale <text>
 | 子命令    | 行为                                                                  | 退出码                                                          |
 | --------- | --------------------------------------------------------------------- | --------------------------------------------------------------- |
 | `propose` | AI 写 pending ack YAML(`--action` 如 `ack-warning` / `ack-critical` / `resign-c-simcode`) | **1 = 已写 pending(正常路径,提示 user 去 confirm)**;2 = CI 模式拒绝(`CI=true`) |
-| `confirm` | User 确认,写入 `ack-log.jsonl` 并删 pending                          | 0 成功;2 = 无 pending / pending YAML 损坏 / `--target-severity` 非法 |
+| `confirm` | User 确认:severity-ack(`ack-warning` / `ack-pause-warning` / `downgrade`)写 marker ack 字段 + 写 `ack-log.jsonl` + 删 pending;其余 action 仅写 `ack-log.jsonl` + 删 pending | 0 成功;2 = 无 pending / pending YAML 损坏 / `--target-severity` 非法 |
 | `reject`  | User 拒绝,写 reject 日志并删 pending                                 | 0 成功;2 = 无 pending / YAML 损坏                              |
 
 注意:`propose` 成功时 **exit 1** 是有意设计的信号(pending 已写、待 user 操作),不是错误。
+
+`<findingId>` / `--finding <id>` 接受两种形式:`<number>`(普通 finding)或 `pause_decisions:<number>`(Fluid Pause decision finding)。
 
 ### `forge evidence`
 

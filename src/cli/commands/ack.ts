@@ -9,7 +9,12 @@ import { readFile, writeFile, unlink, mkdir, copyFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { resolve, dirname } from 'node:path';
 import { stringify as stringifyYaml, parse as parseYaml } from 'yaml';
-import { appendAckLog, getPendingPath, listPending, readAllAckLogEntries } from '../../core/ack-log.js';
+import {
+  appendAckLog,
+  getPendingPath,
+  listPending,
+  readAllAckLogEntries,
+} from '../../core/ack-log.js';
 import type { AckEntry } from '../../core/ack-log.js';
 import { applyMarkerAck } from '../../core/ack/marker-ack.js';
 
@@ -54,7 +59,7 @@ export function buildAckCommand(): Command {
     .command('propose')
     .description('AI 写 pending ack 文件(需 user confirm 才生效)')
     .argument('<changeId>', 'change 目录 ID,如 add-login')
-    .requiredOption('--finding <id>', 'finding ID(数字字符串)')
+    .requiredOption('--finding <id>', 'finding id:`<number>` 或 `pause_decisions:<number>`')
     .requiredOption('--action <type>', 'ack 类型,如 ack-warning / ack-critical / resign-c-simcode')
     .option('--rationale <text>', 'AI 给出的 rationale(可选)')
     .option(
@@ -135,7 +140,7 @@ export function buildAckCommand(): Command {
     .command('confirm')
     .description('User 确认 AI 提议的 ack,写入 ack-log.jsonl 并删除 pending 文件')
     .argument('<changeId>', 'change 目录 ID')
-    .argument('<findingId>', 'finding ID(数字字符串)')
+    .argument('<findingId>', 'finding id:`<number>` 或 `pause_decisions:<number>`')
     .option(
       '--target-severity <sev>',
       '仅 resign-c-simcode action 必填;confirm 时 user 指定目标 severity 并写回 marker',
@@ -322,7 +327,7 @@ export function buildAckCommand(): Command {
     .command('reject')
     .description('User 拒绝 AI 提议的 ack,写入 reject 日志并删除 pending 文件')
     .argument('<changeId>', 'change 目录 ID')
-    .argument('<findingId>', 'finding ID(数字字符串)')
+    .argument('<findingId>', 'finding id:`<number>` 或 `pause_decisions:<number>`')
     .requiredOption('--rationale <text>', '拒绝理由(必填)')
     .action(async (changeId: string, findingId: string, opts: { rationale: string }) => {
       const changeRoot = resolve(process.cwd(), 'forge', 'changes', changeId);

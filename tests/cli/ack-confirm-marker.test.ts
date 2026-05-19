@@ -86,6 +86,191 @@ describe('ack confirm 写 marker —— ack-warning', () => {
   });
 });
 
+describe('ack confirm 写 marker —— downgrade', () => {
+  let proj: string;
+  let changeDir: string;
+
+  // 构造一个指定 severity 的 fixture finding,并返回带真实 finding_hash 的对象
+  function makeFinding(severity: 'WARNING' | 'CRITICAL' | 'SUGGESTION'): Record<string, unknown> {
+    const f: Record<string, unknown> = {
+      id: 1,
+      dimension: 'correctness',
+      check_type: 'requirement-mapping',
+      severity,
+      automated: false,
+      content_hash: 'sha256:abc',
+      git_head: 'd4e5f6',
+      evidence: 'ev',
+      recommendation: 'rec',
+      resolved: false,
+      severity_acked_by: null,
+      severity_acked_at: null,
+    };
+    // 用真实 computeFindingHash 计算初始 hash(severity 取当前值)
+    f.finding_hash = computeFindingHash(extractHashPayload(f as unknown as Finding));
+    return f;
+  }
+
+  beforeEach(() => {
+    proj = mkdtempSync(join(tmpdir(), 'ackproj-downgrade-'));
+    changeDir = join(proj, 'forge', 'changes', 'add-x');
+    mkdirSync(join(changeDir, '.evidence', 'pending-acks'), { recursive: true });
+  });
+
+  it('(a) WARNING finding downgrade → marker severity 改 SUGGESTION,写 downgrade_acked_by/rationale/downgraded_from=WARNING,finding_hash 重算,ack-log finding_hash == 重算值', () => {
+    // 准备 WARNING finding 的 .verify-passed marker
+    const finding = makeFinding('WARNING');
+    writeFileSync(
+      join(changeDir, '.verify-passed'),
+      stringifyYaml({ schema: 'forge-verify/v1', verify_findings: [finding] }),
+    );
+
+    // propose 阶段(AI 提议 downgrade,action=downgrade,提供 rationale)
+    expect(
+      runForge(proj, [
+        'ack',
+        'propose',
+        'add-x',
+        '--finding',
+        '1',
+        '--action',
+        'downgrade',
+        '--rationale',
+        'test rationale',
+      ]).code,
+    ).toBe(1);
+
+    // confirm 阶段:User 确认
+    const r = runForge(proj, ['ack', 'confirm', 'add-x', '1']);
+    expect(r.code, `confirm 失败,stderr: ${r.stderr}`).toBe(0);
+
+    // 验证 marker:severity 改为 SUGGESTION
+    const marker = parseYaml(readFileSync(join(changeDir, '.verify-passed'), 'utf8')) as Record<
+      string,
+      unknown
+    >;
+    const findings = marker.verify_findings as Array<Record<string, unknown>>;
+    const f = findings[0]!;
+
+    expect(f.severity).toBe('SUGGESTION');
+    expect(f.downgraded_from).toBe('WARNING');
+    expect(f.downgrade_acked_by).toBeTruthy();
+    expect(f.downgrade_rationale).toBe('test rationale');
+
+    // 重算预期 hash:severity 已是 SUGGESTION
+    const expectedHash = computeFindingHash(extractHashPayload(f as unknown as Finding));
+    expect(f.finding_hash).toBe(expectedHash);
+
+    // 验证 ack-log entry finding_hash == 重算值(SUGGESTION payload)
+    const log = readFileSync(join(changeDir, '.evidence', 'ack-log.jsonl'), 'utf8')
+      .trim()
+      .split('\n');
+    const ackEntry = JSON.parse(log[log.length - 1]!) as Record<string, unknown>;
+    expect(ackEntry.finding_hash).not.toBeNull();
+    expect(ackEntry.finding_hash).toBe(expectedHash);
+  });
+
+  it('(b) CRITICAL finding downgrade → confirm exit 2,marker 不变,ack-log 不写', () => {
+    const finding = makeFinding('CRITICAL');
+    const originalHash = finding.finding_hash as string;
+    writeFileSync(
+      join(changeDir, '.verify-passed'),
+      stringifyYaml({ schema: 'forge-verify/v1', verify_findings: [finding] }),
+    );
+
+    // propose 阶段(AI 提议)
+    expect(
+      runForge(proj, [
+        'ack',
+        'propose',
+        'add-x',
+        '--finding',
+        '1',
+        '--action',
+        'downgrade',
+        '--rationale',
+        'test rationale',
+      ]).code,
+    ).toBe(1);
+
+    // confirm 阶段:应 exit 2(CRITICAL 不允许 downgrade)
+    const r = runForge(proj, ['ack', 'confirm', 'add-x', '1']);
+    expect(r.code, `confirm 应 exit 2,但返回 ${r.code},stderr: ${r.stderr}`).toBe(2);
+
+    // marker 不变:severity 仍为 CRITICAL,finding_hash 不变
+    const marker = parseYaml(readFileSync(join(changeDir, '.verify-passed'), 'utf8')) as Record<
+      string,
+      unknown
+    >;
+    const findings = marker.verify_findings as Array<Record<string, unknown>>;
+    expect(findings[0]!.severity).toBe('CRITICAL');
+    expect(findings[0]!.finding_hash).toBe(originalHash);
+    expect(findings[0]!.downgraded_from).toBeUndefined();
+
+    // ack-log 不存在或无新条目
+    const ackLogPath = join(changeDir, '.evidence', 'ack-log.jsonl');
+    const logExists = (() => {
+      try {
+        readFileSync(ackLogPath, 'utf8');
+        return true;
+      } catch {
+        return false;
+      }
+    })();
+    expect(logExists, 'ack-log.jsonl 不应被写入').toBe(false);
+  });
+
+  it('(c) SUGGESTION finding downgrade → confirm exit 2,marker 不变,ack-log 不写', () => {
+    const finding = makeFinding('SUGGESTION');
+    const originalHash = finding.finding_hash as string;
+    writeFileSync(
+      join(changeDir, '.verify-passed'),
+      stringifyYaml({ schema: 'forge-verify/v1', verify_findings: [finding] }),
+    );
+
+    // propose 阶段(AI 提议)
+    expect(
+      runForge(proj, [
+        'ack',
+        'propose',
+        'add-x',
+        '--finding',
+        '1',
+        '--action',
+        'downgrade',
+        '--rationale',
+        'test rationale',
+      ]).code,
+    ).toBe(1);
+
+    // confirm 阶段:应 exit 2(SUGGESTION 不需 downgrade)
+    const r = runForge(proj, ['ack', 'confirm', 'add-x', '1']);
+    expect(r.code, `confirm 应 exit 2,但返回 ${r.code},stderr: ${r.stderr}`).toBe(2);
+
+    // marker 不变:severity 仍为 SUGGESTION,finding_hash 不变
+    const marker = parseYaml(readFileSync(join(changeDir, '.verify-passed'), 'utf8')) as Record<
+      string,
+      unknown
+    >;
+    const findings = marker.verify_findings as Array<Record<string, unknown>>;
+    expect(findings[0]!.severity).toBe('SUGGESTION');
+    expect(findings[0]!.finding_hash).toBe(originalHash);
+    expect(findings[0]!.downgraded_from).toBeUndefined();
+
+    // ack-log 不存在或无新条目
+    const ackLogPath = join(changeDir, '.evidence', 'ack-log.jsonl');
+    const logExists = (() => {
+      try {
+        readFileSync(ackLogPath, 'utf8');
+        return true;
+      } catch {
+        return false;
+      }
+    })();
+    expect(logExists, 'ack-log.jsonl 不应被写入').toBe(false);
+  });
+});
+
 describe('ack confirm 写 marker —— ack-pause-warning', () => {
   let proj: string;
   let changeDir: string;

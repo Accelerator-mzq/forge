@@ -160,7 +160,38 @@ export async function applyMarkerAck(params: {
       return { ok: true, ackLogFindingHash: null, backups };
     }
 
-    // downgrade 见 Task A4 扩展(同样走 writeMarkersAtomic)
+    if (action === 'downgrade') {
+      // §5.1 downgrade 行:仅允许 WARNING → SUGGESTION,CRITICAL/SUGGESTION 均拒绝
+      if (!existsSync(verifyPath)) return FAIL('.verify-passed 不存在');
+      const marker = parseYaml(await readFile(verifyPath, 'utf8')) as Record<string, unknown>;
+      const findings = (marker.verify_findings as Array<Record<string, unknown>>) ?? [];
+      const f = findings.find((x) => String(x.id) === findingId);
+      if (!f) return FAIL(`verify_findings 无 id=${findingId}`);
+
+      // severity 校验:仅 WARNING 允许 downgrade;CRITICAL 无 ack 路径,SUGGESTION 无需降级
+      if (f.severity !== 'WARNING') {
+        return FAIL(
+          `downgrade 仅允许 WARNING → SUGGESTION,当前 severity=${String(f.severity)} 不支持`,
+        );
+      }
+
+      // 固定写 'WARNING'(spec 语义:downgraded_from 记录降级前的原始级别)
+      f.downgraded_from = 'WARNING';
+      // 先改 severity,再重算 hash(使 hash 反映新 severity=SUGGESTION)
+      f.severity = 'SUGGESTION';
+      f.downgrade_acked_by = params.user;
+      f.downgrade_rationale = params.rationale;
+
+      // 重算 finding_hash:此时 f.severity 已是 SUGGESTION
+      const newHash = computeFindingHash(extractHashPayload(f as unknown as Finding));
+      f.finding_hash = newHash;
+
+      // 原子写 .verify-passed,备份供 A5 事务回滚
+      const backups = await writeMarkersAtomic([{ path: verifyPath, content: marker }]);
+
+      return { ok: true, ackLogFindingHash: newHash, backups };
+    }
+
     // 其余 action:不写 marker,finding_hash 为 null
     return { ok: true, ackLogFindingHash: null, backups: [] };
   } catch (e) {

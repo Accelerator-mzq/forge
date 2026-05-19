@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [3.0.0] - 2026-05-19
 
 ### BREAKING
 
@@ -414,5 +414,5 @@ MIT。复制 superpowers 12 个 skill 文本(MIT 许可),attribution 见 `LICENS
 - **不支持 Web Dashboard / telemetry / i18n / 自定义 schema**(spec §7,v1 不做)
 - **harness smoke 是 release gate manual checklist,不进 CI**(harness 是闭源 GUI,CI 跑不了)
 
-[Unreleased]: https://github.com/Accelerator-mzq/forge/compare/v0.1.0...HEAD
+[3.0.0]: https://github.com/Accelerator-mzq/forge/compare/v2.0.0...v3.0.0
 [0.1.0]: https://github.com/Accelerator-mzq/forge/releases/tag/v0.1.0

@@ -4,7 +4,7 @@
 [![version](https://img.shields.io/github/package-json/v/Accelerator-mzq/forge)](https://github.com/Accelerator-mzq/forge/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v1.1** 三 harness AI 工作流 plugin。融合 [OpenSpec](https://github.com/Fission-AI/OpenSpec) 产物驱动工作流 + [superpowers](https://github.com/obra/superpowers) 行为塑造 skill,**外加 v1.0 反向加固协议(三级 severity / 三维 verify / 三级 fence / ack 两步)防 AI 在 spec 阶段偷懒**。
+> **v3.1** 三 harness AI 工作流 plugin。融合 [OpenSpec](https://github.com/Fission-AI/OpenSpec) 产物驱动工作流 + [superpowers](https://github.com/obra/superpowers) 行为塑造 skill,**外加 v1.0 反向加固协议(三级 severity / 三维 verify / 三级 fence / ack 两步)防 AI 在 spec 阶段偷懒**。
 
 ```bash
 # Tier 1 — Claude Code(全功能,推荐)
@@ -45,11 +45,11 @@ claude   # 启动 Claude Code 会话
 
 forge 不只是把 superpowers skill 搬到三 harness。v1.0 **fusion completion** 加了 9 块反向加固协议(plan-9a..9j),防 AI 在 spec / verify / archive 三阶段偷懒。
 
-### 1. 主流程 6 步 + 9 slash 命令
+### 1. 主流程 6 步 + 10 slash 命令
 
 `/forge:brainstorm` → `/forge:propose` → `/forge:apply` → `/forge:review` → `/forge:verify` → `/forge:archive`。
 
-横切命令:`/forge:explore`(非线性思考空间)、`/forge:ack-confirm`(WARNING 两步 ack)、`/forge:upgrade`(legacy 清理 + marker 重签)。
+横切命令:`/forge:explore`(非线性思考空间)、`/forge:ack-confirm`(WARNING 两步 ack)、`/forge:upgrade`(legacy 清理 + marker 重签)、`/forge:codex-adversarial`(对抗性 review)。
 
 每步产强校验 marker,后续阶段读 marker 的 `tasks_hash` / `content_hash` / `git.diff_hash` 验证未漂移(`src/core/markers/types.ts`)。
 
@@ -84,15 +84,15 @@ forge 不只是把 superpowers skill 搬到三 harness。v1.0 **fusion completio
 
 ## 安装(三 harness)
 
-| Harness         | 状态                                                                   | 入口                                                   |
-| --------------- | ---------------------------------------------------------------------- | ------------------------------------------------------ |
-| **Claude Code** | Tier 1 ENABLE(全功能 — skill auto-trigger + 9 slash 命令 + CLI helper) | [`docs/claude-install.md`](docs/claude-install.md)     |
-| **OpenCode**    | Tier 2 PARTIAL_SHIP(skills + skill-driven CLI;commands 不支持)         | [`docs/opencode-install.md`](docs/opencode-install.md) |
-| **Codex**       | Tier 3 PARTIAL_SHIP(同 OpenCode)                                       | [`docs/codex-install.md`](docs/codex-install.md)       |
+| Harness         | `/forge:*` slash 命令注册                                  | workflow bridge                | 入口                                                   |
+| --------------- | ---------------------------------------------------------- | ------------------------------ | ------------------------------------------------------ |
+| **Claude Code** | ✅ 全功能(skill auto-trigger + 10 slash 命令 + CLI helper) | —                              | [`docs/claude-install.md`](docs/claude-install.md)     |
+| **OpenCode**    | ❌ 不注册                                                  | ✅ best-effort(经命令文件桥接) | [`docs/opencode-install.md`](docs/opencode-install.md) |
+| **Codex**       | ❌ 不注册                                                  | ✅ best-effort(经命令文件桥接) | [`docs/codex-install.md`](docs/codex-install.md)       |
 
 总览 + 选哪个 tier 见 [`docs/installation.md`](docs/installation.md)。
 
-## CLI 命令(14 个顶层子命令)
+## CLI 命令(17 个顶层子命令)
 
 按业务分组,详见 [`docs/cli-reference.md`](docs/cli-reference.md):
 
@@ -129,19 +129,19 @@ forge upgrade --resign-markers <changeId>  # plan-9j v1.0+ marker 重签(legacy 
 
 ## 状态 + 文档导航
 
-**v1.2.0** released 2026-05-15(`CHANGELOG.md:11`):
+**v3.1.0**(本次 Tier 2/3 workflow closure 增量):
 
 - 本地 5 命令(`typecheck` / `lint` / `format:check` / `build` / `test`)全 0
 - **1115 tests pass**(`CHANGELOG.md:23`)
 - 自动化 skill eval(`pnpm eval`,`forge-eval/scenarios/` 双轨 baseline)
-- 16 skill + 9 slash 命令 + 14 CLI 子命令
+- 18 skill + 10 slash 命令 + 17 CLI 子命令
 
 **v1.0 fusion completion** 经 Codex CLI(gpt-5.4-codex)累计 5+ 轮对抗性 review(跨 10 sub-plan)+ Opus subagent 多轮自检,共修 200+ 条问题;**v1.1 polish leftover** 经 Codex 七轮 review 累计 32 finding 全处置(0 严重 / 0 阻塞 / 0 Major)。
 
 **文档导航**:
 
 - [`docs/getting-started.md`](docs/getting-started.md) — v1.1 端到端工作流 + Bug fix 快速路径
-- [`docs/cli-reference.md`](docs/cli-reference.md) — 14 CLI 子命令完整参数 + 退出码
+- [`docs/cli-reference.md`](docs/cli-reference.md) — 17 CLI 子命令完整参数 + 退出码
 - [`docs/installation.md`](docs/installation.md) — 三 harness 安装总览
 - [`docs/stage-extensions.md`](docs/stage-extensions.md) — stage-extensions framework 协议文档 + config schema + troubleshooting
 - [`docs/codex-review.md`](docs/codex-review.md) — codex review 预置 extension 用户指南

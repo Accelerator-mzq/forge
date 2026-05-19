@@ -137,6 +137,8 @@ You are about to handle `/forge:verify $ARGUMENTS`.
 
      详细 process_evidence 协议见 `skills/process-evidence/SKILL.md`。
 
+     > **Fluid Pause 边界(design §8.3)**:apply 阶段 Fluid Pause 的 `forge pause-capture` 必须在本步 `forge evidence freeze --kind verify` **之前**完成。verify freeze 之后再产生的 pause-capture entry 不被 verify marker 的 `ack_log_tail_hash`/`ack_log_entry_count` 固化,archive 阶段 option=2 强校验会因 ack-log 行数 mismatch 拒签。
+
      4.5 **若产任何 WARNING + resolved=false**:提示用户 — archive 阶段必须先 `forge ack propose <finding-id>`(沿 9a 两步流程),否则 archive fence 拒签。
 
      4.6 **若产任何 automated=true CRITICAL + resolved=false**:**不能 archive**(沿 design §2.2.4 fence)— 必须先实际修复让 finding resolved=true(改 code + 重跑 verify),不允许 ack 降级。

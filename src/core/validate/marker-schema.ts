@@ -767,6 +767,22 @@ function checkPauseDecisionsArray(v: unknown, file?: string): ValidationResult {
         );
       }
     }
+    // added_task_ref / capture_id:undefined(老 marker)跳过,
+    // 存在则须 null 或 non-empty string(schema 层 optional,superset additive)
+    for (const field of ['added_task_ref', 'capture_id']) {
+      const val = p[field];
+      if (val === undefined) continue; // superset additive:老 marker 缺字段 → 跳过(legacy 分支)
+      if (val !== null && (typeof val !== 'string' || !val)) {
+        results.push(
+          failed({
+            artifact: 'marker',
+            field: `${fieldBase}.${field}`,
+            message: 'must be null or non-empty string',
+            file,
+          }),
+        );
+      }
+    }
   }
   return mergeResults(...results);
 }

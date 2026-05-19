@@ -6,7 +6,12 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { validatePauseDecisionsFence } from '../../src/core/archive/pause-decisions-fence.js';
+import { execFileSync } from 'node:child_process';
+import {
+  validatePauseDecisionsFence,
+  crossCheckPauseDecisions,
+} from '../../src/core/archive/pause-decisions-fence.js';
+import type { PauseDecision } from '../../src/core/markers/types.js';
 
 // 合法 PauseDecision baseline(option=3 + 完整 ack + non_blocking_rationale)
 const basePauseDecision = {
@@ -41,12 +46,12 @@ describe('validatePauseDecisionsFence', () => {
 
   // —— Superset additive:marker 缺 pause_decisions → 老兼容通过 ——
   it('marker 缺 pause_decisions 字段 → 老兼容 ok', async () => {
-    const result = await validatePauseDecisionsFence({}, changeDir);
+    const result = await validatePauseDecisionsFence({}, changeDir, changeDir);
     expect(result.valid).toBe(true);
   });
 
   it('pause_decisions: [] → 通过', async () => {
-    const result = await validatePauseDecisionsFence({ pause_decisions: [] }, changeDir);
+    const result = await validatePauseDecisionsFence({ pause_decisions: [] }, changeDir, changeDir);
     expect(result.valid).toBe(true);
   });
 
@@ -54,6 +59,7 @@ describe('validatePauseDecisionsFence', () => {
   it('CRITICAL severity → 拒签(CRITICAL 应走 forge 强 fence,不应进 pause)', async () => {
     const result = await validatePauseDecisionsFence(
       { pause_decisions: [{ ...basePauseDecision, severity: 'CRITICAL' }] },
+      changeDir,
       changeDir,
     );
     expect(result.valid).toBe(false);
@@ -66,6 +72,7 @@ describe('validatePauseDecisionsFence', () => {
       {
         pause_decisions: [{ ...basePauseDecision, severity: 'WARNING', severity_acked_by: null }],
       },
+      changeDir,
       changeDir,
     );
     expect(result.valid).toBe(false);
@@ -96,6 +103,7 @@ describe('validatePauseDecisionsFence', () => {
         ],
       },
       changeDir,
+      changeDir,
     );
     expect(result.valid).toBe(true);
   });
@@ -115,6 +123,7 @@ describe('validatePauseDecisionsFence', () => {
         ],
       },
       changeDir,
+      changeDir,
     );
     expect(result.valid).toBe(true);
   });
@@ -133,72 +142,10 @@ describe('validatePauseDecisionsFence', () => {
         ],
       },
       changeDir,
+      changeDir,
     );
     expect(result.valid).toBe(false);
     expect(result.errors[0]?.message).toMatch(/option=1.*proposal/);
-  });
-
-  // —— option=2 (加 task):tasks.md 中 task_ref 指向的行已勾选 [x] ——
-  it('option=2 + tasks.md 中 task_ref 行已勾选 → 通过', async () => {
-    writeFileSync(join(changeDir, 'tasks.md'), '# Tasks\n- [x] **task-3** subagent 实施 OAuth\n');
-    const result = await validatePauseDecisionsFence(
-      {
-        pause_decisions: [
-          {
-            ...basePauseDecision,
-            chosen_option: 2,
-            task_ref: 'tasks.md#task-3',
-            target_artifact: 'tasks.md',
-            target_anchor: '- task-3',
-            non_blocking_rationale: null,
-          },
-        ],
-      },
-      changeDir,
-    );
-    expect(result.valid).toBe(true);
-  });
-
-  it('option=2 + tasks.md 中 task_ref 行未勾选 [ ] → 拒签', async () => {
-    writeFileSync(join(changeDir, 'tasks.md'), '# Tasks\n- [ ] **task-3** subagent 实施 OAuth\n');
-    const result = await validatePauseDecisionsFence(
-      {
-        pause_decisions: [
-          {
-            ...basePauseDecision,
-            chosen_option: 2,
-            task_ref: 'tasks.md#task-3',
-            target_artifact: 'tasks.md',
-            target_anchor: '- task-3',
-            non_blocking_rationale: null,
-          },
-        ],
-      },
-      changeDir,
-    );
-    expect(result.valid).toBe(false);
-    expect(result.errors[0]?.message).toMatch(/option=2.*未勾选/);
-  });
-
-  it('option=2 + tasks.md 中找不到 task_ref → 拒签', async () => {
-    writeFileSync(join(changeDir, 'tasks.md'), '# Tasks\n- [x] **task-1** other\n');
-    const result = await validatePauseDecisionsFence(
-      {
-        pause_decisions: [
-          {
-            ...basePauseDecision,
-            chosen_option: 2,
-            task_ref: 'tasks.md#task-3',
-            target_artifact: 'tasks.md',
-            target_anchor: '- task-3',
-            non_blocking_rationale: null,
-          },
-        ],
-      },
-      changeDir,
-    );
-    expect(result.valid).toBe(false);
-    expect(result.errors[0]?.message).toMatch(/找不到.*task-3/);
   });
 
   // —— option=3 (转 out-of-scope):scope-entries 有 entry + non_blocking_rationale 非空 ——
@@ -211,6 +158,7 @@ describe('validatePauseDecisionsFence', () => {
       {
         pause_decisions: [{ ...basePauseDecision, task_ref: 'tasks.md#issue-1' }],
       },
+      changeDir,
       changeDir,
     );
     expect(result.valid).toBe(true);
@@ -231,6 +179,7 @@ describe('validatePauseDecisionsFence', () => {
           },
         ],
       },
+      changeDir,
       changeDir,
     );
     expect(result.valid).toBe(false);
@@ -254,6 +203,7 @@ describe('validatePauseDecisionsFence', () => {
         ],
       },
       changeDir,
+      changeDir,
     );
     expect(result.valid).toBe(false);
     expect(result.errors[0]?.message).toMatch(/scope-entries.*triggered_by.*pause_decision/);
@@ -276,6 +226,7 @@ describe('validatePauseDecisionsFence', () => {
         ],
       },
       changeDir,
+      changeDir,
     );
     expect(result.valid).toBe(true);
   });
@@ -295,6 +246,7 @@ describe('validatePauseDecisionsFence', () => {
           },
         ],
       },
+      changeDir,
       changeDir,
     );
     expect(result.valid).toBe(false);
@@ -317,9 +269,179 @@ describe('validatePauseDecisionsFence', () => {
         ],
       },
       changeDir,
+      changeDir,
     );
     expect(result.valid).toBe(false);
     expect(result.errors[0]?.message).toMatch(/option=4.*other_acked_by/);
+  });
+});
+
+// helper:在 git repo 内建 change + proposal.md,baseline commit 后按 mutate 改 proposal.md(不 commit)
+function setupGitChange(opts: {
+  proposalBaseline: string;
+  proposalMutated: string;
+  tasksBaseline: string;
+  tasksMutated?: string;
+}): { repoRoot: string; changeDir: string } {
+  const repoRoot = mkdtempSync(join(tmpdir(), 'forge-opt1-'));
+  execFileSync('git', ['init', '-q'], { cwd: repoRoot });
+  execFileSync('git', ['config', 'user.email', 't@t.com'], { cwd: repoRoot });
+  execFileSync('git', ['config', 'user.name', 't'], { cwd: repoRoot });
+  const changeDir = join(repoRoot, 'forge', 'changes', 'c1');
+  mkdirSync(changeDir, { recursive: true });
+  writeFileSync(join(changeDir, 'proposal.md'), opts.proposalBaseline);
+  writeFileSync(join(changeDir, 'tasks.md'), opts.tasksBaseline);
+  execFileSync('git', ['add', '-A'], { cwd: repoRoot });
+  execFileSync('git', ['commit', '-q', '-m', 'baseline'], { cwd: repoRoot });
+  // mutate(留工作树未提交 —— 模拟 Fluid Pause 的 proposal.md 改动)
+  writeFileSync(join(changeDir, 'proposal.md'), opts.proposalMutated);
+  if (opts.tasksMutated) writeFileSync(join(changeDir, 'tasks.md'), opts.tasksMutated);
+  return { repoRoot, changeDir };
+}
+
+// option=1 diff 段级校验专用 decision fixture
+const OPT1_DECISION = {
+  id: 1,
+  paused_at: '2026-05-12T14:30:00Z',
+  task_ref: 'tasks.md#task-1',
+  issue_summary: 'expand scope',
+  severity: 'WARNING' as const,
+  severity_acked_by: 'msc',
+  severity_acked_at: '2026-05-12T14:32:00Z',
+  chosen_option: 1 as const,
+  target_artifact: 'proposal.md',
+  target_anchor: '## What Changes',
+  non_blocking_rationale: null,
+  other_rationale: null,
+  other_acked_by: null,
+};
+
+describe('option=1 diff 段级校验', () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  it('attack:marker 声称改 proposal ## What Changes,实际 diff 只改 tasks.md → 拒签', async () => {
+    const { repoRoot, changeDir } = setupGitChange({
+      proposalBaseline: '# P\n\n## What Changes\n\n- a\n\n## Impact\n\n- x\n',
+      proposalMutated: '# P\n\n## What Changes\n\n- a\n\n## Impact\n\n- x\n', // proposal 未改
+      tasksBaseline: '# Tasks\n\n- [ ] task-1: t\n',
+      tasksMutated: '# Tasks\n\n- [x] task-1: t\n', // 只改了 tasks.md
+    });
+    dirs.push(repoRoot);
+    const result = await validatePauseDecisionsFence(
+      { pause_decisions: [OPT1_DECISION] },
+      changeDir,
+      repoRoot,
+    );
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => /What Changes.*变更|diff/.test(e.message))).toBe(true);
+  });
+
+  it('happy path:proposal ## What Changes 段确有新增行 → 通过', async () => {
+    const { repoRoot, changeDir } = setupGitChange({
+      proposalBaseline: '# P\n\n## What Changes\n\n- a\n\n## Impact\n\n- x\n',
+      proposalMutated: '# P\n\n## What Changes\n\n- a\n- b (扩 scope)\n\n## Impact\n\n- x\n',
+      tasksBaseline: '# Tasks\n\n- [x] task-1: t\n',
+    });
+    dirs.push(repoRoot);
+    const result = await validatePauseDecisionsFence(
+      { pause_decisions: [OPT1_DECISION] },
+      changeDir,
+      repoRoot,
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it('proposal.md 带 frontmatter → ## What Changes 段行号对齐正确', async () => {
+    const fm = '---\ntitle: P\n---\n';
+    const { repoRoot, changeDir } = setupGitChange({
+      proposalBaseline: fm + '# P\n\n## What Changes\n\n- a\n\n## Impact\n\n- x\n',
+      proposalMutated: fm + '# P\n\n## What Changes\n\n- a\n- b\n\n## Impact\n\n- x\n',
+      tasksBaseline: '# Tasks\n\n- [x] task-1: t\n',
+    });
+    dirs.push(repoRoot);
+    const result = await validatePauseDecisionsFence(
+      { pause_decisions: [OPT1_DECISION] },
+      changeDir,
+      repoRoot,
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it('非 git 项目 → diff 校验 N/A,降级到字段校验(通过)', async () => {
+    const changeDir = mkdtempSync(join(tmpdir(), 'forge-opt1-nogit-'));
+    dirs.push(changeDir);
+    // repoRoot 非 git → 降级;字段校验:target_artifact/target_anchor 合法 → 通过
+    const result = await validatePauseDecisionsFence(
+      { pause_decisions: [OPT1_DECISION] },
+      changeDir,
+      changeDir,
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it('happy path:What Changes 是最后一段且 proposal.md 无尾换行 → 段末新增行正确识别', async () => {
+    // 回归 code review Issue 1:wcEnd off-by-one — What Changes 无后续 ## 标题
+    // + 文件无尾换行时,段区间须含文件最后一行
+    const { repoRoot, changeDir } = setupGitChange({
+      proposalBaseline: '# P\n\n## What Changes\n\n- a',
+      proposalMutated: '# P\n\n## What Changes\n\n- a\n- b 扩 scope',
+      tasksBaseline: '# Tasks\n\n- [x] task-1: t\n',
+    });
+    dirs.push(repoRoot);
+    const result = await validatePauseDecisionsFence(
+      { pause_decisions: [OPT1_DECISION] },
+      changeDir,
+      repoRoot,
+    );
+    expect(result.valid).toBe(true);
+  });
+});
+
+// —— verify/review pause_decisions cross-check 测试 ——
+describe('verify/review pause_decisions cross-check', () => {
+  // 合法 PauseDecision 完整 baseline(含 PauseDecision 所有必填字段)
+  const base: PauseDecision = {
+    id: 1,
+    paused_at: '2026-05-12T14:30:00Z',
+    task_ref: 'tasks.md#task-1',
+    issue_summary: 'test issue',
+    severity: 'WARNING',
+    severity_acked_by: 'msc',
+    severity_acked_at: '2026-05-12T14:32:00Z',
+    chosen_option: 2,
+    target_artifact: 'tasks.md',
+    target_anchor: 'task-3',
+    non_blocking_rationale: null,
+    other_rationale: null,
+    other_acked_by: null,
+    added_task_ref: 'tasks.md#task-3',
+    capture_id: 'cap-1',
+  };
+
+  it('共有 id 字段一致 → 通过', () => {
+    const r = crossCheckPauseDecisions([base], [{ ...base }]);
+    expect(r.valid).toBe(true);
+  });
+
+  it('共有 id 的 capture_id 不一致 → 拒签', () => {
+    const r = crossCheckPauseDecisions([base], [{ ...base, capture_id: 'cap-2' }]);
+    expect(r.valid).toBe(false);
+    expect(r.errors[0]?.message).toMatch(/capture_id.*不一致/);
+  });
+
+  it('verify-only id(review 无)→ 不拒签(单侧独有合法)', () => {
+    // verify 侧有 id=1 + id=2,review 侧只有 id=1,id=2 单侧独有 → 不拒签
+    const r = crossCheckPauseDecisions([base, { ...base, id: 2 }], [base]);
+    expect(r.valid).toBe(true);
+  });
+
+  it('review-only id(verify 无)→ 不拒签(单侧独有合法,design §6.5)', () => {
+    // review 侧有 id=1 + id=2,verify 侧只有 id=1,id=2 单侧独有 → 不拒签
+    const r = crossCheckPauseDecisions([base], [base, { ...base, id: 2 }]);
+    expect(r.valid).toBe(true);
   });
 });
 

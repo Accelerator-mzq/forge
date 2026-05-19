@@ -52,8 +52,25 @@ export interface EvidenceHelperEntry {
   extra: Record<string, unknown>;
 }
 
+/** pause-capture 操作日志条目(kind='pause-capture') — plan pause-fence Block C
+ *  Fluid Pause 触发时 `forge pause-capture` 写入,记录 pause 时刻 tasks.md 的全部 task id。
+ *  沿全 JSONL 链:prev_entry_hash 跨 kind 递推(同 AckEntry / EvidenceHelperEntry)。 */
+export interface PauseCaptureEntry {
+  schema: 'forge-ack-log/v1';
+  kind: 'pause-capture';
+  timestamp: string; // ISO 8601 UTC
+  capture_id: string; // crypto.randomUUID();marker.pause_decisions[].capture_id 据此定位
+  change_id: string;
+  task_ref: string; // 触发 pause 的 task
+  pause_issue_summary: string;
+  tasks_md_task_ids: string[]; // capture 时刻 tasks.md 全部 task id(parseTasks 解析)
+  git_head: string | null;
+  prev_entry_hash?: string | null;
+  extra: Record<string, unknown>;
+}
+
 /** ack 日志条目判别联合 */
-export type AckLogEntry = AckEntry | EvidenceHelperEntry;
+export type AckLogEntry = AckEntry | EvidenceHelperEntry | PauseCaptureEntry;
 
 // ──────────────────────────────────────────────────────────────────────────────
 // pending 文件元数据类型

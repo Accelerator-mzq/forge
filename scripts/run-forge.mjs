@@ -12,7 +12,7 @@
 import { spawn } from 'node:child_process';
 
 // forge npm 包版本范围;改版本号时需与 package.json / .claude-plugin/plugin.json 手动同步
-const REQUIRED_RANGE = '^2.0.0';
+const REQUIRED_RANGE = '^3.0.0';
 
 const args = process.argv.slice(2);
 

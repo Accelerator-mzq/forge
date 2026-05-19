@@ -144,27 +144,16 @@ From 24 failure memories:
 - Implications of success
 - ANY communication suggesting completion/correctness
 
-## forge strict gate step (Tier 2/3 OpenCode/Codex 路径用,Plan 0a 实测 Variant B PASS)
+## Tier 2/3 Orchestration(OpenCode / Codex 路径)
 
-**仅 OpenCode + Codex 路径**(Tier 1 Claude Code 路径走 commands.md `/forge:verify` 调 helper)。
+当前 harness 无 `/forge:*` slash 命令时(OpenCode / Codex),你 **MUST** Read 对应 `commands/verify.md` 并**完整执行**其协议 —— 按 `skills/_shared/tier23-command-bridge.md` 的 plugin root 解析与替换规则执行。Claude Code(Tier 1)有 slash 命令,不走本段。
 
-When user says "verify" / "/forge:verify" / "完成验证" or similar, you **MUST** execute:
+执行完成前核对 verify 硬门槛自检清单:
 
-```bash
-node "${FORGE_HELPER}" validate <change-id>
-```
-
-(`FORGE_HELPER` 解析见 forge:writing-plans skill 末尾 "CLI validation step" 段)
-
-**Result handling**:
-
-- exit 0 → forge CLI 自动写 `forge/changes/<id>/.verify-passed`(YAML schema + tasks_hash + content_hash + pass=true);report "verify PASS"
-- exit 非零 → forge CLI 自动:
-  1. 写 `forge/changes/<id>/.verify-failed`(YAML schema + fake_completions 列表)
-  2. **append 修复 task** 到 `forge/changes/<id>/tasks.md`(每 fake_completion 一条 `- [ ] verify-fix-N: ...`)
-  3. **不修改原已勾 task**(spec §3.3 不变量 2)
-
-  Tell user "Verify FAIL,请处理 verify-fix-\* 新 tasks 后重跑 verify"
+- AI 写基础 `.verify-passed` marker。
+- `forge evidence record-verify` 跑过(写 staging)。
+- `forge evidence freeze --kind verify` exit 0(缺 freeze → archive 的 process-evidence fence 拒签)。
+- 过程中遇 `forge ack propose` 退出(产生 pending)→ Read 并执行 `commands/ack-confirm.md` 等价流程,降级 prompt 让用户确认,经 `forge ack confirm`/`reject` 落 ack-log(AI 不得自 ack)。
 
 ## The Bottom Line
 

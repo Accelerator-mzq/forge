@@ -93,10 +93,11 @@ export interface PendingItem {
 /** pending-acks 目录相对于 changeRoot 的路径 */
 const PENDING_DIR_REL = '.evidence/pending-acks';
 
-/** 文件名正则:匹配 <findingId>-<safeTimestamp>.yaml */
-// findingId 由数字组成;\d+ 捕获
-// safeTimestamp 是 ISO 时间戳中冒号已替换为连字符后的结果
-const PENDING_FILE_RE = /^(\d+)-(.+)\.yaml$/;
+/** 文件名正则:匹配 <encodeURIComponent(findingId)>-<safeTimestamp>.yaml */
+// 文件名 <encodeURIComponent(findingId)>-<safeTimestamp>.yaml
+// safeTimestamp = ISO 时间戳冒号替换连字符:YYYY-MM-DDTHH-MM-SS.mmmZ
+// timestamp 段从右精确锚定 → group 1(findingId)即使含 '-' 也无切分歧义
+const PENDING_FILE_RE = /^(.+)-(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z)\.yaml$/;
 
 // ──────────────────────────────────────────────────────────────────────────────
 // 公开 API
@@ -149,9 +150,10 @@ export async function appendAckLog(changeRoot: string, entry: AckLogEntry): Prom
  * Windows 安全：ISO 时间戳中的 ':' 替换为 '-'(冒号在 Windows 文件名中非法)
  */
 export function getPendingPath(changeRoot: string, findingId: string, timestamp: string): string {
-  // 将 ISO 时间戳中的冒号替换为连字符,确保 Windows 文件系统兼容
   const safeTimestamp = timestamp.replace(/:/g, '-');
-  const fileName = `${findingId}-${safeTimestamp}.yaml`;
+  // findingId 可能含 ':'(pause_decisions:<id>),encodeURIComponent 编码为 %3A;
+  // 纯数字 id 编码后不变 → 向后兼容
+  const fileName = `${encodeURIComponent(findingId)}-${safeTimestamp}.yaml`;
   // path.join 在 Windows 上返回反斜杠;统一替换为正斜杠,使路径在跨平台测试中可靠匹配
   // Windows 文件系统 API 同时接受正斜杠路径
   return path.join(changeRoot, PENDING_DIR_REL, fileName).replace(/\\/g, '/');
@@ -188,7 +190,8 @@ export async function listPending(changeRoot: string, findingId?: string): Promi
     if (!match) continue; // 跳过不符合命名规范的文件
 
     // match[1] 和 match[2] 由正则捕获组保证存在,但 TypeScript 认为可能 undefined
-    const parsedFindingId = match[1] ?? '';
+    // group 1 为 encodeURIComponent 编码后的 findingId,decodeURIComponent 还原原始值
+    const parsedFindingId = decodeURIComponent(match[1] ?? '');
     const safeTimestamp = match[2] ?? '';
 
     // 可选 findingId 过滤

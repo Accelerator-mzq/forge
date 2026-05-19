@@ -17,7 +17,7 @@ You are about to handle `/forge:ack-confirm $ARGUMENTS`。
      - `reject`(拒绝 + 让用户写 rationale)
      - `modify-rationale`(用户改 rationale 后再 confirm)
 5. 根据用户选择:
-   - `confirm` → 调 `forge ack confirm <change-id> <finding-id>`(CLI 写 marker + ack-log + 删 pending)
+   - `confirm` → 调 `forge ack confirm <change-id> <finding-id>`(CLI 对 severity-ack(ack-warning / ack-pause-warning / downgrade)写 marker ack 字段、写 ack-log、删 pending;其余 action 仅写 ack-log + 删 pending)
    - `reject` → 用 AskUserQuestion 让用户输入 `rejection rationale` → 调 `forge ack reject <change-id> <finding-id> --rationale "<text>"`
    - `modify-rationale` → 用 AskUserQuestion 让用户输入新 rationale → 重写 pending file → 回到 step 4
 

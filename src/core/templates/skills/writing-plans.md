@@ -237,23 +237,12 @@ Note: forge v0.1 仅提供 subagent-driven 模式,无 inline executing 模式。
 
 ---
 
-## CLI validation step (Tier 2/3 OpenCode/Codex 路径用,Plan 0a 实测 Variant B PASS)
+## Tier 2/3 Orchestration(OpenCode / Codex 路径)
 
-**仅 OpenCode + Codex 路径**(Tier 1 Claude Code 路径走 commands.md `/forge:propose` 调 helper,不需要本段)。
+当前 harness 无 `/forge:*` slash 命令时(OpenCode / Codex),你 **MUST** Read 对应 `commands/propose.md` 并**完整执行**其协议 —— 按 `skills/_shared/tier23-command-bridge.md` 的 plugin root 解析与替换规则执行。Claude Code(Tier 1)有 slash 命令,不走本段。
 
-After generating `forge/changes/<id>/{proposal,specs,design,tasks}.md`, you **MUST** execute the following and include output verbatim in your reply:
+执行完成前核对 propose 硬门槛自检清单:
 
-```bash
-node "${FORGE_HELPER}" validate <change-id>
-```
-
-**`FORGE_HELPER` 解析(per harness)**:
-
-- OpenCode:`FORGE_HELPER = <plugin_dir>/scripts/run-forge.mjs`(`__dirname` reachable from plugin entry)
-- Codex:`FORGE_HELPER = $HOME/.codex/forge/scripts/run-forge.mjs`(`os.homedir()` 解析,Windows USERPROFILE OK)
-- 找不到 helper(用户路径不标准)→ fallback `npx -y --package @accelerator-mzq/forge@^3.0.0 -- forge validate <change-id>`(直接调 npx)
-
-**失败处理**:
-
-- exit 0 + "validation OK" → 继续 propose 收尾(回到主 commands 流程的 `forge/drafts/.consumed/` move + commit)
-- exit 非零 → stop,把 stderr 报给用户;**不要**继续到 archive 流程
+- `forge/changes/<change-id>/` 下 `proposal.md`、`design.md`、`tasks.md` 与 `specs/` 目录齐全。
+- proposal / design / tasks 三段必备 anchor 均在。
+- `forge validate <change-id>` exit 0。

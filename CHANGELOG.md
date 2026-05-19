@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [3.1.0] - 2026-05-19
+
+### Added
+
+- **Tier 2/3 Orchestration 桥接段**:5 个 stage skill(`writing-plans`、`subagent-driven-development`、`requesting-code-review`、`verification-before-completion`、`finishing-a-development-branch`)末尾各加 "Tier 2/3 Orchestration" 桥接节,OpenCode/Codex 可通过读取 `commands/<stage>.md` 跑完 6 步完整工作流。
+- **共享规则文件** `skills/_shared/tier23-command-bridge.md`:Tier 2/3 command-bridge 协议条款单一来源。
+- **OpenCode plugin bootstrap 注入 plugin root**:`.opencode/plugins/forge.js` SessionStart 现注入 `forge plugin root` 绝对路径,修复 Tier 2 harness 拼 `commands/<stage>.md` 路径失败问题。
+
+### Fixed
+
+- **`forge ack confirm` 写 marker**:`ack confirm` 现按 action 写 marker ack 字段 —— `ack-warning` / `ack-pause-warning` 写 `severity_acked_by`/`severity_acked_at`(`ack-pause-warning` 同步 `.verify-passed`+`.review-passed` 双 marker 的 `pause_decisions` 条目),`downgrade` 写 `downgrade_acked_by`/`downgrade_rationale`/`downgraded_from`、翻转 `severity` WARNING→SUGGESTION 并重算 `finding_hash`;ack-log entry 的 `finding_hash` 改为真实值(此前写死 `null`)。此前 confirm 完全不写 marker,导致 WARNING-ack → archive 在全 tier 失效(forge-wide bug)。
+- **pending-ack 文件名 namespace 编码**:文件名现正确编码 `pause_decisions:<id>` namespace 前缀。
+- **`ack confirm` 事务原子化**:加 rollback + retry 幂等保障。
+
+### Changed
+
+- **文档订正**:`verification-before-completion` 与 `using-forge` skill 删除虚假 claim;README / installation / codex-install / opencode-install 文档更正版本行、harness tier 表拆为 slash 注册与 workflow-bridge 两列、数字统一为 18 个 skill / 10 个 slash 命令 / 17 个 CLI 子命令。
+
 ## [3.0.0] - 2026-05-19
 
 ### BREAKING
@@ -414,5 +432,6 @@ MIT。复制 superpowers 12 个 skill 文本(MIT 许可),attribution 见 `LICENS
 - **不支持 Web Dashboard / telemetry / i18n / 自定义 schema**(spec §7,v1 不做)
 - **harness smoke 是 release gate manual checklist,不进 CI**(harness 是闭源 GUI,CI 跑不了)
 
+[3.1.0]: https://github.com/Accelerator-mzq/forge/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/Accelerator-mzq/forge/compare/v2.0.0...v3.0.0
 [0.1.0]: https://github.com/Accelerator-mzq/forge/releases/tag/v0.1.0

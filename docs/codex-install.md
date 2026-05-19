@@ -1,6 +1,6 @@
-# Forge for Codex(Tier 3 — PARTIAL_SHIP)
+# Forge for Codex(Tier 3)
 
-**状态**:Plan 0a.2 实测 PASS(2026-05-09)— `~/.agents/skills/<plugin>` skill auto-trigger + skill 内嵌 fenced bash + must-execute 让 AI 主动跑 helper 全 work;**`/forge:*` slash commands 不可用**(Codex plugin 不支持 commands);**literal `!command` 协议 IGNORED**(Plan 0a.2 实测 Variant A 失败,改用 fenced bash Variant B/C)。
+**状态**:Plan 0a.2 实测 PASS(2026-05-09)— `~/.agents/skills/<plugin>` skill auto-trigger + skill 内嵌 fenced bash + must-execute 让 AI 主动跑 helper 全 work;**`/forge:*` slash commands 不注册**(Codex plugin 不支持 commands 注册,完整工作流经 stage skill 桥接路径可达);**literal `!command` 协议 IGNORED**(Plan 0a.2 实测 Variant A 失败,改用 fenced bash Variant B/C)。
 
 ## Prerequisites
 
@@ -60,17 +60,19 @@ session 内输入:
 - Codex:用 Read + Bash 工具完成 skill 的"阅读 + 执行"
 - 两者协议层都 PASS,只是实现机制不同
 
-## Workflow(适配 Tier 3 PARTIAL_SHIP 路径)
+## Workflow(Tier 3 桥接路径)
 
-Codex 没有 `/forge:*` slash 入口(Plan 0a.2 实测 commands 不可注册)。用自然语言驱动,AI 按 skill description auto-trigger,**主动**跑 fenced bash + must-execute 调用 forge CLI:
+Codex 没有 `/forge:*` slash 入口(Plan 0a.2 实测 commands 不可注册)。**完整的 6 步工作流(`brainstorm → propose → apply → review → verify → archive`)通过 stage skill 桥接路径可达**:触发对应 stage skill 后,skill 内的「Tier 2/3 Orchestration」段指示 AI Read 对应 `commands/<stage>.md` 并完整执行其协议 —— 这是 best-effort skill orchestration(不等价于 Claude Code 原生 slash 调用),AI 按协议步骤主动跑 forge CLI。
+
+桥接路径中 plugin root 解析:`~/.codex/forge`(标准安装,把 `~` 展开为绝对路径)。`forge` 可执行 token 替换为 `node "<ROOT>/scripts/run-forge.mjs" <subcmd>`。完整替换规则见 `skills/_shared/tier23-command-bridge.md`。
 
 ```
-我想做个 todo list             # → Skill(brainstorming) auto
-完成 brainstorming 走 propose   # → Skill(writing-plans) auto + 跑 forge validate
-跑 apply                       # → Skill(subagent-driven-development) + TDD
-review 一下                    # → Skill(requesting-code-review)
-完成验证                       # → Skill(verification-before-completion) + 跑 forge validate
-完成归档                       # → Skill(finishing-a-development-branch) + 跑 forge archive
+我想做个 todo list             # → Skill(brainstorming) 触发 + Read commands/brainstorm.md + 完整执行
+完成 brainstorming 走 propose   # → Skill(writing-plans) 触发 + Read commands/propose.md + 完整执行
+跑 apply                       # → Skill(subagent-driven-development) 触发 + Read commands/apply.md + 完整执行
+review 一下                    # → Skill(requesting-code-review) 触发 + Read commands/review.md + 完整执行
+完成验证                       # → Skill(verification-before-completion) 触发 + Read commands/verify.md + 完整执行
+完成归档                       # → Skill(finishing-a-development-branch) 触发 + Read commands/archive.md + 完整执行
 ```
 
 skill 文本内嵌的 fenced bash 形态(Plan 3 Task 3.3):
@@ -85,7 +87,7 @@ node "${FORGE_HELPER}" validate <change-id>
 ```
 ````
 
-`$FORGE_HELPER` 解析:`$HOME/.codex/forge/scripts/run-forge.mjs`(`os.homedir()` 跨平台,Windows 走 `USERPROFILE`)。helper 内 spawn `npx -y --package @accelerator-mzq/forge@^3.0.0 -- forge ...` 拉 forge CLI。
+`$FORGE_HELPER` 解析:`$HOME/.codex/forge/scripts/run-forge.mjs`(`os.homedir()` 跨平台,Windows 走 `USERPROFILE`)。helper 内 spawn `npx -y --package @accelerator-mzq/forge@^3.1 -- forge ...` 拉 forge CLI。
 
 ## 备选 — 用全局 forge 替代 helper
 
@@ -103,7 +105,7 @@ Codex skill 内嵌 fenced bash + must-execute 实测 Variant B/C PASS(Plan 0a.2)
 
 ### Codex 不识别 `/forge:*` 命令
 
-预期行为(Plan 0a.2 实测 commands 不支持)。不要装 plugin 期待 slash 入口工作。Tier 3 PARTIAL_SHIP 状态如此。
+预期行为(Plan 0a.2 实测 commands 不支持)。`/forge:*` slash commands 本身不注册,这是事实 —— 完整工作流通过 stage skill 桥接路径(Read `commands/<stage>.md` + 完整执行)可达,不需要 slash 入口。
 
 ### Cross-plugin 同名(superpowers + forge brainstorming)
 
@@ -132,11 +134,10 @@ forge upgrade
 
 详见 [migration/v0.2-to-v0.3.md](migration/v0.2-to-v0.3.md)。
 
-## Tier 3 ship 限制(推 v0.4)
+## Tier 3 已知限制
 
-- `/forge:*` slash commands 不可用(同 OpenCode)
+- `/forge:*` slash commands 本身不注册(Codex plugin 不支持 commands 注册) — 完整工作流经 stage skill 桥接路径可达(已有缓解)
 - literal `!command` 协议 IGNORED — fenced bash + must-execute 替代(实测 PASS)
 - bundled plugin air-gapped 路径不存在(Codex 是 clone + symlink,不需要 bundled)— air-gapped 用户改用本地 git clone + 全局 npm install offline tarball
 - Codex 不支持 plugin 显式 disable / enable 控制 — namespace 冲突时只能手动 rm symlink
-
-当前 ship 状态:**PARTIAL_SHIP — skills + skill-driven CLI 完整 work,commands 入口降级**。
+- Stage extensions(`forge stage-extensions run`)为 Tier 1 Claude Code 专属 — Tier 3 跳过该 hook 段

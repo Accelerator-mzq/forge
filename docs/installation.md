@@ -1,17 +1,17 @@
-# Forge 安装(v1.1 plugin 路径)
+# Forge 安装(v3.1 plugin 路径)
 
-forge v1.1 全部走 **plugin** 形态(`forge init` 仍可用但 deprecated,v1.2 移除)。三 harness 各自路径 + 状态(Plan 0a + Plan 0b.1 实测,2026-05-09):
+forge v3.1 全部走 **plugin** 形态(`forge init` 仍可用但 deprecated,v1.2 移除)。三 harness 各自路径 + 状态(Plan 0a + Plan 0b.1 实测,2026-05-09):
 
-| Tier | Harness     | Status                        | 安装文档                           |
-| ---- | ----------- | ----------------------------- | ---------------------------------- |
-| 1    | Claude Code | **ENABLE**(全功能)           | [claude-install.md](claude-install.md) |
-| 2    | OpenCode    | **PARTIAL_SHIP**(skills + skill-driven CLI;commands 推 v0.4) | [opencode-install.md](opencode-install.md) |
-| 3    | Codex       | **PARTIAL_SHIP**(同上)       | [codex-install.md](codex-install.md) |
+| Tier | Harness     | `/forge:*` slash 命令注册                               | workflow bridge                          | 安装文档                                   |
+| ---- | ----------- | ------------------------------------------------------- | ---------------------------------------- | ------------------------------------------ |
+| 1    | Claude Code | ✅ 全功能(18 skill + 10 slash 命令 + CLI helper)       | —                                        | [claude-install.md](claude-install.md)     |
+| 2    | OpenCode    | ❌ 不注册                                               | ✅ best-effort(经命令文件桥接)          | [opencode-install.md](opencode-install.md) |
+| 3    | Codex       | ❌ 不注册                                               | ✅ best-effort(经命令文件桥接)          | [codex-install.md](codex-install.md)       |
 
 **Tier 区别**:
 
-- Claude Code 全功能 — 16 skill auto-trigger + 9 个 `/forge:*` slash commands + plugin commands.md 调 `${CLAUDE_PLUGIN_ROOT}/scripts/run-forge.mjs` helper
-- OpenCode + Codex `/forge:*` 不可用(plugin commands 协议不支持,Plan 0a 实测确认)— 改为 skill 文本内嵌 fenced bash + must-execute,AI auto-trigger skill 后**主动**跑 helper(Plan 0a Variant B/C 实测 PASS)
+- Claude Code 全功能 — 18 skill auto-trigger + 10 个 `/forge:*` slash commands + plugin commands.md 调 `${CLAUDE_PLUGIN_ROOT}/scripts/run-forge.mjs` helper
+- OpenCode + Codex `/forge:*` slash 命令不注册(plugin commands 协议不支持,Plan 0a 实测确认)— Tier 2/3 通过 workflow bridge 以 best-effort 方式读取 `commands/<stage>.md` 文件运行完整工作流
 
 ## 共通需求
 

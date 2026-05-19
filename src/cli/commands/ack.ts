@@ -5,12 +5,18 @@
 //   forge ack reject <changeId> <findingId> --rationale <text>   — User 拒绝,删 pending
 
 import { Command } from 'commander';
-import { readFile, writeFile, unlink, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, unlink, mkdir, copyFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { resolve, dirname } from 'node:path';
 import { stringify as stringifyYaml, parse as parseYaml } from 'yaml';
-import { appendAckLog, getPendingPath, listPending } from '../../core/ack-log.js';
+import {
+  appendAckLog,
+  getPendingPath,
+  listPending,
+  readAllAckLogEntries,
+} from '../../core/ack-log.js';
 import type { AckEntry } from '../../core/ack-log.js';
+import { applyMarkerAck } from '../../core/ack/marker-ack.js';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // 内部 helper
@@ -53,7 +59,7 @@ export function buildAckCommand(): Command {
     .command('propose')
     .description('AI 写 pending ack 文件(需 user confirm 才生效)')
     .argument('<changeId>', 'change 目录 ID,如 add-login')
-    .requiredOption('--finding <id>', 'finding ID(数字字符串)')
+    .requiredOption('--finding <id>', 'finding id:`<number>` 或 `pause_decisions:<number>`')
     .requiredOption('--action <type>', 'ack 类型,如 ack-warning / ack-critical / resign-c-simcode')
     .option('--rationale <text>', 'AI 给出的 rationale(可选)')
     .option(
@@ -134,7 +140,7 @@ export function buildAckCommand(): Command {
     .command('confirm')
     .description('User 确认 AI 提议的 ack,写入 ack-log.jsonl 并删除 pending 文件')
     .argument('<changeId>', 'change 目录 ID')
-    .argument('<findingId>', 'finding ID(数字字符串)')
+    .argument('<findingId>', 'finding id:`<number>` 或 `pause_decisions:<number>`')
     .option(
       '--target-severity <sev>',
       '仅 resign-c-simcode action 必填;confirm 时 user 指定目标 severity 并写回 marker',
@@ -200,17 +206,38 @@ export function buildAckCommand(): Command {
         process.exit(2);
       }
 
+      // Task A2: marker ack 字段写入 — user/ackedAt 与 ack-log entry 共用同一值保证一致性
+      const ackedAt = new Date().toISOString();
+      const user = process.env['USER'] ?? process.env['USERNAME'] ?? 'unknown';
+      const markerResult = await applyMarkerAck({
+        changeDir: changeRoot,
+        action: payload.action,
+        findingId,
+        user,
+        ackedAt,
+        rationale: payload.rationale ?? null,
+        targetSeverity:
+          resolvedTargetSeverity === 'WARNING' || resolvedTargetSeverity === 'SUGGESTION'
+            ? resolvedTargetSeverity
+            : null,
+      });
+      if (!markerResult.ok) {
+        // marker 写失败(已自恢复) → 不 append ack-log,不删 pending,exit 2
+        process.stderr.write(`forge ack confirm: ${markerResult.reason}\n`);
+        process.exit(2);
+      }
+
       const ackEntry: AckEntry = {
         schema: 'forge-ack-log/v1',
         kind: 'ack',
-        timestamp: new Date().toISOString(),
+        timestamp: ackedAt,
         action: payload.action,
         change_id: changeId,
         finding_id: findingId,
-        user: process.env['USER'] ?? process.env['USERNAME'] ?? 'unknown',
+        user,
         rationale: payload.rationale ?? null,
         git_head: getGitHead(changeRoot),
-        finding_hash: null,
+        finding_hash: markerResult.ackLogFindingHash,
         target_severity:
           resolvedTargetSeverity === 'WARNING' || resolvedTargetSeverity === 'SUGGESTION'
             ? resolvedTargetSeverity
@@ -222,11 +249,72 @@ export function buildAckCommand(): Command {
         },
       };
 
-      // 追加到 ack 日志
-      await appendAckLog(changeRoot, ackEntry);
+      // applyMarkerAck 返回 ok=true、ackEntry 构造完成后:
+      // 幂等读 ack-log + appendAckLog 整体包进同一 rollback try/catch(Codex MAJOR-1)
+      // 保证 readAllAckLogEntries 失败时也触发 rollback,不留 marker 已写的半状态
+      try {
+        const entries = await readAllAckLogEntries(changeRoot);
+        const dup = entries.some(
+          (e) =>
+            e.kind === 'ack' &&
+            e.change_id === changeId &&
+            e.finding_id === findingId &&
+            (e as { action?: string }).action === payload.action &&
+            e.user === user &&
+            e.finding_hash === ackEntry.finding_hash,
+        );
+        if (!dup) await appendAckLog(changeRoot, ackEntry); // 幂等:已存在同 entry 则跳过 append
+      } catch (e) {
+        // ack-log 读/写失败 → 尽力从 .bak 恢复所有已写 marker;保留 pending(retry 可重跑)
+        // 收集 restore 失败,不让单个失败中断其余恢复;有未恢复项时输出清晰诊断
+        const restoreErrors: string[] = [];
+        for (const bak of markerResult.backups) {
+          const marker = bak.replace(/\.bak$/, '');
+          try {
+            await copyFile(bak, marker);
+          } catch (re) {
+            restoreErrors.push(
+              `${marker}(.bak: ${bak}): ${re instanceof Error ? re.message : String(re)}`,
+            );
+          }
+        }
+        if (restoreErrors.length > 0) {
+          process.stderr.write(
+            `forge ack confirm: ack-log 操作失败且 rollback incomplete —— 以下 marker 未恢复,` +
+              `请手动用对应 .bak 还原: ${restoreErrors.join('; ')}\n`,
+          );
+        } else {
+          process.stderr.write(
+            `forge ack confirm: ack-log 操作失败,marker 已回滚: ${e instanceof Error ? e.message : String(e)}\n`,
+          );
+        }
+        process.exit(1);
+      }
 
-      // 删除 pending 文件(confirm 消费后不再需要)
-      await unlink(latest.path);
+      // 成功:先删 pending(它是「未完成」标记;marker+ack-log 已一致即可删)
+      // ENOENT 视为幂等成功(pending 可能已被并发/外部清理);其他 unlink 错误 → exit 1
+      // (pending 残留会被 archive pending fence 拒签,必须让用户知道)
+      try {
+        await unlink(latest.path);
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
+          process.stderr.write(
+            `forge ack confirm: pending 文件删除失败(残留会被 archive 拒签,请手动清理 ${latest.path}): ` +
+              `${e instanceof Error ? e.message : String(e)}\n`,
+          );
+          process.exit(1);
+        }
+        // ENOENT → pending 已不在,幂等成功,继续清理 .bak
+      }
+
+      // best-effort 清理 .bak(.bak 残留不影响 archive,清理失败不阻断)
+      for (const bak of markerResult.backups) {
+        try {
+          await unlink(bak);
+        } catch {
+          /* .bak 清理失败吞错 —— 不阻断,marker+ack-log 已一致 */
+        }
+      }
 
       process.exit(0);
     });
@@ -239,7 +327,7 @@ export function buildAckCommand(): Command {
     .command('reject')
     .description('User 拒绝 AI 提议的 ack,写入 reject 日志并删除 pending 文件')
     .argument('<changeId>', 'change 目录 ID')
-    .argument('<findingId>', 'finding ID(数字字符串)')
+    .argument('<findingId>', 'finding id:`<number>` 或 `pause_decisions:<number>`')
     .requiredOption('--rationale <text>', '拒绝理由(必填)')
     .action(async (changeId: string, findingId: string, opts: { rationale: string }) => {
       const changeRoot = resolve(process.cwd(), 'forge', 'changes', changeId);

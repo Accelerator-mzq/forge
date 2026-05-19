@@ -106,3 +106,14 @@ You: [Fix progress indicators]
 - Push back with technical reasoning
 - Show code/tests that prove it works
 - Request clarification
+
+## Tier 2/3 Orchestration(OpenCode / Codex 路径)
+
+当前 harness 无 `/forge:*` slash 命令时(OpenCode / Codex),你 **MUST** Read 对应 `commands/review.md` 并**完整执行**其协议 —— 按 `skills/_shared/tier23-command-bridge.md` 的 plugin root 解析与替换规则执行。Claude Code(Tier 1)有 slash 命令,不走本段。
+
+执行完成前核对 review 硬门槛自检清单:
+
+- AI 写基础 `.review-passed` marker。
+- `forge evidence record-review` 跑过(写 staging)。
+- `forge evidence freeze --kind review` exit 0。
+- 过程中遇 `forge ack propose` 退出(产生 pending)→ Read 并执行 `commands/ack-confirm.md` 等价流程,降级 prompt 让用户确认,经 `forge ack confirm`/`reject` 落 ack-log(AI 不得自 ack)。

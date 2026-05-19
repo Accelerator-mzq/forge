@@ -225,27 +225,12 @@ forge 路径下,这一步发生在 `/forge:archive` 之后(archive 已做产物�
 
 ---
 
-## forge archive step (Tier 2/3 OpenCode/Codex 路径用,Plan 0a 实测 Variant B PASS)
+## Tier 2/3 Orchestration(OpenCode / Codex 路径)
 
-**仅 OpenCode + Codex 路径**(Tier 1 Claude Code 路径走 commands.md `/forge:archive` 调 helper)。
+当前 harness 无 `/forge:*` slash 命令时(OpenCode / Codex),你 **MUST** Read 对应 `commands/archive.md` 并**完整执行**其协议 —— 按 `skills/_shared/tier23-command-bridge.md` 的 plugin root 解析与替换规则执行。Claude Code(Tier 1)有 slash 命令,不走本段。
 
-When user says "archive" / "/forge:archive" / "完成归档" or similar, **after** finishing branch tasks(merge / clean / etc),you **MUST** execute:
+执行完成前核对 archive 硬门槛自检清单:
 
-```bash
-node "${FORGE_HELPER}" archive <change-id>
-```
-
-(`FORGE_HELPER` 解析见 forge:writing-plans skill 末尾 "CLI validation step" 段)
-
-forge CLI 内部严格门禁(spec §3.4):
-
-- `.verify-passed` 存在 + tasks_hash 匹配
-- `.review-passed` 存在 + content_hash 匹配 + git.diff_hash 匹配
-- specs sync(internal-only,不可绕过)
-
-**Result handling**:
-
-- exit 0 → mv 到 `forge/changes/archive/<date>-<id>/`,Tell user "Archive PASS"
-- exit 非零 → 报 stderr,**不**重试,提示用户跑缺失 step(`/forge:verify` 或 `/forge:review`)
-
-**严格门禁不可绕过 — 不要主动加 `--force`**(那是给 maintainer 紧急 escape hatch 用的,不是 AI 自主决策范畴)。
+- `.verify-passed` 与 `.review-passed` 均存在,且 hash(tasks_hash / content_hash / git.diff_hash)新鲜匹配。
+- `forge archive <change-id>` exit 0。
+- 若 archive 步骤 emit sync-check manifest → 按 `commands/archive.md` 的编排步逐项 fulfill。

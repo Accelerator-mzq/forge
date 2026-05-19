@@ -17,12 +17,14 @@ const extractAndStripFrontmatter = (content) => {
 export default async ({ client, directory }) => {
   // OpenCode plugin 加载根:从本文件位置反推 plugin 仓库根的 skills/ 目录
   const forgeSkillsDir = path.resolve(__dirname, '../../skills');
+  // forge 仓库根绝对路径(供 Tier 2/3 bridge skill 定位 CLI)
+  const forgeRepoRoot = path.resolve(__dirname, '../..');
 
   const getBootstrapContent = () => {
     const skillPath = path.join(forgeSkillsDir, 'using-forge', 'SKILL.md');
     if (!fs.existsSync(skillPath)) return null;
     const { body } = extractAndStripFrontmatter(fs.readFileSync(skillPath, 'utf8'));
-    return `<EXTREMELY_IMPORTANT>\nYou have forge.\n\n${body}\n</EXTREMELY_IMPORTANT>`;
+    return `<EXTREMELY_IMPORTANT>\nYou have forge.\n\nforge plugin root: ${forgeRepoRoot}\n\n${body}\n</EXTREMELY_IMPORTANT>`;
   };
 
   return {

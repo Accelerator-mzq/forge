@@ -14,6 +14,8 @@ function runForge(cwd: string, args: string[]): { code: number; stderr: string }
     execFileSync('node', [join(process.cwd(), 'dist/cli/index.js'), ...args], {
       cwd,
       encoding: 'utf8',
+      // env CI='' :GitHub runner 设 CI=true 会让 forge ack propose exit 2(CI mode 守卫);中和以模拟本地开发
+      env: { ...process.env, CI: '' },
     });
     return { code: 0, stderr: '' };
   } catch (e: any) {

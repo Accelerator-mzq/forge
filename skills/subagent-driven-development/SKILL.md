@@ -403,3 +403,12 @@ subagent 在 task 实施完成报 DONE 时,**必须**提供以下字段给主代
 - **本 STOP triggers**:**多次累积** BLOCKED / verify 重试 时强制 STOP 问用户(避免主代理无限循环)
 
 两者不冲突 — 现有 BLOCKED 第 4 项 "plan itself is wrong → Fluid Pause" 仍走 Fluid Pause(单次 critical gap 即触发);本 STOP triggers 表第 3-4 行(BLOCKED ≥ 2 次 / verify ≥ 3 次)是**累积失败**的反向加固,触发 STOP 后用户决策可能是"拆 task"/"重写 spec"/"走 explore"(沿 §2.8.4 与 §2.1/§2.5 桥接)。
+
+## Tier 2/3 Orchestration(OpenCode / Codex 路径)
+
+当前 harness 无 `/forge:*` slash 命令时(OpenCode / Codex),你 **MUST** Read 对应 `commands/apply.md` 并**完整执行**其协议 —— 按 `skills/_shared/tier23-command-bridge.md` 的 plugin root 解析与替换规则执行。Claude Code(Tier 1)有 slash 命令,不走本段。
+
+执行完成前核对 apply 硬门槛自检清单:
+
+- 每个完成的 task 经 `forge evidence record-tdd` 写入 TDD 证据链(缺则 archive 的 process_evidence fence 因 `tdd_event_chain` 缺失拒签)。
+- `forge preflight branch-check` 已跑(在 main/master 等保护分支上会 fail-closed)。

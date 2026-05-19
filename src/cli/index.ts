@@ -19,6 +19,7 @@ import { buildPreflightCommand } from './commands/preflight.js';
 import { buildStageExtensionsCommand } from './commands/stage-extensions.js';
 import { buildBacklogCommand } from './commands/backlog.js';
 import { buildMonitorCommand } from './commands/monitor.js';
+import { buildPauseCaptureCommand } from './commands/pause-capture.js';
 import { maybeRecordCliExit } from '../core/monitor/exit-handler.js';
 
 // 创建主命令
@@ -76,6 +77,9 @@ program.addCommand(buildBacklogCommand());
 
 // 注册 monitor 子命令组(plan-workflow-monitor)
 program.addCommand(buildMonitorCommand());
+
+// 注册 pause-capture 子命令(plan pause-fence Block C — Fluid Pause 锚点捕获)
+program.addCommand(buildPauseCaptureCommand());
 
 // workflow-monitor:唯一的 CLI 侧埋点(spec §4)。config 守卫确保关闭时零行为。
 process.on('exit', (code) => {

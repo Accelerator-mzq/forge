@@ -3,6 +3,8 @@ reviewed_at: 2026-05-12T15:00:00Z
 reviewed_by: ai-agent
 tasks_hash: sha256:placeholder
 content_hash: sha256:placeholder
+ack_log_tail_hash: e6a6d071bbd7d66871daba1302e27936772aba8df79d6801359905d256c01d62
+ack_log_entry_count: 2
 git:
   is_git_repo: false
 review_outcomes:
@@ -10,3 +12,19 @@ review_outcomes:
     accepted: false
     resolved: true
     rationale: "no issues"
+pause_decisions:
+  - id: 1
+    paused_at: 2026-05-12T14:25:00Z
+    task_ref: tasks.md#task-1
+    issue_summary: "需要加 logging 子任务"
+    severity: WARNING
+    severity_acked_by: msc
+    severity_acked_at: 2026-05-12T14:27:00Z
+    chosen_option: 2
+    target_artifact: tasks.md
+    target_anchor: "- task-3"
+    non_blocking_rationale: null
+    other_rationale: null
+    other_acked_by: null
+    added_task_ref: tasks.md#task-3
+    capture_id: 11111111-1111-1111-1111-111111111111

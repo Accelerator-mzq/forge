@@ -1,13 +1,13 @@
 # Forge CLI Reference
 
-> forge CLI 共 16 个子命令(`src/cli/index.ts` commander 注册)。下表按用途分组;`forge init` 已 deprecated(v0.4 移除),新项目改用 plugin install。
+> forge CLI 共 17 个子命令(`src/cli/index.ts` commander 注册)。下表按用途分组;`forge init` 已 deprecated(v0.4 移除),新项目改用 plugin install。
 
-| 分组                 | 命令                                                                    |
-| -------------------- | ----------------------------------------------------------------------- |
-| 产物校验与归档       | `validate` · `archive`                                                  |
-| 初始化 / 迁移 / 升级 | `init`(deprecated) · `update` · `migrate` · `upgrade` · `legacy-bridge` |
-| 工作流内部 helper    | `ack` · `evidence` · `finding` · `scope` · `preflight` · `backlog`      |
-| 配置与诊断           | `config` · `monitor` · `stage-extensions`                               |
+| 分组                 | 命令                                                                           |
+| -------------------- | ------------------------------------------------------------------------------ |
+| 产物校验与归档       | `validate` · `archive`                                                         |
+| 初始化 / 迁移 / 升级 | `init`(deprecated) · `update` · `migrate` · `upgrade` · `legacy-bridge`        |
+| 工作流内部 helper    | `ack` · `evidence` · `finding` · `scope` · `preflight` · `backlog` · `pause-capture` |
+| 配置与诊断           | `config` · `monitor` · `stage-extensions`                                      |
 
 ## `forge upgrade`(v0.3 新增)
 
@@ -437,7 +437,7 @@ forge stage-extensions analyze-trend --history '[{"round":1,"block_count":5},{"r
 
 ## 工作流内部 helper 命令
 
-以下 6 个命令主要由 slash 命令模板(`/forge:apply` / `/forge:verify` / `/forge:review` / `/forge:ack-confirm` 等)在工作流内部调用,一般不需手敲。列在此处供排障与理解协议。
+以下 7 个命令主要由 slash 命令模板(`/forge:apply` / `/forge:verify` / `/forge:review` / `/forge:ack-confirm` 等)在工作流内部调用,一般不需手敲。列在此处供排障与理解协议。
 
 ### `forge ack`
 
@@ -522,6 +522,22 @@ forge backlog list
 | `forge backlog`           | 重生成 `forge/backlog/active.md`      | 0 成功;2 错误               |
 | `forge backlog --check`   | 只比对磁盘与重生成结果,不写盘        | 0 一致;1 陈旧;2 错误       |
 | `forge backlog list`      | 把当前未决 backlog 打到 stdout,不落盘 | 0 成功;2 错误               |
+
+### `forge pause-capture`
+
+Fluid Pause 触发时由主代理调用:读 `tasks.md` 解析全部 task id,在 ack-log hash-chain 锁内写入 `pause-capture` entry,stdout 输出 `capture_id`(tab 分隔 timestamp)。option=2 Pause 机制使用。
+
+```
+forge pause-capture <changeId> --task <ref> --issue <summary>
+```
+
+| 参数 / 选项         | 含义                                                        |
+| ------------------- | ----------------------------------------------------------- |
+| `<changeId>`        | change 目录 ID(对应 `forge/changes/<changeId>/`)            |
+| `--task <ref>`      | 触发 pause 的 task 引用,如 `tasks.md#task-3`(必填)         |
+| `--issue <summary>` | subagent 报告的 issue 一句概括(必填)                        |
+
+stdout 格式:`<capture_id>\t<timestamp>\n`(capture_id 为 UUID,主代理写入 `pause_decisions[].capture_id`)。
 
 ## 错误退出码(全命令通用)
 

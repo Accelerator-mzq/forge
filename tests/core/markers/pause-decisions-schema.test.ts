@@ -130,4 +130,102 @@ describe('pause_decisions schema validation', () => {
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.field === 'pause_decisions[0].task_ref')).toBe(true);
   });
+
+  it('PauseDecision 缺 added_task_ref / capture_id → schema 通过(superset additive)', () => {
+    // 一个不含两新字段的 option=2 pause_decision 应通过 schema 校验
+    // (必填性由 fence 层判,非 schema 层)
+    // 注:plan 示例用 sha256:x 是简写,实际 schema 要求 64 位 hex;沿 baseVerifyMarker 模式
+    const marker = {
+      schema: 'forge-verify/v1',
+      verified_at: '2026-05-12T14:30:00Z',
+      verified_by: 'ai-agent',
+      tasks_hash: 'sha256:' + 'a'.repeat(64),
+      content_hash: 'sha256:' + 'b'.repeat(64),
+      evidence: [],
+      pause_decisions: [
+        {
+          id: 1,
+          paused_at: '2026-05-12T14:30:00Z',
+          task_ref: 'tasks.md#task-1',
+          issue_summary: 'x',
+          severity: 'WARNING',
+          severity_acked_by: 'msc',
+          severity_acked_at: '2026-05-12T14:32:00Z',
+          chosen_option: 2,
+          target_artifact: 'tasks.md',
+          target_anchor: '- task-2',
+          non_blocking_rationale: null,
+          other_rationale: null,
+          other_acked_by: null,
+        },
+      ],
+    };
+    const result = validateMarkerSchema(marker);
+    expect(result.valid).toBe(true);
+  });
+
+  it('PauseDecision added_task_ref / capture_id 显式为 null → schema 通过', () => {
+    // null 是合法值(schema 层 optional + nullable);option=2 marker 可写 capture_id: null
+    const marker = {
+      schema: 'forge-verify/v1',
+      verified_at: '2026-05-12T14:30:00Z',
+      verified_by: 'ai-agent',
+      tasks_hash: 'sha256:' + 'a'.repeat(64),
+      content_hash: 'sha256:' + 'b'.repeat(64),
+      evidence: [],
+      pause_decisions: [
+        {
+          id: 1,
+          paused_at: '2026-05-12T14:30:00Z',
+          task_ref: 'tasks.md#task-1',
+          issue_summary: 'x',
+          severity: 'WARNING',
+          severity_acked_by: 'msc',
+          severity_acked_at: '2026-05-12T14:32:00Z',
+          chosen_option: 2,
+          target_artifact: 'tasks.md',
+          target_anchor: '- task-2',
+          non_blocking_rationale: null,
+          other_rationale: null,
+          other_acked_by: null,
+          added_task_ref: null,
+          capture_id: null,
+        },
+      ],
+    };
+    const result = validateMarkerSchema(marker);
+    expect(result.valid).toBe(true);
+  });
+
+  it('PauseDecision added_task_ref / capture_id 类型错(非 string 非 null)→ schema 拒签', () => {
+    // 构造独立完整 marker,避免共享引用;hash 同 baseVerifyMarker 模式
+    const marker = {
+      schema: 'forge-verify/v1',
+      verified_at: '2026-05-12T14:30:00Z',
+      verified_by: 'ai-agent',
+      tasks_hash: 'sha256:' + 'a'.repeat(64),
+      content_hash: 'sha256:' + 'b'.repeat(64),
+      evidence: [],
+      pause_decisions: [
+        {
+          id: 1,
+          paused_at: '2026-05-12T14:30:00Z',
+          task_ref: 'tasks.md#task-1',
+          issue_summary: 'x',
+          severity: 'WARNING',
+          severity_acked_by: 'msc',
+          severity_acked_at: '2026-05-12T14:32:00Z',
+          chosen_option: 2,
+          target_artifact: 'tasks.md',
+          target_anchor: '- task-2',
+          non_blocking_rationale: null,
+          other_rationale: null,
+          other_acked_by: null,
+        },
+      ],
+    };
+    (marker.pause_decisions[0] as Record<string, unknown>).added_task_ref = 123; // 非法类型
+    const result = validateMarkerSchema(marker);
+    expect(result.valid).toBe(false);
+  });
 });

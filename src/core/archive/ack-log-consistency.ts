@@ -7,23 +7,8 @@ import { join } from 'node:path';
 import { computeFindingHash, extractHashPayload } from '../validate/finding-hash.js';
 import type { Finding } from '../schemas/severity.js';
 import { type ValidationResult, ok, failed, mergeResults } from '../validate/types.js';
-
-/**
- * ack-log.jsonl 一行 schema(沿 master §3.12.4 kind="ack")
- */
-interface AckLogEntry {
-  schema: string;
-  kind: 'ack' | 'evidence-helper';
-  timestamp: string;
-  action: string;
-  change_id: string;
-  finding_id: string | null;
-  user: string;
-  rationale: string | null;
-  git_head: string | null;
-  finding_hash: string | null;
-  extra?: Record<string, unknown>;
-}
+// 使用正式定义,消除本地重复 AckLogEntry interface(design §6.3 / Codex round 1 NIT #9)
+import type { AckLogEntry, AckEntry } from '../ack-log.js';
 
 /**
  * 校验 ack-log.jsonl ↔ marker verify_findings 中 ack 字段一致性
@@ -90,14 +75,15 @@ export async function validateAckLogConsistency(
   }
 
   // 2-4. ack-log.jsonl 解析 + marker ↔ ack-log 一致性
-  let ackEntries: AckLogEntry[] = [];
+  // ackEntries 类型为 AckEntry[],过滤后类型正确收窄,使下游访问 finding_id/action 等专属字段通过 typecheck
+  let ackEntries: AckEntry[] = [];
   try {
     const ackText = await readFile(ackLogPath, 'utf8');
     ackEntries = ackText
       .split('\n')
       .filter((line) => line.trim())
       .map((line) => JSON.parse(line) as AckLogEntry)
-      .filter((e) => e.kind === 'ack'); // 仅看 kind=ack(沿 master §3.12.4)
+      .filter((e): e is AckEntry => e.kind === 'ack'); // type guard:过滤后收窄为 AckEntry(沿 master §3.12.4)
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
       results.push(

@@ -50,3 +50,6 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      - name: Release gate (strict)
+        run: pnpm test:gate:release

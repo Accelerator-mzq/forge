@@ -30,7 +30,8 @@ const FILE = resolve(__dirname, '../tests/integration/release-blocker-attack-pat
 // **release 模式**(--release flag):忽略 EXPECTED,强制 actual=0
 // v2 MAJOR 2(plan-9e1):2 → 5(plan-9c 2 个 + plan-9e1 3 个 failure-injection it.todo)
 // v3 MAJOR 1(plan-9j Task 4):5 → 6(+ plan-9j version-retrograde fail-closed git error it.todo)
-const EXPECTED_TODO_COUNT_SOFT = 6;
+// v4 pause-fence plan(Task 1-15):6 → 0(全 6 个 release-blocker it.todo 已 unskip,soft 期望归零)
+const EXPECTED_TODO_COUNT_SOFT = 0;
 const isRelease = process.argv.includes('--release');
 
 // v6 codex NIT 修订:readFileSync 加 try/catch,文件不存在(中间状态)给清晰错误而非 stack trace

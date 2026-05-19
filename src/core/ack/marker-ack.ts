@@ -89,6 +89,7 @@ export async function applyMarkerAck(params: {
 }): Promise<MarkerAckResult> {
   const { changeDir, action, findingId, user, ackedAt } = params;
   const verifyPath = join(changeDir, '.verify-passed');
+  const reviewPath = join(changeDir, '.review-passed');
 
   // 统一的失败构造器
   const FAIL = (reason: string): MarkerAckResult => ({
@@ -122,7 +123,44 @@ export async function applyMarkerAck(params: {
       };
     }
 
-    // ack-pause-warning / downgrade 见 Task A3 / A4 扩展(同样走 writeMarkersAtomic)
+    if (action === 'ack-pause-warning') {
+      // §5.1.3 步骤 4-5:同步写 .verify-passed 与 .review-passed 的 pause_decisions ack 字段
+      // 1. 先全量校验两个 marker 都存在且都含该 pause decision,fail-closed:任一不满足 → 不写任何 marker
+      if (!existsSync(verifyPath)) return FAIL('.verify-passed 不存在');
+      if (!existsSync(reviewPath)) return FAIL('.review-passed 不存在');
+
+      // 剥 "pause_decisions:" 前缀得到数字 id 字符串
+      const pdIdStr = findingId.replace(/^pause_decisions:/, '');
+
+      const verifyMarker = parseYaml(await readFile(verifyPath, 'utf8')) as Record<string, unknown>;
+      const reviewMarker = parseYaml(await readFile(reviewPath, 'utf8')) as Record<string, unknown>;
+
+      const verifyPds = (verifyMarker.pause_decisions as Array<Record<string, unknown>>) ?? [];
+      const reviewPds = (reviewMarker.pause_decisions as Array<Record<string, unknown>>) ?? [];
+
+      const verifyPd = verifyPds.find((pd) => String(pd['id']) === pdIdStr);
+      if (!verifyPd) return FAIL(`.verify-passed pause_decisions 无 id=${pdIdStr}`);
+
+      const reviewPd = reviewPds.find((pd) => String(pd['id']) === pdIdStr);
+      if (!reviewPd) return FAIL(`.review-passed pause_decisions 无 id=${pdIdStr}`);
+
+      // 2. 两个 marker 都校验通过 → 写入同一 ack 值(保证一致性)
+      verifyPd['severity_acked_by'] = user;
+      verifyPd['severity_acked_at'] = ackedAt;
+      reviewPd['severity_acked_by'] = user;
+      reviewPd['severity_acked_at'] = ackedAt;
+
+      // 3. 双 marker 原子写:第二个写失败时 writeMarkersAtomic 自动恢复第一个并抛错
+      const backups = await writeMarkersAtomic([
+        { path: verifyPath, content: verifyMarker },
+        { path: reviewPath, content: reviewMarker },
+      ]);
+
+      // 4. pause decision 无 FindingHashPayload,ackLogFindingHash 为 null
+      return { ok: true, ackLogFindingHash: null, backups };
+    }
+
+    // downgrade 见 Task A4 扩展(同样走 writeMarkersAtomic)
     // 其余 action:不写 marker,finding_hash 为 null
     return { ok: true, ackLogFindingHash: null, backups: [] };
   } catch (e) {

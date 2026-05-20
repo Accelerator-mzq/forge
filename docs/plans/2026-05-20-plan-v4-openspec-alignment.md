@@ -627,7 +627,7 @@ v3 的 `verify_findings` 数组(WARNING 阵列)在 v4 直接砍掉。verify 发�
 | `forge validate` | 保留(spec validate 不变)|
 | `forge init` | 保留 |
 | `forge update` | 保留 |
-| `forge archive` | 重写(BREAKING — flag 简化:删 `--from-recovery`/`--force` 部分语义)|
+| `forge archive` | 重写(BREAKING — v8 flag 改造:**新增 `--yes` / `--skip-specs`**(沿 OpenSpec 风格);**删** `--recover` / `--resume-summary` / `--resume`(v3 transaction 中断恢复消亡);**保留** `--force`(human-override / 非 git)+ `--api`(legacy-bridge sync-check 直连)。Codex v7 F-R7-1)|
 | `forge upgrade` | 保留(v0.2 → v0.3 legacy upgrade)|
 | `forge migrate` | 保留 |
 | `forge legacy-bridge` | 保留 |
@@ -671,6 +671,13 @@ v3 的 `verify_findings` 数组(WARNING 阵列)在 v4 直接砍掉。verify 发�
 
 - [ ] **Task 1.5**: 重写 `src/cli/commands/archive.ts`(1166 → ~280 行,沿 §6.1 v6 修订草案,**含正确签名的 legacy-bridge preflight/posthook + generateBacklog + appendTraceEvent + Path B 简化 spec sync 用 forge 现有 API**)。**v6 修订(Codex v5 F-R5-1/F-R5-2)**:Path B 后不再引入 OpenSpec API。引入新 helper:`validateMarkerSchema`(v4 简版,Task 1.3 已造)+ `readDeltas / applyDeltas / type SpecDelta`(forge 现有 specs-sync API,**不**新增到 specs-sync,只在 archive.ts 内 import 使用)+ `renderDeltasSummary(deltas: SpecDelta[]): string`(archive.ts 内**新增本地 helper** ~10 行,显示 deltas 给用户 confirm;Path B "无新增代码" 仅指 specs-sync/ 不变,archive.ts 内仍需 ~10 行 helper)+ `moveDirectory`(沿 OpenSpec EPERM/EXDEV fallback,archive.ts 内**新增本地 helper** ~15 行)+ `getArchiveDate`(archive.ts 内 ~5 行)+ `selectChange` inquirer 交互(archive.ts 内 ~30 行)。**关键**:重写后 archive.ts **不再 import** transaction/lock/recover/recover-prompt/resume-summary/fence/process-evidence-fence/ack-log-consistency/three-level-fence/legacy-exemption/version-retrograde-fence/verify-findings-fence/pause-decisions-fence 任何一个 — 这是 §10.1.3 删除安全的前提。
 - [ ] **Task 1.6**: 重写 `src/core/archive/summary-builder.ts`(351 → ~80 行,删 fence_results / severity_buckets / acked_warnings;保留 archived_at + applied_commits + handoff_to_backlog + spec_updates_applied + verified_by + reviewed_by)。**v7 修订(Codex v6 F-R6-2)**:**导出名保留** `buildArchiveSummary`(不改 `buildSimplifiedSummary`),new signature:`buildArchiveSummary(opts: { archivePath, changeId, verifyMarker, reviewMarker, deltas }): Promise<ArchiveSummary>`。Task 1.5 archive.ts 重写时 import `buildArchiveSummary` 而非 v1-v6 plan 里漂移的 `buildSimplifiedSummary`。
+
+**v8 修订(Codex v7 F-R7-1)— archive command CLI flag 扩展**:
+Task 1.5 重写 archive.ts 时,**新增两个 CLI flag**(沿 OpenSpec archive 风格,§6.1 伪代码 `options.yes` / `options.skipSpecs` 已引用):
+- `--yes` — 自动接受所有 interactive confirm(未完成 task / spec deltas / skip-validation 等),CI 自动化模式必备(沿 OpenSpec archive.ts:53)
+- `--skip-specs` — 跳过 spec deltas 应用(沿 OpenSpec archive.ts:197/53)
+
+保留 forge 现有 flag:`--force`(human-override / 非 git)、`--api`(legacy-bridge sync-check 直连 API),不再保留 v3 的 `--recover / --resume-summary / --resume`(transaction 中断恢复消亡)。§9 Migration Guide CLI 子命令兼容性表同步更新。
 - [ ] **Task 1.7**: **v3 新增**(Codex v2 F-4.2)重写 `src/core/archive/summary-render.ts`(81 → ~40 行)— 删读 `process_evidence_summary` / `acked_warnings` / `pending_suggestions` v1 字段;保留读 archived_at + applied_commits + spec_updates_applied + handoff_to_backlog 段渲染。
 - [ ] **Task 1.8**: 跑 `pnpm typecheck` 验证 archive.ts 已脱离待删模块依赖(此时仍 import barrel 但实际函数已切完 — barrel 清理在 §10.1.6)。
 
@@ -1091,4 +1098,28 @@ v3 的 `verify_findings` 数组(WARNING 阵列)在 v4 直接砍掉。verify 发�
 
 ---
 
-**Plan 结束(v7)**。Review 后请确认是否进入 Phase 1。
+---
+
+## §22 Codex Adversarial Review v7 — Response Log(2026-05-20)
+
+**Review trigger**:plan v7 commit `9678794` 后,user msc 要求"继续到 C+I = 0",续 thread 跑第七轮。Codex 输出:**v6 4 条全 PASS**(F-R6-1 ~ F-R6-4 closed)+ 新 1 条 Important(F-R7-1)。
+
+| Codex v7 Finding | Severity | 核实 | Plan v8 修订 |
+|---|---|---|---|
+| **F-R7-1** §6.1 伪代码用 `options.yes` / `options.skipSpecs`,但 Task 1.5 没声明新增这俩 CLI flag;forge 当前 archive 也无(只有 OpenSpec 有) | Important | ✅ archive.ts:92-103 + OpenSpec archive.ts:53/197 实证 | Task 1.5 + §9 Migration:**显式新增 `--yes` + `--skip-specs` CLI flag**(沿 OpenSpec 风格);**删** `--recover` / `--resume-summary` / `--resume`(transaction 中断恢复消亡);保留 `--force` + `--api` |
+
+**统计**:Critical 0 / Important 1 / Minor 0(全部确证)。
+
+**Codex v7 准确率**:1/1(100%)。
+
+**累计 Codex Review 统计**:
+- v1 16 / v2 9 / v3 4 / v4 3 / v5 4 / v6 4 / v7 1
+- **总计 41 条 finding,100% 命中率**
+
+**进度**:Critical 已稳 0(连续两轮 v6+v7);Important 从 v6 的 2 降到 v7 的 1。v8 修订是机械 CLI flag 扩展,无新 architectural 风险。
+
+**第八轮 review 预期**:F-R7-1 是 plan 与 forge CLI 现有 option 契约对齐细节;v8 修订后,plan 应已达到 user 要求"C+I = 0",**进入 Phase 1**。
+
+---
+
+**Plan 结束(v8)**。Review 后请确认是否进入 Phase 1。

@@ -1,0 +1,725 @@
+# Plan v4 — OpenSpec Alignment (BREAKING)
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** v4.0.0 砍掉 forge `archive` 阶段所有反向加固协议,与 OpenSpec `archive.ts` 设计哲学对齐。具体砍 5 类:hash 链 / 14 invariant fence / git CLI ancestry 校验 / 两步 ack 协议 / archive transaction 中断恢复。最终 forge `archive` 主入口从 1166 行降到 ~250 行,模块体系从 17 个 archive 子模块降到 3 个(summary-builder / summary-render / index)。
+
+**Architecture:** 4 个 Phase 顺序实施。Phase 1 = 砍核心代码(src/core/archive/ 13 文件全删 + evidence.ts/ack.ts/pause-capture.ts/ack-log.ts/process-evidence-freeze-warnings.ts 全删 + 新简化版 archive.ts ~250 行)。Phase 2 = marker-schema.ts / markers/types.ts 简化(791+183 → ~100+60 行),顺手放宽 ISO 8601 正则允许 ms 精度(报告 V-1 修复保留)。Phase 3 = commands/*.md 大改 + 反加固 skill 群删除/改写 + archive emit monitor trace event(报告 3.1 修复)。Phase 4 = 测试 + fixture 清理 + v4.0.0 发布(CHANGELOG / tag / gh release / npm publish)。
+
+**Tech Stack:** TypeScript(ESM,Node ≥ 20.19)、commander(CLI)、vitest(测试)、yaml、gray-matter。包管理 pnpm。
+
+**权威决策证据:**
+- 2026-05-20 user msc 通过 forge upstream session 选择 B1 严格模式("hash 链/不变量/git CLI/ack 协议/中断恢复 全砍,和 openspec 维度对齐")
+- ForgeUE dogfood 报告 `D:\ClaudeProject\ForgeUE_claude\forge\changes\archive\2026-05-20-executor-async-rewrite\notes\workflow_analysis_report.md` 暴露 Arch-1 fence-9 double-marker cycle(协议循环依赖,5 种 workaround 全 fail)
+- 对照 OpenSpec `src/core/archive.ts` 339 行实现,无 marker / 无 ack-log / 无 hash 链 / 无 fence / 无 git 校验,仍能正常 archive 闭环
+
+---
+
+## §1 Executive Summary
+
+| 度量 | v3.1.1(当前) | v4.0.0(B1 后) | 倍数 |
+|---|---|---|---|
+| archive 主入口 行数 | 1166 | ~250 | 4.7× ↓ |
+| archive 相关模块总行数 | 4818 | ~600 | 8× ↓ |
+| archive 子模块数 | 17 | 3 | — |
+| 中间 marker 数 | 2(.verify-passed + .review-passed,fence 强校验)| 2(同名,**仅作存在性 + 简化 schema 校验**)| 内容深度 ↓ |
+| Hash 链种类 | 8(tasks_hash / content_hash / git.diff_hash / finding_hash JCS / ack_log_tail_hash / prev_entry_hash / payload_hash / staging_hash) | **0** | — |
+| 校验不变量 | 14(fence-1 ~ fence-14)| **0** | — |
+| git CLI 调用次数 | 8+ | **0** | — |
+| Ack 协议步数 | 2(propose + confirm)| **0** | — |
+| 中断恢复 / transaction | transaction.ts + recover.ts + recover-prompt.ts | **无** | — |
+| Severity 等级 | 3(CRITICAL/WARNING/SUGGESTION)| **无** | — |
+
+**砍后 forge 比 OpenSpec 仍然多的特性**(forge 真正差异化价值):
+- `handoff_to_backlog`(跨 change 跟踪 Out of Scope / Future Work / Non-Goals)— forge 独有亮点
+- `archive_summary.yaml`(简化版 audit trail)
+- marker 存在性检查(`.verify-passed` + `.review-passed` 必须存在,**不 fence 内容**)
+- 18 → ~13 个 skill(反加固相关删除后剩余的行为塑造价值)
+- multi-harness(Codex/OpenCode 兼容)/ monitor / preflight / migrate / legacy-bridge / stage-extensions / backlog registry CLI
+
+**砍后 forge 失去**:
+- 防 AI 跳过 verify/review 直接 archive(除存在性外无任何 fence)
+- 防 AI 篡改 tasks.md `[x]` 标记(tasks_hash 砍)
+- 防 AI 在 verify 后 commit 新代码混入 archive(git.diff_hash 砍)
+- 防 AI 写假 TDD red→green commit chain(invariant-1/2/14 砍)
+- 防 AI 自 ack WARNING(两步 ack 砍)
+- 防 Fluid Pause option=1/2/3 marker 字段伪造(pause_decisions fence 砍)
+- 防 AI 整体替换 ack-log 文件(ack-log 整体砍)
+
+**砍后用户必须自管**:git diff review、tasks.md 勾选审核、commit history 审核 — 这是 OpenSpec 早就是的模式。
+
+---
+
+## §2 Design Philosophy Shift
+
+| 维度 | v3.x(反向加固协议)| v4.0(OpenSpec 对齐)|
+|---|---|---|
+| 对 AI 信任度 | 极低 — "防 AI 偷懒" 是第一目标 | 中高 — 信任 AI + 用户 review |
+| 防御层 | 8 hash + 14 invariant + 2 marker fence + ack-log chain + 两步 ack | 仅 spec schema validate + marker 存在性 |
+| 复杂度成本 | 高 — fence 链耦合产生 Arch-1 cycle 等架构 bug | 低 — 各组件独立 |
+| 用户摩擦 | 高 — 用户撞 R-1/V-1/Arch-1/V-2 等多重坑 | 低 — 接近 OpenSpec 原生体验 |
+| 设计哲学 | "Trust nothing, verify everything cryptographically" | "Fluid not rigid, iterative not waterfall"(OpenSpec README 字面)|
+
+---
+
+## §3 Mode Selection — B1 strict alignment
+
+**B1 = 严格按字面砍**:hash 链 / 不变量 / git CLI / ack 协议 / 中断恢复 5 项全部 → 0。不留任何反加固"甜区"(不留 tasks_hash + content_hash 比对)。
+
+**B1 vs B2 选择记录**:
+- B1(严格)：archive 100% 对齐 OpenSpec,无任何 hash 防护
+- B2(留 tasks_hash + content_hash 单点 invariant)：~30 行成本,防 verify 后产物篡改 — 用户拒绝,选 B1
+
+**决策时间**: 2026-05-20  
+**决策人**: msc  
+**理由**: 用户拒绝任何形式的 hash chain / invariant,要求完全对齐 OpenSpec
+
+---
+
+## §4 当前 vs B1 完整对比表
+
+### §4.1 archive 主流程逐步对比
+
+| 步骤 | v3.1.1 当前 | v4.0 B1 | OpenSpec 对照 |
+|---|---|---|---|
+| 1. 找/确认 changeName | 同 OpenSpec(interactive select)| 同 | ✅ 同 |
+| 2. validate proposal.md | validate(non-blocking)| 同 | ✅ 同 |
+| 3. validate change/specs/ deltas | 严格 spec 段名 + delta 语法 | 同 | ✅ 同(forge 段名更严)|
+| 4. 检查 .verify-passed + .review-passed | 存在性 + schema + tasks_hash + content_hash + git.diff_hash + ack_log_entry_count + ack_log_tail_hash + process_evidence + pause_decisions + verify_findings 14 invariant fence | **仅存在性 + schema 必填字段**(verified_at/reviewed_at/verified_by) | **forge 独有,但极简** |
+| 5. legacy-exemption fence | 兼容老 marker | **删** | OpenSpec 无 |
+| 6. version-retrograde fence | 防工具版本回退 | **删** | OpenSpec 无 |
+| 7. validatePauseDecisionsFence | 5 option 业务校验 | **删** | OpenSpec 无 |
+| 8. validateAckLogConsistency | ack-log ↔ marker ack 4 条规则 | **删** | OpenSpec 无 |
+| 9. validateThreeLevelFence | critical/warning/suggestion 三级桶 | **删** | OpenSpec 无 |
+| 10. validateVerifyFindingsFence | verify_findings 字段 fence | **删** | OpenSpec 无 |
+| 11. crossCuttingFenceCheck (14 invariant) | git ancestry / red→green 时序 / projection hash 等 | **删** | OpenSpec 无 |
+| 12. archiveTransaction(lock + 阶段 rename + Sync + summary)| transaction.ts(211)+ lock.ts(131)+ recover.ts(280) | **删** — 改 simple `fs.rename` + spec deltas | OpenSpec 同 |
+| 13. specs-sync apply deltas | `src/core/specs-sync/apply.ts` | 同 — 保留 | OpenSpec `specs-apply.ts` 对照 |
+| 14. archive_summary.yaml 生成 | summary-builder.ts(351 行)+ render | 简化 — `archived_at` + `applied_commits` + `handoff_to_backlog` + `spec_updates_applied` | OpenSpec 无 audit summary,**forge 保留**(简化)|
+| 15. 写 archive HEAD marker | git tag-like marker 写入 | **删** | OpenSpec 无 |
+| 16. recover-prompt 中断恢复 | recover-prompt.ts | **删** | OpenSpec 无 |
+| 17. monitor trace emit | 仅靠 maybeRecordCliExit | 新增 1 行 `appendTraceEvent`(顺手修报告 3.1)| OpenSpec 无 |
+
+### §4.2 Marker 字段对比
+
+| 字段 | v3.1.1 .verify-passed | v4.0 .verify-passed | 用途 |
+|---|---|---|---|
+| `schema` | `forge-verify/v1` | `forge-verify/v2`(BREAKING)| 区分新版 |
+| `verified_at` | ISO 8601 严格秒(V-1 bug)| ISO 8601 允许 ms(V-1 修)| 时间戳 |
+| `verified_by` | string | string | 谁跑的 verify |
+| `tasks_hash` | SHA256 of tasks.md | **删** | 防篡改 |
+| `content_hash` | SHA256 of specs/+design+proposal | **删** | 防篡改 |
+| `git.head` + `git.diff_hash` | git refs + diff hash | **删** | 防绕过 |
+| `process_evidence`(整段)| 复杂结构 — staging 4 数组 | **删** | 防 AI 伪造 verify 调用 |
+| `process_evidence_staging_hash` | staging hash 快照 | **删** | 同上 |
+| `ack_log_tail_hash` + `ack_log_entry_count` | ack-log 链固化 | **删** | 防替换 ack-log |
+| `verify_findings`(WARNING 阵列)| 复杂结构 + ack 字段 | **删** | 三级 severity |
+| `pause_decisions` | 5 字段 + option 业务校验 | **保留**(简化为 `{paused_at, task_ref, issue_summary, chosen_option, notes}` 自由 prose,不 fence)| Fluid Pause 软记录 |
+| `created_by_tool_version` | `FORGE_VERSION` 写入(v3.1.1 已动态读 package.json)| 保留 | 工具版本追溯 |
+
+`.review-passed` 同步简化(`reviewed_at` / `reviewed_by` / 删 hash 链 / 删 process_evidence / 删 ack-log / 保留简版 pause_decisions)。
+
+---
+
+## §5 Architecture — 完整删/留/新清单
+
+### §5.1 删除清单(文件级 + 行数)
+
+| 路径 | 行数 | 理由 |
+|---|---|---|
+| `src/core/archive/fence.ts` | 276 | crossCuttingFenceCheck 入口 |
+| `src/core/archive/process-evidence-fence.ts` | 596 | 14 invariant fence 体系 |
+| `src/core/archive/process-evidence-rerun.ts` | 261 | invariant 5/6/13 worktree 重跑 |
+| `src/core/archive/pause-decisions-fence.ts` | 678 | 5 option 业务校验 |
+| `src/core/archive/ack-log-consistency.ts` | 211 | marker ack ↔ ack-log 4 条规则 |
+| `src/core/archive/verify-findings-fence.ts` | 98 | verify_findings 字段 fence |
+| `src/core/archive/three-level-fence.ts` | 127 | critical/warning/suggestion 三级桶 |
+| `src/core/archive/legacy-exemption.ts` | 108 | 老 marker 兼容(v4 重置版本号,无需) |
+| `src/core/archive/version-retrograde-fence.ts` | 110 | 工具版本回退防护 |
+| `src/core/archive/transaction.ts` | 211 | 阶段化 rename + Sync + summary,B1 改 simple fs.rename |
+| `src/core/archive/recover.ts` | 280 | 中断恢复 |
+| `src/core/archive/recover-prompt.ts` | 34 | 中断恢复 prompt |
+| `src/core/archive/lock.ts` | 131 | archive lock(简化版用 mkdir EEXIST 即可)|
+| `src/core/archive/resume-summary.ts` | 94 | recover 配套 |
+| **archive 子模块小计** | **3215** | 13/17 个删,留 summary-builder/render/index |
+| `src/cli/commands/evidence.ts` | 842 | record-tdd/verify/review + freeze CLI 整删 |
+| `src/cli/commands/ack.ts` | 399 | 两步 ack CLI 整删 |
+| `src/cli/commands/pause-capture.ts` | 107 | pause-capture CLI 整删 |
+| `src/core/ack-log.ts` | 307 | ack-log JSONL chain 整删 |
+| `src/core/process-evidence-freeze-warnings.ts` | 215 | freeze WARNING 计算 |
+| `src/core/staging-lock.ts` | ~50 | staging.yaml 锁 |
+| `src/core/schemas/process-evidence.ts` | ~50 | process_evidence schema |
+| `src/core/validate/finding-hash.ts` | ~60 | JCS finding_hash 算法 |
+| `src/core/validate/marker-integrity.ts` | ~80 | marker integrity 校验(hash 链) |
+| `src/core/canonical-json.ts` | ~30 | JCS canonicalize wrapper(评估:仍 backlog 模块用?如否则删) |
+| **CLI / helpers / schemas 小计** | **~2140** | — |
+| **删除总计** | **~5355** | — |
+
+### §5.2 保留清单(forge 真正价值)
+
+| 路径 | 行数 | 理由 |
+|---|---|---|
+| `src/cli/commands/validate.ts` | — | 4 件套 spec validate(同 OpenSpec)|
+| `src/cli/commands/backlog.ts` | — | backlog registry CLI(forge 独有亮点)|
+| `src/cli/commands/scope.ts` | — | scope-entries aggregator(forge 独有亮点)|
+| `src/cli/commands/config.ts` | — | forge config 管理 |
+| `src/cli/commands/init.ts` | — | forge init scaffold |
+| `src/cli/commands/update.ts` | — | forge update |
+| `src/cli/commands/upgrade.ts` | — | forge upgrade(v0.2 → v0.3 等 legacy) |
+| `src/cli/commands/migrate.ts` | — | OpenSpec/superpowers 项目搬运 |
+| `src/cli/commands/legacy-bridge.ts` | — | brownfield onboarding |
+| `src/cli/commands/preflight.ts` | — | main/master 分支保护 |
+| `src/cli/commands/stage-extensions.ts` | — | codex review hook |
+| `src/cli/commands/monitor.ts` | — | trace monitor |
+| `src/cli/commands/finding.ts` | — | finding helper(若不依赖 finding-hash 则留)|
+| `src/core/archive/summary-builder.ts` | 351 → ~80 | 简化版 — 仅生成 archived_at/applied_commits/handoff_to_backlog |
+| `src/core/archive/summary-render.ts` | 81 | render summary 给用户看,保留 |
+| `src/core/archive/index.ts` | 5 | 模块 entry |
+| `src/core/specs-sync/` 全套 | — | spec deltas 应用,等同 OpenSpec specs-apply.ts |
+| `src/core/parse/` 全套 | — | proposal/specs/tasks/design 解析 |
+| `src/core/validate/{change,proposal,specs,tasks,archive-summary-schema,scope-entries,coverage-gap,orphan-tmp,types}.ts` | — | spec layer validate(保留)|
+| `src/core/markers/{parse,index}.ts` | — | marker 解析(types.ts 简化)|
+| `src/core/backlog/` | — | backlog registry implementation |
+| `src/core/monitor/` 全套 | — | monitor trace 系统(独立) |
+| `src/core/migrate/` 全套 | — | 项目搬运 |
+| `src/core/legacy-bridge/` 全套 | — | brownfield |
+| `src/core/stage-extensions/` 全套 | — | codex review hook |
+| `src/core/preflight/` | — | branch-check |
+| `src/core/hash/` | — | 评估:若仅 archive fence 用则删;若 specs-sync 也用则留 |
+| `src/core/canonical-json.ts` | — | 评估:backlog registry 是否依赖? |
+
+### §5.3 新增清单
+
+| 新增 | 内容 | 行数 |
+|---|---|---|
+| `src/cli/commands/archive.ts` 重写 | 简化版主流程 — check markers → validate → confirm progress → apply deltas → mv → emit monitor trace + 写 archive_summary.yaml | ~250 |
+| `src/core/markers/types.ts` 重写 | 简化版 marker interface(仅 schema + verified_at + verified_by + pause_decisions 字段)| ~60 |
+| `src/core/validate/marker-schema.ts` 重写 | 简化版 schema(仅必填字段 + ISO 8601 允许 ms)| ~100 |
+| `docs/migration/v3-to-v4.md` 新建 | v3.x → v4.0 用户迁移指南 | ~200 |
+| `CHANGELOG.md [4.0.0]` 段 | BREAKING change 详尽描述 | ~80 |
+
+### §5.4 Commands(.md)改写要点
+
+| 文件 | 当前行数(估)| 改写要点 | 改后行数(估)|
+|---|---|---|---|
+| `commands/archive.md` | ~200 | 删 14 fence 描述 / 删 ack-log fence / 删 process_evidence 协议;改为简单 "validate → confirm progress → apply specs → mv → done" | ~80 |
+| `commands/verify.md` | ~300 | 删 record-verify + freeze --kind verify 调用;改为简单"写 .verify-passed marker(verified_at + verified_by + pause_decisions 数组)";三维 verify skill 行为保留(但不写复杂 marker 字段) | ~120 |
+| `commands/review.md` | ~250 | 同 verify.md;删 record-review + freeze --kind review;改为简单写 .review-passed marker | ~100 |
+| `commands/apply.md` | ~230 | **保留 Fluid Pause skill 行为**(AskUserQuestion 4 选项);删 pause-capture CLI 调用 + pause_decisions 复杂字段写入 + capture_id;改为简单 prose 写 marker pause_decisions 数组(自由字段无 fence)| ~150 |
+| `commands/ack-confirm.md` | ~150 | **整删**(两步 ack 协议消亡)| 0 |
+| `commands/brainstorm.md` | ~100 | 不变(无 fence)| ~100 |
+| `commands/propose.md` | ~120 | 不变(spec validate 路径保留)| ~120 |
+| `commands/explore.md` | ~80 | 不变 | ~80 |
+| `commands/upgrade.md` | ~50 | 不变 | ~50 |
+| `commands/codex-adversarial.md` | ~95 | 不变(独立 codex review hook)| ~95 |
+
+### §5.5 Skills 删/改清单
+
+| skill | 当前 | v4 命运 |
+|---|---|---|
+| `brainstorming` | OpenSpec 上游 | **保留** |
+| `exploring` | OpenSpec 上游 | **保留**(只移除 What Changes → What 残留,已在 v3.1.1 修)|
+| `writing-plans` | OpenSpec 上游 | **保留**(scale-aware mode 不变)|
+| `writing-skills` | OpenSpec 上游 | **保留** |
+| `test-driven-development` | OpenSpec 上游 | **保留**(TDD red→green 行为是好习惯,只是不再 fence 校验)|
+| `subagent-driven-development` | OpenSpec 上游 + forge 加固 | **保留 + 删反加固段**(删 process-evidence record-tdd 强制调用要求)|
+| `dispatching-parallel-agents` | OpenSpec 上游 | **保留** |
+| `using-git-worktrees` | OpenSpec 上游 | **保留** |
+| `systematic-debugging` | OpenSpec 上游 | **保留** |
+| `verification-before-completion` | OpenSpec 上游 + forge 加固 | **保留 + 删反加固段**(删 evidence helper / 三级 fence claim)|
+| `finishing-a-development-branch` | OpenSpec 上游 | **保留** |
+| `receiving-code-review` | OpenSpec 上游 + forge 加固 | **保留 + 简化**(删 review marker 复杂字段写入要求)|
+| `requesting-code-review` | OpenSpec 上游 + forge 加固 | **保留 + 简化**(同上)|
+| `using-forge` | forge 元 skill | **保留 + 重写**(更新对齐 v4 协议)|
+| **`process-evidence`** | forge 反加固独有 | **整删** |
+| **`verifying-three-dimensions`** | forge 反加固独有 | **整删** |
+| **`verifying-process-evidence`** | forge 反加固独有 | **整删**(如存在;若已合并到 verifying-three-dimensions 同删)|
+| **`subagent-driven-discipline`** | forge 反加固独有 | **整删** |
+| `legacy-bridge-fulfillment` | forge 独有 | **保留**(brownfield 不依赖 fence)|
+
+净:保留 13,删 4-5,改 5-6。
+
+---
+
+## §6 简化版 archive.ts 完整设计
+
+### §6.1 主流程伪代码
+
+```typescript
+// src/cli/commands/archive.ts v4 草案(沿 OpenSpec archive.ts 风格)
+
+export class ArchiveCommand {
+  async execute(changeId?: string, options: ArchiveOptions = {}): Promise<void> {
+    const targetPath = '.';
+    const changesDir = path.join(targetPath, 'forge', 'changes');
+    const archiveDir = path.join(changesDir, 'archive');
+    const mainSpecsDir = path.join(targetPath, 'forge', 'specs');
+
+    // 1. 找 changes 目录;若 changeId 缺则 interactive select
+    if (!await exists(changesDir)) {
+      throw new Error("No forge changes directory. Run 'forge init' first.");
+    }
+    if (!changeId) {
+      changeId = await this.selectChange(changesDir);
+      if (!changeId) return;
+    }
+    const changeDir = path.join(changesDir, changeId);
+    if (!await isDirectory(changeDir)) {
+      throw new Error(`Change '${changeId}' not found.`);
+    }
+
+    // 2. Spec validate(blocking) + proposal validate(non-blocking)
+    if (!options.noValidate) {
+      const result = await validateChange(changeDir);
+      if (!result.valid) {
+        printValidationErrors(result);
+        return;
+      }
+    }
+
+    // 3. Marker 存在性 check + schema validate
+    const verifyPath = path.join(changeDir, '.verify-passed');
+    const reviewPath = path.join(changeDir, '.review-passed');
+    if (!await exists(verifyPath)) {
+      throw new Error(`Missing .verify-passed in ${changeDir}. Run /forge:verify first.`);
+    }
+    if (!await exists(reviewPath)) {
+      throw new Error(`Missing .review-passed in ${changeDir}. Run /forge:review first.`);
+    }
+    const verifyMarker = parseYaml(await readFile(verifyPath));
+    const reviewMarker = parseYaml(await readFile(reviewPath));
+    const verifyValid = validateMarkerSchema(verifyMarker, 'verify');
+    const reviewValid = validateMarkerSchema(reviewMarker, 'review');
+    if (!verifyValid.valid || !reviewValid.valid) {
+      printValidationErrors([verifyValid, reviewValid]);
+      return;
+    }
+
+    // 4. Task progress 显示 + 未完成 confirm(沿 OpenSpec)
+    const progress = await getTaskProgressForChange(changesDir, changeId);
+    if (progress.incomplete > 0 && !options.yes) {
+      const proceed = await confirm({ 
+        message: `${progress.incomplete} incomplete task(s). Continue?`, 
+        default: false 
+      });
+      if (!proceed) return;
+    }
+
+    // 5. Spec deltas 应用(沿 OpenSpec specs-apply)
+    if (!options.skipSpecs) {
+      const updates = await findSpecUpdates(changeDir, mainSpecsDir);
+      // ... 同 OpenSpec buildUpdatedSpec / writeUpdatedSpec
+    }
+
+    // 6. mv change → archive/YYYY-MM-DD-changeId(沿 OpenSpec moveDirectory 含 Windows EPERM/EXDEV fallback)
+    const archiveName = `${getArchiveDate()}-${changeId}`;
+    const archivePath = path.join(archiveDir, archiveName);
+    if (await exists(archivePath)) {
+      throw new Error(`Archive '${archiveName}' already exists.`);
+    }
+    await fs.mkdir(archiveDir, { recursive: true });
+    await moveDirectory(changeDir, archivePath);
+
+    // 7. 写简化 archive_summary.yaml(forge 独有亮点 — handoff_to_backlog)
+    const summary = await buildSimplifiedSummary(archivePath, changeId, verifyMarker, reviewMarker);
+    await writeFile(path.join(archivePath, 'archive_summary.yaml'), stringify(summary));
+
+    // 8. 顺手 emit monitor trace event(报告 3.1 修复)
+    appendTraceEvent(targetPath, {
+      ts: new Date().toISOString(),
+      schema: 'forge-monitor-trace/v1',
+      change_id: changeId,
+      stage: 'archive',
+      layer: 'cli',
+      event: 'change_archived',
+      data: { archive_name: archiveName, spec_updates: updates?.length ?? 0 },
+    });
+
+    console.log(`Change '${changeId}' archived as '${archiveName}'.`);
+  }
+}
+```
+
+**总行数估算**:~250 行(含 import / helper / inquirer 交互)。
+
+### §6.2 Marker schema 简化(`src/core/markers/types.ts` v4)
+
+```typescript
+/** v4 verify marker — 极简 */
+export interface VerifyMarker {
+  schema: 'forge-verify/v2';                       // BREAKING bump
+  verified_at: string;                              // ISO 8601 允许 ms (V-1 修)
+  verified_by: string;                              // 'ai-agent' | username
+  pause_decisions?: PauseDecisionSimple[];          // 软记录,无 fence
+  created_by_tool_version?: string;                 // FORGE_VERSION 写入
+}
+
+/** v4 review marker — 极简,镜像 verify */
+export interface ReviewMarker {
+  schema: 'forge-review/v2';
+  reviewed_at: string;
+  reviewed_by: string;
+  pause_decisions?: PauseDecisionSimple[];
+  created_by_tool_version?: string;
+}
+
+/** v4 Fluid Pause 软记录 — 仅作 audit 不 fence */
+export interface PauseDecisionSimple {
+  paused_at: string;                                // ISO 8601 允许 ms
+  task_ref: string;                                 // tasks.md#task-N
+  issue_summary: string;
+  chosen_option: 1 | 2 | 3 | 4;                     // 1=扩 scope / 2=加 task / 3=转 out-of-scope / 4=other
+  notes?: string;                                   // 自由 prose
+}
+```
+
+### §6.3 Marker schema validate(`src/core/validate/marker-schema.ts` v4)
+
+```typescript
+// ISO 8601 允许 ms(V-1 修复)
+const ISO_8601_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?Z$/;
+
+export function validateMarkerSchema(marker: unknown, kind: 'verify' | 'review'): ValidationResult {
+  if (typeof marker !== 'object' || marker === null) return failed('marker not object');
+  const m = marker as Record<string, unknown>;
+  
+  // schema 类型
+  const expectedSchema = kind === 'verify' ? 'forge-verify/v2' : 'forge-review/v2';
+  if (m.schema !== expectedSchema) return failed(`schema must be ${expectedSchema}`);
+  
+  // timestamp 字段
+  const atKey = kind === 'verify' ? 'verified_at' : 'reviewed_at';
+  if (typeof m[atKey] !== 'string' || !ISO_8601_RE.test(m[atKey] as string)) {
+    return failed(`${atKey} must be ISO 8601 UTC (YYYY-MM-DDTHH:MM:SS[.fff]Z)`);
+  }
+  
+  // by 字段
+  const byKey = kind === 'verify' ? 'verified_by' : 'reviewed_by';
+  if (typeof m[byKey] !== 'string') return failed(`${byKey} must be string`);
+  
+  // pause_decisions(可选,数组类型 only,内容不 fence)
+  if (m.pause_decisions !== undefined && !Array.isArray(m.pause_decisions)) {
+    return failed('pause_decisions must be array if present');
+  }
+  
+  return ok();
+}
+```
+
+总行数 ~100。
+
+### §6.4 archive_summary.yaml 简化
+
+```yaml
+schema: forge-archive-summary/v2                    # BREAKING bump
+archived_at: 2026-05-20T15:30:00Z
+change_id: executor-async-rewrite
+archive_name: 2026-05-20-executor-async-rewrite
+verified_by: msc
+reviewed_by: msc
+applied_commits: []                                 # 可选,user 想填就填,不 fence
+spec_updates_applied:
+  - capability: auth
+    counts: { added: 2, modified: 1, removed: 0, renamed: 0 }
+handoff_to_backlog:                                 # forge 独有亮点 — 跨 change 收集
+  - source: scope_entries                            # proposal.md Out of Scope YAML 块
+    entries:
+      - id: oauth-refresh-token
+        category: out-of-scope
+        description: ...
+        related_change: null
+```
+
+简化版无 `severity_buckets`(critical/warning/suggestion)、无 `fence_results`、无 `acked_warnings`、无 `pause_decisions` 复杂结构(那些都 archive 后 grep 原 marker 即可)。
+
+### §6.5 Spec deltas 应用(沿用)
+
+`src/core/specs-sync/{apply,deltas,index}.ts` 全套保留,**API 不变**,archive 主流程调 `findSpecUpdates → buildUpdatedSpec → writeUpdatedSpec`(命名沿 OpenSpec 风格,可考虑 rename 对齐)。
+
+---
+
+## §7 Fluid Pause 去 fence 协议
+
+### §7.1 v3 协议(被砍部分)
+
+- `forge pause-capture <changeId> --task <ref> --issue "<summary>"` CLI → 写 ack-log entry
+- marker `pause_decisions` 严格 schema(`target_artifact` / `target_anchor` / `non_blocking_rationale` / `other_rationale` / `other_acked_by` / `severity_acked_by` / `severity_acked_at` / `added_task_ref` / `capture_id`)
+- archive 时 `validatePauseDecisionsFence` 跑 5 option 业务校验(option=1 必须改 `## What` 段 + diff 段级校验;option=2 必须 capture_id 链 + task ∈ tasks.md `[x]`;option=3 必须 scope-entries YAML 块 + non_blocking_rationale;option=4 必须 other_rationale + other_acked_by)
+- CRITICAL severity 拒签;WARNING + 未 ack 拒签
+
+### §7.2 v4 协议(简化)
+
+- **保留 skill 行为**:apply 中段 subagent 报 `BLOCKED` / `DONE_WITH_CONCERNS` / `DESIGN_ISSUE_FOUND` 时,主代理 invoke `AskUserQuestion` 弹 4 选项(沿 v3 同语义):
+  - 1 = 扩本 change scope → 用户自行更新 `proposal.md ## What` 段(skill 提示)
+  - 2 = 加 task 进本轮 → 用户/AI append 新 task 到 `tasks.md`(skill 提示)
+  - 3 = 转 out-of-scope → 用户/AI 写到 `proposal.md ## Out of Scope` YAML 块(forge-scope-entries/v1,仍保留 schema!— `scope-entries` validate 是 spec layer)
+  - 4 = Other → 自由 prose
+- **删除**:`forge pause-capture` CLI、marker `pause_decisions` 严格字段、`validatePauseDecisionsFence` 业务校验、CRITICAL 重定向、severity_acked_by 强校验
+- **简化版 marker `pause_decisions` 数组**(若 user/AI 想写):
+  ```yaml
+  pause_decisions:
+    - paused_at: 2026-05-20T14:25:00Z
+      task_ref: tasks.md#task-3
+      issue_summary: subagent 发现 spec 漏 OAuth refresh token
+      chosen_option: 1
+      notes: 用户扩 scope,proposal.md What 段已加 refresh token 处理
+  ```
+- 无 fence,marker schema 仅校验数组类型 + 内字段类型(`paused_at` ISO 8601、`chosen_option` ∈ {1,2,3,4})
+
+**Why 保留 skill 行为而不全删**:Fluid Pause 决策点本身是有价值的工作流元素(让用户在 apply 中段做 scope 决策);v3 复杂的是 marker fence,不是 skill 行为本身。
+
+---
+
+## §8 Verify / Review 行为简化
+
+### §8.1 v3 协议(被砍)
+
+- `/forge:verify`:跑 vitest 全套 → record-verify CLI 写 staging.yaml → freeze --kind verify(算 invariant 7/10 WARNING + fence-9 ack-log chain 固化)→ ack propose 处理 WARNING → ack confirm 写 marker
+- `/forge:review`:dispatch subagent code review → record-review CLI 写 staging.yaml subagent_review_chain → freeze --kind review
+
+### §8.2 v4 协议(简化)
+
+- `/forge:verify`:
+  1. 跑 vitest + lint + typecheck + 三维 verify skill(Completeness/Correctness/Coherence 行为保留,但仅 skill prose check,不写 marker)
+  2. 写 `.verify-passed` 极简 marker(schema + verified_at + verified_by + 可选 pause_decisions)
+- `/forge:review`:
+  1. dispatch subagent code review(行为保留)
+  2. 写 `.review-passed` 极简 marker
+- 无 staging.yaml、无 record-* CLI、无 freeze、无 ack 协议
+
+### §8.3 verify_findings 怎么处理
+
+v3 的 `verify_findings` 数组(WARNING 阵列)在 v4 直接砍掉。verify 发现的问题:
+- CRITICAL → 不 archive,user 修复后重跑(等同 OpenSpec validate fail blocking)
+- WARNING/SUGGESTION → user/AI 在 conversation 里讨论 + 决定是否修;**不再写进 marker**;若决定不修,user 可在 proposal.md Out of Scope 段加 entry(forge backlog registry 仍能跨 change 跟踪)
+
+---
+
+## §9 Migration Guide(v3.x → v4.0)
+
+### §9.1 用户视角变化
+
+| 变化 | v3.x 用户体验 | v4.0 用户体验 |
+|---|---|---|
+| `/forge:verify` 后看到 | invariant-7-verify-count WARNING + 要求 `forge ack propose` | 直接 marker 写完,流畅过 |
+| `/forge:review` 后看到 | subagent_review_chain 详细 staging + freeze 各种 hash | 直接 marker 写完,流畅过 |
+| `/forge:archive` 失败 | "fence-9.3 ack-log chain verification failed: entry count mismatch" | 仅 spec validate fail 或 marker 文件缺失 |
+| Fluid Pause | 复杂 marker pause_decisions 字段 + capture_id 链 | 简单数组 + 自由 prose |
+| AI 偷懒可能 | 几乎所有路径都被 fence 挡住 | 用户自管 — 跟 OpenSpec 一样 |
+
+### §9.2 已有 active change 升级路径
+
+用户从 v3.1.1 升级到 v4.0.0 时,正在进行中的 `forge/changes/<id>/` 怎么办?
+
+**方案 A — 完成路径(推荐)**:
+1. v3.1.1 时已写的 `.verify-passed` / `.review-passed` marker schema 是 `v1`,v4.0 schema 是 `v2` — schema validate 会 fail
+2. 用户在 v4.0 跑 `/forge:verify` 重新写一个 v2 marker 覆盖原 v1 — 不破坏数据(只是覆盖 marker 文件)
+3. 重跑 verify/review → archive
+
+**方案 B — 强制 archive**:
+- v4.0 提供 `forge archive <id> --legacy-marker-mode v1` flag(读 v1 schema 时只检存在 + 简化字段,跳过 v1 复杂字段);archive 时把 v1 marker 改写成 v2 形态再 mv
+
+**方案推荐**:A(简单 + 干净)。 v4.0 启动文档明确告知"升级前完成所有 active change 的 archive,或 v4.0 后跑一次 /forge:verify 重写 marker"。
+
+### §9.3 已 archived change 兼容性
+
+`forge/changes/archive/*` 已归档的 v1 marker / 复杂 archive_summary.yaml 全部保留。v4.0 不读它们,只追加新 archive(沿 OpenSpec 风格,archive 是 dead state 不再操作)。
+
+**潜在不便**:用户用 `forge backlog scan-archived-followups` 时,scope-entries YAML 块的 schema 没变(仍 `forge-scope-entries/v1`),仍能正常工作。v3 archive_summary 的 handoff_to_backlog 段被 v4 backlog CLI 正常读取(向后兼容)。
+
+### §9.4 CLI 子命令兼容性
+
+| 子命令 | v4 状态 |
+|---|---|
+| `forge validate` | 保留(spec validate 不变)|
+| `forge init` | 保留 |
+| `forge update` | 保留 |
+| `forge archive` | 重写(BREAKING — flag 简化:删 `--from-recovery`/`--force` 部分语义)|
+| `forge upgrade` | 保留(v0.2 → v0.3 legacy upgrade)|
+| `forge migrate` | 保留 |
+| `forge legacy-bridge` | 保留 |
+| `forge preflight` | 保留 |
+| `forge stage-extensions` | 保留 |
+| `forge monitor` | 保留 + 接 archive emit trace |
+| `forge backlog` | 保留 |
+| `forge scope` | 保留 |
+| `forge config` | 保留 |
+| `forge finding` | 评估 — 若仅依赖 finding-hash 则**删**;若 backlog 用则简化 |
+| **`forge ack`** | **整删** |
+| **`forge evidence`** | **整删** |
+| **`forge pause-capture`** | **整删** |
+
+---
+
+## §10 Phase 1-4 SDD 任务清单
+
+### §10.1 Phase 1 — 核心代码砍
+
+> 目标:删 ~5355 行 / 改 archive.ts 重写 ~250 行。每步 commit 跑 typecheck 保证不破。
+
+- [ ] **Task 1.1**: 删 `src/cli/commands/evidence.ts`(842 行)+ `evidenceCommand` import / register from `src/cli/index.ts`。
+- [ ] **Task 1.2**: 删 `src/cli/commands/ack.ts`(399)+ register。
+- [ ] **Task 1.3**: 删 `src/cli/commands/pause-capture.ts`(107)+ register。
+- [ ] **Task 1.4**: 删 `src/core/ack-log.ts`(307)。
+- [ ] **Task 1.5**: 删 `src/core/process-evidence-freeze-warnings.ts`(215)+ `staging-lock.ts` + `schemas/process-evidence.ts`。
+- [ ] **Task 1.6**: 删 `src/core/archive/{fence,process-evidence-fence,process-evidence-rerun,pause-decisions-fence,ack-log-consistency,verify-findings-fence,three-level-fence,legacy-exemption,version-retrograde-fence}.ts`(总 ~2475 行)。
+- [ ] **Task 1.7**: 删 `src/core/archive/{transaction,recover,recover-prompt,lock,resume-summary}.ts`(总 ~750 行)。
+- [ ] **Task 1.8**: 删 `src/core/validate/{finding-hash,marker-integrity}.ts`(~140);`canonical-json.ts` 暂留(评估 backlog 依赖)。
+- [ ] **Task 1.9**: 重写 `src/cli/commands/archive.ts`(1166 → ~250 行,沿 §6.1 草案)。引入新 helper `validateMarkerSchema`(v4 简版)+ `findSpecUpdates / buildUpdatedSpec / writeUpdatedSpec`(specs-sync 已有)+ `moveDirectory`(沿 OpenSpec EPERM/EXDEV fallback)+ `getArchiveDate` + `selectChange` inquirer 交互。
+- [ ] **Task 1.10**: 重写 `src/core/archive/summary-builder.ts`(351 → ~80 行,删 fence_results / severity_buckets / acked_warnings;保留 archived_at + applied_commits + handoff_to_backlog + spec_updates_applied)。
+- [ ] **Task 1.11**: 跑 `pnpm typecheck` + `pnpm build`,确保 Phase 1 末尾 typecheck 干净(不需要 test 过)。
+
+### §10.2 Phase 2 — Marker schema + types 简化
+
+> 目标:重写 schema 100 + types 60 行,V-1 ms 正则放宽
+
+- [ ] **Task 2.1**: 重写 `src/core/markers/types.ts`(183 → ~60,仅 VerifyMarker / ReviewMarker / PauseDecisionSimple 三个 interface)。
+- [ ] **Task 2.2**: 重写 `src/core/validate/marker-schema.ts`(791 → ~100,只校验 schema/verified_at/reviewed_at/verified_by/reviewed_by/pause_decisions 类型 + ISO 8601 允许 ms 正则)。
+- [ ] **Task 2.3**: 顺手修 `src/core/validate/archive-summary-schema.ts:76` ISO 正则错误消息(与 marker-schema 对齐:`(YYYY-MM-DDTHH:MM:SS[.fff]Z)`)。
+- [ ] **Task 2.4**: 删 `src/core/markers/parse.ts` 中跟 v1 marker 复杂字段相关的 parse 逻辑(若有),保留 simple YAML parse。
+- [ ] **Task 2.5**: 跑 `pnpm typecheck` 干净。
+
+### §10.3 Phase 3 — Skills + 命令文档大改 + archive emit monitor trace
+
+> 目标:文档级大改 + 反加固 skill 群删除
+
+- [ ] **Task 3.1**: 整删 skill — `skills/process-evidence/SKILL.md` + 其 references/。
+- [ ] **Task 3.2**: 整删 skill — `skills/verifying-three-dimensions/SKILL.md` + references/。
+- [ ] **Task 3.3**: 整删 skill — `skills/subagent-driven-discipline/SKILL.md` + references/。
+- [ ] **Task 3.4**: 整删 skill — `skills/verifying-process-evidence/SKILL.md`(若存在)。
+- [ ] **Task 3.5**: 删 `commands/ack-confirm.md`(整删 — 两步 ack 协议消亡)。
+- [ ] **Task 3.6**: 重写 `commands/archive.md`(~200 → ~80;删 14 fence / ack-log / process_evidence 协议描述)。
+- [ ] **Task 3.7**: 重写 `commands/verify.md`(~300 → ~120;删 record-verify + freeze 调用;改为简单写 .verify-passed)。
+- [ ] **Task 3.8**: 重写 `commands/review.md`(~250 → ~100;同上)。
+- [ ] **Task 3.9**: 重写 `commands/apply.md`(~230 → ~150;保留 Fluid Pause skill 行为但删 pause-capture CLI + 复杂字段)。
+- [ ] **Task 3.10**: 改 `skills/subagent-driven-development/SKILL.md` — 删反加固段(process-evidence record-tdd 强制要求 / verify_findings fence claim)。
+- [ ] **Task 3.11**: 改 `skills/verification-before-completion/SKILL.md` — 删 evidence helper / 三级 fence claim。
+- [ ] **Task 3.12**: 改 `skills/receiving-code-review/SKILL.md` — 删 review marker 复杂字段写入要求。
+- [ ] **Task 3.13**: 改 `skills/requesting-code-review/SKILL.md` — 同上。
+- [ ] **Task 3.14**: 重写 `skills/using-forge/SKILL.md` — 对齐 v4 协议描述。
+- [ ] **Task 3.15**: 在 `src/cli/commands/archive.ts` 加 5 行 `appendTraceEvent` 调用(报告 3.1 修复)。
+- [ ] **Task 3.16**: 跑 `pnpm build` 同步 commands/ + skills/ 模板到 dist/ + src/core/templates/。
+- [ ] **Task 3.17**: 全套 CI 跑过 `format:check / lint / typecheck / build`。
+
+### §10.4 Phase 4 — 测试 + fixture 清理 + v4.0.0 发布
+
+> 目标:测试全绿、release-gate 通过、发版
+
+- [ ] **Task 4.1**: 删 evidence helper 测试 — `tests/cli/evidence.test.ts` / `tests/cli/ack-*.test.ts` / `tests/cli/pause-capture.test.ts`(整删,~10 文件)。
+- [ ] **Task 4.2**: 删 fence 测试 — `tests/cli/archive-pause-fence.test.ts` / `tests/core/archive/{pause-capture-fence,ack-log-consistency,three-level-fence,version-retrograde-fence,legacy-exemption,transaction,transaction-summary,recover,recover-prompt}.test.ts` 等(整删,~12 文件)。
+- [ ] **Task 4.3**: 删 process_evidence + freeze warning 测试 — `tests/core/archive/process-evidence-{fence,fence-rerun}.test.ts` / `tests/core/process-evidence-freeze-warnings.test.ts`(~5 文件)。
+- [ ] **Task 4.4**: 删 marker-integrity 测试 — `tests/core/markers/marker-integrity.test.ts` 等。
+- [ ] **Task 4.5**: 删 release-blocker attack path 测试 — `tests/integration/release-blocker-attack-path.test.ts`(整删 — 这是 fence-9.3 attack path 测试,v4 fence 消亡)。
+- [ ] **Task 4.6**: 删 pause-decisions fixture — `tests/fixtures/pause-decisions/` 整目录(5 子目录)。
+- [ ] **Task 4.7**: 删 process-evidence / verify-findings fixture — `tests/fixtures/{process-evidence,verify-findings,archive-warnings}/` 整目录。
+- [ ] **Task 4.8**: 删 marker-version fixture(legacy-exemption + version-retrograde 配套)。
+- [ ] **Task 4.9**: 简化 `tests/cli/archive.test.ts` — 写简化版主流程的新测试(check marker exists / validate / specs apply / mv / summary write)。
+- [ ] **Task 4.10**: 简化 `tests/core/markers/marker-schema.test.ts` — 测 v4 schema(verified_at allow ms / required fields)。
+- [ ] **Task 4.11**: 简化 `tests/core/archive/summary-builder.test.ts` — 测 v4 简化版 summary 生成。
+- [ ] **Task 4.12**: 修 `scripts/check-release-gate.mjs` — 删 release-blocker-attack-path.test.ts 引用 + 调整 EXPECTED_TODO_COUNT_SOFT(应该 = 0)。
+- [ ] **Task 4.13**: 跑 `pnpm test` 全套 + `pnpm test:gate` 干净。
+- [ ] **Task 4.14**: 跑 `pnpm release:gate`(完整 7 步 release gate) 干净。
+- [ ] **Task 4.15**: 写 `docs/migration/v3-to-v4.md`(~200 行 — §9 migration guide 落地)。
+- [ ] **Task 4.16**: 写 `CHANGELOG.md [4.0.0]` 段(详尽 BREAKING 描述 + migration link)。
+- [ ] **Task 4.17**: bump 5 处版本号 → `4.0.0`(package.json + .claude-plugin/plugin.json + .claude-plugin/marketplace.json + .codex-plugin/plugin.json + scripts/run-forge.mjs REQUIRED_RANGE → `^4.0.0`)。
+- [ ] **Task 4.18**: `pnpm build` 同步模板。
+- [ ] **Task 4.19**: commit + push to dev。
+- [ ] **Task 4.20**: `git tag v4.0.0 + push origin v4.0.0`。
+- [ ] **Task 4.21**: `gh release create v4.0.0 dist-bundled/forge-bundled-v4.0.0.tgz --title "v4.0.0 — OpenSpec alignment (BREAKING)" --notes-from migration guide`。
+- [ ] **Task 4.22**: 用户(msc 交互终端)`pnpm publish --no-git-checks --ignore-scripts` 输 OTP 发 npm。
+
+---
+
+## §11 测试改造矩阵
+
+| 测试目录 | 当前数 | v4 命运 |
+|---|---|---|
+| `tests/cli/{evidence,ack-*,pause-capture}*.test.ts` | ~10 | **整删** |
+| `tests/cli/archive*.test.ts`(除 v4 简化版新增)| ~5 | **删旧 + 写新简化** |
+| `tests/core/archive/{pause-capture-fence,ack-log-consistency,three-level-fence,version-retrograde-fence,legacy-exemption,transaction,transaction-summary,recover,recover-prompt,fence,process-evidence-fence,process-evidence-rerun}.test.ts` | ~12 | **整删** |
+| `tests/core/archive/summary-builder.test.ts` | 1 | **简化重写** |
+| `tests/core/process-evidence-freeze-warnings.test.ts` | 1 | **整删** |
+| `tests/core/markers/{marker-schema,marker-integrity,marker-version-schema,pause-decisions-schema}.test.ts` | ~4 | **简化(只留 marker-schema 简版)** |
+| `tests/core/ack-log*.test.ts` | ~3 | **整删** |
+| `tests/integration/release-blocker-attack-path.test.ts` | 1 | **整删** |
+| `tests/integration/archive-summary-end-to-end.test.ts` | 1 | **简化重写** |
+| `tests/integration/pause-decisions-end-to-end.test.ts` | 1 | **整删** |
+| `tests/integration/marker-version-end-to-end.test.ts` | 1 | **整删** |
+| `tests/cli/validate-verify-findings.test.ts` | 1 | **整删**(verify_findings 消亡)|
+| `tests/fixtures/{pause-decisions,process-evidence,verify-findings,archive-warnings,marker-version}/` | 60+ 子目录 | **大批量删** |
+| 其他 — proposal/specs/tasks/parse/validate/backlog/scope/monitor/migrate/legacy-bridge/preflight/stage-extensions 等 | ~120 文件 | **不动**(独立子系统) |
+
+**最终测试数估算**:192 → 约 120-130(去 60+ 反加固相关测试)。
+
+---
+
+## §12 Risk & Rollback
+
+| 风险 | 缓解 |
+|---|---|
+| Phase 1 删大量代码后,某些"看似 archive 专用但实际被其他模块依赖"的 helper 被误删 → typecheck fail | 每个 Task 后跑 `pnpm typecheck`;遇 unresolved import 检查是否 backlog/scope/migrate/legacy-bridge 依赖,若是则保留(列入 §5.2 评估)|
+| `canonicalize` / `canonical-json.ts` / `hash/` 模块可能被 backlog registry 用(finding_hash 跨用)→ 误删导致 backlog 子命令崩 | Phase 1 末尾跑 `grep -rn "canonicalHash\|canonicalize\|finding-hash"` 全仓 — 若仅 archive fence 用则删,backlog 用则留 |
+| Skill 文档大改后 forge-eval scenarios 失效 | Phase 3 完跑 `pnpm eval` 看 scenarios 状态;失效的 scenario 留在 archive 不重跑(eval 是 skill 行为评测,删 4 skill 自然不再评)|
+| v4.0.0 发布后老用户 active change 的 v1 marker schema validate fail → archive 卡住 | §9.2 migration guide 明确告知"升级前完成 archive 或重跑 /forge:verify";若用户真撞,提供 `--legacy-marker-mode v1` flag(可选 future task)|
+| ForgeUE 项目 v3.1.1 升 v4.0.0 时正在跑的 executor-async-rewrite-followup change 卡住 | ForgeUE 项目 manual archive 已经在 v3.1.1 下走完 executor-async-rewrite,新 change 走 v4 |
+| forge upstream issue / community 反弹("forge 不是反加固吗?") | CHANGELOG + migration guide + 这份 plan 解释设计哲学转向;接受社区反馈,极端情况可以保留 v3 分支永久 patch |
+
+**Rollback**: 每个 Phase 是独立 commit batch,可逐 Phase revert。Phase 1 之前(本 plan 之后)是 v3.1.1 干净状态,完全可回。
+
+---
+
+## §13 Release Strategy(v4.0.0)
+
+**SemVer**: MAJOR(4.0.0)— BREAKING change
+
+**版本号同步 5 处**(沿 [[project_forge_version_sync]] memory 纪律):
+- `package.json` `version: "4.0.0"`
+- `.claude-plugin/plugin.json` `version: "4.0.0"`
+- `.claude-plugin/marketplace.json` plugins[0].version
+- `.codex-plugin/plugin.json` `version: "4.0.0"`
+- `scripts/run-forge.mjs` `REQUIRED_RANGE = '^4.0.0'`
+
+**4 步发布纪律**(沿 [[feedback_forge_release_discipline]]):
+1. `pnpm release:gate`(v3.1.1 已接 prepublishOnly hook,Phase 4 末尾自动跑)
+2. `pnpm publish --no-git-checks --ignore-scripts`(用户交互终端输 OTP)
+3. `git tag v4.0.0 + push origin v4.0.0`
+4. `gh release create v4.0.0 dist-bundled/forge-bundled-v4.0.0.tgz --title "v4.0.0 — OpenSpec alignment (BREAKING)" --notes ...`
+
+**CHANGELOG `[4.0.0]` 段必含**:
+- BREAKING:具体砍掉哪些子命令 / 协议 / fence
+- Migration:指向 `docs/migration/v3-to-v4.md`
+- 哲学转向说明(从反向加固到 OpenSpec 对齐)
+- 同时修的小 fix(V-1 ms 正则 / 3.1 monitor trace)
+
+---
+
+## §14 Open Questions(留 review 时填)
+
+1. **`forge finding` CLI 命运**:依赖 `finding-hash.ts`(已列入 Task 1.8 删)— 若 `forge finding` 仅 archive 用则同删;backlog 用则保留简化版。**Phase 1 Task 1.8 后 grep 决定**。
+2. **`canonical-json.ts` 命运**:JCS RFC 8785 canonicalize wrapper — backlog registry / scope-entries fingerprint 可能依赖。**Phase 1 末尾 grep 决定**。
+3. **`forge-eval/` scenarios 命运**:删 4 反加固 skill 后,evaluator scenarios 与之对应的部分自然失效。是否需要补新 v4 风格 scenarios?**Phase 3 末跑 `pnpm eval` 看实际影响**,补 v4 风格 eval 留 v4.1 plan。
+4. **`stage-extensions` 与 v4 兼容性**:stage-extensions 触发点是 `propose / apply / review / verify`,涉及现有 marker fence 调用?**Phase 1 检查 `src/core/stage-extensions/` 是否 import fence / evidence**;预期独立无依赖。
+5. **`legacy-bridge` 与 v4 兼容性**:legacy-bridge 自己有 marker 写入?**Phase 1 检查;预期独立**。
+6. **`upgrade` 子命令是否需要 v3 → v4 自动迁移逻辑**:user 跑 `forge upgrade` 时是否自动改写 active change 的 v1 marker → v2?**默认不实施**,留 migration guide 手动指引;实施留 v4.1。
+7. **Plugin marketplace 行为**:`.claude-plugin/marketplace.json` 改 v4 后,已装 v3 plugin 用户升级路径?**Claude Code plugin 自动拉新版本应该 OK,加 migration warning 到 SessionStart hook**(留 Phase 3 Task 3.14 review)。
+
+---
+
+## §15 后续 Session 推荐节奏
+
+**Session 1(本 session — Phase 0)**:写完本 plan + commit + push。**已完成**。
+
+**Session 2(Phase 1)**:核心代码砍 + 写简化 archive.ts。**估计 2-3 小时**。  
+**进入条件**:用户 review 本 plan 确认大方向无异议。
+
+**Session 3(Phase 2)**:marker schema + types 简化。**估计 1-2 小时**。
+
+**Session 4(Phase 3)**:skill + 命令文档大改。**估计 2-3 小时**。
+
+**Session 5 (+ 可能 6)(Phase 4)**:测试 + fixture 清理 + 发布。**估计 3-4 小时**。
+
+**总计**:5-8 session,跨 1-2 周日历时间(看用户节奏)。
+
+---
+
+**Plan 结束**。Review 后请确认是否进入 Phase 1。

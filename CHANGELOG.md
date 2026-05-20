@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.
 - **pause_decisions fence 与 proposal 段名对齐**:`src/core/archive/pause-decisions-fence.ts` option=1(扩 scope)的 `target_anchor` 字段校验与 diff 段定位正则从 `What Changes` 改为 `What`,与 `forge validate` 要求的 `## What` proposal 段名一致(此前 fence 死代码,marker 注释 / 模板 / fixture 仍用 OpenSpec 旧名 `## What Changes`,option=1 扩 scope 路径在 forge 3.x 下无法通过 archive)。同步收尾 `commands/apply.md`、`skills/exploring/SKILL.md`、`docs/getting-started.md`、`src/core/markers/types.ts` 注释及 13 个 pause-decisions 测试 / fixture。
 - **docs**:`docs/codex-review.md` Quick Start 的 `codex-adversarial` 示例补 `build_prompt` + `command --prompt-file "${PROMPT_FILE}"`,并加 `code-review` 与 `adversarial` 差别说明(此前示例缺 `build_prompt`,helper `run --mode adversarial` 强制要求 `--prompt-file`,照抄示例直接报错退出)。
 - **docs**:`docs/getting-started.md` 第 2 步加「4 件套格式速查」,展示 forge 3.x 的 `## What` proposal 段名、`## Scenario:` H2 spec scenario、`- [ ] <task-id>:` tasks 行三种正确格式,避免有 OpenSpec 习惯的用户照旧记忆写出 `## What Changes` 等导致 validate 报错。
+- **`FORGE_VERSION` 漂移污染产物**(release-gate 拦下):`src/index.ts:3` 此前硬编码 `FORGE_VERSION = '1.3.0'`,自 2026-05-16 漂移 —— 不仅 `forge --version` 显示错,更关键是被写进 archive marker / legacy-bridge handoff manifest 的 `forgeVersion` 字段(`legacy-bridge.ts:954`、`archive.ts:1006/1051`),v3.0.0 / v3.1.0 所有用户 archive 产物 / handoff manifest 写的 `forgeVersion: '1.3.0'` —— 数据完整性问题。本版改为动态读包根 `package.json#version`(`new URL('../package.json', import.meta.url)`),根治漂移,版本号同步唯一源是 `package.json`。
 
 ## [3.1.0] - 2026-05-19
 

@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [3.1.1] - 2026-05-20
+
+### Fixed
+
+- **npm 发布包补全 stage-extensions 运行时资产**:`package.json#files` 此前仅含 `dist/`,导致 `scripts/codex-review-helper.mjs` 与 `src/core/codex-review/prompts/adversarial-default.md` 未进发布包,3.0.0 / 3.1.0 所有 npm 用户在 stage-extensions 5 个 stage 调 codex review / adversarial 都会因 helper 路径不存在或 prompt 模板缺失而失败。本版补齐两个资产到 `files` 字段;并在 release-gate 的 tarball 内容检查改用 `npm pack --dry-run`(跨平台),新增 helper + 模板必含断言,堵住「Windows 跳过」缺口。
+- **bundled plugin tgz 同步补齐 codex 资产**:`scripts/build-bundled-plugin.mjs` 现额外拷 `scripts/codex-review-helper.mjs` 与 `src/core/codex-review/` 到 staging,bundled 离线分发形态也能跑 stage-extensions。
+- **pause_decisions fence 与 proposal 段名对齐**:`src/core/archive/pause-decisions-fence.ts` option=1(扩 scope)的 `target_anchor` 字段校验与 diff 段定位正则从 `What Changes` 改为 `What`,与 `forge validate` 要求的 `## What` proposal 段名一致(此前 fence 死代码,marker 注释 / 模板 / fixture 仍用 OpenSpec 旧名 `## What Changes`,option=1 扩 scope 路径在 forge 3.x 下无法通过 archive)。同步收尾 `commands/apply.md`、`skills/exploring/SKILL.md`、`docs/getting-started.md`、`src/core/markers/types.ts` 注释及 13 个 pause-decisions 测试 / fixture。
+- **docs**:`docs/codex-review.md` Quick Start 的 `codex-adversarial` 示例补 `build_prompt` + `command --prompt-file "${PROMPT_FILE}"`,并加 `code-review` 与 `adversarial` 差别说明(此前示例缺 `build_prompt`,helper `run --mode adversarial` 强制要求 `--prompt-file`,照抄示例直接报错退出)。
+- **docs**:`docs/getting-started.md` 第 2 步加「4 件套格式速查」,展示 forge 3.x 的 `## What` proposal 段名、`## Scenario:` H2 spec scenario、`- [ ] <task-id>:` tasks 行三种正确格式,避免有 OpenSpec 习惯的用户照旧记忆写出 `## What Changes` 等导致 validate 报错。
+
 ## [3.1.0] - 2026-05-19
 
 ### Added

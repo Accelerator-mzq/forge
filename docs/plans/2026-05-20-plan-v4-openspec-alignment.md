@@ -335,7 +335,9 @@ export class ArchiveCommand {
       deltas = await readDeltas(changeSpecsDir, mainSpecsDir);
       if (deltas.length > 0) {
         // 显示 deltas 给用户 + interactive confirm(同 OpenSpec archive.ts 询问模式)
-        printDeltasSummary(deltas);
+        // v6 修订(Codex v5 F-R5-2):renderDeltasSummary 是 archive.ts 内新增 local helper(~10 行),
+        // 不在 specs-sync/ 新增 — Path B "无新增代码"仅指 specs-sync/ 不变,archive.ts 仍需此 helper
+        console.log(renderDeltasSummary(deltas));
         if (!options.yes) {
           const proceed = await confirm({ message: 'Apply spec deltas?', default: true });
           if (!proceed) {
@@ -481,8 +483,10 @@ verified_by: msc
 reviewed_by: msc
 applied_commits: []                                 # 可选,user 想填就填,不 fence
 spec_updates_applied:
+  # v6 修订(Codex v5 F-R5-3):字段语义对齐 forge `applyDeltas` operation 类型
+  # (create / replace / delete),不是 OpenSpec delta-block 级别(added / modified / removed / renamed)
   - capability: auth
-    counts: { added: 2, modified: 1, removed: 0, renamed: 0 }
+    operation: replace # 'create' | 'replace' | 'delete',沿 forge SpecDelta.operation
 handoff_to_backlog:                                 # forge 独有亮点 — 跨 change 收集
   - source: scope_entries                            # proposal.md Out of Scope YAML 块
     entries:
@@ -496,7 +500,7 @@ handoff_to_backlog:                                 # forge 独有亮点 — 跨
 
 ### §6.5 Spec deltas 应用(沿用)
 
-**v5 修订(Codex v4 F-R4-1/F-R4-2)— 放弃 OpenSpec specs-apply 移植**:`src/core/specs-sync/{apply,deltas,index}.ts` 全套**保留不变**,archive 主流程直接调用 forge 现有 `readDeltas` + `applyDeltas`(等同 forge 当前 archive.ts:518-525 调用方式)。
+**v5 修订(Codex v4 F-R4-1/F-R4-2)— 放弃 OpenSpec specs-apply 移植**:`src/core/specs-sync/{apply,deltas,index}.ts` 全套**保留不变**,archive 主流程直接调用 forge 现有 `readDeltas` + `applyDeltas`。**v6 修订(Codex v5 F-R5-4)**:实际调用点是 forge 当前 `transaction.ts:159-160`(`archiveTransaction` 内调 readDeltas + applyDeltas);v4 archive.ts 简化版直接在 main 流程调,绕开 transaction.ts。
 
 **根因分析**(Codex v4 抓到的根本路线问题):
 - OpenSpec specs-apply.ts 用 **delta grammar**:`## ADDED/MODIFIED/REMOVED/RENAMED Requirements` 段 + 内部 `### Requirement: <name>` blocks(requirement-blocks.ts:122-125)
@@ -655,7 +659,7 @@ v3 的 `verify_findings` 数组(WARNING 阵列)在 v4 直接砍掉。verify 发�
 
 **§10.1.2 重写 archive 主入口 + summary builder/render**(切 archive.ts 的 import)
 
-- [ ] **Task 1.5**: 重写 `src/cli/commands/archive.ts`(1166 → ~280 行,沿 §6.1 v3 修订草案,**含正确签名的 legacy-bridge preflight/posthook + generateBacklog + appendTraceEvent + 简化 spec sync 流程用移植的 OpenSpec API**)。引入新 helper:`validateMarkerSchema`(v4 简版,Task 1.3 已造)+ `findSpecUpdates / buildUpdatedSpec / writeUpdatedSpec`(Task 1.1 已移植)+ `moveDirectory`(沿 OpenSpec EPERM/EXDEV fallback)+ `getArchiveDate` + `selectChange` inquirer 交互。**关键**:重写后 archive.ts **不再 import** transaction/lock/recover/recover-prompt/resume-summary/fence/process-evidence-fence/ack-log-consistency/three-level-fence/legacy-exemption/version-retrograde-fence/verify-findings-fence/pause-decisions-fence 任何一个 — 这是 §10.1.3 删除安全的前提。
+- [ ] **Task 1.5**: 重写 `src/cli/commands/archive.ts`(1166 → ~280 行,沿 §6.1 v6 修订草案,**含正确签名的 legacy-bridge preflight/posthook + generateBacklog + appendTraceEvent + Path B 简化 spec sync 用 forge 现有 API**)。**v6 修订(Codex v5 F-R5-1/F-R5-2)**:Path B 后不再引入 OpenSpec API。引入新 helper:`validateMarkerSchema`(v4 简版,Task 1.3 已造)+ `readDeltas / applyDeltas / type SpecDelta`(forge 现有 specs-sync API,**不**新增到 specs-sync,只在 archive.ts 内 import 使用)+ `renderDeltasSummary(deltas: SpecDelta[]): string`(archive.ts 内**新增本地 helper** ~10 行,显示 deltas 给用户 confirm;Path B "无新增代码" 仅指 specs-sync/ 不变,archive.ts 内仍需 ~10 行 helper)+ `moveDirectory`(沿 OpenSpec EPERM/EXDEV fallback,archive.ts 内**新增本地 helper** ~15 行)+ `getArchiveDate`(archive.ts 内 ~5 行)+ `selectChange` inquirer 交互(archive.ts 内 ~30 行)。**关键**:重写后 archive.ts **不再 import** transaction/lock/recover/recover-prompt/resume-summary/fence/process-evidence-fence/ack-log-consistency/three-level-fence/legacy-exemption/version-retrograde-fence/verify-findings-fence/pause-decisions-fence 任何一个 — 这是 §10.1.3 删除安全的前提。
 - [ ] **Task 1.6**: 重写 `src/core/archive/summary-builder.ts`(351 → ~80 行,删 fence_results / severity_buckets / acked_warnings;保留 archived_at + applied_commits + handoff_to_backlog + spec_updates_applied + verified_by + reviewed_by)。
 - [ ] **Task 1.7**: **v3 新增**(Codex v2 F-4.2)重写 `src/core/archive/summary-render.ts`(81 → ~40 行)— 删读 `process_evidence_summary` / `acked_warnings` / `pending_suggestions` v1 字段;保留读 archived_at + applied_commits + spec_updates_applied + handoff_to_backlog 段渲染。
 - [ ] **Task 1.8**: 跑 `pnpm typecheck` 验证 archive.ts 已脱离待删模块依赖(此时仍 import barrel 但实际函数已切完 — barrel 清理在 §10.1.6)。
@@ -802,7 +806,7 @@ v3 的 `verify_findings` 数组(WARNING 阵列)在 v4 直接砍掉。verify 发�
 | v4.0.0 发布后老用户 active change 的 v1 marker schema validate fail → archive 卡住 | §9.2 migration guide 明确告知"升级前完成 archive 或重跑 /forge:verify"。**v3 修订(Codex v2 F-12.1)**:删原 v2 此处保留的 `--legacy-marker-mode v1` flag 后备承诺(与 §16 F-3.1 决定的"单一路径"冲突)— 唯一路径就是重跑 verify/review,不引入 flag 复杂度。|
 | ForgeUE 项目 v3.1.1 升 v4.0.0 时正在跑的 executor-async-rewrite-followup change 卡住 | ForgeUE 项目 manual archive 已经在 v3.1.1 下走完 executor-async-rewrite,新 change 走 v4 |
 | forge upstream issue / community 反弹("forge 不是反加固吗?") | CHANGELOG + migration guide + 这份 plan 解释设计哲学转向;接受社区反馈,极端情况可以保留 v3 分支永久 patch |
-| **v2 新增**(Codex F-5.1)删 `transaction.ts` 阶段 0/1/1.5/1.6/2 五阶段 atomic 后,spec sync 部分失败(buildUpdatedSpec / writeUpdatedSpec)无回滚,已写 spec 文件保留半边状态 | **已知接受 risk**,沿 OpenSpec 风格(`archive.ts:225-262` 也是部分失败重跑模式)。用户撞到时:手动 `git checkout` 受影响 specs + 重跑 `/forge:archive`。在 migration guide §"已知限制" 段明示此 trade-off |
+| **v2 新增**(Codex F-5.1)删 `transaction.ts` 阶段 0/1/1.5/1.6/2 五阶段 atomic 后,spec sync 部分失败无回滚,已写 spec 文件保留半边状态。**v6 修订(Codex v5 F-R5-4)**:Path B 后失败点是 `applyDeltas` 逐文件写入时部分成功(不再有 buildUpdatedSpec / writeUpdatedSpec) | **已知接受 risk**,沿 OpenSpec 风格(`archive.ts:225-262` 也是部分失败重跑模式)。用户撞到时:手动 `git checkout` 受影响 specs + 重跑 `/forge:archive`。在 migration guide §"已知限制" 段明示此 trade-off |
 | **v2 新增**(Codex F-3.2)v3 → v4 升级时 `forge/changes/<id>/.evidence/pending-acks/` 与 `forge/.cache/archive-pause-*.json` 残留可能让用户困惑 | §9.2 v2 修订已加显式清理步骤;Phase 4 Task 4.15 写 `docs/migration/v3-to-v4.md` 时把这步放到最显眼位置 |
 
 **Rollback**: 每个 Phase 是独立 commit batch,可逐 Phase revert。Phase 1 之前(本 plan 之后)是 v3.1.1 干净状态,完全可回。
@@ -1019,4 +1023,31 @@ v3 的 `verify_findings` 数组(WARNING 阵列)在 v4 直接砍掉。verify 发�
 
 ---
 
-**Plan 结束(v5)**。Review 后请确认是否进入 Phase 1。
+---
+
+## §20 Codex Adversarial Review v5 — Response Log(2026-05-20)
+
+**Review trigger**:plan v5 commit `518f9bf` 后,user msc 要求"继续到 C+I = 0",续 thread 跑第五轮。Codex 输出 4 条 finding(F-R5-1 ~ F-R5-4),全部关于 **plan 内部一致性问题**(v5 修订漏掉的描述同步)。user 主代理逐条核实,**确证 4/4 全为真**。
+
+| Codex v5 Finding | Severity | 核实 | Plan v6 修订 |
+|---|---|---|---|
+| **F-R5-1** Task 1.5 描述仍写"用移植的 OpenSpec API + findSpecUpdates / buildUpdatedSpec / writeUpdatedSpec(Task 1.1 已移植)",与 v5 Path B 决定矛盾 | **Critical** | ✅ plan v5:658 真有此残留 | Task 1.5 改写为"用 forge 现有 readDeltas / applyDeltas / type SpecDelta + archive.ts 内本地 helper" |
+| **F-R5-2** §6.1 Step 5 调 `printDeltasSummary(deltas)`,全仓无此函数;Path B "无新增代码" 描述不准 | Important | ✅ grep src/ 0 命中 | Step 5 改 `renderDeltasSummary`;§6.1 + Task 1.5 注明 "archive.ts 内本地 helper ~10 行";澄清 Path B "无新增代码" 仅指 `specs-sync/` 不变,archive.ts 内仍 ~50-70 行本地 helper |
+| **F-R5-3** §6.4 archive_summary 用 OpenSpec `{added, modified, removed, renamed}`,forge applyDeltas operation 是 `create/replace/delete` | Important | ✅ plan:485 + deltas.ts:11 实证 | §6.4 改字段为 forge `operation: 'create' \| 'replace' \| 'delete'` 风格 |
+| **F-R5-4** §6.5 行号引用 archive.ts:518-525,实际是 transaction.ts:159-160;§12 风险仍提 buildUpdatedSpec 部分失败,Path B 已无 | Minor | ✅ 实际调用在 transaction.ts:159-160 | §6.5 行号修正;§12 风险描述同步 `applyDeltas` 部分失败 |
+
+**统计**:Critical 1 / Important 2 / Minor 1(全部确证)。
+
+**Codex v5 准确率**:4/4(100%)。
+
+**累计 Codex Review 统计**:
+- v1 16 / v2 9 / v3 4 / v4 3 / v5 4
+- **总计 36 条 finding,100% 命中率**
+
+**v5 finding 性质**:全部是 plan v5 修订时漏掉的描述同步(Task 1.5 描述未跟 Path B 同步、§6.4 字段风格未对齐、引用行号过时)。代码层 path 已稳,剩余多是文档同步问题。
+
+**第六轮 review 预期**:v6 修订都是机械文字同步,新引入隐患概率极低;但 plan v6 总行数已 1020+,可能仍有 Codex 此前未触及的小问题(例如 §10.4 Task 4.X 编号未连续 / §11 测试矩阵某行表述与代码现状有微小漂移)。继续按 user 要求"直到 Critical+Important = 0"。
+
+---
+
+**Plan 结束(v6)**。Review 后请确认是否进入 Phase 1。

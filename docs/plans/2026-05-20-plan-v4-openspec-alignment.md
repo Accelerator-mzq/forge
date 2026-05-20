@@ -325,19 +325,26 @@ export class ArchiveCommand {
       if (!proceed) return;
     }
 
-    // 5. Spec deltas 应用(沿 OpenSpec specs-apply)
-    // v3 修订(Codex v2 F-2.3):forge `specs-sync/` 当前只 export applyDeltas,
-    // **缺 findSpecUpdates / buildUpdatedSpec / writeUpdatedSpec** 三个 OpenSpec API。
-    // Phase 1 Task 1.13a 新增 — 从 OpenSpec 移植这三个 API 到 forge specs-sync。
-    let updates: SpecUpdate[] = [];
+    // 5. Spec deltas 应用 — v5 修订(Codex v4 F-R4-1/F-R4-2):放弃移植 OpenSpec specs-apply,
+    // 用 forge 现有 readDeltas + applyDeltas(整文件 create/replace,与 forge `## Scenario:` grammar 兼容)。
+    // OpenSpec specs-apply 用 delta grammar(## ADDED/MODIFIED Requirements),与 forge GWT grammar
+    // 不兼容,即使移植也产生 forge validate 拒收的 spec。Path B 是唯一可行(详 §6.5)。
+    let deltas: SpecDelta[] = [];
     if (!options.skipSpecs) {
-      updates = await findSpecUpdates(changeDir, mainSpecsDir);
-      if (updates.length > 0) {
-        // 显示 + 询问(同 OpenSpec archive.ts:202-222)
-        // ... interactive confirm + 逐 update buildUpdatedSpec → writeUpdatedSpec
-        const prepared = await Promise.all(updates.map(u => buildUpdatedSpec(u, changeId)));
-        for (const p of prepared) {
-          await writeUpdatedSpec(p.update, p.rebuilt, p.counts);
+      const changeSpecsDir = path.join(changeDir, 'specs');
+      deltas = await readDeltas(changeSpecsDir, mainSpecsDir);
+      if (deltas.length > 0) {
+        // 显示 deltas 给用户 + interactive confirm(同 OpenSpec archive.ts 询问模式)
+        printDeltasSummary(deltas);
+        if (!options.yes) {
+          const proceed = await confirm({ message: 'Apply spec deltas?', default: true });
+          if (!proceed) {
+            console.log('Skipping spec deltas. Continuing with archive.');
+            deltas = [];
+          }
+        }
+        if (deltas.length > 0) {
+          await applyDeltas(mainSpecsDir, deltas);
         }
       }
     }
@@ -489,16 +496,18 @@ handoff_to_backlog:                                 # forge 独有亮点 — 跨
 
 ### §6.5 Spec deltas 应用(沿用)
 
-`src/core/specs-sync/{apply,deltas,index}.ts` 全套保留 + **v3 修订(Codex v2 F-2.3)新增 specs-apply.ts**。**v4 修订(Codex v3 F-R3-1)**:OpenSpec specs-apply.ts 不是"三个 API 独立 helper",实际还 import `parsers/requirement-blocks.ts` + `parsers/spec-structure.ts`(`findMainSpecStructureIssues` + `buildSpecSkeleton`)+ `validation/validator.ts`(`Validator.validateSpecContent`)。移植真实工作量是多文件 + 转换层。
+**v5 修订(Codex v4 F-R4-1/F-R4-2)— 放弃 OpenSpec specs-apply 移植**:`src/core/specs-sync/{apply,deltas,index}.ts` 全套**保留不变**,archive 主流程直接调用 forge 现有 `readDeltas` + `applyDeltas`(等同 forge 当前 archive.ts:518-525 调用方式)。
 
-**v4 拆分到具体子任务**(Phase 1 §10.1.1 Task 1.1a-1.1e):
-- Task 1.1a:从 OpenSpec `src/core/parsers/requirement-blocks.ts` 移植到 `src/core/specs-sync/parsers/requirement-blocks.ts`
-- Task 1.1b:从 OpenSpec `src/core/parsers/spec-structure.ts` 移植 `findMainSpecStructureIssues` + `buildSpecSkeleton`
-- Task 1.1c:复用 forge 已有 `src/core/validate/specs.ts validateSpec` 替代 OpenSpec `Validator.validateSpecContent`;不行则写最小 shim(forge spec 段名严于 OpenSpec,validation 语义不同)
-- Task 1.1d:移植 `findSpecUpdates / buildUpdatedSpec / writeUpdatedSpec` 三 API(`specs-apply.ts` ~430 行)
-- Task 1.1e:决定 `SpecUpdate`(OpenSpec)vs `SpecDelta`(forge)边界:**并存**(SpecUpdate 是 archive 时"扫 → 构造 → 写"的 high-level 工作单元;SpecDelta 是 specs-sync 内部表示);加 `specUpdateFromDelta` / `deltaFromSpecUpdate` 转换函数(或视实际语义决定是否需要)
+**根因分析**(Codex v4 抓到的根本路线问题):
+- OpenSpec specs-apply.ts 用 **delta grammar**:`## ADDED/MODIFIED/REMOVED/RENAMED Requirements` 段 + 内部 `### Requirement: <name>` blocks(requirement-blocks.ts:122-125)
+- forge 用 **GWT grammar**:`## Scenario: <id>` H2 + `**Given/When/Then**` 步骤(parse/specs.ts:40 + fixture valid-change/specs/login.md 实证)
+- forge 现有 `applyDeltas` 是**整文件 create/replace**(`deltas.ts:17` SpecDelta.operation = 'create'/'replace'/'delete'),不解析 requirement-blocks
+- OpenSpec `buildSpecSkeleton` 生成 `## Requirements` 结构,forge `validateSpec` 不接受(找不到 `## Scenario:` H2 即 fail)
+- **两套 grammar 完全不兼容,即使移植 ~700-900 行也产生 forge 不认的 spec**
 
-`index.ts` barrel 加 `export * from './specs-apply.js'`。移植真实增量估计 **~700-900 行**(specs-apply ~430 + requirement-blocks ~100 + spec-structure ~150 + 转换层 + 测试),不是 plan v3 估的 ~300 行。
+**v5 取消 plan v4 §10.1.1 Task 1.1a-1.1f 整套**(7 个移植子任务全删)。archive.ts 简化版第 5 步用 forge `readDeltas + applyDeltas`(整文件 create/replace),功能等同 forge 当前 archive.ts 行为,与 forge grammar 兼容。这也是 forge v3.x 的实际运行方式,稳定可靠。
+
+**与 OpenSpec archive.ts 风格的差异**:OpenSpec 用 fine-grained delta merge(ADDED/MODIFIED block 级别),forge v4 用整文件 create/replace 级别。这是设计选择 — 用户原选项 (a) 移植 OpenSpec 是基于 grammar 兼容假设,实际不兼容则 path B 是唯一可行。失去 fine-grained delta merge 能力,但 forge change 一般 capability 粒度写整 spec 文件,整文件替换其实够用。
 
 ---
 
@@ -625,7 +634,7 @@ v3 的 `verify_findings` 数组(WARNING 阵列)在 v4 直接砍掉。verify 发�
 
 ### §10.1 Phase 1 — 核心代码砍
 
-> 目标:删 ~5445 行 / 改 archive.ts 重写 ~280 行 + 移植 ~300 行(OpenSpec specs-apply API)+ 重写 summary-builder/summary-render/archive-summary-schema/marker-schema 等。
+> 目标:删 ~5445 行 / 改 archive.ts 重写 ~280 行 + 重写 summary-builder/summary-render/archive-summary-schema/marker-schema 等。**v5 修订(Codex v4 F-R4-3)**:删 v3/v4 估的"移植 ~300 行 / 700-900 行 OpenSpec specs-apply API"— 此方案 path 错(grammar 不兼容),v5 走 path B 用 forge 现有 applyDeltas,无新增代码。
 > 
 > **v3 修订(Codex v2 F-4.1 / F-16.1)— 顺序根本重排**:Phase 1 真正正确的依赖图是 **"先重写 archive.ts 让它不再 import 待删模块 → 然后才能安全删 archive 子模块"**。v2 的"先清 barrel + 删 CLI → 后删 archive 子模块 → 最后重写 archive.ts"在中间状态(Task 1.11/1.12 删完 transaction/recover/fence,但 Task 1.14 才重写 archive.ts)仍 typecheck 立刻崩,因为 archive.ts:22-55 直接 import 这些。
 > 
@@ -639,12 +648,7 @@ v3 的 `verify_findings` 数组(WARNING 阵列)在 v4 直接砍掉。verify 发�
 
 **§10.1.1 准备阶段** — 移植 OpenSpec API + 简化 schema 草案
 
-- [ ] **Task 1.1a**: **v4 新增**(Codex v3 F-R3-1)从 OpenSpec `src/core/parsers/requirement-blocks.ts` 移植到 `src/core/specs-sync/parsers/requirement-blocks.ts`(估 ~100 行;requirement block parse 工具,specs-apply.ts buildUpdatedSpec 依赖)。
-- [ ] **Task 1.1b**: **v4 新增**(Codex v3 F-R3-1)从 OpenSpec `src/core/parsers/spec-structure.ts` 移植 `findMainSpecStructureIssues` + `buildSpecSkeleton`(估 ~150 行;new spec skeleton 生成 + 结构校验,specs-apply.ts:227 抛 structure invalid 错误依赖)。
-- [ ] **Task 1.1c**: **v4 新增**(Codex v3 F-R3-1)适配 spec validate — 复用 forge 已有 `src/core/validate/specs.ts validateSpec` 替代 OpenSpec `Validator.validateSpecContent`(specs-apply.ts:435 调用)。**注**:forge 段名严于 OpenSpec(`## Scenario:` H2 而非 OpenSpec `#### Scenario` H4),validate 语义不同 — 移植时把 OpenSpec validator 调用点替换为 forge `validateSpec(parseSpec(content), file)`,语义差异在 §6.5 已说明。
-- [ ] **Task 1.1d**: **v4 新增**(Codex v3 F-R3-1)从 OpenSpec `src/core/specs-apply.ts:57/102/353` 移植 `findSpecUpdates` / `buildUpdatedSpec` / `writeUpdatedSpec` 三 API 到 `src/core/specs-sync/specs-apply.ts`(估 ~430 行)。引用上面 1.1a/1.1b/1.1c 已造的依赖。
-- [ ] **Task 1.1e**: **v4 新增**(Codex v3 F-R3-1)`SpecUpdate`(OpenSpec)vs `SpecDelta`(forge)边界决定:**并存**模型 — SpecUpdate 是 archive 时"扫 → 构造 → 写"的 high-level 工作单元(含 source/target/exists 字段),SpecDelta 是 specs-sync 内部 ADDED/MODIFIED/REMOVED/RENAMED 表示。视 1.1d 移植后实际语义决定是否需要 `specUpdateFromDelta` 转换函数(预期不需要:两者在不同流程层,无直接转换需求)。
-- [ ] **Task 1.1f**: 在 `src/core/specs-sync/index.ts` barrel 加 `export * from './specs-apply.js'` + `export * from './parsers/requirement-blocks.js'` + `export * from './parsers/spec-structure.js'`。
+- [ ] **Task 1.1**: **v5 修订(Codex v4 F-R4-1/F-R4-2)— 删除任务**:plan v3/v4 的 Task 1.1a-1.1f(从 OpenSpec 移植 specs-apply + parsers + validator,~700-900 行)整套**取消**。根本原因:OpenSpec delta grammar(`## ADDED Requirements`)与 forge GWT grammar(`## Scenario:`)不兼容,移植后产生 forge validate 拒收的 spec。改用 forge 现有 `readDeltas + applyDeltas`(整文件 create/replace,无需新代码,见 §6.1 Step 5 v5 修订)。**Task 1.1 不动 specs-sync/**。
 - [ ] **Task 1.2**: 重写 `src/core/markers/types.ts`(183 → ~60 行)— 仅 VerifyMarker v2 / ReviewMarker v2 / PauseDecisionSimple interface(为 Task 1.5 archive.ts 重写时 import 准备)。
 - [ ] **Task 1.3**: 重写 `src/core/validate/marker-schema.ts`(791 → ~100 行)— 仅校验 v2 schema(verified_at/reviewed_at 允许 ms — V-1 修);删 process_evidence / verify_findings / pause_decisions 复杂校验。
 - [ ] **Task 1.4**: 重写 `src/core/schemas/archive-summary.ts` v1 → v2(Codex F-1.3)— 删 `process_evidence_summary` 必填;同步重写 `src/core/validate/archive-summary-schema.ts` validator。
@@ -980,4 +984,39 @@ v3 的 `verify_findings` 数组(WARNING 阵列)在 v4 直接砍掉。verify 发�
 
 ---
 
-**Plan 结束(v4)**。Review 后请确认是否进入 Phase 1。
+---
+
+## §19 Codex Adversarial Review v4 — Response Log(2026-05-20)
+
+**Review trigger**:plan v4 commit `9f3c84e` 后,user msc 要求"继续跑 codex 评审,直到 Critical 和 Important 问题为 0",续 thread 跑第四轮。Codex 输出 3 条 finding(F-R4-1 ~ F-R4-3),user 主代理逐条独立对照 forge-repo + OpenSpec 代码核实,**确证 3/3 全为真问题**(Codex v4 准确率仍 100%)。**Codex 四轮累计 32 条 finding,100% 命中率**。
+
+第四轮 finding 抓出一个**根本性路线问题**,比前三轮所有 finding 都严重:plan v3/v4 整套"OpenSpec specs-apply 移植"方案 path 错。
+
+| Codex v4 Finding | Severity | 核实 | Plan v5 修订 |
+|---|---|---|---|
+| **F-R4-1** OpenSpec delta grammar(`## ADDED Requirements`)与 forge GWT grammar(`## Scenario:`)不兼容,plan v3/v4 移植 OpenSpec specs-apply 后产生 forge validate 拒收的 spec | **Critical** | ✅ OpenSpec requirement-blocks.ts:122-125 / specs-apply.ts:374 vs forge parse/specs.ts:40 / fixture login.md / deltas.ts:17 实证 | **§5.3 + §6.5 + §10.1.1 Task 1.1 整套删除**(7 子任务 ~700-900 行移植任务全删);改用 forge 现有 `readDeltas + applyDeltas` 整文件 create/replace |
+| **F-R4-2** OpenSpec `buildSpecSkeleton` 生成 `## Requirements` 结构,forge `validateSpec` 找不到 `## Scenario:` H2 → 拒;F-R4-1 + F-R4-2 双重阻塞 | Important | ✅ specs-apply.ts:374 + validate/specs.ts:21 | 同 F-R4-1 fix(走 path B 后此 finding 自动消失) |
+| **F-R4-3** §10.1 头行残留 "移植 ~300 行" 与 §6.5/§18 已修正的 ~700-900 行不一致 | Minor | ✅ plan v4 行号实证 | §10.1 头行改为 "v5 后无移植代码,Phase 1 工作量净减"(path B 简化) |
+
+**统计**:Critical 1 / Important 1 / Minor 1(全部确证)。
+
+**Codex v4 准确率**:3/3(100%)。
+
+**关键 v5 修订 — Path B 决策**:
+- 用户原选项 (a) "从 OpenSpec 移植" 基于错误假设(以为 grammar 兼容),实际 OpenSpec delta grammar 与 forge GWT grammar 完全不兼容,移植后产物失效
+- 唯一可行 path B:**保留 forge 现有 `specs-sync/{apply,deltas,index}.ts` 不变,archive 主流程调 `readDeltas + applyDeltas`** — 等同 forge v3.x 实际运行方式
+- 失去 OpenSpec 的 fine-grained delta merge 能力,但 forge change 一般 capability 粒度写整 spec 文件,整文件 create/replace 够用
+- Plan v5 净改:Phase 1 工作量**减少**(取消 7 个 OpenSpec 移植子任务),archive.ts 重写更简单(用现有 API)
+
+**累计 Codex Review 统计**:
+- v1 16 条(plan v1 → v2)
+- v2 9 条(plan v2 → v3)
+- v3 4 条(plan v3 → v4)
+- v4 3 条(plan v4 → v5)
+- **总计 32 条 finding,100% 命中率**
+
+**第五轮 review 预期**:plan v5 走 path B 大幅简化 specs-sync 部分,剩余可能 finding 多是细节(§19 自身描述 / monitor 8 子模块清理范围 / archive_summary v2 schema 字段 list),Critical 概率显著降低。继续按 user 要求"直到 Critical+Important = 0"。
+
+---
+
+**Plan 结束(v5)**。Review 后请确认是否进入 Phase 1。

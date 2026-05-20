@@ -291,12 +291,13 @@ export class ArchiveCommand {
     }
 
     // 3. Spec validate(blocking) + proposal validate(non-blocking)
-    if (!options.noValidate) {
-      const result = await validateChange(changeDir);
-      if (!result.valid) {
-        printValidationErrors(result);
-        return;
-      }
+    // v9 修订(Codex v8 F-R8-1):删 options.noValidate 分支,archive 永远 validate。
+    // 沿 B1 严格精神 — spec layer validate 不是反加固 fence,删 --no-validate flag
+    // 让 plan v8 §9.4 CLI flag 表完整闭合(无 undocumented option)
+    const result = await validateChange(changeDir);
+    if (!result.valid) {
+      printValidationErrors(result);
+      return;
     }
 
     // 3. Marker 存在性 check + schema validate
@@ -674,10 +675,14 @@ v3 的 `verify_findings` 数组(WARNING 阵列)在 v4 直接砍掉。verify 发�
 
 **v8 修订(Codex v7 F-R7-1)— archive command CLI flag 扩展**:
 Task 1.5 重写 archive.ts 时,**新增两个 CLI flag**(沿 OpenSpec archive 风格,§6.1 伪代码 `options.yes` / `options.skipSpecs` 已引用):
-- `--yes` — 自动接受所有 interactive confirm(未完成 task / spec deltas / skip-validation 等),CI 自动化模式必备(沿 OpenSpec archive.ts:53)
+- `--yes` — 自动接受所有 interactive confirm(未完成 task / spec deltas 等),CI 自动化模式必备(沿 OpenSpec archive.ts:53)
 - `--skip-specs` — 跳过 spec deltas 应用(沿 OpenSpec archive.ts:197/53)
 
-保留 forge 现有 flag:`--force`(human-override / 非 git)、`--api`(legacy-bridge sync-check 直连 API),不再保留 v3 的 `--recover / --resume-summary / --resume`(transaction 中断恢复消亡)。§9 Migration Guide CLI 子命令兼容性表同步更新。
+保留 forge 现有 flag:`--force`(human-override / 非 git)、`--api`(legacy-bridge sync-check 直连 API),不再保留 v3 的 `--recover / --resume-summary / --resume`(transaction 中断恢复消亡)。
+
+**v9 修订(Codex v8 F-R8-1)— 不引入 --no-validate flag**:沿 B1 严格精神,删 §6.1 `options.noValidate` 分支,archive **永远 validate**(spec layer validate 不是反加固 fence,无需提供 skip 路径)。CLI flag 表(Task 1.5 + §9.4)只含 `--yes` / `--skip-specs` / `--force` / `--api` 四个,完整闭合无 undocumented option。
+
+§9 Migration Guide CLI 子命令兼容性表同步更新。
 - [ ] **Task 1.7**: **v3 新增**(Codex v2 F-4.2)重写 `src/core/archive/summary-render.ts`(81 → ~40 行)— 删读 `process_evidence_summary` / `acked_warnings` / `pending_suggestions` v1 字段;保留读 archived_at + applied_commits + spec_updates_applied + handoff_to_backlog 段渲染。
 - [ ] **Task 1.8**: 跑 `pnpm typecheck` 验证 archive.ts 已脱离待删模块依赖(此时仍 import barrel 但实际函数已切完 — barrel 清理在 §10.1.6)。
 
@@ -1122,4 +1127,28 @@ Task 1.5 重写 archive.ts 时,**新增两个 CLI flag**(沿 OpenSpec archive �
 
 ---
 
-**Plan 结束(v8)**。Review 后请确认是否进入 Phase 1。
+---
+
+## §23 Codex Adversarial Review v8 — Response Log(2026-05-20)
+
+**Review trigger**:plan v8 commit `24c562d` 后跑第八轮。Codex 输出:F-R7-1 PARTIAL closed(主体修了但 §6.1 `noValidate` 未对齐)+ 新 1 条 F-R8-1 Important + 0 Critical。
+
+| Codex v8 Finding | Severity | 核实 | Plan v9 修订 |
+|---|---|---|---|
+| **F-R8-1** §6.1 用 `options.noValidate` 但 Task 1.5 / §9.4 没列此 flag,CLI option contract 不闭合 | Important | ✅ plan:294 真有 `!options.noValidate` 分支,Task 1.5 / §9.4 未列 | 选项 A:**删 §6.1 noValidate 分支,archive 永远 validate**(沿 B1 严格精神,spec validate 非反加固 fence,无需 skip 路径)|
+
+**统计**:Critical 0 / Important 1 / Minor 0(全部确证)。
+
+**Codex v8 准确率**:1/1(100%)。
+
+**累计 Codex Review 统计**:
+- v1 16 / v2 9 / v3 4 / v4 3 / v5 4 / v6 4 / v7 1 / v8 1
+- **总计 42 条 finding,100% 命中率**
+
+**进度**:Critical 连续 3 轮稳 0(v6/v7/v8);Important 趋势 v6:2 → v7:1 → v8:1。v9 修订是最小机械改动(删一个 if 分支),plan 应已稳定。
+
+**第九轮 review 预期**:F-R8-1 是 CLI option contract 闭合细节;v9 修订后 plan 应达到 user 要求 "C+I = 0"。**进入 Phase 1**。
+
+---
+
+**Plan 结束(v9)**。Review 后请确认是否进入 Phase 1。

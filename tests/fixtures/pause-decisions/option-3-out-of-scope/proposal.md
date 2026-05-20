@@ -4,7 +4,7 @@
 
 Fixture for plan-9c Task 5: option=3 (转 out-of-scope) fence pass case.
 
-## What Changes
+## What
 
 - baseline change
 

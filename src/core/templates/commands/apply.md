@@ -82,7 +82,7 @@ subagent 报告 → 主代理判定 severity(CRITICAL / WARNING / SUGGESTION,沿
                                 ↓
                                 用户选择
                                 ↓
-                                1=扩本 change scope → 更新 proposal `## What Changes` + subagent 重派
+                                1=扩本 change scope → 更新 proposal `## What` + subagent 重派
                                 2=加 task 进本轮 → 主代理 append 新 task 到 tasks.md + subagent 重派
                                 3=转 out-of-scope → 写到 proposal `## Out of Scope` / design `## Future Work` YAML 块(沿 §2.6)+ subagent 跳过 issue 继续
                                 4=Other → 用户自由文本描述(必须配 other_rationale + other_acked_by)
@@ -107,7 +107,7 @@ subagent 报告 → 主代理判定 severity(CRITICAL / WARNING / SUGGESTION,沿
 **Severity:** WARNING | SUGGESTION(主代理初判,沿 design §2.3 分级;CRITICAL 不进本流程)
 
 **Options:**
-1. **扩本 change scope** — 把这个 issue 纳入本 change。更新 proposal `## What Changes` 段,重新派 subagent 实施。代价:本 change scope 增大,需要重 review
+1. **扩本 change scope** — 把这个 issue 纳入本 change。更新 proposal `## What` 段,重新派 subagent 实施。代价:本 change scope 增大,需要重 review
 2. **加 task 进本轮 tasks.md** — 当成新发现的本 change 必做项。主代理 append 新 task 到 tasks.md,subagent 重派实施。等同 v0.4 行为
 3. **转 out-of-scope**(仅限 issue 不阻断本 task 时可用) — 不在本 change 做,写到 proposal `## Out of Scope` 或 design `## Future Work` 段(YAML 结构化字段,沿 §2.6)。subagent 跳过该 issue 继续当前 task。**v1.1 backlog registry 会从这里读**
 4. **Other** — 自由文本描述。必须配 `other_rationale` + `other_acked_by`(用户在 marker 之外的某处确认)
@@ -146,7 +146,7 @@ pause_decisions:
 
 - CRITICAL severity → 拒签(CRITICAL 应走 forge 强 fence,不应进 pause)
 - WARNING + (severity_acked_by 空 ∨ severity_acked_at 空)→ 拒签
-- option=1:`target_artifact='proposal.md'` + `target_anchor` 含 `What Changes`
+- option=1:`target_artifact='proposal.md'` + `target_anchor` 含 `What`
 - option=2:`added_task_ref` 指向的 task ∉ capture 快照、∈ 当前 tasks.md 且勾选 `[x]`;`capture_id` 匹配 ack-log pause-capture entry;链完整
 - option=3:proposal/design YAML 块含对应 entry.id + `non_blocking_rationale` 非空
 - option=4:`other_rationale` + `other_acked_by` 非空

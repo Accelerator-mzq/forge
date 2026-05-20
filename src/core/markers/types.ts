@@ -47,7 +47,7 @@ export interface VerifyFinding extends Finding {
 
 /**
  * chosen_option — Fluid Pause 用户决策选项(沿 design §2.1.4 / §2.1.5)
- * 1 = 扩 scope(更新 proposal `## What Changes`,subagent 重派)
+ * 1 = 扩 scope(更新 proposal `## What`,subagent 重派)
  * 2 = 加 task(主代理 append 新 task 到 tasks.md,subagent 重派)
  * 3 = 转 out-of-scope(写到 proposal `## Out of Scope` / design `## Future Work` YAML 块,subagent 跳过 issue 继续)
  * 4 = Other(用户提供自由文本描述,必须配 other_rationale + other_acked_by)
@@ -85,7 +85,7 @@ export interface PauseDecision {
   chosen_option: ChosenOption;
   /** option=1 → 'proposal.md';option=2 → 'tasks.md';option=3 → 'proposal.md' | 'design.md' */
   target_artifact: string;
-  /** option=1 → '## What Changes';option=2 → 新 task 行;option=3 → '## Out of Scope' | '## Future Work' */
+  /** option=1 → '## What';option=2 → 新 task 行;option=3 → '## Out of Scope' | '## Future Work' */
   target_anchor: string;
   /** option=3 必填(沿 design §2.1.5 fence 校验);其他选项填 null */
   non_blocking_rationale: string | null;

@@ -2,7 +2,7 @@
 // 沿 design §2.1.5 fence 五类业务校验:
 //   - CRITICAL 重定向(CRITICAL 应走 forge 强 fence,不应进 pause)
 //   - WARNING + 未 ack → 拒签(SUGGESTION 例外)
-//   - option=1:target_artifact=proposal.md + target_anchor 包含 'What Changes' + diff 段级校验
+//   - option=1:target_artifact=proposal.md + target_anchor 包含 'What' + diff 段级校验
 //   - option=2:capture 校验(design §6.4):added_task_ref + capture_id + ack-log pause-capture entry
 //   - option=3:proposal.md/design.md 含 scope-entries fenced YAML 块 + entry_id 匹配 + non_blocking_rationale 非空
 //   - option=4:other_rationale + other_acked_by 非空
@@ -106,9 +106,9 @@ export async function validatePauseDecisionsFence(
 
     // —— 3. option 五分支业务校验 ——
     if (p.chosen_option === 1) {
-      // option=1 扩 scope:必须改 proposal.md `## What Changes`
-      // 字段校验:target_artifact=proposal.md + target_anchor 含 'What Changes'
-      // diff 段级校验:跑 git diff HEAD -- <changeDir>/proposal.md,验 ## What Changes 段确有新增行
+      // option=1 扩 scope:必须改 proposal.md `## What`
+      // 字段校验:target_artifact=proposal.md + target_anchor='## What'
+      // diff 段级校验:跑 git diff HEAD -- <changeDir>/proposal.md,验 ## What 段确有新增行
       // (沿 design §2.1.5 line 262;Task 5 plan-9c 实现)
       if (p.target_artifact !== 'proposal.md') {
         results.push(
@@ -120,12 +120,12 @@ export async function validatePauseDecisionsFence(
           }),
         );
       }
-      if (!p.target_anchor.includes('What Changes')) {
+      if (p.target_anchor !== '## What') {
         results.push(
           failed({
             artifact: 'marker',
             field: `${fieldBase}.target_anchor`,
-            message: `option=1(扩 scope)必须 target_anchor 包含 'What Changes',实际:${p.target_anchor}`,
+            message: `option=1(扩 scope)必须 target_anchor='## What',实际:${p.target_anchor}`,
             file,
           }),
         );
@@ -188,7 +188,7 @@ export async function validatePauseDecisionsFence(
 }
 
 /**
- * option=1 diff 段级校验:proposal.md 的 git diff 中,`## What Changes` 段须确有新增行。
+ * option=1 diff 段级校验:proposal.md 的 git diff 中,`## What` 段须确有新增行。
  * 沿 design §5.3。非 git → N/A 降级(返回 ok);git 项目内 git diff 失败 → fail-closed 拒签。
  */
 async function checkOption1WhatChangesDiff(
@@ -222,17 +222,17 @@ async function checkOption1WhatChangesDiff(
       file,
     });
   }
-  // 3. 求 `## What Changes` 段在 proposal.md 原始文件中的行号区间 [start, end)
+  // 3. 求 `## What` 段在 proposal.md 原始文件中的行号区间 [start, end)
   //    直接扫原始文本(不用 parseMarkdown —— 它剥 frontmatter 后行号有偏移,design §5.3)
   const content = await readFile(proposalPath, 'utf8');
   const srcLines = content.split('\n');
   let wcStart = -1;
-  // wcEnd 初始 +1:What Changes 是 proposal.md 最后一段(无后续 ## 标题)时,段区间须含
+  // wcEnd 初始 +1:What 是 proposal.md 最后一段(无后续 ## 标题)时,段区间须含
   // 文件最后一行 —— 无尾换行时 srcLines.length 恰为末行号,半开区间会漏掉它(code review)
   let wcEnd = srcLines.length + 1;
   for (let i = 0; i < srcLines.length; i++) {
     // 1-indexed 行号(git diff 行号从 1 开始)
-    if (/^##\s+What Changes\s*$/.test(srcLines[i] ?? '')) {
+    if (/^##\s+What\s*$/.test(srcLines[i] ?? '')) {
       wcStart = i + 1;
       continue;
     }
@@ -245,7 +245,7 @@ async function checkOption1WhatChangesDiff(
     return failed({
       artifact: 'marker',
       field: `${fieldBase}.target_anchor`,
-      message: `option=1 校验失败:proposal.md 找不到 \`## What Changes\` 段`,
+      message: `option=1 校验失败:proposal.md 找不到 \`## What\` 段`,
       file,
     });
   }
@@ -256,7 +256,7 @@ async function checkOption1WhatChangesDiff(
     return failed({
       artifact: 'marker',
       field: `${fieldBase}.target_anchor`,
-      message: `option=1(扩 scope)校验失败:git diff 中 proposal.md \`## What Changes\` 段无新增行 — marker 声称扩 scope 但实际未改该段(沿 design §2.1.5 line 262)`,
+      message: `option=1(扩 scope)校验失败:git diff 中 proposal.md \`## What\` 段无新增行 — marker 声称扩 scope 但实际未改该段(沿 design §2.1.5 line 262)`,
       file,
     });
   }

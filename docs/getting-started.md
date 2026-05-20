@@ -160,6 +160,47 @@ draft 文件顶部应该能看到:你选了哪个 approach、核心约束、成�
 
 > ❌ 如果报 "draft 不存在: forge/drafts/<name>.md" → draft 路径写错,跑 `ls forge/drafts/` 确认实际文件名
 
+### 4 件套格式速查
+
+`forge validate` 对 4 件套格式强校验(forge 3.0 起的格式,**不是** OpenSpec 旧式),格式不符直接报错。
+
+`proposal.md` —— H1 标题 + `## Why` + `## What`(段名就是 `What`,**不是** OpenSpec 的 `What Changes`)+ `## Scope`:
+
+```text
+# 给 todo 列表加优先级
+
+## Why
+
+长列表里重点项沉底,难定位。
+
+## What
+
+加 priority 字段(high/med/low),列表按 priority 降序渲染。
+
+## Scope
+
+只动列表渲染与数据模型。
+```
+
+`specs/<area>.md` —— H1 + `## Scenario: <id>`(H2 标题),步骤行用 `**Given**` / `**When**` / `**Then**` 加粗前缀:
+
+```text
+# 优先级排序
+
+## Scenario: sort-by-priority
+
+**Given** 列表含 high 与 low 两项
+**When** 渲染列表
+**Then** high 项排在 low 项之前
+```
+
+`tasks.md` —— 每行 `- [ ] <task-id>: <描述>`,**必须**带 `<id>:` 前缀(id 限字母、数字、`-`、`_`),纯 `- [ ] 描述` 不带 id 会被判为 0 个 task:
+
+```text
+- [ ] task-1: 数据模型加 priority 字段
+- [ ] task-2: 列表渲染按 priority 降序
+```
+
 ### 嵌入 deep-dive
 
 > 💡 **深入:不确定方案时先 `/forge:explore` 探路**
@@ -250,7 +291,7 @@ forge preflight branch-check
 >
 > | 选项 | 行为 | 必填字段 |
 > |---|---|---|
-> | **1 = 扩本 change scope** | 更新 `proposal.md` `## What Changes` + subagent 重派 | 无 |
+> | **1 = 扩本 change scope** | 更新 `proposal.md` `## What` + subagent 重派 | 无 |
 > | **2 = 加 task 进本轮** | 主代理 append 新 task 到 `tasks.md` + subagent 重派 | 无 |
 > | **3 = 转 out-of-scope** | subagent 跳过 issue 继续 | `non_blocking_rationale`(为啥不在本轮做) |
 > | **4 = Other** | 自由文本 | `other_rationale` + `other_acked_by` |

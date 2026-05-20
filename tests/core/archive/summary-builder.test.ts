@@ -527,7 +527,7 @@ describe('buildArchiveSummary - collector3 handoff_to_backlog 三类聚合', () 
         severity_acked_at: '2026-05-12T15:05:00Z',
         chosen_option: 1, // 扩 scope,不进 backlog
         target_artifact: 'proposal.md',
-        target_anchor: '## What Changes',
+        target_anchor: '## What',
         non_blocking_rationale: null,
         other_rationale: null,
         other_acked_by: null,

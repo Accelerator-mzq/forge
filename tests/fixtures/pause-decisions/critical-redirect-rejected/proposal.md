@@ -4,7 +4,7 @@
 
 Fixture for plan-9c Task 5: CRITICAL pause_decision fence reject case.
 
-## What Changes
+## What
 
 - baseline change
 

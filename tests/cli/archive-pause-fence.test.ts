@@ -108,8 +108,8 @@ describe('validatePauseDecisionsFence', () => {
     expect(result.valid).toBe(true);
   });
 
-  // —— option=1 (扩 scope):target_artifact=proposal.md + target_anchor 含 'What Changes' ——
-  it('option=1 + target_artifact=proposal.md + target_anchor=## What Changes → 通过', async () => {
+  // —— option=1 (扩 scope):target_artifact=proposal.md + target_anchor 含 'What' ——
+  it('option=1 + target_artifact=proposal.md + target_anchor=## What → 通过', async () => {
     const result = await validatePauseDecisionsFence(
       {
         pause_decisions: [
@@ -117,7 +117,7 @@ describe('validatePauseDecisionsFence', () => {
             ...basePauseDecision,
             chosen_option: 1,
             target_artifact: 'proposal.md',
-            target_anchor: '## What Changes',
+            target_anchor: '## What',
             non_blocking_rationale: null,
           },
         ],
@@ -136,7 +136,7 @@ describe('validatePauseDecisionsFence', () => {
             ...basePauseDecision,
             chosen_option: 1,
             target_artifact: 'tasks.md',
-            target_anchor: '## What Changes',
+            target_anchor: '## What',
             non_blocking_rationale: null,
           },
         ],
@@ -220,7 +220,7 @@ describe('validatePauseDecisionsFence', () => {
             other_rationale: '用户自定义方案 X',
             other_acked_by: 'msc',
             target_artifact: 'proposal.md',
-            target_anchor: '## What Changes',
+            target_anchor: '## What',
             non_blocking_rationale: null,
           },
         ],
@@ -241,7 +241,7 @@ describe('validatePauseDecisionsFence', () => {
             other_rationale: null,
             other_acked_by: 'msc',
             target_artifact: 'proposal.md',
-            target_anchor: '## What Changes',
+            target_anchor: '## What',
             non_blocking_rationale: null,
           },
         ],
@@ -263,7 +263,7 @@ describe('validatePauseDecisionsFence', () => {
             other_rationale: '用户自定义方案 X',
             other_acked_by: null,
             target_artifact: 'proposal.md',
-            target_anchor: '## What Changes',
+            target_anchor: '## What',
             non_blocking_rationale: null,
           },
         ],
@@ -310,7 +310,7 @@ const OPT1_DECISION = {
   severity_acked_at: '2026-05-12T14:32:00Z',
   chosen_option: 1 as const,
   target_artifact: 'proposal.md',
-  target_anchor: '## What Changes',
+  target_anchor: '## What',
   non_blocking_rationale: null,
   other_rationale: null,
   other_acked_by: null,
@@ -322,10 +322,10 @@ describe('option=1 diff 段级校验', () => {
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
 
-  it('attack:marker 声称改 proposal ## What Changes,实际 diff 只改 tasks.md → 拒签', async () => {
+  it('attack:marker 声称改 proposal ## What,实际 diff 只改 tasks.md → 拒签', async () => {
     const { repoRoot, changeDir } = setupGitChange({
-      proposalBaseline: '# P\n\n## What Changes\n\n- a\n\n## Impact\n\n- x\n',
-      proposalMutated: '# P\n\n## What Changes\n\n- a\n\n## Impact\n\n- x\n', // proposal 未改
+      proposalBaseline: '# P\n\n## What\n\n- a\n\n## Impact\n\n- x\n',
+      proposalMutated: '# P\n\n## What\n\n- a\n\n## Impact\n\n- x\n', // proposal 未改
       tasksBaseline: '# Tasks\n\n- [ ] task-1: t\n',
       tasksMutated: '# Tasks\n\n- [x] task-1: t\n', // 只改了 tasks.md
     });
@@ -336,13 +336,13 @@ describe('option=1 diff 段级校验', () => {
       repoRoot,
     );
     expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => /What Changes.*变更|diff/.test(e.message))).toBe(true);
+    expect(result.errors.some((e) => /What.*变更|diff/.test(e.message))).toBe(true);
   });
 
-  it('happy path:proposal ## What Changes 段确有新增行 → 通过', async () => {
+  it('happy path:proposal ## What 段确有新增行 → 通过', async () => {
     const { repoRoot, changeDir } = setupGitChange({
-      proposalBaseline: '# P\n\n## What Changes\n\n- a\n\n## Impact\n\n- x\n',
-      proposalMutated: '# P\n\n## What Changes\n\n- a\n- b (扩 scope)\n\n## Impact\n\n- x\n',
+      proposalBaseline: '# P\n\n## What\n\n- a\n\n## Impact\n\n- x\n',
+      proposalMutated: '# P\n\n## What\n\n- a\n- b (扩 scope)\n\n## Impact\n\n- x\n',
       tasksBaseline: '# Tasks\n\n- [x] task-1: t\n',
     });
     dirs.push(repoRoot);
@@ -354,11 +354,11 @@ describe('option=1 diff 段级校验', () => {
     expect(result.valid).toBe(true);
   });
 
-  it('proposal.md 带 frontmatter → ## What Changes 段行号对齐正确', async () => {
+  it('proposal.md 带 frontmatter → ## What 段行号对齐正确', async () => {
     const fm = '---\ntitle: P\n---\n';
     const { repoRoot, changeDir } = setupGitChange({
-      proposalBaseline: fm + '# P\n\n## What Changes\n\n- a\n\n## Impact\n\n- x\n',
-      proposalMutated: fm + '# P\n\n## What Changes\n\n- a\n- b\n\n## Impact\n\n- x\n',
+      proposalBaseline: fm + '# P\n\n## What\n\n- a\n\n## Impact\n\n- x\n',
+      proposalMutated: fm + '# P\n\n## What\n\n- a\n- b\n\n## Impact\n\n- x\n',
       tasksBaseline: '# Tasks\n\n- [x] task-1: t\n',
     });
     dirs.push(repoRoot);
@@ -382,12 +382,12 @@ describe('option=1 diff 段级校验', () => {
     expect(result.valid).toBe(true);
   });
 
-  it('happy path:What Changes 是最后一段且 proposal.md 无尾换行 → 段末新增行正确识别', async () => {
-    // 回归 code review Issue 1:wcEnd off-by-one — What Changes 无后续 ## 标题
+  it('happy path:What 是最后一段且 proposal.md 无尾换行 → 段末新增行正确识别', async () => {
+    // 回归 code review Issue 1:wcEnd off-by-one — What 无后续 ## 标题
     // + 文件无尾换行时,段区间须含文件最后一行
     const { repoRoot, changeDir } = setupGitChange({
-      proposalBaseline: '# P\n\n## What Changes\n\n- a',
-      proposalMutated: '# P\n\n## What Changes\n\n- a\n- b 扩 scope',
+      proposalBaseline: '# P\n\n## What\n\n- a',
+      proposalMutated: '# P\n\n## What\n\n- a\n- b 扩 scope',
       tasksBaseline: '# Tasks\n\n- [x] task-1: t\n',
     });
     dirs.push(repoRoot);
@@ -455,7 +455,7 @@ function buildProposalWithScopeEntry(
 ): string {
   return `# Proposal: test-change
 
-## What Changes
+## What
 
 - baseline change
 

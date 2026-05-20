@@ -25,7 +25,7 @@ describe('validate.ts auto-produce verify-domain CRITICAL findings (plan-9d Task
     // 不在 validate CLI 阶段产 finding;本测试反向验证 validate 层**不**产 tasks 类 CRITICAL finding
     await writeFile(
       join(testDir, 'proposal.md'),
-      `# Proposal\n\n## Why\n\ntest\n\n## What Changes\n\nadd X\n\n## Impact\n\nsmall`,
+      `# Proposal\n\n## Why\n\ntest\n\n## What\n\nadd X\n\n## Impact\n\nsmall`,
     );
     await writeFile(
       join(testDir, 'design.md'),
@@ -51,7 +51,7 @@ describe('validate.ts auto-produce verify-domain CRITICAL findings (plan-9d Task
   it('specs/ 为空 → CRITICAL specs/no-files + finding_hash', async () => {
     await writeFile(
       join(testDir, 'proposal.md'),
-      `# Proposal\n\n## Why\n\nx\n\n## What Changes\n\ny\n\n## Impact\n\nz`,
+      `# Proposal\n\n## Why\n\nx\n\n## What\n\ny\n\n## Impact\n\nz`,
     );
     await writeFile(join(testDir, 'design.md'), `# Design\n\n## Context\n\nx\n\n## Approach\n\ny`);
     await writeFile(join(testDir, 'tasks.md'), `# Tasks\n\n- [ ] task-1: x`);

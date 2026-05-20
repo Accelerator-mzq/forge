@@ -77,7 +77,7 @@ beforeEach(async () => {
 });
 
 describe('release-blocker: pause_decisions option=1/2 attack paths (9z gate)', () => {
-  it('option=1 attack:marker 写 target_anchor=## What Changes 但 diff 只改 tasks.md → fence 拒签', async () => {
+  it('option=1 attack:marker 写 target_anchor=## What 但 diff 只改 tasks.md → fence 拒签', async () => {
     const repoRoot = mkdtempSync(join(tmpdir(), 'forge-relblk-opt1-'));
     try {
       // 初始化 git 仓库并建立 baseline commit
@@ -86,15 +86,12 @@ describe('release-blocker: pause_decisions option=1/2 attack paths (9z gate)', (
       execFileSync('git', ['config', 'user.name', 't'], { cwd: repoRoot });
       const changeDir = join(repoRoot, 'forge', 'changes', 'c1');
       mkdirSync(changeDir, { recursive: true });
-      // baseline:写入 proposal.md(含 ## What Changes 段)和 tasks.md
-      writeFileSync(
-        join(changeDir, 'proposal.md'),
-        '# P\n\n## What Changes\n\n- a\n\n## Impact\n\n- x\n',
-      );
+      // baseline:写入 proposal.md(含 ## What 段)和 tasks.md
+      writeFileSync(join(changeDir, 'proposal.md'), '# P\n\n## What\n\n- a\n\n## Impact\n\n- x\n');
       writeFileSync(join(changeDir, 'tasks.md'), '# Tasks\n\n- [ ] task-1: t\n');
       execFileSync('git', ['add', '-A'], { cwd: repoRoot });
       execFileSync('git', ['commit', '-q', '-m', 'baseline'], { cwd: repoRoot });
-      // attack:只改 tasks.md,proposal.md 不动,但 marker 声称 option=1 改了 ## What Changes
+      // attack:只改 tasks.md,proposal.md 不动,但 marker 声称 option=1 改了 ## What
       writeFileSync(join(changeDir, 'tasks.md'), '# Tasks\n\n- [x] task-1: t\n');
       const result = await validatePauseDecisionsFence(
         {
@@ -109,7 +106,7 @@ describe('release-blocker: pause_decisions option=1/2 attack paths (9z gate)', (
               severity_acked_at: '2026-05-12T14:32:00Z',
               chosen_option: 1,
               target_artifact: 'proposal.md',
-              target_anchor: '## What Changes',
+              target_anchor: '## What',
               non_blocking_rationale: null,
               other_rationale: null,
               other_acked_by: null,
@@ -119,10 +116,10 @@ describe('release-blocker: pause_decisions option=1/2 attack paths (9z gate)', (
         changeDir,
         repoRoot,
       );
-      // proposal.md 未改 → git diff 空 → What Changes 段无新增行 → fence 拒签
+      // proposal.md 未改 → git diff 空 → What 段无新增行 → fence 拒签
       expect(result.valid).toBe(false);
       // 锁定拒签原因是 option=1 diff 段级校验(防 fence 重构后退化为字段校验拒签仍假绿)
-      expect(result.errors.some((e) => /What Changes.*无新增行/.test(e.message))).toBe(true);
+      expect(result.errors.some((e) => /What.*无新增行/.test(e.message))).toBe(true);
     } finally {
       rmSync(repoRoot, { recursive: true, force: true });
     }

@@ -14,7 +14,7 @@ pause_decisions:
     severity_acked_at: 2026-05-12T14:27:00Z
     chosen_option: 4
     target_artifact: proposal.md
-    target_anchor: "## What Changes"
+    target_anchor: "## What"
     non_blocking_rationale: null
     other_rationale: "用户决定走自定义方案:实施完后用 PR 描述说明,而非走标准三选项"
     other_acked_by: msc

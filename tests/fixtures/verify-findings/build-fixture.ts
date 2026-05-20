@@ -54,7 +54,7 @@ export async function buildFixture(
   const tasksContent = `# Tasks\n\n- [x] task-1: implement X\n`;
   await writeFile(
     join(changeDir, 'proposal.md'),
-    `# Proposal\n\n## Why\nx\n\n## What Changes\ny\n\n## Impact\nz\n`,
+    `# Proposal\n\n## Why\nx\n\n## What\ny\n\n## Impact\nz\n`,
   );
   await writeFile(join(changeDir, 'design.md'), `# Design\n\n## Context\nx\n\n## Approach\ny\n`);
   await writeFile(join(changeDir, 'tasks.md'), tasksContent);

@@ -68,19 +68,20 @@ try {
   process.exit(1);
 }
 
-// tarball 结构验证(tar -tzf 列内容,过滤 package/ 前缀)
-// Windows 下 tar 不可用时 warn 跳过,不阻塞
-console.log('\n[tarball-content] 验证 tarball 内容 ...');
+// tarball 内容验证 —— 用 `npm pack --dry-run --json` 列文件清单
+// 改用 npm pack(替代旧的 `tar -tzf`):tar 在 Windows 上不可用、旧实现遇 Windows 直接跳过校验,
+// codex-review helper / prompt 模板缺失的发布 bug 正是从这道 Windows 缺口漏出去的。
+// npm pack --dry-run 跨平台一致,Windows 也能跑,不再有跳过分支。
+console.log('\n[tarball-content] 验证 tarball 内容(npm pack --dry-run)...');
 try {
-  const out = execSync(`tar -tzf ${tarballName}`, { encoding: 'utf8' });
-  const entries = out
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map((e) => e.replace(/^package\//, ''));
-  // 期望:dist/cli/index.js + dist/core/templates/skills/<12>.md + README.md + LICENSE + LICENSE-THIRD-PARTY.md + package.json
+  const packJson = execSync('npm pack --dry-run --json', { encoding: 'utf8' });
+  const entries = JSON.parse(packJson)[0].files.map((f) => f.path);
+  // 期望存在的前缀
   const requiredPrefixes = [
     'dist/cli/index.js',
     'dist/core/templates/skills/',
+    'scripts/codex-review-helper.mjs', // codex stage-extension helper —— 运行时必需(见 package.json files)
+    'src/core/codex-review/prompts/', // codex adversarial prompt 模板 —— 运行时必需
     'README.md',
     'LICENSE',
     'package.json',
@@ -90,27 +91,23 @@ try {
       throw new Error(`tarball 缺少:${required}`);
     }
   }
-  // 不应有的:src/、tests/、forge-eval/、docs/、scripts/、.github/
+  // 不该含的目录;codex-review 的 helper 与 prompt 模板是显式例外(见 requiredPrefixes)
+  const allowedExceptions = ['scripts/codex-review-helper.mjs', 'src/core/codex-review/'];
   const forbiddenPrefixes = ['src/', 'tests/', 'forge-eval/', 'docs/', 'scripts/', '.github/'];
   for (const forbidden of forbiddenPrefixes) {
-    if (entries.some((e) => e.startsWith(forbidden))) {
-      throw new Error(`tarball 不该含:${forbidden}`);
+    const offender = entries.find(
+      (e) => e.startsWith(forbidden) && !allowedExceptions.some((a) => e.startsWith(a)),
+    );
+    if (offender) {
+      throw new Error(`tarball 不该含:${offender}`);
     }
   }
   console.log(`  → ${entries.length} 个文件,结构 OK`);
 } catch (err) {
-  // Windows 下 tar 命令可能不可用,warn 后跳过(不阻塞)
-  if (process.platform === 'win32') {
-    console.warn(
-      '  ⚠ Windows 下 tar 命令不可用,跳过 tarball 内容验证(请用 WSL 或 macOS/Linux 重跑)',
-    );
-  } else {
-    // 非 Windows 环境 tarball 验证失败是真实错误
-    console.error('FAIL: tarball 内容验证');
-    console.error(err.message);
-    rmSync(tarballName, { force: true });
-    process.exit(3);
-  }
+  console.error('FAIL: tarball 内容验证');
+  console.error(err.message);
+  rmSync(tarballName, { force: true });
+  process.exit(3);
 }
 
 // 临时目录 dry install + forge --version 验证

@@ -34,12 +34,19 @@ stage_extensions:
   verify:
     - name: codex-adversarial
       enabled: true
+      build_prompt: >
+        node "${FORGE_HELPER_DIR}/codex-review-helper.mjs" build-prompt
+        --output "${PROMPT_FILE}"
+        --target-label "${CHANGE_ID}"
       command: >
         node "${FORGE_HELPER_DIR}/codex-review-helper.mjs" run
         --mode adversarial
+        --prompt-file "${PROMPT_FILE}"
         --output-log "${OUTPUT_FILE}"
       output: forge/changes/${CHANGE_ID}/.evidence/codex-adversarial-r${ROUND}-a${ATTEMPT}.md
 ```
+
+> **`code-review` 与 `adversarial` 的差别**:`code-review` 模式直接分析 git diff,无需 prompt 文件;`adversarial` 模式必须先用 `build_prompt` 命令生成 prompt 文件,再由 `command` 通过 `--prompt-file "${PROMPT_FILE}"` 传给 `run` —— helper 的 `run --mode adversarial` 强制要求 `--prompt-file`,缺了会直接报错退出。所以 adversarial entry 必须同时写 `build_prompt` 与 `command` 两个字段。
 
 保存后,下次跑 `/forge:review` 或 `/forge:verify` 时 AI 主代理自动检测并触发 codex review。
 

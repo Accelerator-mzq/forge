@@ -44,7 +44,9 @@ if (buildResult.status !== 0) {
 }
 
 // 2. 拷 plugin 必需目录到 staging(仅 Claude Code 形态)
-const dirsToCp = ['.claude-plugin', 'skills', 'commands', 'hooks', 'dist'];
+// src/core/codex-review:adversarial prompt 模板源;codex-review-helper.mjs 的 REPO_ROOT
+// 推导到 staging/,需要 staging/src/core/codex-review/prompts/ 存在(同 npm 包 files 字段约束)
+const dirsToCp = ['.claude-plugin', 'skills', 'commands', 'hooks', 'dist', 'src/core/codex-review'];
 for (const dir of dirsToCp) {
   const src = join(REPO_ROOT, dir);
   if (!existsSync(src)) {
@@ -54,9 +56,14 @@ for (const dir of dirsToCp) {
   await cp(src, join(STAGING, dir), { recursive: true });
 }
 
-// 拷 run-forge.mjs(单文件)
+// 拷 scripts 下运行时需要的 helper(stage-extensions runner 调 codex-review-helper.mjs;
+// run-forge.mjs 是 bundled 入口,patch 后调 vendored dist/cli/index.js)
 await mkdir(join(STAGING, 'scripts'), { recursive: true });
 await cp(join(REPO_ROOT, 'scripts', 'run-forge.mjs'), join(STAGING, 'scripts', 'run-forge.mjs'));
+await cp(
+  join(REPO_ROOT, 'scripts', 'codex-review-helper.mjs'),
+  join(STAGING, 'scripts', 'codex-review-helper.mjs'),
+);
 
 // 3. patch staging/scripts/run-forge.mjs:spawn npx → spawn node + dist/cli/index.js(离线)
 // 把整个文件内容替换为 bundled 变体(原内容是 npx 形态,bundled 不需要)

@@ -1,286 +1,205 @@
-// src/core/archive/summary-builder.ts — plan-9e1 Task 2
-// buildArchiveSummary:从 markers + change 目录构造 ArchiveSummary
-// 三 collector:
-//   collectAckedWarnings — verify_findings + review_outcomes 中 WARNING + resolved=false + 有 ack
-//   collectPendingSuggestions — verify_findings + review_outcomes 中 SUGGESTION + resolved=false
-//   collectHandoffEntries — 三类 input 聚合(verify/review SUGGESTION 持挂 + pause_decisions option=3 + scope-entries active)
+// src/core/archive/summary-builder.ts — v4 OpenSpec alignment 简版(plan-v4 Phase 1 Task 1.6)
+//
+// v4 BREAKING change(沿 plan-v4 §6.4 + §10.1.2):
+// - signature 改为 `buildArchiveSummary({ archivePath, changeId, verifyMarker, reviewMarker, deltas })`
+// - 输出 ArchiveSummary v2:仅 schema/version/archived_at/change_id/archive_name/verified_by/
+//   reviewed_by/applied_commits/spec_updates_applied/handoff_to_backlog 字段
+// - 删 collectAckedWarnings / collectPendingSuggestions / buildVerifiedInvariants /
+//   buildProcessEvidenceSummary / mergePauseDecisions(反加固阵列消亡)
+// - handoff_to_backlog 仅两来源:pause_decisions chosen_option=3 + scope_entries 三段 YAML 块
+// - spec_updates_applied 字段从 forge applyDeltas 实际 SpecDelta[] 转换,operation 沿 create/replace/delete
 
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
-import type { Finding } from '../schemas/severity.js';
-import type { PauseDecision } from '../markers/types.js';
-import type {
-  ArchiveSummary,
-  HandoffEntry,
-  AckedWarningRef,
-  SuggestionRef,
-  ProcessEvidenceSummary,
-} from '../schemas/archive-summary.js';
+import { basename, join } from 'node:path';
+import type { PauseDecisionSimple } from '../markers/types.js';
+import type { SpecDelta } from '../specs-sync/index.js';
+import type { ArchiveSummary, HandoffEntry } from '../schemas/archive-summary.js';
 import { ARCHIVE_SUMMARY_VERSION } from '../schemas/archive-summary.js';
-// plan-9e2 Task 2:接 plan-9g fence 真实统计;PLACEHOLDER_PROCESS_EVIDENCE_SUMMARY 常量已移至 schema 文件供测试 fixture 使用
-import type { FenceCheckResult } from './fence.js';
 import { parseMarkdown } from '../parse/markdown.js';
 import { parseFencedYamlBlocks } from '../parse/fenced-yaml.js';
 import { SCOPE_ANCHOR_IDS, type ScopeAnchorId, type ScopeEntry } from '../schemas/scope-entries.js';
 
-/** review_outcomes 单项最小子集(沿 marker types.ReviewOutcome — v3 BLOCKER 4 plan-9j:扩全名双格式) */
-interface ReviewOutcome {
-  severity: 'S' | 'C' | 'L' | 'CRITICAL' | 'WARNING' | 'SUGGESTION';
-  accepted: boolean;
-  resolved: boolean;
-  task_ref?: string;
-  rationale?: string;
-}
-
-/** 选项:archive 时刻(测试可注入,生产用 new Date()) */
-export interface BuildArchiveSummaryOptions {
-  /** archived_at 时刻(沿 archive transaction 调用方计算,默认 new Date().toISOString()) */
+/**
+ * buildArchiveSummary 入参 — v4 sig 改造(plan §10.1.2 Task 1.6)
+ *
+ * - archivePath:归档后的目标目录绝对路径(forge/changes/archive/<archiveName>/);
+ *   buildArchiveSummary 从此处读 proposal.md / design.md 抽 scope_entries handoff
+ * - changeId:change id 字符串
+ * - verifyMarker / reviewMarker:v2 marker 解析后对象
+ * - deltas:archive 主流程 readDeltas + applyDeltas 实际应用的 SpecDelta 数组
+ * - archivedAt:可选时间戳(测试注入用,生产默认 new Date().toISOString())
+ */
+export interface BuildArchiveSummaryInput {
+  archivePath: string;
+  changeId: string;
+  verifyMarker: Record<string, unknown>;
+  reviewMarker: Record<string, unknown>;
+  deltas: SpecDelta[];
   archivedAt?: string;
 }
 
 /**
- * 构造 archive_summary 对象
+ * buildArchiveSummary v4 — 构造极简 ArchiveSummary v2 对象
  *
- * @param verifyMarker .verify-passed 解析后对象(Record 形)
- * @param reviewMarker .review-passed 解析后对象(Record 形)
- * @param changeDir change 目录绝对路径(读 proposal.md / design.md 抽 scope-entries)
- * @param changeId change id 字符串
- * @param fenceResult plan-9g crossCuttingFenceCheck() 输出;9e2 接真实统计(替换 plan-9e1 placeholder)
- * @param opts 可选项
+ * 沿 plan §6.4 + §10.1.2 v7:
+ *   - schema:forge-archive-summary/v2
+ *   - spec_updates_applied:从 deltas 1:1 映射 capability + operation
+ *   - handoff_to_backlog 两来源:
+ *       1) verify/review marker.pause_decisions[] chosen_option=3(转 out-of-scope)
+ *       2) proposal.md + design.md `## Out of Scope` / `## Future Work` YAML 块 active entry
+ *   - 不再生成 acked_warnings / pending_suggestions / process_evidence_summary / verified_invariants
  */
 export async function buildArchiveSummary(
-  verifyMarker: Record<string, unknown>,
-  reviewMarker: Record<string, unknown>,
-  changeDir: string,
-  changeId: string,
-  fenceResult: FenceCheckResult,
-  opts: BuildArchiveSummaryOptions = {},
+  input: BuildArchiveSummaryInput,
 ): Promise<ArchiveSummary> {
-  const archivedAt = opts.archivedAt ?? toIso8601(new Date());
+  const archivedAt = input.archivedAt ?? toIso8601(new Date());
 
-  const verifyFindings: Finding[] = Array.isArray(verifyMarker.verify_findings)
-    ? (verifyMarker.verify_findings as Finding[])
-    : [];
-  const pauseDecisions: PauseDecision[] = Array.isArray(verifyMarker.pause_decisions)
-    ? (verifyMarker.pause_decisions as PauseDecision[])
-    : [];
-  // review marker 也可能携带 pause_decisions(沿 9c superset additive 镜像)
-  const reviewPauseDecisions: PauseDecision[] = Array.isArray(reviewMarker.pause_decisions)
-    ? (reviewMarker.pause_decisions as PauseDecision[])
-    : [];
-  const reviewOutcomes: ReviewOutcome[] = Array.isArray(reviewMarker.review_outcomes)
-    ? (reviewMarker.review_outcomes as ReviewOutcome[])
-    : [];
+  // —— spec_updates_applied:从 SpecDelta 直接映射(name → capability,operation 沿 create/replace/delete)——
+  const spec_updates_applied = input.deltas.map((d) => ({
+    capability: d.name,
+    operation: d.operation,
+  }));
 
-  const acked_warnings = collectAckedWarnings(verifyFindings, reviewOutcomes);
-  const pending_suggestions = collectPendingSuggestions(verifyFindings, reviewOutcomes);
-
-  // 合并 verify + review 的 pause_decisions(去重以 id 为 key,review 镜像优先级低)
-  const allPauseDecisions = mergePauseDecisions(pauseDecisions, reviewPauseDecisions);
-
+  // —— handoff_to_backlog:pause_decisions option=3 + scope_entries active(两来源 union)——
   const handoff_to_backlog: HandoffEntry[] = [
-    // 第 1 类:SUGGESTION 持挂(直接复用 pending_suggestions,但映射到 HandoffEntry 字段)
-    ...pending_suggestions.map<HandoffEntry>((s) => ({
-      source: s.source,
-      id: s.id,
-      severity: 'SUGGESTION',
-      dimension: s.dimension,
-      check_type: s.check_type,
-      evidence: s.evidence,
-      recommendation: s.recommendation,
-    })),
-    // 第 2 类:pause_decisions chosen_option=3
-    ...allPauseDecisions
-      .filter((p) => p.chosen_option === 3)
-      .map<HandoffEntry>((p) => ({
-        source: 'pause_decisions',
-        id: p.id,
-        severity: p.severity,
-        chosen_option: 3,
-        target_artifact: p.target_artifact,
-        target_anchor: p.target_anchor,
-        issue_summary: p.issue_summary,
-      })),
-    // 第 3 类:proposal/design scope-entries Out-of-Scope/Future-Work YAML 块的 active entry
-    ...(await collectScopeEntriesHandoff(changeDir)),
+    ...collectPauseDecisionHandoff(input.verifyMarker, input.reviewMarker),
+    ...(await collectScopeEntriesHandoff(input.archivePath)),
   ];
 
+  // —— verified_by / reviewed_by 直读 marker(v2 schema 已校验为非空字符串)——
+  const verified_by = String(input.verifyMarker.verified_by ?? 'unknown');
+  const reviewed_by = String(input.reviewMarker.reviewed_by ?? 'unknown');
+
   return {
-    schema: 'forge-archive-summary/v1',
+    schema: 'forge-archive-summary/v2',
     version: ARCHIVE_SUMMARY_VERSION,
     archived_at: archivedAt,
-    change_id: changeId,
-    verify_passed: {
-      verified_invariants: buildVerifiedInvariants(verifyMarker),
-    },
-    review_passed: {
-      reviewers: [String(reviewMarker.reviewed_by ?? 'unknown')],
-    },
-    process_evidence_summary: buildProcessEvidenceSummary(fenceResult),
+    change_id: input.changeId,
+    archive_name: basename(input.archivePath),
+    verified_by,
+    reviewed_by,
+    spec_updates_applied,
     handoff_to_backlog,
-    acked_warnings,
-    pending_suggestions,
   };
 }
 
-/** collector1:verify_findings WARNING + ack + review_outcomes WARNING 全名 + acked(v3 BLOCKER 4:resign 后或 v1.0 native 写入) */
-function collectAckedWarnings(findings: Finding[], outcomes: ReviewOutcome[]): AckedWarningRef[] {
-  const refs: AckedWarningRef[] = [];
-  // verify_findings WARNING + ack(plan-9e1 v3 BLOCKER 3 已有,不动)
-  for (const f of findings) {
-    if (
-      f.severity === 'WARNING' &&
-      f.resolved === false &&
-      f.severity_acked_by &&
-      f.severity_acked_at
-    ) {
-      refs.push({
-        source: 'verify_findings',
-        id: f.id,
-        dimension: f.dimension,
-        check_type: f.check_type,
-        evidence: f.evidence,
-        acked_by: f.severity_acked_by,
-        acked_at: f.severity_acked_at,
-      });
-    }
+/**
+ * collectPauseDecisionHandoff:从 verify + review marker 抽 pause_decisions chosen_option=3
+ *
+ * v4 PauseDecisionSimple 仅 5 字段(paused_at / task_ref / issue_summary / chosen_option / notes),
+ * 不再有 v1 的 target_artifact / target_anchor / severity 等反加固字段。
+ * verify + review 两侧 pause_decisions 合并去重(以 (task_ref, paused_at) 复合 key)。
+ */
+function collectPauseDecisionHandoff(
+  verifyMarker: Record<string, unknown>,
+  reviewMarker: Record<string, unknown>,
+): HandoffEntry[] {
+  const all = mergePauseDecisions(
+    extractPauseDecisions(verifyMarker),
+    extractPauseDecisions(reviewMarker),
+  );
+  const entries: HandoffEntry[] = [];
+  for (let i = 0; i < all.length; i++) {
+    const p = all[i];
+    if (!p || p.chosen_option !== 3) continue;
+    entries.push({
+      source: 'pause_decisions',
+      id: i, // 数字索引(沿 v4 简化 — 不再有 capture_id 链)
+      chosen_option: 3,
+      issue_summary: p.issue_summary,
+    });
   }
-  // review_outcomes WARNING 全名 + acked(v3 BLOCKER 4:resign 后或 v1.0 native 写入)
-  for (let i = 0; i < outcomes.length; i++) {
-    const o = outcomes[i] as ReviewOutcome;
-    // C 简码由 fence 拒签,不进 builder(沿 plan-9e1 v3 BLOCKER 3)
-    // S 简码 / CRITICAL 全名由 fence 拒签,不进 builder
-    // 仅 WARNING 全名 + accepted=true + rationale 非空(v0.4 review_outcomes 端的 "acked" 等价路径)
-    if (
-      o.severity === 'WARNING' &&
-      o.resolved === false &&
-      o.accepted === true &&
-      typeof o.rationale === 'string' &&
-      o.rationale.length > 0
-    ) {
-      refs.push({
-        source: 'review_outcomes',
-        id: i,
-        acked_by: 'review-accepted',
-        acked_at: '', // review_outcomes 端无 user 字段,沿 plan-9e1 v1 collector1 review-accepted 标记
-        rationale: o.rationale,
-      });
-    }
-  }
-  return refs;
+  return entries;
 }
 
-/** collector2:verify_findings + review_outcomes 中 SUGGESTION + resolved=false(v3 BLOCKER 4:L 简码 + SUGGESTION 全名双格式) */
-function collectPendingSuggestions(
-  findings: Finding[],
-  outcomes: ReviewOutcome[],
-): SuggestionRef[] {
-  const refs: SuggestionRef[] = [];
-  // verify_findings SUGGESTION 全名(plan-9e1 v3 BLOCKER 3 已有,不动)
-  for (const f of findings) {
-    if (f.severity === 'SUGGESTION' && f.resolved === false) {
-      refs.push({
-        source: 'verify_findings',
-        id: f.id,
-        dimension: f.dimension,
-        check_type: f.check_type,
-        evidence: f.evidence,
-        recommendation: f.recommendation,
-      });
-    }
-  }
-  // review_outcomes L 简码 + SUGGESTION 全名双格式映射(v3 BLOCKER 4 新增)
-  for (let i = 0; i < outcomes.length; i++) {
-    const o = outcomes[i] as ReviewOutcome;
-    if ((o.severity === 'L' || o.severity === 'SUGGESTION') && o.resolved === false) {
-      refs.push({
-        source: 'review_outcomes',
-        id: i,
-        recommendation: o.rationale,
-      });
-    }
-  }
-  return refs;
+/** 从 marker 安全抽 pause_decisions 数组(非数组返空) */
+function extractPauseDecisions(marker: Record<string, unknown>): PauseDecisionSimple[] {
+  return Array.isArray(marker.pause_decisions)
+    ? (marker.pause_decisions as PauseDecisionSimple[])
+    : [];
 }
 
 /**
- * v2 BLOCKER 4 修订:scope-entries YAML 完整性错误(parse 失败 / schema 非法 / anchor_id 不匹配)
- * archive.ts 步骤 4.5 try/catch 转 fence business-fail exit 1
+ * 合并 verify + review 两侧 pause_decisions
+ *
+ * 去重策略:以 (task_ref, paused_at) 复合 key 判等,verify 侧优先。
+ * v4 简化:不再有 capture_id 锚定,user 在 verify/review 阶段可能各写一次同一 pause,
+ * 合并避免 handoff 重复一项。
  */
-export class ScopeEntriesIntegrityError extends Error {
-  constructor(
-    message: string,
-    public readonly artifactName: string,
-    public readonly anchorId: string,
-  ) {
-    super(message);
-    this.name = 'ScopeEntriesIntegrityError';
+function mergePauseDecisions(
+  verifyPauses: PauseDecisionSimple[],
+  reviewPauses: PauseDecisionSimple[],
+): PauseDecisionSimple[] {
+  const keyOf = (p: PauseDecisionSimple) => `${p.task_ref}@${p.paused_at}`;
+  const seen = new Set<string>();
+  const out: PauseDecisionSimple[] = [];
+  for (const p of verifyPauses) {
+    const k = keyOf(p);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(p);
   }
+  for (const p of reviewPauses) {
+    const k = keyOf(p);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(p);
+  }
+  return out;
 }
 
 /**
- * collector3 子函数:抽 proposal.md + design.md 中 scope-entries active entry
- * v2 BLOCKER 4:parse 失败 / schema 非法 → 抛 ScopeEntriesIntegrityError(不再静默 continue)
+ * collectScopeEntriesHandoff:从 archive 后的 proposal.md + design.md 抽 scope-entries
+ *
+ * v4 简化:
+ *   - 仅扫 forge-oos / forge-future-work 两段(forge-non-goals 是反目标,不做 handoff)
+ *   - 仅取 status=active 的 entry(inherited/superseded/completed/obsolete 不进)
+ *   - parse 失败 / schema 不匹配 → 静默跳过(v4 不再 throw fence error,沿 OpenSpec 风格)
+ *   - changeDir 已归档到 archivePath,本函数从该路径读 proposal/design
  */
-async function collectScopeEntriesHandoff(changeDir: string): Promise<HandoffEntry[]> {
+async function collectScopeEntriesHandoff(archivePath: string): Promise<HandoffEntry[]> {
   const entries: HandoffEntry[] = [];
   for (const artifactName of ['proposal.md', 'design.md']) {
-    const artifactPath = join(changeDir, artifactName);
+    const artifactPath = join(archivePath, artifactName);
     if (!existsSync(artifactPath)) continue;
-    const content = await readFile(artifactPath, 'utf8');
+
+    let content: string;
+    try {
+      content = await readFile(artifactPath, 'utf8');
+    } catch {
+      continue; // 读失败静默跳过(archive 已完成,handoff 是衍生产物)
+    }
+
     const md = parseMarkdown(content);
     for (const sec of md.sections) {
       if (!sec.anchor || !(SCOPE_ANCHOR_IDS as readonly string[]).includes(sec.anchor)) continue;
-      // 仅取 forge-oos / forge-future-work(non-goals 不是 handoff 目标;non-goal 是"反目标",不需 backlog 追踪)
       const anchorId = sec.anchor as ScopeAnchorId;
+      // 仅 oos / future-work 进 handoff;non-goals 不进
       if (anchorId !== 'forge-oos' && anchorId !== 'forge-future-work') continue;
+
       let yamlBlocks: unknown[];
       try {
         yamlBlocks = parseFencedYamlBlocks(sec.body);
-      } catch (err) {
-        // v2 BLOCKER 4:parse 失败 → 抛错(让 archive fence 拒签),不再静默跳过
-        throw new ScopeEntriesIntegrityError(
-          `scope-entries YAML parse failed in ${artifactName} section ${anchorId}: ${(err as Error).message}`,
-          artifactName,
-          anchorId,
-        );
+      } catch {
+        continue; // v4 静默跳过(不再 throw ScopeEntriesIntegrityError)
       }
-      if (yamlBlocks.length === 0) continue; // 段内无 YAML 块允许(空段沿 9b 通过)
+      if (yamlBlocks.length === 0) continue;
+
       const block = yamlBlocks[0] as Record<string, unknown>;
-      if (block.schema !== 'forge-scope-entries/v1') {
-        throw new ScopeEntriesIntegrityError(
-          `scope-entries schema 非 'forge-scope-entries/v1'(${artifactName} section ${anchorId},实际 ${JSON.stringify(block.schema)})`,
-          artifactName,
-          anchorId,
-        );
-      }
-      if (block.anchor_id !== anchorId) {
-        throw new ScopeEntriesIntegrityError(
-          `scope-entries anchor_id 不匹配(${artifactName}:${anchorId} 段内 YAML 块 anchor_id=${JSON.stringify(block.anchor_id)})`,
-          artifactName,
-          anchorId,
-        );
-      }
-      if (!Array.isArray(block.entries)) {
-        throw new ScopeEntriesIntegrityError(
-          `scope-entries entries 非数组(${artifactName} section ${anchorId})`,
-          artifactName,
-          anchorId,
-        );
-      }
+      if (block.schema !== 'forge-scope-entries/v1') continue;
+      if (block.anchor_id !== anchorId) continue;
+      if (!Array.isArray(block.entries)) continue;
+
       for (const e of block.entries as ScopeEntry[]) {
         if (!e || typeof e !== 'object') continue;
-        // 仅 status=active 进 handoff(inherited/superseded/completed/obsolete 不进)
         if (e.status !== 'active') continue;
         entries.push({
           source: 'scope_entries',
           id: e.id,
-          severity: null,
           category: e.category,
+          description: e.description,
           reason: e.reason,
-          target_artifact: artifactName,
-          target_anchor: anchorId === 'forge-oos' ? '## Out of Scope' : '## Future Work',
         });
       }
     }
@@ -288,64 +207,7 @@ async function collectScopeEntriesHandoff(changeDir: string): Promise<HandoffEnt
   return entries;
 }
 
-/** 合并 verify + review 端 pause_decisions(以 id 为 key 去重,verify 优先) */
-function mergePauseDecisions(
-  verifyPauses: PauseDecision[],
-  reviewPauses: PauseDecision[],
-): PauseDecision[] {
-  const byId = new Map<number, PauseDecision>();
-  for (const p of verifyPauses) byId.set(p.id, p);
-  for (const p of reviewPauses) {
-    if (!byId.has(p.id)) byId.set(p.id, p);
-  }
-  return [...byId.values()];
-}
-
-/** 沿 design verified_invariants 至少含 hash-match + evidence-complete(9d 三维度 fence 已通过) */
-function buildVerifiedInvariants(verifyMarker: Record<string, unknown>): string[] {
-  const list = ['hash-match', 'evidence-complete'];
-  // 9d 三维度 fence 已通过 — 若 verify_findings 字段存在(老 marker 缺则跳),加上 verify-findings-fence
-  if (Array.isArray(verifyMarker.verify_findings)) {
-    list.push('verify-findings-fence');
-  }
-  if (Array.isArray(verifyMarker.pause_decisions)) {
-    list.push('pause-decisions-fence');
-  }
-  return list;
-}
-
-/** Date → 'YYYY-MM-DDTHH:MM:SSZ'(沿 marker-schema.ts:20 ISO 8601 UTC 格式) */
+/** Date → 'YYYY-MM-DDTHH:MM:SSZ'(沿 marker-schema.ts ISO 8601 UTC 格式,无 ms) */
 function toIso8601(d: Date): string {
   return d.toISOString().replace(/\.\d{3}Z$/, 'Z');
-}
-
-/**
- * buildProcessEvidenceSummary — fence 14 不变量统计折数为 ProcessEvidenceSummary
- *
- * plan-9e2 v2 codex 一轮 MAJOR 修订:4 字段计数
- *
- * 输出 4 计数:
- *   - invariants_passed: status='pass' 的数(真过校验)
- *   - invariants_with_warning: status='warning' 的数(WARNING 经 fail/legacy-skip 优先级筛选后保留)
- *   - invariants_failed: status='fail' 的数(v1.0 永远 = 0;fence.ok=false 时 archive 已 exit 1 不进本路径)
- *   - legacy_exempt: status='legacy-skip' 的数(沿 §3.4.4.1)
- *
- * 不变式:passed + warning + failed + exempt === FENCE_INVARIANT_NAMES.length
- *
- * 注:不在 builder 内 throw — 让 archive-summary-schema validator 单点把守不变式
- *     (避免双源校验路径分歧;沿 brainstorm spec §4.2 决策 #1)
- */
-function buildProcessEvidenceSummary(fenceResult: FenceCheckResult): ProcessEvidenceSummary {
-  // 按 status 4 态分类统计
-  const passed = fenceResult.results.filter((r) => r.status === 'pass').length;
-  const warning = fenceResult.results.filter((r) => r.status === 'warning').length;
-  const failed = fenceResult.results.filter((r) => r.status === 'fail').length;
-  const exempt = fenceResult.results.filter((r) => r.status === 'legacy-skip').length;
-  return {
-    placeholder: false,
-    invariants_passed: passed,
-    invariants_with_warning: warning,
-    invariants_failed: failed,
-    legacy_exempt: exempt,
-  };
 }

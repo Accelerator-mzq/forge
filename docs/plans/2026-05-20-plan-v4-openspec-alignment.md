@@ -252,8 +252,10 @@
 
 ### §6.1 主流程伪代码
 
+> **v7 修订(Codex v6 F-R6-1)— 实现模式注意**:下方伪代码用 `class ArchiveCommand` 风格仅为可读性,**真实实现必须用 forge 现有 `buildArchiveCommand(): Command` 工厂模式**(沿 `src/cli/index.ts:10/46` 注册契约)。把 `execute` 主体改写到 commander `.action(async (...) => { ... })` 内即可,`selectChange / getArchiveDate / moveDirectory / renderDeltasSummary` 是文件内 module-level 普通 helper(非 class method)。
+
 ```typescript
-// src/cli/commands/archive.ts v4 草案(沿 OpenSpec archive.ts 风格)
+// src/cli/commands/archive.ts v4 草案(沿 OpenSpec archive.ts 风格;真实导出见上方 disclaimer)
 
 export class ArchiveCommand {
   async execute(changeId?: string, options: ArchiveOptions = {}): Promise<void> {
@@ -364,7 +366,15 @@ export class ArchiveCommand {
     await moveDirectory(changeDir, archivePath);
 
     // 7. 写简化 archive_summary.yaml(forge 独有亮点 — handoff_to_backlog)
-    const summary = await buildSimplifiedSummary(archivePath, changeId, verifyMarker, reviewMarker);
+    // v7 修订(Codex v6 F-R6-2):函数名保留 forge 现有 `buildArchiveSummary`(summary-builder.ts:52),
+    // 不改名为 buildSimplifiedSummary。signature:({ archivePath, changeId, verifyMarker, reviewMarker, deltas })
+    const summary = await buildArchiveSummary({
+      archivePath,
+      changeId,
+      verifyMarker,
+      reviewMarker,
+      deltas,
+    });
     await writeFile(path.join(archivePath, 'archive_summary.yaml'), stringify(summary));
 
     // 8. Legacy-bridge posthook(Codex F-2.1 — brownfield 同步检查 post 路径)
@@ -642,15 +652,15 @@ v3 的 `verify_findings` 数组(WARNING 阵列)在 v4 直接砍掉。verify 发�
 > 
 > **v3 修订(Codex v2 F-4.1 / F-16.1)— 顺序根本重排**:Phase 1 真正正确的依赖图是 **"先重写 archive.ts 让它不再 import 待删模块 → 然后才能安全删 archive 子模块"**。v2 的"先清 barrel + 删 CLI → 后删 archive 子模块 → 最后重写 archive.ts"在中间状态(Task 1.11/1.12 删完 transaction/recover/fence,但 Task 1.14 才重写 archive.ts)仍 typecheck 立刻崩,因为 archive.ts:22-55 直接 import 这些。
 > 
-> v3 正确顺序:
-> 1. **§10.1.1** 准备:OpenSpec API 移植 + 简版 marker schema 草案到位
+> v6 + v7 正确顺序(Path B 后):
+> 1. **§10.1.1** 准备:简版 marker / archive-summary schema 草案到位(specs-sync 走 Path B 保持现有 API)
 > 2. **§10.1.2** 重写 archive.ts(把 import 全切到新 helper)+ summary-render + summary-builder + archive-summary schema → archive.ts 不再 import 待删模块
 > 3. **§10.1.3** 删 archive.ts 不再用的 archive 子模块(typecheck 自然干净)
 > 4. **§10.1.4** 删 CLI 子命令(evidence/ack/pause-capture)+ 上游消费者(marker-ack)
 > 5. **§10.1.5** 删 core helpers(ack-log / freeze warnings)
 > 6. **§10.1.6** 清 barrels + 终末 typecheck/build 验证 + open question grep
 
-**§10.1.1 准备阶段** — 移植 OpenSpec API + 简化 schema 草案
+**§10.1.1 准备阶段** — 简版 schema 草案到位(Path B 后无 OpenSpec API 移植任务)
 
 - [ ] **Task 1.1**: **v5 修订(Codex v4 F-R4-1/F-R4-2)— 删除任务**:plan v3/v4 的 Task 1.1a-1.1f(从 OpenSpec 移植 specs-apply + parsers + validator,~700-900 行)整套**取消**。根本原因:OpenSpec delta grammar(`## ADDED Requirements`)与 forge GWT grammar(`## Scenario:`)不兼容,移植后产生 forge validate 拒收的 spec。改用 forge 现有 `readDeltas + applyDeltas`(整文件 create/replace,无需新代码,见 §6.1 Step 5 v5 修订)。**Task 1.1 不动 specs-sync/**。
 - [ ] **Task 1.2**: 重写 `src/core/markers/types.ts`(183 → ~60 行)— 仅 VerifyMarker v2 / ReviewMarker v2 / PauseDecisionSimple interface(为 Task 1.5 archive.ts 重写时 import 准备)。
@@ -660,7 +670,7 @@ v3 的 `verify_findings` 数组(WARNING 阵列)在 v4 直接砍掉。verify 发�
 **§10.1.2 重写 archive 主入口 + summary builder/render**(切 archive.ts 的 import)
 
 - [ ] **Task 1.5**: 重写 `src/cli/commands/archive.ts`(1166 → ~280 行,沿 §6.1 v6 修订草案,**含正确签名的 legacy-bridge preflight/posthook + generateBacklog + appendTraceEvent + Path B 简化 spec sync 用 forge 现有 API**)。**v6 修订(Codex v5 F-R5-1/F-R5-2)**:Path B 后不再引入 OpenSpec API。引入新 helper:`validateMarkerSchema`(v4 简版,Task 1.3 已造)+ `readDeltas / applyDeltas / type SpecDelta`(forge 现有 specs-sync API,**不**新增到 specs-sync,只在 archive.ts 内 import 使用)+ `renderDeltasSummary(deltas: SpecDelta[]): string`(archive.ts 内**新增本地 helper** ~10 行,显示 deltas 给用户 confirm;Path B "无新增代码" 仅指 specs-sync/ 不变,archive.ts 内仍需 ~10 行 helper)+ `moveDirectory`(沿 OpenSpec EPERM/EXDEV fallback,archive.ts 内**新增本地 helper** ~15 行)+ `getArchiveDate`(archive.ts 内 ~5 行)+ `selectChange` inquirer 交互(archive.ts 内 ~30 行)。**关键**:重写后 archive.ts **不再 import** transaction/lock/recover/recover-prompt/resume-summary/fence/process-evidence-fence/ack-log-consistency/three-level-fence/legacy-exemption/version-retrograde-fence/verify-findings-fence/pause-decisions-fence 任何一个 — 这是 §10.1.3 删除安全的前提。
-- [ ] **Task 1.6**: 重写 `src/core/archive/summary-builder.ts`(351 → ~80 行,删 fence_results / severity_buckets / acked_warnings;保留 archived_at + applied_commits + handoff_to_backlog + spec_updates_applied + verified_by + reviewed_by)。
+- [ ] **Task 1.6**: 重写 `src/core/archive/summary-builder.ts`(351 → ~80 行,删 fence_results / severity_buckets / acked_warnings;保留 archived_at + applied_commits + handoff_to_backlog + spec_updates_applied + verified_by + reviewed_by)。**v7 修订(Codex v6 F-R6-2)**:**导出名保留** `buildArchiveSummary`(不改 `buildSimplifiedSummary`),new signature:`buildArchiveSummary(opts: { archivePath, changeId, verifyMarker, reviewMarker, deltas }): Promise<ArchiveSummary>`。Task 1.5 archive.ts 重写时 import `buildArchiveSummary` 而非 v1-v6 plan 里漂移的 `buildSimplifiedSummary`。
 - [ ] **Task 1.7**: **v3 新增**(Codex v2 F-4.2)重写 `src/core/archive/summary-render.ts`(81 → ~40 行)— 删读 `process_evidence_summary` / `acked_warnings` / `pending_suggestions` v1 字段;保留读 archived_at + applied_commits + spec_updates_applied + handoff_to_backlog 段渲染。
 - [ ] **Task 1.8**: 跑 `pnpm typecheck` 验证 archive.ts 已脱离待删模块依赖(此时仍 import barrel 但实际函数已切完 — barrel 清理在 §10.1.6)。
 
@@ -790,7 +800,8 @@ v3 的 `verify_findings` 数组(WARNING 阵列)在 v4 直接砍掉。verify 发�
 | `tests/cli/validate-verify-findings.test.ts` | 1 | **整删**(verify_findings 消亡)|
 | `tests/fixtures/{pause-decisions,process-evidence,verify-findings,archive-warnings,marker-version}/` | 60+ 子目录 | **大批量删** |
 | `tests/core/monitor/artifact-observer.test.ts` | 1 | **v3 修订**(Codex v2 F-10.1)— **改写**:fixture 构造从 v1 反加固字段切到 v2 simplified |
-| 其他 — proposal/specs/tasks/parse/validate/backlog/scope/migrate/legacy-bridge/preflight/stage-extensions 等(monitor 已单独列上) | ~119 文件 | **不动**(独立子系统) |
+| `tests/core/specs-sync.test.ts` | 1 | **v7 新增**(Codex v6 F-R6-4)— **保留**(Path B 核心依赖:`readDeltas / applyDeltas / SpecDelta` 测试覆盖 create/replace/delete/error)。可补 `renderDeltasSummary` 单测 + archive path 集成覆盖 |
+| 其他 — proposal/specs/tasks/parse/validate/backlog/scope/migrate/legacy-bridge/preflight/stage-extensions 等(monitor + specs-sync 已单独列上) | ~118 文件 | **不动**(独立子系统) |
 
 **最终测试数估算**:192 → 约 120-130(去 60+ 反加固相关测试)。
 
@@ -1050,4 +1061,34 @@ v3 的 `verify_findings` 数组(WARNING 阵列)在 v4 直接砍掉。verify 发�
 
 ---
 
-**Plan 结束(v6)**。Review 后请确认是否进入 Phase 1。
+---
+
+## §21 Codex Adversarial Review v6 — Response Log(2026-05-20)
+
+**Review trigger**:plan v6 commit `87adaf2` 后,user msc 要求"继续到 C+I = 0",续 thread 跑第六轮。Codex 输出 4 条 finding(0 Critical / 2 Important / 2 Minor)— **Critical 首次 = 0**!但 Important 仍 2,user 要求严格 C+I=0 → 继续。
+
+| Codex v6 Finding | Severity | 核实 | Plan v7 修订 |
+|---|---|---|---|
+| **F-R6-1** §6.1 用 `class ArchiveCommand` 风格,与 forge CLI 实际 `buildArchiveCommand(): Command` 工厂模式矛盾 | Important | ✅ archive.ts:87 + index.ts:10/46 实证 | §6.1 加 v7 disclaimer:伪代码 class 风格仅可读性,真实实现用 `buildArchiveCommand()` 工厂 + commander `.action(async ...)` 入口 |
+| **F-R6-2** §6.1 调 `buildSimplifiedSummary`,但 forge 实际 export `buildArchiveSummary`(summary-builder.ts:52)— 名字 mismatch | Important | ✅ grep 实证 | §6.1 + Task 1.6 改用 `buildArchiveSummary(opts: { archivePath, changeId, verifyMarker, reviewMarker, deltas })` |
+| **F-R6-3** §10.1 头行残留"OpenSpec API 移植"描述,与 Path B 决定矛盾 | Minor | ✅ plan v6 行 646/653 实证 | §10.1 头行改"Path B 准备:简版 marker / archive-summary schema 草案到位" |
+| **F-R6-4** §11 测试矩阵漏 `tests/core/specs-sync.test.ts`,Path B 核心依赖应明示保留 | Minor | ✅ 文件实存,矩阵无 | §11 加 specs-sync.test.ts 行 |
+
+**关闭 v5 finding**(Codex v6 显式确认):
+- F-R5-1/2/3/4 全部 closed in v6
+
+**统计**:Critical 0 / Important 2 / Minor 2(全部确证)。
+
+**Codex v6 准确率**:4/4(100%)。
+
+**累计 Codex Review 统计**:
+- v1 16 / v2 9 / v3 4 / v4 3 / v5 4 / v6 4
+- **总计 40 条 finding,100% 命中率**
+
+**重要里程碑**:**v6 是 Critical 首次 = 0**(进度)。剩余 Important 2 都是 plan 文档与 forge CLI 现有契约对齐细节(class vs 工厂、function name mismatch),v7 已修。
+
+**第七轮 review 预期**:v7 修订都是机械文字同步。如果 v7 抓 0 Critical/Important,plan **ready for Phase 1**。
+
+---
+
+**Plan 结束(v7)**。Review 后请确认是否进入 Phase 1。

@@ -134,14 +134,18 @@ async function selectChange(changesDir: string): Promise<string | undefined> {
 /**
  * confirmPrompt:Y/n 交互(--yes 时跳过 — 由 caller 判断)
  *
- * 默认 'Y'(回车 = yes),输入 n/N 返 false,其他返 true。
+ * defaultYes=true:回车 = yes(spec deltas 等 safe-by-default 场景)
+ * defaultYes=false:回车 = no(incomplete tasks 等 dangerous-by-default 场景,沿 plan §6.1
+ *   line 326 `default: false`;Codex Phase 1 review F-2 修订)
  * 沿 forge 现有 readline/promises 惯例(upgrade.ts:144 / migrate/index.ts 同模式)。
  */
-async function confirmPrompt(message: string): Promise<boolean> {
+async function confirmPrompt(message: string, defaultYes: boolean): Promise<boolean> {
   const rl = createInterface({ input: stdin, output: stdout });
   try {
-    const ans = (await rl.question(`${message} [Y/n] `)).trim().toLowerCase();
-    return ans === '' || ans === 'y' || ans === 'yes';
+    const hint = defaultYes ? '[Y/n]' : '[y/N]';
+    const ans = (await rl.question(`${message} ${hint} `)).trim().toLowerCase();
+    if (ans === '') return defaultYes;
+    return ans === 'y' || ans === 'yes';
   } finally {
     rl.close();
   }
@@ -304,8 +308,10 @@ export function buildArchiveCommand(): Command {
         // —— 5. Task progress confirm(未完成 + 非 --yes 才弹)——
         const incomplete = await countIncompleteTasks(changeDir);
         if (incomplete > 0 && !opts.yes) {
+          // dangerous-by-default:回车 = NO(沿 plan §6.1 line 326 + Codex Phase 1 F-2)
           const proceed = await confirmPrompt(
             `${incomplete} incomplete task(s) in tasks.md. Continue archive anyway?`,
+            false,
           );
           if (!proceed) {
             console.log('Archive cancelled.');
@@ -321,7 +327,8 @@ export function buildArchiveCommand(): Command {
           if (deltas.length > 0) {
             console.log(renderDeltasSummary(deltas));
             if (!opts.yes) {
-              const proceed = await confirmPrompt('Apply spec deltas?');
+              // safe-by-default:回车 = YES(spec deltas 是 archive 正常路径,plan §6.1 line 345 `default: true`)
+              const proceed = await confirmPrompt('Apply spec deltas?', true);
               if (!proceed) {
                 console.log('Skipping spec deltas. Continuing with archive.');
                 deltas = [];

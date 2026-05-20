@@ -149,11 +149,18 @@
 | `src/core/process-evidence-freeze-warnings.ts` | 215 | freeze WARNING 计算 |
 | `src/core/staging-lock.ts` | ~50 | staging.yaml 锁 |
 | `src/core/schemas/process-evidence.ts` | ~50 | process_evidence schema |
-| `src/core/validate/finding-hash.ts` | ~60 | JCS finding_hash 算法 |
 | `src/core/validate/marker-integrity.ts` | ~80 | marker integrity 校验(hash 链) |
-| `src/core/canonical-json.ts` | ~30 | JCS canonicalize wrapper(评估:仍 backlog 模块用?如否则删) |
-| **CLI / helpers / schemas 小计** | **~2140** | — |
-| **删除总计** | **~5355** | — |
+| `src/core/ack/marker-ack.ts` | ~200 | **v2 新增删除项**(Codex F-1.2)— forge ack confirm 写 marker ack 字段,反加固模块残留 |
+| **CLI / helpers / schemas 小计** | **~2230** | — |
+| **删除总计** | **~5445** | — |
+
+**v2 修订:不删项**(原 plan 误列删):
+- `src/core/validate/finding-hash.ts`(~60)— **保留**:Codex F-1.1 确证 13 处依赖(`validate/index.ts:9` / `validate/scope-entries.ts:161` / `finding.ts:17` / `validate/change.ts` / `validate/auto-findings.ts` / `schemas/severity.ts` / `validate/marker-schema.ts` / `validate/types.ts` / `_shared/tier23-command-bridge.md:34` 等)。multi-harness Tier 2/3 bridge 调 `forge finding hash`(F-6.2),scope-entries fingerprint / candidate validators 都用 — **属 spec layer 工具,不是 archive fence 工具**。
+- `src/core/canonical-json.ts`(~30)— **保留**:finding-hash 依赖它(JCS canonicalize)。仅删 archive fence 路径上的 canonicalHash 引用,wrapper 本身留。
+
+**v2 修订:新增重写项**(原 plan 漏)— Codex F-1.3:
+- `src/core/schemas/archive-summary.ts` 从 `forge-archive-summary/v1` 升 `v2`,删 `process_evidence_summary` 字段 + `acked_warnings` + `pending_suggestions` 反加固字段;保留 `archived_at` / `change_id` / `applied_commits` / `handoff_to_backlog` / `spec_updates_applied`。
+- `src/core/validate/archive-summary-schema.ts` 同步重写,删 `process_evidence_summary` 必填校验,简化为 v2 schema validate。
 
 ### §5.2 保留清单(forge 真正价值)
 
@@ -171,7 +178,7 @@
 | `src/cli/commands/preflight.ts` | — | main/master 分支保护 |
 | `src/cli/commands/stage-extensions.ts` | — | codex review hook |
 | `src/cli/commands/monitor.ts` | — | trace monitor |
-| `src/cli/commands/finding.ts` | — | finding helper(若不依赖 finding-hash 则留)|
+| `src/cli/commands/finding.ts` | — | **保留**(Codex F-6.2)— multi-harness Tier 2/3 bridge `skills/_shared/tier23-command-bridge.md:34` 显式调 `node run-forge.mjs finding hash`,删之破坏 multi-harness 价值承诺 |
 | `src/core/archive/summary-builder.ts` | 351 → ~80 | 简化版 — 仅生成 archived_at/applied_commits/handoff_to_backlog |
 | `src/core/archive/summary-render.ts` | 81 | render summary 给用户看,保留 |
 | `src/core/archive/index.ts` | 5 | 模块 entry |
@@ -232,7 +239,7 @@
 | `requesting-code-review` | OpenSpec 上游 + forge 加固 | **保留 + 简化**(同上)|
 | `using-forge` | forge 元 skill | **保留 + 重写**(更新对齐 v4 协议)|
 | **`process-evidence`** | forge 反加固独有 | **整删** |
-| **`verifying-three-dimensions`** | forge 反加固独有 | **整删** |
+| **`verifying-three-dimensions`** | forge 反加固独有(但行为价值独立)| **v2 修订:保留 + 简化**(Codex F-6.1 暴露原 plan §5.5/§8.2 内部矛盾)— 三维 verify(Completeness/Correctness/Coherence)是有价值的 prose check 行为,与反加固协议正交。改写为"仅 prose check 不写 marker.verify_findings"。**与 §8.2 一致** |
 | **`verifying-process-evidence`** | forge 反加固独有 | **整删**(如存在;若已合并到 verifying-three-dimensions 同删)|
 | **`subagent-driven-discipline`** | forge 反加固独有 | **整删** |
 | `legacy-bridge-fulfillment` | forge 独有 | **保留**(brownfield 不依赖 fence)|
@@ -268,7 +275,12 @@ export class ArchiveCommand {
       throw new Error(`Change '${changeId}' not found.`);
     }
 
-    // 2. Spec validate(blocking) + proposal validate(non-blocking)
+    // 2. Legacy-bridge preflight(Codex F-2.1 — brownfield 同步检查,非反加固)
+    // forge-repo 现有 archive.ts:270 调 runArchivePreflight;legacy-bridge 不是 fence,
+    // 是 brownfield onboarding 的正式耦合 — 保留
+    await runArchivePreflight(changeDir, options);
+
+    // 3. Spec validate(blocking) + proposal validate(non-blocking)
     if (!options.noValidate) {
       const result = await validateChange(changeDir);
       if (!result.valid) {
@@ -324,7 +336,21 @@ export class ArchiveCommand {
     const summary = await buildSimplifiedSummary(archivePath, changeId, verifyMarker, reviewMarker);
     await writeFile(path.join(archivePath, 'archive_summary.yaml'), stringify(summary));
 
-    // 8. 顺手 emit monitor trace event(报告 3.1 修复)
+    // 8. Legacy-bridge posthook(Codex F-2.1 — brownfield 同步检查 post 路径)
+    // forge-repo 现有 archive.ts:651 调 runArchivePostHook;同 preflight 保留
+    await runArchivePostHook(archivePath, changeId, options);
+
+    // 9. archive 后自动重生成 backlog(Codex F-2.2 + F-6.3 — forge 差异化价值,自动一致)
+    // forge-repo 现有 archive.ts:666 调 generateBacklog;archive 主流程成功后必跑,
+    // 失败仅 warn 不回滚 archive(backlog 是衍生产物)
+    try {
+      const bl = await generateBacklog(forgeRoot);
+      console.log(`Backlog: forge/backlog/active.md (${bl.openCount} open, ${bl.warningCount} warnings)`);
+    } catch (e) {
+      console.warn(`⚠ backlog 重生成失败(不影响 archive):${(e as Error).message} —— 可手动跑 \`forge backlog\``);
+    }
+
+    // 10. 顺手 emit monitor trace event(报告 3.1 修复)
     appendTraceEvent(targetPath, {
       ts: new Date().toISOString(),
       schema: 'forge-monitor-trace/v1',
@@ -340,7 +366,9 @@ export class ArchiveCommand {
 }
 ```
 
-**总行数估算**:~250 行(含 import / helper / inquirer 交互)。
+**总行数估算**:~280 行(含 import / helper / inquirer 交互 + legacy-bridge preflight/posthook + generateBacklog)。
+
+**v2 修订说明(Codex F-2.3 + F-5.1)**:删 transaction.ts 后,spec sync 第 5 步(`buildUpdatedSpec → writeUpdatedSpec`)部分失败时**无原子回滚** — 已写的 spec 文件保留半边状态。**已知接受 risk**,沿 OpenSpec 风格(`archive.ts:225-262` 也是这样的"部分失败重跑"模式)。用户撞到时手动 git checkout 受影响 specs 即可。
 
 ### §6.2 Marker schema 简化(`src/core/markers/types.ts` v4)
 
@@ -511,21 +539,27 @@ v3 的 `verify_findings` 数组(WARNING 阵列)在 v4 直接砍掉。verify 发�
 
 用户从 v3.1.1 升级到 v4.0.0 时,正在进行中的 `forge/changes/<id>/` 怎么办?
 
-**方案 A — 完成路径(推荐)**:
-1. v3.1.1 时已写的 `.verify-passed` / `.review-passed` marker schema 是 `v1`,v4.0 schema 是 `v2` — schema validate 会 fail
-2. 用户在 v4.0 跑 `/forge:verify` 重新写一个 v2 marker 覆盖原 v1 — 不破坏数据(只是覆盖 marker 文件)
-3. 重跑 verify/review → archive
+**唯一升级路径 — 重跑 verify/review**(v2 修订:Codex F-3.1 暴露原 §9.2 方案 B `--legacy-marker-mode v1` flag 凭空承诺无 Task 实现,v2 删之保留单一路径):
 
-**方案 B — 强制 archive**:
-- v4.0 提供 `forge archive <id> --legacy-marker-mode v1` flag(读 v1 schema 时只检存在 + 简化字段,跳过 v1 复杂字段);archive 时把 v1 marker 改写成 v2 形态再 mv
+1. v3.1.1 时已写的 `.verify-passed` / `.review-passed` marker schema 是 `forge-verify/v1`,v4.0 schema 是 `forge-verify/v2` — schema validate 会 fail。
+2. **升级前必须做的清理**(Codex F-3.2):
+   - 删 `forge/changes/<id>/.evidence/pending-acks/` 整目录(v4 不再读 pending ack)
+   - 删 `forge/.cache/archive-pause-<changeId>.json`(若存在,v4 不再有 archive pause 协议)
+   - 删 `forge/changes/<id>/.evidence/process-evidence.staging.yaml`(v4 不再用 staging)
+   - 可选:删 `forge/changes/<id>/.evidence/ack-log.jsonl`(v4 不再用 ack-log;若想保留作 history 也无害,v4 archive 不读)
+3. 用户在 v4.0 跑 `/forge:verify` 重新写一个 v2 marker 覆盖原 v1(verify skill 改写后自动写 v2 schema)— 不破坏数据(只是覆盖 marker 文件)
+4. 同理重跑 `/forge:review` 写 v2 review marker
+5. 跑 `/forge:archive` → 通过 v2 schema validate + spec deltas apply + mv
 
-**方案推荐**:A(简单 + 干净)。 v4.0 启动文档明确告知"升级前完成所有 active change 的 archive,或 v4.0 后跑一次 /forge:verify 重写 marker"。
+**v4.0 启动文档**(`docs/migration/v3-to-v4.md`)详细说明上面步骤,在 SessionStart hook 也加 BREAKING warning(Phase 3 Task 3.14 review)。
 
 ### §9.3 已 archived change 兼容性
 
 `forge/changes/archive/*` 已归档的 v1 marker / 复杂 archive_summary.yaml 全部保留。v4.0 不读它们,只追加新 archive(沿 OpenSpec 风格,archive 是 dead state 不再操作)。
 
-**潜在不便**:用户用 `forge backlog scan-archived-followups` 时,scope-entries YAML 块的 schema 没变(仍 `forge-scope-entries/v1`),仍能正常工作。v3 archive_summary 的 handoff_to_backlog 段被 v4 backlog CLI 正常读取(向后兼容)。
+**潜在不便**:用户用 `forge backlog scan-archived-followups` 时,scope-entries YAML 块的 schema 没变(仍 `forge-scope-entries/v1`),仍能正常工作。
+
+**v2 修订(Codex F-3.3)**:原 plan 写"v4 backlog CLI 读 archive_summary.handoff_to_backlog"**不准** — 实际 `src/core/backlog/index.ts:40` 调 `scanArchivedFollowups`,在 `src/core/scope/aggregator.ts:96-99` 直接扫 archived change 的 `proposal.md` / `design.md` 的 `## Out of Scope` / `## Future Work` / `## Non-Goals` YAML 块(`forge-scope-entries/v1` schema),**不读 archive_summary**。所以 v3 → v4 兼容路径是:v3 时期写的 archived proposal/design YAML 块继续被 v4 backlog CLI 扫到,与 archive_summary 改 v2 schema 无关。
 
 ### §9.4 CLI 子命令兼容性
 
@@ -555,19 +589,43 @@ v3 的 `verify_findings` 数组(WARNING 阵列)在 v4 直接砍掉。verify 发�
 
 ### §10.1 Phase 1 — 核心代码砍
 
-> 目标:删 ~5355 行 / 改 archive.ts 重写 ~250 行。每步 commit 跑 typecheck 保证不破。
+> 目标:删 ~5445 行 / 改 archive.ts 重写 ~280 行。**v2 修订**:任务顺序按依赖图重排(Codex F-4.1 / F-4.2),先清 barrel exports 与上游消费者,再删模块本体,否则 typecheck 立刻崩。每步 commit 跑 typecheck 保证不破。
 
-- [ ] **Task 1.1**: 删 `src/cli/commands/evidence.ts`(842 行)+ `evidenceCommand` import / register from `src/cli/index.ts`。
-- [ ] **Task 1.2**: 删 `src/cli/commands/ack.ts`(399)+ register。
-- [ ] **Task 1.3**: 删 `src/cli/commands/pause-capture.ts`(107)+ register。
-- [ ] **Task 1.4**: 删 `src/core/ack-log.ts`(307)。
-- [ ] **Task 1.5**: 删 `src/core/process-evidence-freeze-warnings.ts`(215)+ `staging-lock.ts` + `schemas/process-evidence.ts`。
-- [ ] **Task 1.6**: 删 `src/core/archive/{fence,process-evidence-fence,process-evidence-rerun,pause-decisions-fence,ack-log-consistency,verify-findings-fence,three-level-fence,legacy-exemption,version-retrograde-fence}.ts`(总 ~2475 行)。
-- [ ] **Task 1.7**: 删 `src/core/archive/{transaction,recover,recover-prompt,lock,resume-summary}.ts`(总 ~750 行)。
-- [ ] **Task 1.8**: 删 `src/core/validate/{finding-hash,marker-integrity}.ts`(~140);`canonical-json.ts` 暂留(评估 backlog 依赖)。
-- [ ] **Task 1.9**: 重写 `src/cli/commands/archive.ts`(1166 → ~250 行,沿 §6.1 草案)。引入新 helper `validateMarkerSchema`(v4 简版)+ `findSpecUpdates / buildUpdatedSpec / writeUpdatedSpec`(specs-sync 已有)+ `moveDirectory`(沿 OpenSpec EPERM/EXDEV fallback)+ `getArchiveDate` + `selectChange` inquirer 交互。
-- [ ] **Task 1.10**: 重写 `src/core/archive/summary-builder.ts`(351 → ~80 行,删 fence_results / severity_buckets / acked_warnings;保留 archived_at + applied_commits + handoff_to_backlog + spec_updates_applied)。
-- [ ] **Task 1.11**: 跑 `pnpm typecheck` + `pnpm build`,确保 Phase 1 末尾 typecheck 干净(不需要 test 过)。
+**§10.1.1 准备阶段**(清 barrel + 上游消费者,Codex F-4.2 修订)
+
+- [ ] **Task 1.1**: 清 `src/core/archive/index.ts` barrel — 删 `export * from './transaction'` / `lock` / `recover`(三行)。
+- [ ] **Task 1.2**: 清 `src/core/validate/index.ts` barrel — 删 `export * from './marker-integrity'`(留 `./finding-hash` 不删,Codex F-1.1)。
+- [ ] **Task 1.3**: 重写 `src/core/schemas/severity.ts` —— 评估 process_evidence_unavailable / verify_findings 字段引用,清掉反加固字段(保留 Finding 基本字段供 backlog/scope 用)。
+- [ ] **Task 1.4**: 重写 `src/core/validate/marker-schema.ts`(791 → ~100 行)— 删 process_evidence / pause_decisions 复杂 schema(改写于 Phase 2 Task 2.2,本步先清 v1 schema 引用让 marker-integrity 之类消费者不再被 import)。
+
+**§10.1.2 删 CLI 子命令**
+
+- [ ] **Task 1.5**: 删 `src/cli/commands/evidence.ts`(842 行)+ `evidenceCommand` import / register from `src/cli/index.ts`。
+- [ ] **Task 1.6**: 删 `src/cli/commands/ack.ts`(399)+ register。
+- [ ] **Task 1.7**: 删 `src/cli/commands/pause-capture.ts`(107)+ register。
+- [ ] **Task 1.8**: **v2 新增**(Codex F-1.2)删 `src/core/ack/marker-ack.ts`(~200)+ 该模块的 export(`src/core/ack/index.ts` 若有)+ 调用点。
+
+**§10.1.3 删 core helpers**
+
+- [ ] **Task 1.9**: 删 `src/core/ack-log.ts`(307)。
+- [ ] **Task 1.10**: 删 `src/core/process-evidence-freeze-warnings.ts`(215)+ `staging-lock.ts` + `schemas/process-evidence.ts`。
+
+**§10.1.4 删 archive 子模块**
+
+- [ ] **Task 1.11**: 删 `src/core/archive/{fence,process-evidence-fence,process-evidence-rerun,pause-decisions-fence,ack-log-consistency,verify-findings-fence,three-level-fence,legacy-exemption,version-retrograde-fence}.ts`(总 ~2475 行)。
+- [ ] **Task 1.12**: 删 `src/core/archive/{transaction,recover,recover-prompt,lock,resume-summary}.ts`(总 ~750 行)。
+- [ ] **Task 1.13**: 删 `src/core/validate/marker-integrity.ts`(~80)。**v2 修订**:**`finding-hash.ts` 不删**(Codex F-1.1)— validate/scope-entries/finding CLI/auto-findings/severity schema 等 13 处依赖,multi-harness Tier 2/3 bridge `forge finding hash` 调用必需。`canonical-json.ts` 同样保留(finding-hash 依赖)。
+
+**§10.1.5 重写 archive 主入口 + summary builder + schema**
+
+- [ ] **Task 1.14**: 重写 `src/cli/commands/archive.ts`(1166 → ~280 行,沿 §6.1 v2 修订草案,**含 legacy-bridge preflight/posthook + generateBacklog + appendTraceEvent**)。引入新 helper `validateMarkerSchema`(v4 简版)+ `findSpecUpdates / buildUpdatedSpec / writeUpdatedSpec`(specs-sync 已有)+ `moveDirectory`(沿 OpenSpec EPERM/EXDEV fallback)+ `getArchiveDate` + `selectChange` inquirer 交互。
+- [ ] **Task 1.15**: 重写 `src/core/archive/summary-builder.ts`(351 → ~80 行,删 fence_results / severity_buckets / acked_warnings;保留 archived_at + applied_commits + handoff_to_backlog + spec_updates_applied)。
+- [ ] **Task 1.16**: **v2 新增**(Codex F-1.3)— 重写 `src/core/schemas/archive-summary.ts` 从 `forge-archive-summary/v1` 升 `v2`,删 `process_evidence_summary` 必填字段;同步重写 `src/core/validate/archive-summary-schema.ts` validator(791 → ~100 行)。
+- [ ] **Task 1.17**: 跑 `pnpm typecheck` + `pnpm build`,确保 Phase 1 末尾 typecheck 干净(不需要 test 过)。
+
+**§10.1.6 grep 决定 open question**
+
+- [ ] **Task 1.18**: grep `canonicalize\|canonicalHash` 全仓非 archive 路径,确认 backlog/scope/finding 是否仍用 — 是则 `canonical-json.ts` + `finding-hash.ts` 留(预期是),否则可议(预期不议)。
 
 ### §10.2 Phase 2 — Marker schema + types 简化
 
@@ -584,7 +642,7 @@ v3 的 `verify_findings` 数组(WARNING 阵列)在 v4 直接砍掉。verify 发�
 > 目标:文档级大改 + 反加固 skill 群删除
 
 - [ ] **Task 3.1**: 整删 skill — `skills/process-evidence/SKILL.md` + 其 references/。
-- [ ] **Task 3.2**: 整删 skill — `skills/verifying-three-dimensions/SKILL.md` + references/。
+- [ ] **Task 3.2**: **v2 修订**(Codex F-6.1)— `skills/verifying-three-dimensions/SKILL.md` **改写不删**:三维 verify(Completeness/Correctness/Coherence)是有价值的 prose check 行为,删去其中"写 marker.verify_findings + severity 三级 + ack 协议"段;留三维 prose check 流程指引,与 §8.2 一致。同时清掉 references/ 内反加固相关 doc。
 - [ ] **Task 3.3**: 整删 skill — `skills/subagent-driven-discipline/SKILL.md` + references/。
 - [ ] **Task 3.4**: 整删 skill — `skills/verifying-process-evidence/SKILL.md`(若存在)。
 - [ ] **Task 3.5**: 删 `commands/ack-confirm.md`(整删 — 两步 ack 协议消亡)。
@@ -610,6 +668,10 @@ v3 的 `verify_findings` 数组(WARNING 阵列)在 v4 直接砍掉。verify 发�
 - [ ] **Task 4.3**: 删 process_evidence + freeze warning 测试 — `tests/core/archive/process-evidence-{fence,fence-rerun}.test.ts` / `tests/core/process-evidence-freeze-warnings.test.ts`(~5 文件)。
 - [ ] **Task 4.4**: 删 marker-integrity 测试 — `tests/core/markers/marker-integrity.test.ts` 等。
 - [ ] **Task 4.5**: 删 release-blocker attack path 测试 — `tests/integration/release-blocker-attack-path.test.ts`(整删 — 这是 fence-9.3 attack path 测试,v4 fence 消亡)。
+- [ ] **Task 4.5a**: **v2 新增**(Codex F-4.3)— 处理 3 个反加固关联测试:
+  - 删 `tests/cli/severity-fence.test.ts`(import `computeFindingHash` 走反加固路径)
+  - 评估 `tests/core/canonical-json.test.ts`:Task 1.18 grep 显示 backlog/scope 仍依赖 `canonicalize` → 保留测试;反之删
+  - 改 `tests/integration/tier23-bridge-protocol.test.ts:20` — 删 WARNING finding 构造路径,保留 multi-harness bridge 主路径测试(`forge finding hash` 调用应仍 work)
 - [ ] **Task 4.6**: 删 pause-decisions fixture — `tests/fixtures/pause-decisions/` 整目录(5 子目录)。
 - [ ] **Task 4.7**: 删 process-evidence / verify-findings fixture — `tests/fixtures/{process-evidence,verify-findings,archive-warnings}/` 整目录。
 - [ ] **Task 4.8**: 删 marker-version fixture(legacy-exemption + version-retrograde 配套)。
@@ -624,6 +686,7 @@ v3 的 `verify_findings` 数组(WARNING 阵列)在 v4 直接砍掉。verify 发�
 - [ ] **Task 4.17**: bump 5 处版本号 → `4.0.0`(package.json + .claude-plugin/plugin.json + .claude-plugin/marketplace.json + .codex-plugin/plugin.json + scripts/run-forge.mjs REQUIRED_RANGE → `^4.0.0`)。
 - [ ] **Task 4.18**: `pnpm build` 同步模板。
 - [ ] **Task 4.19**: commit + push to dev。
+- [ ] **Task 4.19a**: **v2 新增**(Codex F-5.3)— 跑 `node scripts/build-bundled-plugin.mjs` 生成 `dist-bundled/forge-bundled-v4.0.0.tgz`(package.json 无 npm script alias,直接调脚本)。
 - [ ] **Task 4.20**: `git tag v4.0.0 + push origin v4.0.0`。
 - [ ] **Task 4.21**: `gh release create v4.0.0 dist-bundled/forge-bundled-v4.0.0.tgz --title "v4.0.0 — OpenSpec alignment (BREAKING)" --notes-from migration guide`。
 - [ ] **Task 4.22**: 用户(msc 交互终端)`pnpm publish --no-git-checks --ignore-scripts` 输 OTP 发 npm。
@@ -663,6 +726,8 @@ v3 的 `verify_findings` 数组(WARNING 阵列)在 v4 直接砍掉。verify 发�
 | v4.0.0 发布后老用户 active change 的 v1 marker schema validate fail → archive 卡住 | §9.2 migration guide 明确告知"升级前完成 archive 或重跑 /forge:verify";若用户真撞,提供 `--legacy-marker-mode v1` flag(可选 future task)|
 | ForgeUE 项目 v3.1.1 升 v4.0.0 时正在跑的 executor-async-rewrite-followup change 卡住 | ForgeUE 项目 manual archive 已经在 v3.1.1 下走完 executor-async-rewrite,新 change 走 v4 |
 | forge upstream issue / community 反弹("forge 不是反加固吗?") | CHANGELOG + migration guide + 这份 plan 解释设计哲学转向;接受社区反馈,极端情况可以保留 v3 分支永久 patch |
+| **v2 新增**(Codex F-5.1)删 `transaction.ts` 阶段 0/1/1.5/1.6/2 五阶段 atomic 后,spec sync 部分失败(buildUpdatedSpec / writeUpdatedSpec)无回滚,已写 spec 文件保留半边状态 | **已知接受 risk**,沿 OpenSpec 风格(`archive.ts:225-262` 也是部分失败重跑模式)。用户撞到时:手动 `git checkout` 受影响 specs + 重跑 `/forge:archive`。在 migration guide §"已知限制" 段明示此 trade-off |
+| **v2 新增**(Codex F-3.2)v3 → v4 升级时 `forge/changes/<id>/.evidence/pending-acks/` 与 `forge/.cache/archive-pause-*.json` 残留可能让用户困惑 | §9.2 v2 修订已加显式清理步骤;Phase 4 Task 4.15 写 `docs/migration/v3-to-v4.md` 时把这步放到最显眼位置 |
 
 **Rollback**: 每个 Phase 是独立 commit batch,可逐 Phase revert。Phase 1 之前(本 plan 之后)是 v3.1.1 干净状态,完全可回。
 
@@ -695,8 +760,8 @@ v3 的 `verify_findings` 数组(WARNING 阵列)在 v4 直接砍掉。verify 发�
 
 ## §14 Open Questions(留 review 时填)
 
-1. **`forge finding` CLI 命运**:依赖 `finding-hash.ts`(已列入 Task 1.8 删)— 若 `forge finding` 仅 archive 用则同删;backlog 用则保留简化版。**Phase 1 Task 1.8 后 grep 决定**。
-2. **`canonical-json.ts` 命运**:JCS RFC 8785 canonicalize wrapper — backlog registry / scope-entries fingerprint 可能依赖。**Phase 1 末尾 grep 决定**。
+1. **`forge finding` CLI 命运**:**v2 已定**(Codex F-1.1 + F-6.2)— **保留**。`finding-hash.ts` 不删,multi-harness Tier 2/3 bridge `skills/_shared/tier23-command-bridge.md:34` 显式调 `forge finding hash`。原 Q 答错被 Codex 抓出。
+2. **`canonical-json.ts` 命运**:**v2 已定**(Codex F-1.1)— **保留**(finding-hash 依赖)。仅删 archive fence 路径上的 `canonicalHash` 调用,wrapper 本身留。Phase 1 Task 1.18 grep 二次确认。
 3. **`forge-eval/` scenarios 命运**:删 4 反加固 skill 后,evaluator scenarios 与之对应的部分自然失效。是否需要补新 v4 风格 scenarios?**Phase 3 末跑 `pnpm eval` 看实际影响**,补 v4 风格 eval 留 v4.1 plan。
 4. **`stage-extensions` 与 v4 兼容性**:stage-extensions 触发点是 `propose / apply / review / verify`,涉及现有 marker fence 调用?**Phase 1 检查 `src/core/stage-extensions/` 是否 import fence / evidence**;预期独立无依赖。
 5. **`legacy-bridge` 与 v4 兼容性**:legacy-bridge 自己有 marker 写入?**Phase 1 检查;预期独立**。
@@ -722,4 +787,52 @@ v3 的 `verify_findings` 数组(WARNING 阵列)在 v4 直接砍掉。verify 发�
 
 ---
 
-**Plan 结束**。Review 后请确认是否进入 Phase 1。
+---
+
+## §16 Codex Adversarial Review v1 — Response Log(2026-05-20)
+
+**Review trigger**: user msc 通过 codex:rescue agent 跑对抗性审查,目标本 plan v1。Codex 输出 16 条 finding,user 主代理逐条独立对照 forge-repo 代码核实,确证 16/16 全为真问题。Plan v2 修订针对每条 finding。
+
+| Codex Finding | Severity | 核实 | Plan v2 修订 |
+|---|---|---|---|
+| **F-1.1** `finding-hash.ts` 非 archive-only,validate/scope-entries/finding CLI 等 13 处依赖 | Critical | ✅ grep 命中 13 文件 | §5.1 + §5.2 + §10.1.4 Task 1.13:**保留** finding-hash.ts;§14 Q1 改答案 |
+| **F-1.2** 漏砍 `src/core/ack/marker-ack.ts`(写 verify_findings ack 字段) | Important | ✅ 文件存在 + import computeFindingHash | §5.1 加删除项;§10.1.2 Task 1.8 新增 |
+| **F-1.3** archive-summary schema v1 字段未升 v2 | Critical | ✅ schemas/archive-summary.ts + validator/archive-summary-schema.ts:126 都要 `process_evidence_summary` | §5.1 加 v1→v2 重写项;§10.1.5 Task 1.16 新增 |
+| **F-2.1** §6.1 漏 legacy-bridge preflight/posthook | Critical | ✅ archive.ts:270/651 调 runArchivePreflight/PostHook,legacy-bridge 是 brownfield 正式耦合非 fence | §6.1 伪代码补 Step 2 / Step 8 |
+| **F-2.2** §6.1 漏 archive 后自动 generateBacklog | Important | ✅ archive.ts:666 调 generateBacklog | §6.1 伪代码补 Step 9 |
+| **F-2.3** 删 transaction 后 spec sync 部分失败无回滚 | Important | ✅ transaction.ts 阶段 0/1/1.5/1.6/2 五阶段 atomic | §6.1 v2 修订说明 + §12 Risk 加已知接受项 |
+| **F-3.1** §9.2 凭空承诺 `--legacy-marker-mode v1` flag,§10 无对应 Task | Important | ✅ archive 当前无此 flag,我自己凭空写 | §9.2 删方案 B,保留单一"重跑 verify/review"路径 |
+| **F-3.2** §9.2 未覆盖 pending-acks / archive-pause cache 清理 | Important | ✅ ack-log.ts:93-94 写 `.evidence/pending-acks/`,archive.ts:1015 写 `.cache/archive-pause-<id>.json` | §9.2 加显式清理步骤;§12 Risk 加 v2 项 |
+| **F-3.3** §9.3 错误描述 backlog CLI 读 archive_summary | Minor | ✅ 实际 backlog/index.ts:40 调 scanArchivedFollowups,在 scope/aggregator.ts:96-99 扫 archived proposal/design YAML | §9.3 加 v2 修订段澄清 |
+| **F-4.1** Phase 1 Task 1.8 先删 finding-hash 致 typecheck 立崩 | Critical | ✅ upstream 13 依赖未清就删本体 | §10.1 全段重排为 6 个 sub-phase(1.1-1.18),先清 barrel + 上游消费者,再删模块本体 |
+| **F-4.2** 漏 archive/index.ts + validate/index.ts barrel exports 清理 | Important | ✅ 两 barrel 都还 export 要删的模块 | §10.1.1 Task 1.1 + 1.2 新增 |
+| **F-4.3** 漏 severity-fence / canonical-json / tier23-bridge 三测试 | Important | ✅ 3 文件全存在,severity-fence 直接 import computeFindingHash | §10.4 Task 4.5a 新增 |
+| **F-5.1** Risk 未捕获 spec sync 失败无回滚 | Critical | ✅ 同 F-2.3 | §12 Risk 加 v2 项(已知接受) |
+| **F-5.2** finding-hash 归因不全(validate + scope-entries 也依赖) | Important | ✅ §14 Q1/Q2 原答案错 | §14 Q1+Q2 改答案为"保留" |
+| **F-5.3** Task 4.21 用 bundled tgz 但无生成步骤 | Minor | ✅ scripts/build-bundled-plugin.mjs 存在但 package.json 无 npm script alias | §10.4 Task 4.19a 新增 |
+| **F-6.1** §5.5 删 verifying-three-dimensions vs §8.2 三维 verify 保留 — plan 自相矛盾 | Critical | ✅ 我自己两段写了相反内容 | §5.5 改"保留 + 简化"(仅 prose check 不写 verify_findings);§10.3 Task 3.2 同步改 |
+| **F-6.2** 删 finding CLI 破坏 multi-harness Tier 2/3 bridge | Important | ✅ tier23-command-bridge.md:34 调 forge finding hash | §5.2 加 finding.ts 保留;§14 Q1 改答案 |
+| **F-6.3** §6.1 漏 archive 自动 backlog 刷新(与 multi-harness 价值承诺冲突) | Important | ✅ 同 F-2.2 | §6.1 伪代码补 Step 9(同 F-2.2 fix) |
+
+**统计**:Critical 6 / Important 8 / Minor 2 / 需人工验证 0(全部确证)。
+
+**Codex review 准确率**:16/16(100%)。本轮 review 质量极高,关键 finding(F-1.1 finding-hash 13 依赖、F-2.1 legacy-bridge 耦合、F-4.1 Phase 1 顺序错、F-6.1 plan 自相矛盾)都是 user 主代理写 plan v1 时认知盲区,Codex 通过对照真实代码全部抓出。
+
+**Plan v2 净改动**:
+- §5.1 删除清单:删 finding-hash 移到保留;加 marker-ack 删除;加 schemas/archive-summary 重写
+- §5.2 保留清单:加 finding.ts(multi-harness 承诺)
+- §5.5 skill 清单:verifying-three-dimensions 改"保留 + 简化"
+- §6.1 伪代码:加 legacy-bridge preflight/posthook + generateBacklog + 失败回滚 trade-off 说明
+- §9.2 migration:删 legacy-marker-mode flag 承诺,加 pending-acks/archive-pause cache 清理步骤
+- §9.3 backlog 描述修正
+- §10.1 Phase 1:6 个 sub-phase 重排(1.1-1.18),18 个 Task(原 11 个);新增 5 个 Task(marker-ack 删、archive-summary schema 重写、archive/validate barrel 清理、final grep 决定)
+- §10.3 Phase 3 Task 3.2 改写
+- §10.4 Phase 4 加 Task 4.5a(3 测试处理)+ 4.19a(bundled tgz 生成)
+- §12 Risk:加 2 项 v2 风险
+- §14 Open Questions:Q1+Q2 改答案
+
+**进入 Phase 1 的前置**:plan v2 review 通过(本 commit)+ user 显式授权。
+
+---
+
+**Plan 结束(v2)**。Review 后请确认是否进入 Phase 1。

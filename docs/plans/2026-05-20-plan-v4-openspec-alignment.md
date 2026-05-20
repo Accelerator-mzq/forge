@@ -638,7 +638,7 @@ v3 的 `verify_findings` 数组(WARNING 阵列)在 v4 直接砍掉。verify 发�
 | `forge backlog` | 保留 |
 | `forge scope` | 保留 |
 | `forge config` | 保留 |
-| `forge finding` | 评估 — 若仅依赖 finding-hash 则**删**;若 backlog 用则简化 |
+| `forge finding` | **保留**(v10 修订 Codex v9 F-R9-1)— multi-harness Tier 2/3 bridge `skills/_shared/tier23-command-bridge.md:34` 显式调 `forge finding hash`;finding-hash 属 spec layer 工具,不是 archive fence。与 §5.2 / §14 已收敛决定一致 |
 | **`forge ack`** | **整删** |
 | **`forge evidence`** | **整删** |
 | **`forge pause-capture`** | **整删** |
@@ -1151,4 +1151,26 @@ Task 1.5 重写 archive.ts 时,**新增两个 CLI flag**(沿 OpenSpec archive �
 
 ---
 
-**Plan 结束(v9)**。Review 后请确认是否进入 Phase 1。
+---
+
+## §24 Codex Adversarial Review v9 — Response Log(2026-05-21)
+
+**Review trigger**:plan v9 commit `c29b314` 后跑第九轮。Codex 输出:F-R8-1 CLOSED + 新 1 条 F-R9-1 Important + 0 Critical。
+
+| Codex v9 Finding | Severity | 核实 | Plan v10 修订 |
+|---|---|---|---|
+| **F-R9-1** §9.4 `forge finding` 写"评估 — 若仅依赖则删",与 §5.2 / §14 已定的"保留"矛盾(plan 内部不一致) | Important | ✅ §9.4:641 / §5.2:181 / §14:866 + tier23-command-bridge.md:34 实证 | §9.4 一行改"保留 — multi-harness 依赖" |
+
+**统计**:Critical 0 / Important 1 / Minor 0(全部确证)。
+
+**Codex v9 准确率**:1/1(100%)。
+
+**累计 Codex Review 统计**:
+- v1 16 / v2 9 / v3 4 / v4 3 / v5 4 / v6 4 / v7 1 / v8 1 / v9 1
+- **总计 43 条 finding,100% 命中率**
+
+**第十轮 review 预期**:F-R9-1 是 plan 内部一行矛盾;v10 修订后 plan 应达 C+I = 0,**进入 Phase 1**。
+
+---
+
+**Plan 结束(v10)**。Review 后请确认是否进入 Phase 1。

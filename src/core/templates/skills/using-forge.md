@@ -29,6 +29,22 @@ If CLAUDE.md says "don't use TDD" and a skill says "always use TDD," follow the 
 
 **In Claude Code:** Use the `Skill` tool. When you invoke a skill, its content is loaded and presented to you—follow it directly. Never use the Read tool on skill files.
 
+**In OpenCode:** Use OpenCode's native `skill` tool to list and load skills. Skills are auto-discovered via `config.skills.paths`(forge plugin 自动注入,无需手动 symlink)。
+
+**In Codex CLI:** Skills 通过 `~/.agents/skills/forge/` symlink 被 Codex 原生 discovery 扫到(安装见 `docs/codex-install.md`)。Codex 没有显式的 skill invoke 工具 — 当一个 skill 的 trigger phrase / description 匹配当前任务时,直接读它的 `SKILL.md` 并按内容执行。
+
+## Platform Tool Mapping
+
+Skills 是按 Claude Code 工具名写的。在其它 harness 上遇到这些名字时,按下表替换:
+
+| Claude Code 引用          | Codex 等价                                                       | OpenCode 等价                     |
+| ------------------------- | ---------------------------------------------------------------- | --------------------------------- |
+| `Skill` 工具              | 直接读 `SKILL.md` 并按内容执行                                   | OpenCode 原生 `skill` 工具        |
+| `Task` 工具(派 subagent)  | `spawn_agent`(需 `~/.codex/config.toml` 开 `multi_agent = true`) | OpenCode `@mention` subagent 系统 |
+| `TodoWrite`               | `update_plan`                                                    | `todowrite`                       |
+| `Read` / `Write` / `Edit` | 原生文件工具                                                     | 原生文件工具                      |
+| `Bash`                    | 原生 shell 工具                                                  | 原生 shell 工具                   |
+
 # Using Skills
 
 ## The Rule

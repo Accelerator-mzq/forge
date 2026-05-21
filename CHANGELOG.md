@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [4.0.1] - 2026-05-21
+
+### Added
+
+- **`forge preflight stage-extensions-check` 子命令**(PR #62)— 扫 `forge/config.yaml#stage_extensions` 常见漏洞:adversarial entry 缺 `--user-focus` / `--target-label`(导致 codex 失焦扫整个 working tree)、adversarial 模式 entry 无 `build_prompt`(helper 立即失败)、`defaults.timeout_sec` > 900 或 `convergence.max_rounds` > 3(易 hang)。loose 模式 — 发现问题只 emit stderr,exit 0 不阻塞。覆盖 5 测试 case。
+- **`forge monitor record --json-file <path>` flag**(PR #63)— 从文件读 JSON payload 替代 stdin `--json`,**绕过 Windows cmd.exe 引号嵌套吃花括号导致 100% `record_error`** 的 bug(`scripts/run-forge.mjs` 在 Windows 下 spawn `npx.cmd` 必须 `shell: true`,Node 21+ CVE-2024-27980)。`--json-file` 优先于 `--json`;文件不存在 / 解析失败 → `record_error` 降级。
+- **`docs/migration/setup-stage-extensions.md`**(PR #62)— stage-extensions 完整 onboarding checklist(271 行):新项目 6-step setup / 已有项目检测 / 5 stage 各自 user-focus 文本设计 / preflight 验证 / 常见 FAQ。
+
+### Fixed
+
+- **OpenCode workflow-monitor 不会自动注入**(PR #61)— `.opencode/plugins/forge.js` 加 `getMonitorInjection`(inline copy `scanMonitorEnabled` 自 `hooks/monitor-check.mjs`),`transform` hook bootstrap 拼接 monitor injection,对齐 Tier 1 SessionStart hook 行为。
+- **OpenCode 下 SKILL.md 引用 Claude Code 工具名(`Skill` / `Task` / `TodoWrite`)无翻译**(PR #59)— `.opencode/plugins/forge.js` bootstrap 末尾追加 Tool Mapping for OpenCode 段,避免 AI 调用不存在的工具导致流程漂移。
+- **`hooks/workflow-monitor-injection.md` 硬编码 `${CLAUDE_PLUGIN_ROOT}`**(PR #61)— harness-agnostic 化:`<forge plugin root>` 按 Claude Code / OpenCode / Codex 三种解析方式说明,Codex 路径显式标注 fallback(无 hook 通道,主动 Read injection.md)。
+
+### Docs
+
+- **CLAUDE.md / AGENTS.md 同步 v4 现状**(PR #60)— v4.0.0 release 时遗漏:删 "核心增量是「反向加固协议」" 描述、`tasks_hash` / `content_hash` / `git.diff_hash` 完整性校验段(v4 BREAKING 已砍 ~5500 行);更正计数(14 CLI 子命令 / 9 slash 命令 / 17 skill,原写 16 / 10 / 16);"反向加固协议" 段改写为 "v4 设计转向",列 v4 留存的 4 项协议骨架。
+- **`docs/codex-review.md` + `docs/getting-started.md` 示例修**(PR #62)— Quick Start 加 `defaults` 收紧示范、verify entry 加 `--user-focus`、callout 引 ForgeUE 实测案例 + 指向 `setup-stage-extensions.md`。
+- **`skills/using-forge/SKILL.md`**(PR #59 + #61)— `## How to Access Skills` 段补 OpenCode / Codex CLI 平台说明;新增 `## Platform Tool Mapping` 表对照三 harness 工具等价;新增 `## workflow-monitor 跨 harness 兼容` 段。
+- **`hooks/workflow-monitor-injection.md`**(PR #63)— 加 Windows 限制说明,`monitor record` 4 步全部给两种形态(macOS/Linux `--json` / Windows `--json-file` + tmp 文件中转)。
+
 ## [4.0.0] - 2026-05-21
 
 ### BREAKING

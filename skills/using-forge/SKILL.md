@@ -106,15 +106,15 @@ The skill itself tells you which.
 
 Instructions say WHAT, not HOW. "Add X" or "Fix Y" doesn't mean skip workflows.
 
-## v0.3 plugin 协议状态(Plan 0a + Plan 0b.1 实测,2026-05-09)
+## Multi-harness 协议状态
 
 forge 在三 harness 下的协议支持:
 
-| Tier | Harness     | skill auto-trigger | slash command 注册     | workflow bridge                                     | CLI 调用形态                                                                              |
-| ---- | ----------- | ------------------ | ---------------------- | --------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| 1    | Claude Code | ✅ 全 PASS         | ✅ 全 PASS             | —(slash 直驱,无需桥接)                              | commands.md 调 `${CLAUDE_PLUGIN_ROOT}/scripts/run-forge.mjs`                              |
-| 2    | OpenCode    | ✅ PASS            | ❌ FAIL(plugin 不注册) | ✅ 经 stage skill 桥接段 Read `commands/<stage>.md` | 桥接段按 `tier23-command-bridge.md` 替换为 `node "<ROOT>/scripts/run-forge.mjs" <subcmd>` |
-| 3    | Codex       | ✅ PASS            | ❌ FAIL(plugin 不注册) | ✅ 同上                                             | 同上                                                                                      |
+| Tier | Harness     | skill auto-trigger | slash command 注册 | workflow bridge                                     | CLI 调用形态                                                                              |
+| ---- | ----------- | ------------------ | ------------------ | --------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| 1    | Claude Code | ✅                 | ✅                 | —(slash 直驱,无需桥接)                              | commands.md 调 `${CLAUDE_PLUGIN_ROOT}/scripts/run-forge.mjs`                              |
+| 2    | OpenCode    | ✅                 | ❌(plugin 不注册)  | ✅ 经 stage skill 桥接段 Read `commands/<stage>.md` | 桥接段按 `tier23-command-bridge.md` 替换为 `node "<ROOT>/scripts/run-forge.mjs" <subcmd>` |
+| 3    | Codex       | ✅                 | ❌(plugin 不注册)  | ✅ 同上                                             | 同上                                                                                      |
 
 **OpenCode + Codex 用户提示**:即使 `/forge:*` 不可用,brainstorming / writing-plans / verify 等 skill **会按 description 自动触发**,你只需:
 
@@ -124,21 +124,22 @@ forge 在三 harness 下的协议支持:
 
 Tier 2/3 经 stage skill 的桥接段 Read `commands/<stage>.md` 执行,功能闭环但属 best-effort skill orchestration。
 
-## forge slash commands(本 bootstrap 携带的 7 个工作流入口)
+## forge slash commands(工作流入口)
 
-**触发 prerequisites**:Tier 1 Claude Code 路径下可用;Tier 2/3 OpenCode/Codex 路径下不可用(实测 FAIL,见上表)— 改为 skill auto-trigger 等价路径。
+**触发 prerequisites**:Tier 1 Claude Code 路径下可用;Tier 2/3 OpenCode/Codex 路径下不可用 — 改为 skill auto-trigger 等价路径。
 
 触发以下任一命令时,会自动调起对应 skill 链:
 
-| 命令                                               | 用途                                                   | 调起 skill                                                                                                                                     |
-| -------------------------------------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/forge:brainstorm <topic>`                        | 模糊想法 → forge/drafts/<date>-<topic>.md              | forge:brainstorming                                                                                                                            |
-| `/forge:propose <change-id> [--from-draft <name>]` | draft → 4 个 change 产物                               | forge:writing-plans                                                                                                                            |
-| `/forge:apply [--parallel]`                        | tasks.md → 实施                                        | forge:subagent-driven-development + forge:test-driven-development(--parallel 加 forge:dispatching-parallel-agents + forge:using-git-worktrees) |
-| `/forge:review`                                    | 派 review subagent + 收反馈                            | forge:requesting-code-review + forge:receiving-code-review                                                                                     |
-| `/forge:verify`                                    | 跑 forge validate + 三维度分析 + 写 verify-passed YAML | forge:verification-before-completion + forge:verifying-three-dimensions                                                                        |
-| `/forge:archive`                                   | 归档 change 到 forge/changes/archive/                  | (CLI `forge archive`,无 skill 链)                                                                                                              |
-| `/forge:explore [<topic> \| --change <id>]`        | 非线性思考空间(任何阶段,非产物驱动)                    | forge:exploring(9f 新增,沿 design §2.5)                                                                                                        |
+| 命令                                               | 用途                                                                     | 调起 skill                                                                                                                                     |
+| -------------------------------------------------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/forge:brainstorm <topic>`                        | 模糊想法 → forge/drafts/<date>-<topic>.md                                | forge:brainstorming                                                                                                                            |
+| `/forge:propose <change-id> [--from-draft <name>]` | draft → 4 个 change 产物                                                 | forge:writing-plans                                                                                                                            |
+| `/forge:apply [--parallel]`                        | tasks.md → 实施                                                          | forge:subagent-driven-development + forge:test-driven-development(--parallel 加 forge:dispatching-parallel-agents + forge:using-git-worktrees) |
+| `/forge:review`                                    | 派 review subagent + 收反馈,写 .review-passed v2 marker                  | forge:requesting-code-review + forge:receiving-code-review                                                                                     |
+| `/forge:verify`                                    | 跑 forge validate + 三维度 prose check,写 .verify-passed v2 marker       | forge:verification-before-completion + forge:verifying-three-dimensions                                                                        |
+| `/forge:archive`                                   | 归档 change 到 forge/changes/archive/(校验 v2 marker + 应用 spec deltas) | (CLI `forge archive`,无 skill 链)                                                                                                              |
+| `/forge:explore [<topic> \| --change <id>]`        | 非线性思考空间(任何阶段,非产物驱动)                                      | forge:exploring                                                                                                                                |
+| `/forge:upgrade`                                   | 清理 v0.2 legacy harness adapter 产物(forge/ 100% 不动)                  | (CLI `forge upgrade`)                                                                                                                          |
 
 ## meta-development entry — writing-skills
 
@@ -150,14 +151,14 @@ forge 框架自身的 skill 开发流程(用户主动 invoke,不走 slash comman
 | 修订一个 forge skill 的 behavior(不是 typo)           | `forge:writing-skills` |
 | 跑 forge-eval baseline 重跑发现 skill 失效 → REFACTOR | `forge:writing-skills` |
 
-`forge:writing-skills` 自身的初次开发使用 superpowers 上游 writing-skills 完成(bootstrap exception,沿 design §2.9.5);后续修订使用 forge:writing-skills 自身。详 `skills/writing-skills/SKILL.md`。
+`forge:writing-skills` 自身的初次开发使用 superpowers 上游 writing-skills 完成(bootstrap exception);后续修订使用 forge:writing-skills 自身。详 `skills/writing-skills/SKILL.md`。
 
 ## forge 红旗清单(覆盖 superpowers 红旗清单的 forge 专属补充)
 
 除了 superpowers 通用红旗,forge 多以下条目:
 
-| 想法                                                               | 现实                                                                                                                                                                                                     |
-| ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| "用户需求看起来很清晰,直接写 propose 吧"                           | 用户原话有 "大概 / 也许 / 不太确定 / 看着办" 任一关键词 → 必须先 `/forge:brainstorm`,不允许直接 `/forge:propose`                                                                                         |
-| "实施中模糊 / 觉得需要重新想想,直接改 `design.md` 或跳 forge 流程" | 错(沿 design §2.5 + plan-9f)。**开放思考**走 `/forge:explore --change <id>`(skill 强制显式收尾 + capture offer + 不写 artifacts);**阻塞 issue**走 §2.1 Fluid Pause;**都不是**在 apply 中直接改 artifacts |
-| "explore 是 thinking time,可以无限发散,不需要 capture offer"       | 错(沿 design §2.5.6 forge 反向加固第一条)。即使 OpenSpec 上游允许"不 reach conclusion",forge 加显式收尾约束 — skill 末尾必须输出 `## Exploration Summary` + 至少一个具体 `file:section` 的 capture offer |
+| 想法                                                               | 现实                                                                                                                                                                                           |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| "用户需求看起来很清晰,直接写 propose 吧"                           | 用户原话有 "大概 / 也许 / 不太确定 / 看着办" 任一关键词 → 必须先 `/forge:brainstorm`,不允许直接 `/forge:propose`                                                                               |
+| "实施中模糊 / 觉得需要重新想想,直接改 `design.md` 或跳 forge 流程" | 错。**开放思考**走 `/forge:explore --change <id>`(skill 强制显式收尾 + capture offer + 不写 artifacts);**阻塞 issue**走 Fluid Pause(`commands/apply.md`);**都不是**在 apply 中直接改 artifacts |
+| "explore 是 thinking time,可以无限发散,不需要 capture offer"       | 错(forge 反向加固)。即使 OpenSpec 上游允许"不 reach conclusion",forge 加显式收尾约束 — skill 末尾必须输出 `## Exploration Summary` + 至少一个具体 `file:section` 的 capture offer              |

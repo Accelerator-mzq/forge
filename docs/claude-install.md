@@ -48,20 +48,20 @@ session 内输入:
 ## Workflow(完整 happy path)
 
 ```
-# Tier 1 全功能:9 个 /forge:* slash commands 都可用(brainstorm / propose / explore / apply / review / verify / archive / upgrade / ack-confirm)
+# Tier 1 全功能:8 个 /forge:* slash commands 都可用(brainstorm / propose / explore / apply / review / verify / archive / upgrade)
 /forge:brainstorm <topic>     # 调 brainstorming skill
 /forge:propose <change-id> [--from-draft <name>] [--light]
                               # 调 writing-plans skill(P3 scale-aware:< 200 行 → light mode)
 /forge:explore --change <id>  # 不确定方案时探路(调 code 分析 skill)
 /forge:apply [--parallel]      # 调 subagent-driven-development + test-driven-development
-/forge:review                 # 调 requesting/receiving-code-review
-/forge:verify                 # 调 verification-before-completion + helper validate
-/forge:archive                # 调 helper archive(严格门禁 marker hash 校验)
-/forge:upgrade                # v0.x → v1.x 升级 legacy 项目
-/forge:ack-confirm            # confirm 待 ack 的 WARNING finding
+/forge:review                 # 调 requesting/receiving-code-review,写 forge-review/v2 marker
+/forge:verify                 # 调 verification-before-completion,写 forge-verify/v2 marker
+/forge:archive                # 调 helper archive(v4:v2 marker schema 校验 + spec deltas apply)
+/forge:upgrade                # v0.x → v1.x 升级 legacy 项目(v4:删 --resign-markers flag)
+# v4:删 /forge:ack-confirm —— 反加固两步 ack 协议消亡,WARNING 给用户自管
 ```
 
-每个 command 内部调 `node "${CLAUDE_PLUGIN_ROOT}/scripts/run-forge.mjs"` helper,helper 内 spawn `npx -y --package @accelerator-mzq/forge@^3.0.0 -- forge ...` 拉 forge CLI(避开 v0.2 P1 全局 PATH 问题)。
+每个 command 内部调 `node "${CLAUDE_PLUGIN_ROOT}/scripts/run-forge.mjs"` helper,helper 内 spawn `npx -y --package @accelerator-mzq/forge@^4.0.0 -- forge ...` 拉 forge CLI(避开 v0.2 P1 全局 PATH 问题)。
 
 ## Troubleshooting
 

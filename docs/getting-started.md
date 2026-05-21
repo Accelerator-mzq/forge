@@ -69,8 +69,8 @@ claude                          # 启动 Claude Code 会话
 
 - ✅ `/plugin marketplace add` 报 "Marketplace added: accelerator-mzq-forge"
 - ✅ `/plugin install` 报 "Plugin installed: forge"
-- ✅ 重启 session 后,任意位置打 `/forge:` 看到 9 个候选(brainstorm / propose / explore / apply / review / verify / archive / upgrade / ack-confirm)
-- ✅ 任意位置打 `/skills` 看到 16 个 `forge:*` skill
+- ✅ 重启 session 后,任意位置打 `/forge:` 看到 8 个候选(brainstorm / propose / explore / apply / review / verify / archive / upgrade)
+- ✅ 任意位置打 `/skills` 看到 15+ 个 `forge:*` skill
 
 > ❌ 如果 `/forge:` 没补全 → bootstrap 没生效,见 [§出问题怎么办 第 1 条](#出问题怎么办)
 
@@ -344,34 +344,23 @@ tail -10 forge/changes/add-todo/tasks.md  # 期望:末尾有 applied_commits YAM
 
 ### 嵌入 deep-dive
 
-> 💡 **深入:Review 报 finding,走哪一级处理**
+> 💡 **深入:Review 报 finding 处理(v4 简化)**
 >
-> forge 把 review finding 分三级,**只有 WARNING 可走 ack 流程**(沿 `skills/receiving-code-review/SKILL.md:230 + 263`):
+> v4 起 forge 走 OpenSpec 风格简洁对齐 —— **review finding 不再分三级 + 不再有 ack 两步协议**。
+> 主代理读 review subagent 意见列表后,**逐条判接受/拒绝**(参考 `forge:receiving-code-review` skill 的"用证据反驳"原则,不机械接受)。处理后:
 >
-> | Severity | 判定来源 | 你的动作 |
-> |---|---|---|
-> | **CRITICAL** | 工具客观判定(测试 fail / hash mismatch / evidence 缺失) | **必修**。修代码 → 重跑 verify。**不能 ack 降级**(forge 协议硬约束) |
-> | **WARNING** | AI 主判(事实可能有问题但需人类裁决) | 优先 fix;若有合理理由不 fix(scope 太大 / 决策被推翻)→ 走 **ack 两步协议**(见下) |
-> | **SUGGESTION** | AI 主判,无需 ack | 顺手 fix 或留 backlog,archive 不阻塞 |
+> | 接受/拒绝 | 你的动作                                                                          |
+> | --------- | --------------------------------------------------------------------------------- |
+> | **接受**  | append 到 `forge/changes/<id>/tasks.md` 末尾作为新 task,实施 + commit             |
+> | **拒绝**  | 用证据反驳(记录在 commit message 或 review 笔记里),不写 marker fence            |
 >
-> **ack 两步协议(只对 WARNING)**:
+> 只有满足三条件,主代理才打 `.review-passed` v2 marker:
 >
-> ```bash
-> # 第一步:AI 调 propose(用户不直接敲)
-> forge ack propose --action ack-warning --finding-id <id> --rationale "<为啥可以不修>"
-> # → 写 forge/changes/<id>/.ack-log.jsonl 一条 status=proposed
-> ```
+> 1. 无"已用证据反驳但未存档"的拒绝意见
+> 2. 接受的意见已全部实现 + 测试通过
+> 3. 本轮无新增 task
 >
-> 然后在 Claude Code 会话里:
->
-> ```
-> /forge:ack-confirm
-> ```
->
-> - AI 列出待 confirm 的 propose 项
-> - 你回答 `accept` / `reject`
-> - accept → `.ack-log.jsonl` append `status=confirmed` + `acked_by` + `ack_at`
-> - reject → `.ack-log.jsonl` append `status=rejected`,你回头修代码
+> v3 的 CRITICAL/WARNING/SUGGESTION 三级 severity + ack-warning 两步协议 + `forge ack propose/confirm` CLI + `/forge:ack-confirm` slash 在 v4 全部移除。完整 v3 → v4 升级路径见 [`docs/migration/v3-to-v4.md`](./migration/v3-to-v4.md)。
 
 ### 嵌入 deep-dive: stage-extensions(review)
 
@@ -397,15 +386,14 @@ tail -10 forge/changes/add-todo/tasks.md  # 期望:末尾有 applied_commits YAM
 ### 确认
 
 ```bash
-cat forge/changes/<id>/.review-passed   # 期望:schema_version / log_hash / reviewed_at / findings_acked
-cat forge/changes/<id>/.ack-log.jsonl   # 若有 WARNING:每行 1 个 ack 事件(proposed / confirmed / rejected)
+cat forge/changes/<id>/.review-passed   # 期望(v4 v2):schema=forge-review/v2 / reviewed_at / reviewed_by / pause_decisions?
 ```
 
 ### 深读
 
-- [`skills/receiving-code-review/SKILL.md`](../skills/receiving-code-review/SKILL.md) §三级 severity 段
-- [`commands/review.md`](../commands/review.md) + [`commands/ack-confirm.md`](../commands/ack-confirm.md)
-- [`src/cli/commands/ack.ts`](../src/cli/commands/ack.ts) — `forge ack` 三子命令实现
+- [`skills/receiving-code-review/SKILL.md`](../skills/receiving-code-review/SKILL.md)
+- [`commands/review.md`](../commands/review.md)
+- [`docs/migration/v3-to-v4.md`](./migration/v3-to-v4.md) — v3 ack 协议如何升级到 v4 简化路径
 
 ## 第 5 步 — Verify 三维
 
@@ -510,18 +498,16 @@ cat forge/changes/<id>/.verify-passed | grep process_evidence  # 期望:freeze �
 
 ### 期望发生(✅ 表示 forge 工作正常)
 
-- ✅ AI 校验 `.verify-passed` + `.review-passed` marker schema + log_hash + git integrity
-- ✅ AI 跑**三级 fence**(沿 `src/core/archive/three-level-fence.ts`):
-  - **CRITICAL 硬墙**:有未解 CRITICAL → exit + 提示修代码重跑 verify(不能 archive)
-  - **WARNING ack**:有 WARNING + 未 confirm → 提示用户走 `/forge:ack-confirm`(沿 §4)
-  - **SUGGESTION soft**:不阻塞,聚合到 `archive_summary.yaml` 的 `handoff_to_backlog`
-- ✅ 通过后 AI **Move** `forge/changes/<id>/` → `forge/changes/archive/<date>-<id>/`
-- ✅ AI **Sync** specs deltas 到 `forge/specs/<area>.md`
-- ✅ AI 写 `forge/changes/archive/<date>-<id>/archive_summary.yaml`(含 9 业务字段 + `handoff_to_backlog` 三类聚合)
+- ✅ AI 校验 `.verify-passed` + `.review-passed` marker schema(v4 v2 极简,无 hash/git 校验)
+- ✅ AI 跑 spec validate(永远跑,sanity check 非 fence)
+- ✅ AI 处理 task progress confirm + spec deltas confirm(`--yes` 时跳过)
+- ✅ AI **Move** `forge/changes/<id>/` → `forge/changes/archive/<date>-<id>/`
+- ✅ AI **Sync** spec deltas 到 `forge/specs/<area>.md`(`applyDeltas` operation-driven)
+- ✅ AI 写 `forge/changes/archive/<date>-<id>/archive_summary.yaml`(v4 v2:含 verified_by / reviewed_by / spec_updates_applied / handoff_to_backlog 两来源)
+- ✅ AI 自动重生成 `forge/backlog/active.md`(scope_entries 聚合)
 - ✅ AI invoke `forge:finishing-a-development-branch` skill 提示 git 后续(merge / PR / cleanup 决策)
 
-> ❌ 如果 archive 报 "marker hash mismatch" → marker 跟当前 tasks.md / specs/ 不符,见 §出问题 第 2 条
-> ❌ **`forge backlog list` 在 v1.1 不存在**(`commands/archive.md:86` 是 forward-looking 提示)— 只能 `cat archive_summary.yaml` 看 backlog,沿 spec §9.0
+> ❌ 如果 archive 报 `forge-verify/v2 required, got forge-verify/v1` → 这是 v3 → v4 升级未做 marker 重写,见 [`docs/migration/v3-to-v4.md §3`](./migration/v3-to-v4.md)
 
 ### 确认
 
@@ -529,7 +515,7 @@ cat forge/changes/<id>/.verify-passed | grep process_evidence  # 期望:freeze �
 ls forge/changes/archive/                           # 期望:<date>-<id> 目录
 ls forge/specs/                                     # 期望:本 change 留下的 spec 文件
 cat forge/changes/archive/<date>-<id>/archive_summary.yaml | head -30
-# 期望:schema=forge-archive-summary/v1 + handoff_to_backlog 三类(critical/warning/suggestion)
+# 期望:schema=forge-archive-summary/v2 + handoff_to_backlog 两来源(scope_entries / pause_decisions)
 ```
 
 ### 深读
@@ -556,27 +542,19 @@ ls .claude/commands/forge/ # 期望 9 个 .md
 - `/plugins` 看 forge 是否 enabled
 - 极端情况:`/plugin install forge@accelerator-mzq-forge --force` 重装
 
-### 2. `/forge:archive` 被拒(marker 已过期 / hash mismatch)
+### 2. `/forge:archive` 被拒(marker schema 不对)
 
-**症状**:`forge archive` 报 `marker hash mismatch / git integrity failed`。
+**症状**:`forge archive` 报 `forge-verify/v2 required, got forge-verify/v1`(或 `forge-review/v2 required`)。
 
-**原因**:你或 AI 在 verify / review 之后改了 `tasks.md` 或 `specs/`,marker 锁的 content_hash 跟当前不符。
+**原因**:你在 v3 时期跑了 verify/review 写的是 v1 marker,升级 v4 后 schema 校验拒。
 
-**修法**:重跑 `/forge:verify` + `/forge:review`(顺序不变),让 marker 重新对齐 → 再 archive。
+**修法**:见 [`docs/migration/v3-to-v4.md §3`](./migration/v3-to-v4.md) —— 清掉 `forge/changes/<id>/.evidence/pending-acks/` 等 v3 残留,重跑 `/forge:verify` + `/forge:review` 写 v2 marker → 再 archive。
 
-### 3. `/forge:verify` 三维报 CRITICAL automated finding
+### 3. `/forge:verify` 报测试 fail / spec 未覆盖
 
-**症状**:`forge validate` exit 1,`.verify-failed` YAML 列 `automated=true` CRITICAL。
+**症状**:verify subagent 报告测试 fail 或 spec layer 校验失败。
 
-**修法**:**修代码**(测试 fail → fix code → 测试 pass / coverage_gap → 实施 spec 未覆盖部分)→ 重跑 verify。**不能** `forge ack propose` 降级(CRITICAL 不可 ack,沿 §4 Review 表)。
-
-### 4. `forge evidence freeze` 报 staging not found
-
-**症状**:freeze exit 1 + "staging file not found ... 必须先调 `forge evidence record-tdd/verify/review`"。
-
-**原因**:freeze 必须前置 `record-*` helper 写 staging(`.evidence/process-evidence.staging.yaml`)。
-
-**修法**:**AI 应当自动调** record-* helper(沿 `commands/apply.md:179-182`)。若 AI 没调,提示 AI invoke 对应 helper(record-tdd 在 apply 完成时、record-verify 在 verify 后、record-review 在 review 后)。
+**修法**:**修代码**(测试 fail → fix code → 测试 pass / coverage gap → 实施 spec 未覆盖部分)→ 重跑 verify。v4 不再有 `forge ack propose` 降级路径 —— 测试必须 pass + spec 必须完整覆盖。
 
 完整错误退出码清单见 [`docs/cli-reference.md`](cli-reference.md)。
 
@@ -590,7 +568,7 @@ forge 的 16 个 skill 是从 [superpowers](https://github.com/obra/superpowers)
 |---|---|
 | 安装路径(项目级 `.claude/` vs 用户级 `~/.claude/plugins/`) | ❌ 不冲突 |
 | skill 名(`forge:brainstorming` vs `superpowers:brainstorming`) | ❌ 命名空间隔离 |
-| slash 命令(forge 9 个 `/forge:*` vs superpowers 不带命令) | ❌ 不冲突 |
+| slash 命令(forge 8 个 `/forge:*` vs superpowers 不带命令) | ❌ 不冲突 |
 
 **但行为可能重叠**:你说"我想做个 todo list 应用"时,Claude 看到两个 brainstorming skill 都"1% 可能匹配",可能优先 invoke `superpowers:brainstorming`(plugin auto-load 抢先注册)→ 走完引导但**不写 `forge/drafts/<date>-<topic>.md`** → 下一步 `/forge:propose --from-draft <name>` 找不到 draft。
 

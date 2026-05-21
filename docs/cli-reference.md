@@ -437,42 +437,9 @@ forge stage-extensions analyze-trend --history '[{"round":1,"block_count":5},{"r
 
 ## 工作流内部 helper 命令
 
-以下 7 个命令主要由 slash 命令模板(`/forge:apply` / `/forge:verify` / `/forge:review` / `/forge:ack-confirm` 等)在工作流内部调用,一般不需手敲。列在此处供排障与理解协议。
+以下命令主要由 slash 命令模板(`/forge:apply` / `/forge:verify` / `/forge:review`)在工作流内部调用,一般不需手敲。列在此处供排障与理解协议。
 
-### `forge ack`
-
-ack 两步确认协议(反向加固):WARNING finding 必须走 AI propose + User confirm 两步,AI 不能自 ack。
-
-```
-forge ack propose <changeId> --finding <id> --action <type> [--rationale <text>] [--target-severity <sev>]
-forge ack confirm <changeId> <findingId> [--target-severity <sev>]
-forge ack reject  <changeId> <findingId> --rationale <text>
-```
-
-| 子命令    | 行为                                                                  | 退出码                                                          |
-| --------- | --------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `propose` | AI 写 pending ack YAML(`--action` 如 `ack-warning` / `ack-critical` / `resign-c-simcode`) | **1 = 已写 pending(正常路径,提示 user 去 confirm)**;2 = CI 模式拒绝(`CI=true`) |
-| `confirm` | User 确认:severity-ack(`ack-warning` / `ack-pause-warning` / `downgrade`)写 marker ack 字段 + 写 `ack-log.jsonl` + 删 pending;其余 action 仅写 `ack-log.jsonl` + 删 pending | 0 成功;2 = 无 pending / pending YAML 损坏 / `--target-severity` 非法 |
-| `reject`  | User 拒绝,写 reject 日志并删 pending                                 | 0 成功;2 = 无 pending / YAML 损坏                              |
-
-注意:`propose` 成功时 **exit 1** 是有意设计的信号(pending 已写、待 user 操作),不是错误。
-
-`<findingId>` / `--finding <id>` 接受两种形式:`<number>`(普通 finding)或 `pause_decisions:<number>`(Fluid Pause decision finding)。
-
-### `forge evidence`
-
-记录 TDD / verify / review 过程证据到 `ack-log.jsonl` + `.evidence/process-evidence.staging.yaml`,最后 `freeze` 凝固进 marker。由 apply / verify / review slash 模板调用。
-
-```
-forge evidence record-tdd    <changeId> --task <ref> [--red-commit <sha>] --green-commit <sha> [...]
-forge evidence record-verify <changeId> --task-refs <list> --scope <per-task|change-level> --report <path> [...]
-forge evidence record-review <changeId> --task <ref> --implementer-commit <sha> [...]
-forge evidence freeze        <changeId> --kind <verify|review> [--marker <path>]
-```
-
-`record-*` 三个子命令各有大量可选证据字段(timestamp / log / report / hash / exit code 等),完整列表见 `forge evidence <sub> --help`。`freeze` 把 staging 凝固进 `.verify-passed` / `.review-passed` marker 并校验 `staging_hash`。
-
-退出码:0 成功;1 = staging / marker 缺失、`staging_hash` 不匹配、CRITICAL 不变量失败;2 = 参数无效(JSON 解析失败 / `--scope` 或 `--kind` 取值非法)。
+> v4 BREAKING:`forge ack` / `forge evidence` / `forge pause-capture` 子命令整删 —— 反加固协议消亡。详见 [`docs/migration/v3-to-v4.md`](./migration/v3-to-v4.md)。
 
 ### `forge finding`
 

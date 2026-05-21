@@ -97,7 +97,7 @@ opencode run --print-logs "hello" 2>&1 | grep -i forge
 
 ### skill 触发但 helper 调用失败
 
-OpenCode skill 内嵌 `${FORGE_HELPER}` 变量,plugin loader 应解析为 `<plugin_dir>/scripts/run-forge.mjs`。如果失败,fallback 直接 `npx -y --package @accelerator-mzq/forge@^3.1 -- forge <subcmd>`(同 Tier 1 行为)。
+OpenCode skill 内嵌 `${FORGE_HELPER}` 变量,plugin loader 应解析为 `<plugin_dir>/scripts/run-forge.mjs`。如果失败,fallback 直接 `npx -y --package @accelerator-mzq/forge@^4.0.0 -- forge <subcmd>`(同 Tier 1 行为)。
 
 ### Cross-plugin 同名(superpowers + forge brainstorming)
 

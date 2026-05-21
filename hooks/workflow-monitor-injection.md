@@ -13,18 +13,35 @@
 
 > **Codex 路径下本注入不会自动触发**(Codex plugin 协议无 hook 通道)。如 `forge/config.yaml#monitor.enabled=true` 但你正在 Codex session,需主动 `Read` 本文件并按下面步骤执行 monitor record。
 
+> **Windows 限制 + 推荐做法**:`run-forge.mjs` 在 Windows 下 spawn `npx.cmd` 必须 `shell: true`(Node 21+ CVE-2024-27980),JSON args 经 cmd.exe 二次 escape 会被吃掉引号导致 100% `record_error`。**Windows 用户用 `--json-file <path>` 替代 `--json '...'`**:把 JSON payload 写文件再传路径,绕过 shell quoting。下面"每个阶段要记录的"步骤同时给两种形态。
+
 ## 每个阶段要记录的
 
 进入任一 forge 阶段(brainstorm / propose / apply / review / verify / archive / explore)时:
 
-1. **进入阶段** —— 调:
+1. **进入阶段** —— 调(无 data 负载,无 Windows quoting 问题):
    `... run-forge.mjs monitor record --stage <阶段> --event stage_enter --change <change-id>`
+
 2. **fork 点决策** —— 在该阶段的关键岔路口,记录你实际选了哪条分支:
-   `... monitor record --stage <阶段> --event decision --change <id> --json '{"scenario_id":"<见下>","chosen":"<你实际怎么走的>"}'`
+   - **macOS/Linux**(`--json` 直传):
+     `... monitor record --stage <阶段> --event decision --change <id> --json '{"scenario_id":"<见下>","chosen":"<你实际怎么走的>"}'`
+   - **Windows**(`--json-file` 绕 cmd.exe;推荐):
+     ```bash
+     # 先把 payload 写文件
+     echo '{"scenario_id":"<见下>","chosen":"<...>"}' > /tmp/forge-monitor-payload.json
+     # 再传文件路径(无 shell quoting 问题)
+     ... monitor record --stage <阶段> --event decision --change <id> --json-file /tmp/forge-monitor-payload.json
+     ```
+
 3. **加固步骤** —— 执行(或跳过)一个反向加固步骤后:
-   `... monitor record --stage <阶段> --event hardening_step --change <id> --json '{"step":"<步骤名>","executed":<true 或 false>}'`
+   - **macOS/Linux**:`... monitor record --stage <阶段> --event hardening_step --change <id> --json '{"step":"<步骤名>","executed":<true 或 false>}'`
+   - **Windows**:同 fork 点用 `--json-file <path>`
+
 4. **离开阶段** —— 调:
-   `... monitor record --stage <阶段> --event stage_exit --change <id> --json '{"outcome":"<结果>"}'`
+   - **macOS/Linux**:`... monitor record --stage <阶段> --event stage_exit --change <id> --json '{"outcome":"<结果>"}'`
+   - **Windows**:同上用 `--json-file <path>`
+
+> **`--json-file` 优先于 `--json`**:如两者同传,以 file 内容为准(file 不存在 / 解析失败 → 降级 `record_error`,同 stdin 路径语义对称)。
 
 > **brainstorm/explore 阶段还没有 change-id 时,`record` 省略 `--change`(自动落 `_session` 桶,propose 创建 change 后报告会并入)**。
 

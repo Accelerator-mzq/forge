@@ -98,6 +98,65 @@ describe('forge monitor record', () => {
     const { events } = readTrace(root, '2026-05-15-s');
     expect(events.some((e) => e.event === 'record_error')).toBe(true);
   });
+
+  it('--json-file 读 JSON 文件 → data 正确(Windows 绕 cmd.exe quoting)', async () => {
+    await run(['enable']);
+    const jsonPath = join(root, 'payload.json');
+    writeFileSync(jsonPath, '{"scenario_id":"verify-tests-green","chosen":"走了三维"}', 'utf8');
+    await run([
+      'record',
+      '--stage',
+      'verify',
+      '--event',
+      'decision',
+      '--change',
+      '2026-05-15-jf',
+      '--json-file',
+      jsonPath,
+    ]);
+    const { events } = readTrace(root, '2026-05-15-jf');
+    expect(events).toHaveLength(1);
+    expect(events[0]?.data.chosen).toBe('走了三维');
+    expect(events[0]?.data.scenario_id).toBe('verify-tests-green');
+  });
+
+  it('--json-file 路径不存在 → record_error 降级', async () => {
+    await run(['enable']);
+    await run([
+      'record',
+      '--stage',
+      'verify',
+      '--event',
+      'decision',
+      '--change',
+      '2026-05-15-jfx',
+      '--json-file',
+      join(root, '不存在.json'),
+    ]);
+    const { events } = readTrace(root, '2026-05-15-jfx');
+    expect(events.some((e) => e.event === 'record_error')).toBe(true);
+  });
+
+  it('--json-file + --json 同时 → --json-file 优先', async () => {
+    await run(['enable']);
+    const jsonPath = join(root, 'payload2.json');
+    writeFileSync(jsonPath, '{"chosen":"from-file"}', 'utf8');
+    await run([
+      'record',
+      '--stage',
+      'verify',
+      '--event',
+      'decision',
+      '--change',
+      '2026-05-15-jfp',
+      '--json',
+      '{"chosen":"from-flag"}',
+      '--json-file',
+      jsonPath,
+    ]);
+    const { events } = readTrace(root, '2026-05-15-jfp');
+    expect(events[0]?.data.chosen).toBe('from-file');
+  });
 });
 
 describe('forge monitor report', () => {

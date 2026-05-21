@@ -1,1 +1,0 @@
-{"schema":"forge-ack-log/v1","kind":"ack","timestamp":"2026-05-12T14:32:00Z","action":"ack-pause-warning","change_id":"<fixture-name>","finding_id":"pause_decisions:1","user":"msc","rationale":"see out-of-scope entry","git_head":null,"finding_hash":null,"extra":{}}

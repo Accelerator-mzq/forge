@@ -14,11 +14,79 @@ const extractAndStripFrontmatter = (content) => {
   return match ? { body: match[2] } : { body: content };
 };
 
+// ─── workflow-monitor 开关 scanner ──────────────────────────────────────────
+// 以下两函数 inline copy 自 hooks/monitor-check.mjs(spec §9 契约同款),改一处必须同步另一处
+// inline 而非 import:OpenCode plugin loader 不一定支持 import sibling .mjs;同步成本低于 module 重构
+
+/** 去掉行内第一个非引号包裹的 # 起的注释(同 monitor-check.mjs#stripComment) */
+const stripCommentForMonitor = (line) => {
+  let inStr = false;
+  let quote = '';
+  for (let k = 0; k < line.length; k++) {
+    const c = line[k];
+    if (inStr) {
+      if (c === quote) inStr = false;
+    } else if (c === '"' || c === "'") {
+      inStr = true;
+      quote = c;
+    } else if (c === '#') {
+      return line.slice(0, k);
+    }
+  }
+  return line;
+};
+
+/**
+ * 扫 forge/config.yaml 文本判断 monitor.enabled=true(同 monitor-check.mjs#scanMonitorEnabled)
+ * - 顶层 monitor: 块,enabled 严格裸 true 才返回 true;
+ * - 支持块式与 inline flow 式;
+ * - 任何异常一律按 disabled 处理(调用方包 try-catch)。
+ */
+const scanMonitorEnabled = (text) => {
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const raw = stripCommentForMonitor(lines[i]);
+    const m = /^monitor:\s*(.*)$/.exec(raw);
+    if (!m) continue;
+    const rest = m[1].trim();
+    if (rest.startsWith('{')) {
+      return /\benabled\s*:\s*true\s*[},]/.test(rest + ',');
+    }
+    for (let j = i + 1; j < lines.length; j++) {
+      const sub = stripCommentForMonitor(lines[j]);
+      if (sub.trim() === '') continue;
+      if (!/^\s/.test(sub)) break;
+      const e = /^\s+enabled\s*:\s*(\S+)\s*$/.exec(sub);
+      if (e) return e[1] === 'true';
+    }
+    return false;
+  }
+  return false;
+};
+
 export default async ({ client, directory }) => {
   // OpenCode plugin 加载根:从本文件位置反推 plugin 仓库根的 skills/ 目录
   const forgeSkillsDir = path.resolve(__dirname, '../../skills');
   // forge 仓库根绝对路径(供 Tier 2/3 bridge skill 定位 CLI)
   const forgeRepoRoot = path.resolve(__dirname, '../..');
+
+  // workflow-monitor 注入获取(spec §9 — Tier 1 走 SessionStart hook,Tier 2 OpenCode 走本函数)
+  // 兜底链:directory(OpenCode plugin context 的项目根)→ process.cwd();任一异常按 disabled 处理
+  const getMonitorInjection = () => {
+    try {
+      const projectRoot = directory || process.cwd();
+      const configPath = path.join(projectRoot, 'forge', 'config.yaml');
+      if (!fs.existsSync(configPath)) return null;
+      const configText = fs.readFileSync(configPath, 'utf8');
+      if (!scanMonitorEnabled(configText)) return null;
+      const injectionPath = path.join(forgeRepoRoot, 'hooks', 'workflow-monitor-injection.md');
+      if (!fs.existsSync(injectionPath)) return null;
+      return fs.readFileSync(injectionPath, 'utf8');
+    } catch {
+      // 任何异常一律安全侧默认 disabled,绝不阻塞 session 启动
+      return null;
+    }
+  };
 
   const getBootstrapContent = () => {
     const skillPath = path.join(forgeSkillsDir, 'using-forge', 'SKILL.md');
@@ -35,7 +103,11 @@ When skills reference tools you don't have, substitute OpenCode equivalents:
 - \`Read\`, \`Write\`, \`Edit\`, \`Bash\` → your native tools
 
 Use OpenCode's native \`skill\` tool to list and load skills.`;
-    return `<EXTREMELY_IMPORTANT>\nYou have forge.\n\nforge plugin root: ${forgeRepoRoot}\n\n${body}\n\n${toolMapping}\n</EXTREMELY_IMPORTANT>`;
+    // workflow-monitor 注入(forge/config.yaml#monitor.enabled=true 时拼接;否则空段)
+    // 对齐 Tier 1 Claude Code SessionStart hook 行为
+    const monitorInjection = getMonitorInjection();
+    const monitorSection = monitorInjection ? `\n\n${monitorInjection}` : '';
+    return `<EXTREMELY_IMPORTANT>\nYou have forge.\n\nforge plugin root: ${forgeRepoRoot}\n\n${body}\n\n${toolMapping}${monitorSection}\n</EXTREMELY_IMPORTANT>`;
   };
 
   return {

@@ -3,9 +3,15 @@
 本会话 forge 工作流监控已开启。在跑 forge 工作流时,你**额外**做以下记录动作 —— 它们不改变工作流本身,只产出可观测 trace。
 
 所有 `forge monitor` 调用走 plugin helper(forge CLI 不在 PATH):
-`node "${CLAUDE_PLUGIN_ROOT}/scripts/run-forge.mjs" monitor <子命令> <参数>`
+`node "<forge plugin root>/scripts/run-forge.mjs" monitor <子命令> <参数>`
 
-(`CLAUDE_PLUGIN_ROOT` 由 Claude Code 环境注入,直接用即可。)
+`<forge plugin root>` 按 harness 不同解析:
+
+- **Claude Code**:直接用环境变量 `${CLAUDE_PLUGIN_ROOT}`(SessionStart hook 自动注入)
+- **OpenCode**:看本 bootstrap 顶部 `forge plugin root: <abs path>` 行(plugin transform hook 注入)
+- **Codex**:`~/.codex/forge`(标准安装路径,Windows 是 `$env:USERPROFILE\.codex\forge`,需展开 home)
+
+> **Codex 路径下本注入不会自动触发**(Codex plugin 协议无 hook 通道)。如 `forge/config.yaml#monitor.enabled=true` 但你正在 Codex session,需主动 `Read` 本文件并按下面步骤执行 monitor record。
 
 ## 每个阶段要记录的
 

@@ -45,6 +45,16 @@ Skills 是按 Claude Code 工具名写的。在其它 harness 上遇到这些名
 | `Read` / `Write` / `Edit` | 原生文件工具                                                     | 原生文件工具                      |
 | `Bash`                    | 原生 shell 工具                                                  | 原生 shell 工具                   |
 
+## workflow-monitor 跨 harness 兼容
+
+`forge/config.yaml#monitor.enabled=true` 后,workflow-monitor 自动注入的可用性按 harness 不同:
+
+| Harness     | 自动注入 | 触发路径                                                                                                                                                                          |
+| ----------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code | ✅       | SessionStart hook(`hooks/session-start`)跑 `monitor-check.mjs` → exit 0 时把 `hooks/workflow-monitor-injection.md` 注入                                                           |
+| OpenCode    | ✅       | `.opencode/plugins/forge.js` 的 `transform` hook 在 bootstrap 拼接 monitor injection(同 Tier 1 行为)                                                                              |
+| Codex       | ❌       | **无 hook 通道** — 不会自动注入。如 `monitor.enabled=true` 但你在 Codex session,主动 `Read` `<forge plugin root>/hooks/workflow-monitor-injection.md` 按其指引执行 monitor record |
+
 # Using Skills
 
 ## The Rule

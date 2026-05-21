@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [4.1.0] - 2026-05-21
+
+### Changed
+
+- **`scripts/run-forge.mjs` wrapper 重构 — 主路径 spawn node + npx-cli.js,绕过 Windows cmd.exe 解析层**。三同根 bug 根治路径(v4.0.x 系列遗留技术债)。
+
+  **背景**:v4.0.x 系列三个 bug 同根于 `spawn { shell: process.platform === 'win32' }`(Node 21+ CVE-2024-27980 修复后,spawn `.cmd` 文件强制要求 `shell: true`)→ 走 cmd.exe 解析 args → cmd.exe 干扰 args:
+  - JSON 花括号 `{}` 引号嵌套被吃 → `forge monitor record --json '{...}'` 100% `record_error`(v4.0.1 workaround:`--json-file`)
+  - 引号嵌套乱 → stage-extensions build_prompt 失焦扫整个 working tree(v4.0.1 workaround:config 加 `--user-focus` + preflight 检测)
+  - `^` 字符当 escape char 吃 → `^4.0.0` 变 `4.0.0` 永远拉不到 patch update(v4.0.2 workaround:`REQUIRED_RANGE` 改 `4.x`)
+
+  **v4.1.0 重写**:主路径用 `execSync('npm root -g')` 解析 npm 全局 root → 拼 `<root>/npm/bin/npx-cli.js` 路径 → `spawn(process.execPath, [npxCliPath, ...npxArgs], { shell: false })` 直接 node 跑 npx-cli.js,**完全无 cmd.exe 解析层**。
+
+  **fallback 保留**:`npm root -g` 失败 / candidate 不存在 → 退回 v4.0.2 wrapper(`spawn('npx.cmd', ..., { shell: true })`),做 safety net。`REQUIRED_RANGE` 保持 `4.x`(cmd-safe),fallback 路径自身也不会被 `^` escape 坑。
+
+  **影响范围**:Linux/macOS 无 cmd.exe 解析层 不受影响;Windows 用户主路径下三 bug 根治,fallback 路径下退回 v4.0.2 行为。
+
+### Added
+
+- **`tests/integration/run-forge-wrapper.test.ts`** — wrapper 源码层验证(14 case):REQUIRED_RANGE cmd-safe 规则、主路径 `spawn node + npx-cli.js + shell:false` 形态、fallback 路径保留、错误处理、文档注释完整性。沿 `tests/integration/opencode-plugin-bootstrap.test.ts` 模式,静态分析 source code 防回归。
+
 ## [4.0.2] - 2026-05-21
 
 ### Fixed

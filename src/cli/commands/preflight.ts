@@ -71,5 +71,132 @@ export function buildPreflightCommand(): Command {
       process.exit(2);
     });
 
+  // stage-extensions-check:扫 forge/config.yaml#stage_extensions 配置常见漏洞
+  // - adversarial entry 漏 --user-focus / --target-label → codex 失焦扫整个 working tree
+  // - adversarial 模式 entry 漏 build_prompt → helper run 立即失败
+  // - defaults 过松(timeout > 900 / max_rounds > 3)→ 易 15+ 分钟 hang
+  // loose 模式:发现问题只 emit stderr,exit 0 不阻塞;沿 codex stage-extensions 整体 loose 哲学
+  cmd
+    .command('stage-extensions-check')
+    .description(
+      '扫 forge/config.yaml#stage_extensions 配置常见漏洞(user-focus 缺失 / defaults 过松等)',
+    )
+    .action(() => {
+      const cwd = process.cwd();
+      const configPath = join(cwd, 'forge', 'config.yaml');
+
+      // 没 config 文件 → graceful skip(新项目初始化前跑此命令不算错)
+      if (!existsSync(configPath)) {
+        return; // exit 0
+      }
+
+      // parse 失败 → 同 branch-check 走 exit 2(config 错)
+      let config: Record<string, unknown>;
+      try {
+        config = parseConfig(readFileSync(configPath, 'utf-8')) as unknown as Record<
+          string,
+          unknown
+        >;
+      } catch (err) {
+        console.error(`forge preflight: 解析 forge/config.yaml 失败: ${(err as Error).message}`);
+        process.exit(2);
+      }
+
+      const se = config.stage_extensions as Record<string, unknown> | undefined;
+      // 没 stage_extensions 段 → 不报警(用户没用此特性)
+      if (!se || typeof se !== 'object') {
+        return; // exit 0
+      }
+
+      const findings: string[] = [];
+      const stages = [
+        'brainstorming',
+        'propose',
+        'apply_critical_plan_review',
+        'review',
+        'verify',
+      ] as const;
+
+      // 逐 stage 扫 entry
+      for (const stage of stages) {
+        const entries = se[stage];
+        if (!Array.isArray(entries)) continue;
+
+        for (const entry of entries as Array<Record<string, unknown>>) {
+          // 显式 disabled 跳过(不扫已停用的 entry)
+          if (entry.enabled === false) continue;
+          const name = typeof entry.name === 'string' ? entry.name : '?';
+
+          // R1:adversarial build_prompt 含 helper 但缺 --user-focus / --target-label
+          if (typeof entry.build_prompt === 'string') {
+            const bp = entry.build_prompt;
+            // 用两次 includes 检测,容忍 helper 路径用引号包裹("${FORGE_HELPER_DIR}/codex-review-helper.mjs" build-prompt)
+            if (bp.includes('codex-review-helper.mjs') && bp.includes('build-prompt')) {
+              if (!bp.includes('--user-focus')) {
+                findings.push(
+                  `[WARN] stage_extensions.${stage}[${name}].build_prompt 漏 --user-focus → ` +
+                    `codex 会用字面 'Focus: (none provided)' 失焦扫整个 working tree,` +
+                    `可能 surface 无关 finding`,
+                );
+              }
+              if (!bp.includes('--target-label')) {
+                findings.push(
+                  `[WARN] stage_extensions.${stage}[${name}].build_prompt 漏 --target-label → ` +
+                    `codex review 报告 target 显示字面 'current branch' 不精确`,
+                );
+              }
+            }
+          }
+
+          // R4:command 含 --mode adversarial 但 entry 无 build_prompt
+          if (typeof entry.command === 'string' && entry.command.includes('--mode adversarial')) {
+            const hasBp =
+              typeof entry.build_prompt === 'string' && entry.build_prompt.trim() !== '';
+            if (!hasBp) {
+              findings.push(
+                `[WARN] stage_extensions.${stage}[${name}] command 用 --mode adversarial 但 entry 无 build_prompt → ` +
+                  `helper 的 run --mode adversarial 强制 --prompt-file,缺会立即失败`,
+              );
+            }
+          }
+        }
+      }
+
+      // R2/R3:defaults 收紧建议(默认值实测易 hang)
+      const defaults = se.defaults as Record<string, unknown> | undefined;
+      const timeout =
+        typeof defaults?.timeout_sec === 'number' ? (defaults.timeout_sec as number) : 900;
+      if (timeout > 900) {
+        findings.push(
+          `[SUGGESTION] stage_extensions.defaults.timeout_sec=${timeout} > 900,实测 codex 偶尔 ` +
+            `15+ 分钟无输出 hang;建议 600`,
+        );
+      }
+      const convergence = defaults?.convergence as Record<string, unknown> | undefined;
+      const maxRounds =
+        typeof convergence?.max_rounds === 'number' ? (convergence.max_rounds as number) : 10;
+      if (maxRounds > 3) {
+        findings.push(
+          `[SUGGESTION] stage_extensions.defaults.convergence.max_rounds=${maxRounds} > 3,` +
+            `多轮重跑成本大;建议 1(loose 模式不需要收敛 loop)`,
+        );
+      }
+
+      // 输出 summary
+      if (findings.length === 0) {
+        console.error(`forge preflight stage-extensions-check: ✓ 配置完整,无已知问题`);
+        return; // exit 0
+      }
+
+      console.error(
+        `forge preflight stage-extensions-check: ${findings.length} 项建议改进(loose,不阻塞)`,
+      );
+      for (const f of findings) {
+        console.error(`  ${f}`);
+      }
+      console.error(`\n详:docs/migration/setup-stage-extensions.md`);
+      return; // exit 0(loose,不阻塞;CI 想 strict 可用 grep 自检)
+    });
+
   return cmd;
 }

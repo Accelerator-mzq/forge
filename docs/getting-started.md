@@ -436,20 +436,30 @@ test:
 >
 > 若 `forge/config.yaml` 含 `stage_extensions.verify` 配置,AI 主代理在 verify 完成后自动跑 codex adversarial extension。adversarial 模式使用对抗性 prompt 深度审查,找 review 可能遗漏的问题。结果同样走多轮收敛协议(block 桶非空 → 未收敛 → 三选项),**loose 模式不阻塞主流程**。
 >
-> 快速开启(verify stage):
+> 快速开启(verify stage,adversarial 模式必须配 `build_prompt` + `--user-focus`):
 >
 > ```yaml
 > stage_extensions:
+>   defaults:        # 建议显式收紧默认值(详 docs/migration/setup-stage-extensions.md)
+>     timeout_sec: 600
+>     max_retries: 1
+>     convergence:
+>       max_rounds: 1
 >   verify:
 >     - name: codex-adversarial
 >       enabled: true
+>       build_prompt: >
+>         node "${FORGE_HELPER_DIR}/codex-review-helper.mjs" build-prompt
+>         --output "${PROMPT_FILE}"
+>         --user-focus "聚焦 change ${CHANGE_ID} 实施结果的三维 verify;不要 surface working tree 中未合并代码的问题。"
+>         --target-label "${CHANGE_ID}-verify"
 >       command: >
 >         node "${FORGE_HELPER_DIR}/codex-review-helper.mjs" run
->         --mode adversarial --output-log "${OUTPUT_FILE}"
+>         --mode adversarial --prompt-file "${PROMPT_FILE}" --output-log "${OUTPUT_FILE}"
 >       output: forge/changes/${CHANGE_ID}/.evidence/codex-adversarial-r${ROUND}-a${ATTEMPT}.md
 > ```
 >
-> 推荐新用户先只开 review + verify 两个 stage(D/E 路径)再按需扩展。完整协议见 [`docs/stage-extensions.md`](stage-extensions.md)。
+> 推荐新用户先只开 review + verify 两个 stage(D/E 路径)再按需扩展。完整 onboarding checklist 见 [`docs/migration/setup-stage-extensions.md`](migration/setup-stage-extensions.md);完整协议见 [`docs/stage-extensions.md`](stage-extensions.md)。配好后跑一次 `forge preflight stage-extensions-check` 验证配置完整性。
 
 ### 嵌入 deep-dive
 

@@ -24,7 +24,18 @@ export default async ({ client, directory }) => {
     const skillPath = path.join(forgeSkillsDir, 'using-forge', 'SKILL.md');
     if (!fs.existsSync(skillPath)) return null;
     const { body } = extractAndStripFrontmatter(fs.readFileSync(skillPath, 'utf8'));
-    return `<EXTREMELY_IMPORTANT>\nYou have forge.\n\nforge plugin root: ${forgeRepoRoot}\n\n${body}\n</EXTREMELY_IMPORTANT>`;
+    // OpenCode 下 SKILL.md 引用的 Claude Code 工具名(Skill / Task / TodoWrite ...)需要翻译
+    // SKILL.md 内已含 Platform Tool Mapping 表,这里再追加一份精简提醒,确保 AI 第一时间用对工具名
+    // 避免 AI 尝试 invoke 不存在的 `Skill` 工具导致流程漂移
+    const toolMapping = `**Tool Mapping for OpenCode:**
+When skills reference tools you don't have, substitute OpenCode equivalents:
+- \`TodoWrite\` → \`todowrite\`
+- \`Task\` tool with subagents → OpenCode's @mention subagent system
+- \`Skill\` tool → OpenCode's native \`skill\` tool
+- \`Read\`, \`Write\`, \`Edit\`, \`Bash\` → your native tools
+
+Use OpenCode's native \`skill\` tool to list and load skills.`;
+    return `<EXTREMELY_IMPORTANT>\nYou have forge.\n\nforge plugin root: ${forgeRepoRoot}\n\n${body}\n\n${toolMapping}\n</EXTREMELY_IMPORTANT>`;
   };
 
   return {

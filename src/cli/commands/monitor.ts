@@ -1,6 +1,6 @@
 // src/cli/commands/monitor.ts — forge monitor 子命令组(spec §7)
 import { Command } from 'commander';
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { isMonitorEnabled, setMonitorEnabled } from '../../core/monitor/config.js';
 import {
@@ -59,44 +59,76 @@ export function buildMonitorCommand(): Command {
     .requiredOption('--event <event>', '事件类型(stage_enter|decision|hardening_step|stage_exit)')
     .option('--change <id>', 'change-id')
     .option('--json <payload>', 'data 负载(JSON)', '{}')
-    .action((opts: { stage: string; event: string; change?: string; json: string }) => {
-      // 硬约束(spec §7):永远 exit 0;关闭时静默 no-op。
-      try {
-        const root = process.cwd();
-        if (!isMonitorEnabled(root)) return; // 静默 no-op
-        // 未传 --change 时自动落 _session-<uuid> 桶(spec §2.4:pre-change brainstorm/explore 事件)
-        const changeId = opts.change ?? sessionChangeId(root);
-        let data: Record<string, unknown>;
-        let event = opts.event; // JSON 解析失败或 stage 非法时降级为 'record_error'
+    .option(
+      '--json-file <path>',
+      'data 负载从文件读(优先于 --json;Windows 推荐,避 cmd.exe 吃 JSON 引号)',
+    )
+    .action(
+      (opts: {
+        stage: string;
+        event: string;
+        change?: string;
+        json: string;
+        jsonFile?: string;
+      }) => {
+        // 硬约束(spec §7):永远 exit 0;关闭时静默 no-op。
         try {
-          data = JSON.parse(opts.json) as Record<string, unknown>;
-        } catch (err) {
-          // 坏输入降级为 record_error,不报错退出
-          event = 'record_error';
-          data = { original_event: opts.event, error: (err as Error).message };
+          const root = process.cwd();
+          if (!isMonitorEnabled(root)) return; // 静默 no-op
+          // 未传 --change 时自动落 _session-<uuid> 桶(spec §2.4:pre-change brainstorm/explore 事件)
+          const changeId = opts.change ?? sessionChangeId(root);
+          let data: Record<string, unknown>;
+          let event = opts.event; // JSON 解析失败或 stage 非法时降级为 'record_error'
+          // jsonFile 优先于 --json(Windows 路径,避 cmd.exe 引号嵌套问题)
+          // 读文件失败 / 解析失败一律降级 record_error,与 stdin --json 失败语义对称
+          let jsonContent: string = opts.json;
+          let fileReadError: Error | null = null;
+          if (typeof opts.jsonFile === 'string' && opts.jsonFile.trim() !== '') {
+            try {
+              if (!existsSync(opts.jsonFile)) {
+                fileReadError = new Error(`--json-file 路径不存在: ${opts.jsonFile}`);
+              } else {
+                jsonContent = readFileSync(opts.jsonFile, 'utf8');
+              }
+            } catch (err) {
+              fileReadError = err as Error;
+            }
+          }
+          if (fileReadError) {
+            event = 'record_error';
+            data = { original_event: opts.event, error: fileReadError.message };
+          } else {
+            try {
+              data = JSON.parse(jsonContent) as Record<string, unknown>;
+            } catch (err) {
+              // 坏输入降级为 record_error,不报错退出
+              event = 'record_error';
+              data = { original_event: opts.event, error: (err as Error).message };
+            }
+          }
+          // stage 合法性校验 —— 无效 stage 同样降级为 record_error(与坏 JSON 对称,spec §7「坏输入」)
+          if (
+            event !== 'record_error' &&
+            !(MONITOR_STAGES as readonly string[]).includes(opts.stage)
+          ) {
+            event = 'record_error';
+            data = { original_event: opts.event, error: `invalid stage: ${opts.stage}` };
+          }
+          const traceEvent: TraceEvent = {
+            ts: new Date().toISOString(),
+            schema: 'forge-monitor-trace/v1',
+            change_id: changeId,
+            stage: opts.stage as MonitorStage,
+            layer: 'ai',
+            event,
+            data,
+          };
+          appendTraceEvent(root, traceEvent);
+        } catch {
+          // 永不破坏工作流 —— 吞掉一切异常
         }
-        // stage 合法性校验 —— 无效 stage 同样降级为 record_error(与坏 JSON 对称,spec §7「坏输入」)
-        if (
-          event !== 'record_error' &&
-          !(MONITOR_STAGES as readonly string[]).includes(opts.stage)
-        ) {
-          event = 'record_error';
-          data = { original_event: opts.event, error: `invalid stage: ${opts.stage}` };
-        }
-        const traceEvent: TraceEvent = {
-          ts: new Date().toISOString(),
-          schema: 'forge-monitor-trace/v1',
-          change_id: changeId,
-          stage: opts.stage as MonitorStage,
-          layer: 'ai',
-          event,
-          data,
-        };
-        appendTraceEvent(root, traceEvent);
-      } catch {
-        // 永不破坏工作流 —— 吞掉一切异常
-      }
-    });
+      },
+    );
 
   cmd
     .command('report')

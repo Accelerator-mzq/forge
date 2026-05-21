@@ -1,6 +1,6 @@
 {
   "name": "@accelerator-mzq/forge",
-  "version": "3.1.0",
+  "version": "4.0.0",
   "description": "OpenSpec × superpowers fusion: spec-driven workflow + behavior-shaping skills, packaged as multi-harness CLI",
   "type": "module",
   "engines": {
@@ -12,16 +12,17 @@
   },
   "files": [
     "dist",
+    "scripts/codex-review-helper.mjs",
+    "src/core/codex-review",
     "README.md",
     "LICENSE",
     "LICENSE-THIRD-PARTY.md"
   ],
   "scripts": {
     "build": "node scripts/copy-templates.mjs && tsc -p tsconfig.json",
-    "prepublishOnly": "pnpm build",
-    "test": "vitest run && pnpm test:gate",
-    "test:gate": "node scripts/check-release-gate.mjs",
-    "test:gate:release": "node scripts/check-release-gate.mjs --release",
+    "prepublishOnly": "node scripts/release-gate.mjs",
+    "release:gate": "node scripts/release-gate.mjs",
+    "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",

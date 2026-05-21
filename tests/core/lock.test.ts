@@ -6,7 +6,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:
 import { readFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { acquireLock, acquireLockByPath, LockHeldError } from '../../../src/core/archive/lock.js';
+import { acquireLock, acquireLockByPath, LockHeldError } from '../../src/core/lock.js';
 
 // —— helper:创建含 .cache/ 的 forgeRoot 临时目录 ——
 function setupForgeRoot(): { forgeRoot: string; lockPath: string; cleanup: () => void } {

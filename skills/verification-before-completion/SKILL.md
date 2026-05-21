@@ -150,10 +150,10 @@ From 24 failure memories:
 
 执行完成前核对 verify 硬门槛自检清单:
 
-- AI 写基础 `.verify-passed` marker。
-- `forge evidence record-verify` 跑过(写 staging)。
-- `forge evidence freeze --kind verify` exit 0(缺 freeze → archive 的 process-evidence fence 拒签)。
-- 过程中遇 `forge ack propose` 退出(产生 pending)→ Read 并执行 `commands/ack-confirm.md` 等价流程,降级 prompt 让用户确认,经 `forge ack confirm`/`reject` 落 ack-log(AI 不得自 ack)。
+- 真跑了项目测试 + 三维度 prose check(`forge:verifying-three-dimensions`),证据先于声称。
+- 写 `.verify-passed` v2 marker(schema=`forge-verify/v2`,5 字段;沿 `src/core/markers/types.ts`)。
+- 若三维度发现 Completeness / Correctness 重大问题 → abort verify 不写 marker,让用户先修。
+- v4 已无 evidence-helper / freeze / ack 协议;不要再调 `forge evidence` 子命令(v4 已删)。
 
 ## The Bottom Line
 

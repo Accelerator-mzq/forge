@@ -39,8 +39,9 @@ export function computeVerdict(events: TraceEvent[]): HealthVerdict {
     if (e.layer === 'ai' && e.event === 'stage_enter') stagesWithAiEnter.add(e.stage);
   }
   for (const stage of stagesWithCli) {
-    // 只对可对比阶段判 AI trace 缺失;forge 专属阶段(ack-confirm/upgrade/codex-adversarial)
+    // 只对可对比阶段判 AI trace 缺失;forge 专属阶段(upgrade/codex-adversarial)
     // 按 spec §1.3 本就 CLI-only、注入内容不要求 AI record,跳过避免假阳性(M-3)
+    // v4(2026-05-21):删 ack-confirm — 反加固两步 ack 协议消亡(plan-v4 Phase 1)
     if (!COMPARABLE_STAGE_SET.has(stage)) continue;
     if (!stagesWithAiEnter.has(stage)) {
       items.push({

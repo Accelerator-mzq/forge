@@ -4,7 +4,7 @@
 // Task 5.16:enforceArchiveIntegrity(M13) / Task 5.17:isBundled(M16)
 // P5 final review fixups C1+C2:runRegenerate 接入主流程
 
-import { acquireLockByPath, LockHeldError } from '../archive/lock.js';
+import { acquireLockByPath, LockHeldError } from '../lock.js';
 import { existsSync } from 'node:fs';
 import { mkdir, rename, readFile, writeFile, unlink, stat } from 'node:fs/promises';
 import { join, dirname } from 'node:path';

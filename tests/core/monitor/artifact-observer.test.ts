@@ -1,4 +1,8 @@
 // tests/core/monitor/artifact-observer.test.ts
+// v4 简版(plan-v4 Phase 4 Task 4.5b):
+// - 删 ack-log / verify-failed / review-failed / verify_findings / fence_observed 相关 case
+// - marker 极简(VerifyMarker v2 / ReviewMarker v2,无 tasks_hash/content_hash/finding 字段)
+// - archive_summary fence_observed → archive_summary_observed(无 fence 拒签语义,纯 audit)
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -11,50 +15,34 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-const HASH_A = 'sha256:' + 'a'.repeat(64);
-const HASH_B = 'sha256:' + 'b'.repeat(64);
-
-/** 写一个合法的 verify marker 到 active change 目录 */
-function writeVerifyMarker(changeId: string, taskHash: string = HASH_A): void {
+/** 写一个合法的 v4 verify marker 到 active change 目录 */
+function writeVerifyMarker(changeId: string): void {
   const dir = join(root, 'forge', 'changes', changeId);
   mkdirSync(dir, { recursive: true });
   writeFileSync(
     join(dir, '.verify-passed'),
-    [
-      'schema: forge-verify/v1',
-      'verified_at: 2026-05-15T01:00:00Z', // marker-schema ISO 正则不接受毫秒
-      'verified_by: ai-agent',
-      `tasks_hash: ${taskHash}`,
-      `content_hash: ${HASH_B}`,
-      'evidence: []',
-    ].join('\n') + '\n',
+    ['schema: forge-verify/v2', 'verified_at: 2026-05-15T01:00:00Z', 'verified_by: ai-agent'].join(
+      '\n',
+    ) + '\n',
     'utf8',
   );
 }
 
-describe('observeArtifacts', () => {
+describe('observeArtifacts (v4)', () => {
   it('无 change 目录 → 空事件', () => {
     expect(observeArtifacts(root, '无此 change')).toEqual([]);
   });
 
-  it('合法 verify marker → marker_observed,含 hashes 与 ok=true', () => {
+  it('合法 v4 verify marker → marker_observed,ok=true,ts=verified_at', () => {
     writeVerifyMarker('2026-05-15-x');
     const events = observeArtifacts(root, '2026-05-15-x');
     const m = events.find((e) => e.event === 'marker_observed');
     expect(m).toBeDefined();
     expect(m?.layer).toBe('cli');
     expect(m?.stage).toBe('verify');
-    expect(m?.data.marker_schema).toBe('forge-verify/v1');
+    expect(m?.data.marker_schema).toBe('forge-verify/v2');
     expect(m?.data.ok).toBe(true);
-    expect((m?.data.hashes as Record<string, unknown>).tasks_hash).toBe(HASH_A);
     expect(m?.ts).toBe('2026-05-15T01:00:00Z'); // 事件 ts = marker 的 verified_at,非观察时刻
-  });
-
-  it('hash 格式非法的 marker → marker_observed 但 ok=false', () => {
-    writeVerifyMarker('2026-05-15-bad', '非法hash');
-    const events = observeArtifacts(root, '2026-05-15-bad');
-    const m = events.find((e) => e.event === 'marker_observed');
-    expect(m?.data.ok).toBe(false);
   });
 
   it('marker YAML 损坏 → record_error,不抛', () => {
@@ -65,125 +53,76 @@ describe('observeArtifacts', () => {
     expect(events.some((e) => e.event === 'record_error')).toBe(true);
   });
 
-  it('archive 目录有 archive_summary.yaml → fence_observed(archive 阶段)', () => {
-    // archive 目录名带 <YYYY-MM-DD>- 前缀(transaction.ts:56);changeId 仍是 2026-05-15-z
-    const adir = join(root, 'forge', 'changes', 'archive', '2026-05-16-2026-05-15-z');
-    mkdirSync(adir, { recursive: true });
-    writeFileSync(
-      join(adir, 'archive_summary.yaml'),
-      [
-        'schema: forge-archive-summary/v1',
-        'version: 1.0.0',
-        'archived_at: 2026-05-15T02:00:00Z',
-        'change_id: 2026-05-15-z',
-        'verify_passed: { verified_invariants: [] }',
-        'review_passed: { reviewers: [ai-agent] }',
-        'process_evidence_summary: { placeholder: true }',
-        'handoff_to_backlog: []',
-        'acked_warnings: []',
-        'pending_suggestions: []',
-      ].join('\n') + '\n',
-      'utf8',
-    );
-    const events = observeArtifacts(root, '2026-05-15-z');
-    const f = events.find((e) => e.event === 'fence_observed');
-    expect(f).toBeDefined();
-    expect(f?.stage).toBe('archive');
-    expect(f?.data.ok).toBe(true);
-  });
-
-  it('review-passed marker → marker_observed,stage=review、ts=reviewed_at', () => {
+  it('v4 review-passed marker → marker_observed,stage=review、ts=reviewed_at', () => {
     const dir = join(root, 'forge', 'changes', '2026-05-15-rv');
     mkdirSync(dir, { recursive: true });
     writeFileSync(
       join(dir, '.review-passed'),
-      'schema: forge-review/v1\nreviewed_at: 2026-05-15T03:00:00Z\n',
+      'schema: forge-review/v2\nreviewed_at: 2026-05-15T03:00:00Z\nreviewed_by: ai-agent\n',
       'utf8',
     );
     const events = observeArtifacts(root, '2026-05-15-rv');
     const m = events.find((e) => e.event === 'marker_observed');
     expect(m?.stage).toBe('review');
+    expect(m?.data.marker_schema).toBe('forge-review/v2');
     expect(m?.ts).toBe('2026-05-15T03:00:00Z');
   });
 
-  it('verify-failed marker → marker_observed,ts=failed_at', () => {
-    const dir = join(root, 'forge', 'changes', '2026-05-15-fl');
-    mkdirSync(dir, { recursive: true });
+  it('archive 目录有 v4 archive_summary.yaml → archive_summary_observed', () => {
+    // archive 目录名带 <YYYY-MM-DD>- 前缀;changeId 仍是 2026-05-15-z
+    const adir = join(root, 'forge', 'changes', 'archive', '2026-05-16-2026-05-15-z');
+    mkdirSync(adir, { recursive: true });
     writeFileSync(
-      join(dir, '.verify-failed'),
-      'schema: forge-verify-failed/v1\nfailed_at: 2026-05-15T04:00:00Z\n',
-      'utf8',
-    );
-    const events = observeArtifacts(root, '2026-05-15-fl');
-    const m = events.find((e) => e.event === 'marker_observed');
-    expect(m?.ts).toBe('2026-05-15T04:00:00Z');
-  });
-
-  it('verify marker 含未决 finding → fence_observed ok=false', () => {
-    const dir = join(root, 'forge', 'changes', '2026-05-15-fc');
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(
-      join(dir, '.verify-passed'),
+      join(adir, 'archive_summary.yaml'),
       [
-        'schema: forge-verify/v1',
-        'verified_at: 2026-05-15T05:00:00Z',
+        'schema: forge-archive-summary/v2',
+        'version: 2.0.0',
+        'archived_at: 2026-05-15T02:00:00Z',
+        'change_id: 2026-05-15-z',
+        'archive_name: 2026-05-16-2026-05-15-z',
         'verified_by: ai-agent',
-        'tasks_hash: sha256:' + 'c'.repeat(64),
-        'content_hash: sha256:' + 'd'.repeat(64),
-        'evidence: []',
-        'verify_findings:',
-        '  - { id: 1, severity: CRITICAL, resolved: false, dimension: correctness }',
+        'reviewed_by: ai-agent',
+        'spec_updates_applied: []',
+        'handoff_to_backlog: []',
       ].join('\n') + '\n',
       'utf8',
     );
-    const events = observeArtifacts(root, '2026-05-15-fc');
-    const f = events.find((e) => e.event === 'fence_observed');
+    const events = observeArtifacts(root, '2026-05-15-z');
+    const f = events.find((e) => e.event === 'archive_summary_observed');
     expect(f).toBeDefined();
-    expect(f?.data.level).toBe('verify');
-    expect(f?.data.ok).toBe(false);
+    expect(f?.stage).toBe('archive');
+    expect(f?.data.ok).toBe(true);
+    expect(f?.data.verified_by).toBe('ai-agent');
+    expect(f?.data.reviewed_by).toBe('ai-agent');
+    expect(f?.data.spec_updates_applied_count).toBe(0);
+    expect(f?.data.handoff_to_backlog_count).toBe(0);
+    expect(f?.ts).toBe('2026-05-15T02:00:00Z');
   });
 
-  it('ack-log 有 ack entry → ack_observed', () => {
-    const dir = join(root, 'forge', 'changes', '2026-05-15-ak', '.evidence');
-    mkdirSync(dir, { recursive: true });
+  it('archive_summary 含 spec_updates + handoff → 计数正确', () => {
+    const adir = join(root, 'forge', 'changes', 'archive', '2026-05-16-multi');
+    mkdirSync(adir, { recursive: true });
     writeFileSync(
-      join(dir, 'ack-log.jsonl'),
-      JSON.stringify({
-        schema: 'forge-ack-log/v1',
-        kind: 'ack',
-        timestamp: '2026-05-15T06:00:00Z',
-        action: 'ack-warning',
-        change_id: '2026-05-15-ak',
-        finding_id: '3',
-        user: 'msc',
-        target_severity: 'WARNING',
-      }) + '\n',
-      'utf8',
-    );
-    const events = observeArtifacts(root, '2026-05-15-ak');
-    const a = events.find((e) => e.event === 'ack_observed');
-    expect(a).toBeDefined();
-    expect(a?.stage).toBe('ack-confirm');
-    expect(a?.data.finding_id).toBe('3');
-  });
-
-  it('review-failed marker(unresolved_outcomes 未决)→ fence_observed ok=false', () => {
-    const dir = join(root, 'forge', 'changes', '2026-05-15-rf');
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(
-      join(dir, '.review-failed'),
+      join(adir, 'archive_summary.yaml'),
       [
-        'schema: forge-review-failed/v1',
-        'failed_at: 2026-05-15T07:00:00Z',
-        'unresolved_outcomes:',
-        '  - { severity: CRITICAL, accepted: false, resolved: false }',
-        'appended_tasks: []',
+        'schema: forge-archive-summary/v2',
+        'version: 2.0.0',
+        'archived_at: 2026-05-15T05:00:00Z',
+        'change_id: multi',
+        'archive_name: 2026-05-16-multi',
+        'verified_by: ai-agent',
+        'reviewed_by: msc',
+        'spec_updates_applied:',
+        '  - { capability: auth, operation: replace }',
+        '  - { capability: api, operation: create }',
+        'handoff_to_backlog:',
+        '  - { source: pause_decisions, id: 0, chosen_option: 3, issue_summary: defer X }',
       ].join('\n') + '\n',
       'utf8',
     );
-    const events = observeArtifacts(root, '2026-05-15-rf');
-    const f = events.find((e) => e.event === 'fence_observed');
-    expect(f?.data.level).toBe('review');
-    expect(f?.data.ok).toBe(false);
+    const events = observeArtifacts(root, 'multi');
+    const f = events.find((e) => e.event === 'archive_summary_observed');
+    expect(f?.data.spec_updates_applied_count).toBe(2);
+    expect(f?.data.handoff_to_backlog_count).toBe(1);
   });
 });

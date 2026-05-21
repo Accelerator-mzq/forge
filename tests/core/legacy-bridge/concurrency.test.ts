@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { acquireLockByPath, LockHeldError } from '../../../src/core/archive/lock.js';
+import { acquireLockByPath, LockHeldError } from '../../../src/core/lock.js';
 
 describe('legacy-bridge 并发 / lock 防死锁(C-2 / I-5)', () => {
   let dir: string;

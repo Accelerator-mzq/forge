@@ -329,7 +329,7 @@ You: [读 forge/changes/add-oauth-integration/{proposal,design,tasks,specs/oauth
 
 **Capture offer**:
 - 若选 option 2:capture 到 `forge/changes/add-oauth-integration/design.md ## Token Refresh Strategy`(新增段);**注意**:design.md 改后 marker `content_hash` 失效,需要重 verify
-- 若决定扩 scope(加 IdP 时钟同步):capture 到 `proposal.md ## What Changes`(扩本 change)
+- 若决定扩 scope(加 IdP 时钟同步):capture 到 `proposal.md ## What`(扩本 change)
 - 若决定不做(留 v1.1):capture 到 `proposal.md ## Out of Scope` YAML 块(沿 §2.6 schema)
 ```
 
@@ -381,7 +381,7 @@ You: forge:exploring 下的对比请求 — 沿 OpenSpec `explore.ts:132` "用�
 User: /forge:explore --change add-oauth-integration
       我们应不应该顺便加 SAML 支持?
 
-You: [读 add-oauth-integration 现状] proposal.md `## What Changes` 只列了 OAuth
+You: [读 add-oauth-integration 现状] proposal.md `## What` 只列了 OAuth
      (Google + GitHub),没提 SAML。
 
      SAML vs OAuth 是企业级 vs 消费者级路线分支:
@@ -437,7 +437,7 @@ AI 倾向把所有"不做"的项都塞 SUGGESTION 持挂,而不写到 out-of-sco
 | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
 | New requirement / Requirement changed | `forge/changes/<id>/specs/<capability>/spec.md`                                                                  | marker 失效(`content_hash` 变),提示用户重 verify |
 | Design decision made                  | `forge/changes/<id>/design.md`                                                                                   | marker 失效,提示重 verify                        |
-| Scope changed(扩本 change)            | `forge/changes/<id>/proposal.md ## What Changes`                                                                 | marker 失效,提示重 propose review                |
+| Scope changed(扩本 change)            | `forge/changes/<id>/proposal.md ## What`                                                                         | marker 失效,提示重 propose review                |
 | **Out-of-scope 识别(转 follow-up)**   | `forge/changes/<id>/proposal.md ## Out of Scope` / `## Non-Goals` 或 `design.md ## Future Work` YAML 块(沿 §2.6) | 不影响 marker(out-of-scope 不是 change 内容)     |
 | New work identified(本 change 必做)   | `forge/changes/<id>/tasks.md`                                                                                    | marker 失效,需重 apply                           |
 | Assumption invalidated                | 相关 artifact                                                                                                    | 看具体                                           |

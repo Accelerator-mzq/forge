@@ -33,7 +33,7 @@ export function appendTraceEvent(projectRoot: string, event: TraceEvent): void {
   appendFileSync(file, JSON.stringify(event) + '\n', 'utf8');
 }
 
-// existsSync + readFileSync 间有 TOCTOU 窗口;单进程 CLI 场景可接受(对齐 ack-log.ts 惯例)
+// existsSync + readFileSync 间有 TOCTOU 窗口;单进程 CLI 场景可接受(v4 沿用,单进程容忍 TOCTOU)
 /** 读某 change 的 trace;逐行解析,坏行跳过并计数 */
 export function readTrace(
   projectRoot: string,
@@ -67,7 +67,7 @@ function sessionIdFile(projectRoot: string): string {
  * 故多个工作流运行的 pre-change 事件会累积在同一 _session 桶 —— report 合并时
  * 会带入跨 run 的 pre-change 噪声。spec §2.4/§3.2 接受此 best-effort 行为。
  * TOCTOU:existsSync + readFileSync 间(及并发 writeFileSync)有竞争窗口;
- * 单进程 CLI 场景可接受(对齐 readTrace / ack-log.ts 惯例)。
+ * 单进程 CLI 场景可接受(同 readTrace,v4 沿用 best-effort 容忍 TOCTOU)。
  */
 export function sessionChangeId(projectRoot: string): string {
   const file = sessionIdFile(projectRoot);

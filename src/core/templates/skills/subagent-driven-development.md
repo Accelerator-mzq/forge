@@ -327,49 +327,44 @@ Done!
 
 - **forge:test-driven-development** - Subagents follow TDD for each task
 
-## forge-specific 反向加固(v1.0)
+## forge-specific 协议(v4)
 
-forge v1.0 在本 skill 基础上加以下反向加固协议(与上游 superpowers 兼容、不冲突):
+forge v4 在本 skill 基础上加以下行为约束(与上游 superpowers 兼容、不冲突;v4 BREAKING 删反加固 fence + 复杂 marker 字段 + 严格 ack 协议)。
 
-### Fluid Pause 不可绕过的不变量
+### Fluid Pause 行为约束(v4 软记录)
 
-主代理在调 AskUserQuestion 并写入 `pause_decisions` marker 字段时**不可**:
+主代理在调 AskUserQuestion 并写入 marker `pause_decisions[]` 字段时:
 
-1. **伪造 `severity_acked_by`** — WARNING pause_decision 的 `severity_acked_by` 必须是真实用户响应,且 `.evidence/ack-log.jsonl` 必须有对应 `kind=ack` + `action=ack-pause-warning` + `finding_id=pause_decisions:<id>` + `user=<同 marker>` 条目。若 marker 直填 `severity_acked_by: msc` 但 ack-log.jsonl 无该条目 → `validateAckLogConsistency`(v2 codex BLOCKER 1 扩展)拒签;若 ack-log `user` 与 marker `severity_acked_by` 不一致(如 marker 写 `msc`,ack-log 写 `ai-agent`)→ 拒签。**SUGGESTION 例外**:fence 不要求 ack 一致性(沿 design §2.1.5 SUGGESTION 允许空 ack)
+1. **CRITICAL 不走 pause 路径** — 主代理判定问题严重到 abort 程度(测试 fail / 显式错误)时**禁止**调 AskUserQuestion 让用户在 1-4 间选;直接 abort 让用户修代码 / 重派 subagent。Fluid Pause 仅用于 DONE_WITH_CONCERNS / BLOCKED 第 4 项 / DESIGN_ISSUE_FOUND 三档。
 
-2. **CRITICAL 走 pause 路径** — 主代理判定 severity=CRITICAL 时**禁止**调 AskUserQuestion 让用户在 1-4 间选;CRITICAL 必须走 forge 强 fence 拒签(沿 design §2.1.2)。`forge archive` 步骤 3.7 任一 `pause_decisions[].severity === 'CRITICAL'` → exit 1
+2. **option=2 必勾选新 task** — `option=2` 加 task 时,主代理 append 新 task 到 tasks.md 后 subagent 重派实施;实施完成后**必须**改 `[ ]` → `[x]`(沿 SDD 写入主代理单点串行职责)。
 
-3. **option=3 没 `non_blocking_rationale`** — `option=3` 转 out-of-scope 必须配 `non_blocking_rationale` 论证"为什么 subagent 能跳过该 issue 完成主体 task"。fence 拒签缺失
+3. **option=3 转 out-of-scope 必写 `notes`** — `notes` 字段应论证"为什么 subagent 能跳过该 issue 完成主体 task"(沿 PauseDecisionSimple `notes?` 字段,v4 marker 不再校验 `non_blocking_rationale` 等结构化字段)。
 
-4. **option=2 不勾选新 task** — `option=2` 加 task 时,主代理 append 新 task 到 tasks.md 后 subagent 重派实施;实施完成后**必须**改 `[ ]` → `[x]`。fence 校验 `tasks.md` 中 `task_ref` 末段对应行已勾选
+4. **`PauseDecisionSimple` 5 字段限定** — v4 marker 只接受 `paused_at` / `task_ref` / `issue_summary` / `chosen_option` / `notes?` 共 5 字段(沿 `src/core/markers/types.ts`);**不要写 v3 字段**(`severity` / `severity_acked_by` / `added_task_ref` / `capture_id` / `target_artifact` / `non_blocking_rationale` / `other_rationale` 等已删,写了 marker schema 校验拒)。
 
 ### 红旗清单(借口模式)
 
-| AI 借口                                                  | 反向加固                                                                                         |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| "用户在对话中确认过,我直接写 ack 就好"                   | `forge archive` ack-log 一致性 cross-check 会发现 marker ack ↔ ack-log 不一致(沿 plan-9d v2 B-4) |
-| "CRITICAL 太严了,我降级为 WARNING 让用户 ack"            | fence 在 `severity` 字段重算 finding_hash(沿 plan-9d Task 6),篡改任一 hash payload 字段 → 拒签   |
-| "option=3 转 out-of-scope 时 rationale 写"用户决定即可"" | rationale 必须论证"为什么 subagent 能跳过"— 不是"用户决定"是答案                                 |
+| AI 借口                                                  | 现实                                                                                   |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| "CRITICAL 不严重,走 pause 让用户选"                      | CRITICAL 应直接 abort 让用户修(不进 Fluid Pause)— Fluid Pause 只处理 non-critical 3 档 |
+| "option=3 转 out-of-scope 时 notes 写'用户决定即可'"     | notes 必须论证"为什么 subagent 能跳过"— 不是"用户决定"是答案                           |
+| "把 v3 字段塞回 marker(severity / severity_acked_by 等)" | v4 `VerifyMarker` / `ReviewMarker` schema 只 5 字段,塞 v3 字段 → archive 校验直接拒    |
 
-### plan-9g 新增:DONE_REPORT 必须含 process_evidence 字段
+### DONE_REPORT 字段(v4 极简)
 
-subagent 在 task 实施完成报 DONE 时,**必须**提供以下字段给主代理(供 `forge evidence record-tdd` helper 用):
+subagent 在 task 实施完成报 DONE 时,**必须**提供给主代理:
 
-- `red_commit`:RED 阶段 commit sha + ISO timestamp
-- `red_log_path` + `red_log_hash`(sha256)
-- `red_report_path` + `red_report_hash`(JUnit XML / TAP / Vitest JSON)
-- `red_exit_code`(必 != 0)
-- `green_commit`:同上(GREEN)
-- `green_exit_code`(必 == 0)
-- `expected_failures`:RED 阶段绑定具体失败的 test(test_file + test_name + failure_type)
+- `red_commit`:RED 阶段 commit sha + ISO timestamp(若走 TDD)
+- `green_commit`:GREEN 阶段 commit sha
+- `task_ref`:tasks.md 内对应行(如 `tasks.md#task-3`)
+- (可选)`notes`:subagent 在实施中遇到的 observation,供主代理 review
 
-若 light mode trivial change 走 tdd_exemption:必须先调 `forge ack propose --action ack-tdd-exemption`,DONE_REPORT 含 ack_log entry 引用。
+**v4 BREAKING**:不再要求 subagent 提供 RED log path / hash / expected failure list / tdd-exemption ack entry 等反加固字段。evidence-helper CLI 已删;TDD 行为仍由 `forge:test-driven-development` skill 约束,但 marker 不固化 TDD 证据链。
 
-详细 process_evidence 协议见 `skills/process-evidence/SKILL.md`。
+### Main Agent STOP Triggers
 
-### plan-9h 新增:Main Agent STOP Triggers
-
-主代理在 apply 阶段必须停下问用户的 **6 类触发条件**(不允许自动绕过或重试,沿 design v3 §2.8.3 B + §2.8.3 C):
+主代理在 apply 阶段必须停下问用户的 **6 类触发条件**(不允许自动绕过或重试):
 
 | 触发条件                                                                                                                   | 主代理行为                                                                                                            | cross-ref                                                                                                |
 | -------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
@@ -386,8 +381,8 @@ subagent 在 task 实施完成报 DONE 时,**必须**提供以下字段给主代
 
 - 每次接到 subagent BLOCKED 报告 → 该 task 计数 +1
 - 每次 verify 命令失败 → 该次重试计数 +1
-- **不依赖 marker / ack-log 持久化字段**(避免侵入 master plan §3.12.4 ack-log schema freeze + §3.12 marker schema freeze)
-- 跨 session wakeup 丢计数属 v0.4 known limitation;若用户手工告知"task X 已 BLOCKED N 次",主代理按用户告知值续计
+- **不依赖 marker 持久化字段**(v4 marker 极简,只 5 字段;计数纯 session-local)
+- 跨 session wakeup 丢计数属 v4 known limitation;若用户手工告知"task X 已 BLOCKED N 次",主代理按用户告知值续计
 
 #### 禁止行为(主代理 dispatch 阶段红线)
 
@@ -410,5 +405,5 @@ subagent 在 task 实施完成报 DONE 时,**必须**提供以下字段给主代
 
 执行完成前核对 apply 硬门槛自检清单:
 
-- 每个完成的 task 经 `forge evidence record-tdd` 写入 TDD 证据链(缺则 archive 的 process_evidence fence 因 `tdd_event_chain` 缺失拒签)。
+- 每个完成的 task 走 TDD red → green → refactor + 真 commit(沿 `forge:test-driven-development`;v4 marker 不固化 TDD 证据链,但行为约束仍在)。
 - `forge preflight branch-check` 已跑(在 main/master 等保护分支上会 fail-closed)。

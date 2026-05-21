@@ -87,7 +87,7 @@ node "${FORGE_HELPER}" validate <change-id>
 ```
 ````
 
-`$FORGE_HELPER` 解析:`$HOME/.codex/forge/scripts/run-forge.mjs`(`os.homedir()` 跨平台,Windows 走 `USERPROFILE`)。helper 内 spawn `npx -y --package @accelerator-mzq/forge@^3.1 -- forge ...` 拉 forge CLI。
+`$FORGE_HELPER` 解析:`$HOME/.codex/forge/scripts/run-forge.mjs`(`os.homedir()` 跨平台,Windows 走 `USERPROFILE`)。helper 内 spawn `npx -y --package @accelerator-mzq/forge@^4.0.0 -- forge ...` 拉 forge CLI。
 
 ## 备选 — 用全局 forge 替代 helper
 

@@ -4,6 +4,64 @@ All notable changes to this project will be documented in this file.
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [4.0.0] - 2026-05-21
+
+### BREAKING
+
+> v4 是 forge 设计哲学的整体转向 —— **从反向加固协议变为 OpenSpec 简洁对齐**。完整迁移指南见 [`docs/migration/v3-to-v4.md`](docs/migration/v3-to-v4.md)。
+
+- **整套反向加固协议被砍**:删 13 fence、三级 severity、ack 两步协议、process-evidence freeze、ack-log 完整性链、verify_findings/review_outcomes marker 字段、transaction 五阶段 atomic、resign-markers 升级等机制(~5500 行净删)。设计动机:维护成本 > 收益,WARNING/suggestion 给用户自管,沿 OpenSpec 风格。
+- **CLI 子命令整删**:`forge ack` / `forge evidence` / `forge pause-capture`、`forge upgrade --resign-markers` flag。`/forge:ack-confirm` slash 命令同步删。
+- **marker schema v1 → v2**(BREAKING):
+  - VerifyMarker / ReviewMarker 极简化(`forge-verify/v2` / `forge-review/v2`):仅留 `schema` / `verified_at`(`reviewed_at`)/ `verified_by`(`reviewed_by`)/ `pause_decisions?` / `created_by_tool_version?` 五字段
+  - 删字段:`tasks_hash` / `content_hash` / `git` / `evidence[]` / `verify_findings[]` / `review_outcomes[]` / `process_evidence` / `ack_log_tail_hash` / `ack_log_entry_count`
+  - `PauseDecisionSimple` 5 字段(`paused_at` / `task_ref` / `issue_summary` / `chosen_option` 1-4 / `notes?`),无 fence 校验
+  - **失败 marker 整删** —— v4 verify/review 失败直接 abort,不再写 `.verify-failed` / `.review-failed`
+- **archive_summary schema v1 → v2**:
+  - 删字段:`acked_warnings` / `pending_suggestions` / `process_evidence_summary` / `verify_passed.verified_invariants` / `review_passed.reviewers`
+  - 新字段:`verified_by` / `reviewed_by` 顶级 / `spec_updates_applied[]`(forge `applyDeltas` operation 风格,`create/replace/delete`)/ `handoff_to_backlog[]`(仅 `pause_decisions` chosen_option=3 + `scope_entries` active 两来源)
+- **`forge archive` CLI flag 改造**:
+  - 新增:`--yes`(CI 自动接受所有 confirm)/ `--skip-specs`(跳过 spec deltas)—— 沿 OpenSpec 风格
+  - 删除:`--recover` / `--resume-summary` / `--resume`(transaction 中断恢复消亡)
+  - 保留:`--force` / `--api`
+- **`forge monitor` archive 阶段事件改名**:`fence_observed` → `archive_summary_observed`(更准确反映 v4 无 fence 拒签语义);data 字段对齐 v2 archive_summary(`verified_by` / `reviewed_by` / `spec_updates_applied_count` / `handoff_to_backlog_count`)。其他事件名(`marker_observed` / `record_error` / `stage_enter` / `cli_exit` / `hardening_step`)不变
+- **`MonitorStage` 类型删 `'ack-confirm'`** —— 反加固两步 ack 协议消亡;health-verdict 不再对 `ack-confirm` 阶段做 trace anomaly 判定
+
+### Removed
+
+- 整删 `scripts/check-release-gate.mjs` + `tests/integration/release-blocker-attack-path.test.ts`(plan-9c reminder gate,v4 无 release-blocker 概念)。`pnpm test` 简化为单 `vitest run`,release 时机器纪律由 `pnpm release:gate`(`scripts/release-gate.mjs`)统管 7 步 typecheck/lint/format/build/vitest/pack/dry-install/brownfield。
+- 整删 14 个 archive 子模块源码:`fence` / `process-evidence-fence` / `process-evidence-rerun` / `pause-decisions-fence` / `ack-log-consistency` / `verify-findings-fence` / `three-level-fence` / `legacy-exemption` / `version-retrograde-fence` / `transaction` / `recover` / `recover-prompt` / `resume-summary` / `fence-mapper`(`lock.ts` 迁出 `archive/` → `src/core/lock.ts`)
+- 整删 4 fixture 目录:`tests/fixtures/{pause-decisions,verify-findings,archive-warnings,marker-version}/`
+- 整删 ~40 测试文件 + 5 e2e integration 测试,新增 v4 简化版 `archive.test.ts` / `summary-builder.test.ts` / `marker-schema.test.ts` / `artifact-observer.test.ts`
+
+### Changed
+
+- **`divergence-map.ts`**:删 `archive-unresolved-warning` scenario(v4 archive 无 fence 拒签 WARNING),新加 v4-aligned `archive-spec-deltas-application` scenario(覆盖 forge `applyDeltas` + auto `generateBacklog` 独特性)
+- **AGENTS.md / CLAUDE.md §3 改述 release gate 走 `release-gate.mjs`**(v4 简化)
+- **docs**:新增 `docs/migration/v3-to-v4.md`(~280 行,§9 migration guide 落地)
+
+### Migration
+
+完整升级路径见 [`docs/migration/v3-to-v4.md`](docs/migration/v3-to-v4.md):
+
+1. 升级前清掉 `forge/changes/<id>/.evidence/pending-acks/` + `forge/.cache/archive-pause-*.json` + `process-evidence.staging.yaml`
+2. `pnpm update -g @accelerator-mzq/forge`(或 plugin marketplace 升级)
+3. 对每个 active change 重跑 `/forge:verify` + `/forge:review` 写 v2 marker
+4. 跑 `/forge:archive <id>` 通过 v2 schema validate + spec deltas apply
+
+已 archived change 全部保留不动 —— v4 不读 v1 archive_summary,只追加新 archive。
+
+## [3.1.1] - 2026-05-20
+
+### Fixed
+
+- **npm 发布包补全 stage-extensions 运行时资产**:`package.json#files` 此前仅含 `dist/`,导致 `scripts/codex-review-helper.mjs` 与 `src/core/codex-review/prompts/adversarial-default.md` 未进发布包,3.0.0 / 3.1.0 所有 npm 用户在 stage-extensions 5 个 stage 调 codex review / adversarial 都会因 helper 路径不存在或 prompt 模板缺失而失败。本版补齐两个资产到 `files` 字段;并在 release-gate 的 tarball 内容检查改用 `npm pack --dry-run`(跨平台),新增 helper + 模板必含断言,堵住「Windows 跳过」缺口。
+- **bundled plugin tgz 同步补齐 codex 资产**:`scripts/build-bundled-plugin.mjs` 现额外拷 `scripts/codex-review-helper.mjs` 与 `src/core/codex-review/` 到 staging,bundled 离线分发形态也能跑 stage-extensions。
+- **pause_decisions fence 与 proposal 段名对齐**:`src/core/archive/pause-decisions-fence.ts` option=1(扩 scope)的 `target_anchor` 字段校验与 diff 段定位正则从 `What Changes` 改为 `What`,与 `forge validate` 要求的 `## What` proposal 段名一致(此前 fence 死代码,marker 注释 / 模板 / fixture 仍用 OpenSpec 旧名 `## What Changes`,option=1 扩 scope 路径在 forge 3.x 下无法通过 archive)。同步收尾 `commands/apply.md`、`skills/exploring/SKILL.md`、`docs/getting-started.md`、`src/core/markers/types.ts` 注释及 13 个 pause-decisions 测试 / fixture。
+- **docs**:`docs/codex-review.md` Quick Start 的 `codex-adversarial` 示例补 `build_prompt` + `command --prompt-file "${PROMPT_FILE}"`,并加 `code-review` 与 `adversarial` 差别说明(此前示例缺 `build_prompt`,helper `run --mode adversarial` 强制要求 `--prompt-file`,照抄示例直接报错退出)。
+- **docs**:`docs/getting-started.md` 第 2 步加「4 件套格式速查」,展示 forge 3.x 的 `## What` proposal 段名、`## Scenario:` H2 spec scenario、`- [ ] <task-id>:` tasks 行三种正确格式,避免有 OpenSpec 习惯的用户照旧记忆写出 `## What Changes` 等导致 validate 报错。
+- **`FORGE_VERSION` 漂移污染产物**(release-gate 拦下):`src/index.ts:3` 此前硬编码 `FORGE_VERSION = '1.3.0'`,自 2026-05-16 漂移 —— 不仅 `forge --version` 显示错,更关键是被写进 archive marker / legacy-bridge handoff manifest 的 `forgeVersion` 字段(`legacy-bridge.ts:954`、`archive.ts:1006/1051`),v3.0.0 / v3.1.0 所有用户 archive 产物 / handoff manifest 写的 `forgeVersion: '1.3.0'` —— 数据完整性问题。本版改为动态读包根 `package.json#version`(`new URL('../package.json', import.meta.url)`),根治漂移,版本号同步唯一源是 `package.json`。
+
 ## [3.1.0] - 2026-05-19
 
 ### Added

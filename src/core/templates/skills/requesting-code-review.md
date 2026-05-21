@@ -113,7 +113,7 @@ You: [Fix progress indicators]
 
 执行完成前核对 review 硬门槛自检清单:
 
-- AI 写基础 `.review-passed` marker。
-- `forge evidence record-review` 跑过(写 staging)。
-- `forge evidence freeze --kind review` exit 0。
-- 过程中遇 `forge ack propose` 退出(产生 pending)→ Read 并执行 `commands/ack-confirm.md` 等价流程,降级 prompt 让用户确认,经 `forge ack confirm`/`reject` 落 ack-log(AI 不得自 ack)。
+- 派了 fresh review subagent + 主代理逐条接受/拒绝 + 接受意见全部实施 + 测试通过(三条件满足)。
+- 写 `.review-passed` v2 marker(schema=`forge-review/v2`,5 字段;沿 `src/core/markers/types.ts`)。
+- 若有"已用证据反驳"的拒绝意见,**在对话内显式记录**(v4 marker 不再持久化 review_outcomes 数组,纯对话 audit)。
+- v4 已无 evidence-helper / freeze / ack 协议;不要再调相关子命令(v4 已删)。

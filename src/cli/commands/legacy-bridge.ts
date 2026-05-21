@@ -7,7 +7,7 @@ import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
 import { existsSync, statSync, type Dirent } from 'node:fs';
 import { join, relative, basename } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
-import { acquireLockByPath, LockHeldError } from '../../core/archive/lock.js';
+import { acquireLockByPath, LockHeldError } from '../../core/lock.js';
 import { loadAnchorsFile, getAuthoritativeAnchors } from '../../core/legacy-bridge/anchors.js';
 import { writeAck, checkAck } from '../../core/legacy-bridge/ack.js';
 import { formatRedactReport, redact, type RedactReport } from '../../core/legacy-bridge/redact.js';

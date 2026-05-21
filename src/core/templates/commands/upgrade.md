@@ -1,58 +1,39 @@
 ---
-description: 调 forge upgrade CLI(legacy adapter 清理 + marker resign)
-argument-hint: '[--resign-markers <changeId>] [--recover] [--gc] [--dry-run]'
+description: 调 forge upgrade CLI(清理 legacy v0.2 harness adapter 产物)
+argument-hint: '[--dry-run] [--recover] [--gc]'
 ---
 
 # /forge:upgrade
 
-包装 `forge upgrade` CLI(v0.3 / plan-9j 落地)。
+包装 `forge upgrade` CLI(v0.3 起)。**仅清理 legacy harness adapter 产物;`forge/` 下 drafts/changes/specs/config 100% 不动**。
 
-## 用法 / 选项(v6 MINOR 4:option flag 形态,不是 subcommand)
-
-- `forge upgrade`(无 flag,沿 v0.3):清理 legacy v0.2 harness adapter 产物
-- `forge upgrade --resign-markers <changeId>`(plan-9j 新增 option):升级 v0.4 marker 到 v1.0 schema
-
-## --resign-markers 用法(plan-9j Task 2 落地)
+## 用法
 
 ```bash
-forge upgrade --resign-markers add-oauth-refresh
+forge upgrade               # 清理 v0.2 legacy harness adapter 产物
+forge upgrade --dry-run     # 只 SHOW DIFF,不 stash
+forge upgrade --recover     # 恢复最近 stash(24h 有效期)
+forge upgrade --gc          # 删除过期 stash(>24h)
 ```
 
-行为:
+## 6 阶段事务
 
-- **S 简码** → 自动映射 CRITICAL
-- **L 简码** → 自动映射 SUGGESTION
-- **C 简码** → 写 pending file 到 `.evidence/pending-acks/`,exit 1 + 提示走 `forge ack confirm`
-- **不自动填空** verify_findings / pause_decisions / process_evidence(违反 AI 反向加固)
-- 改标 `process_evidence_unavailable_legacy: true` meta 字段
-- 写 `ack-log.jsonl` action=resign 行
+SCAN(纯只读)→ SHOW DIFF(只读)→ ASK(等用户输入)→ STASH(rename 到 `.forge-upgrade-stash-<ts>/`)→ VERIFY(hash 比对)→ COMMIT(默认不删 stash,24h 内可 `--recover`)。
 
-退出码(沿 master §3.12.3):
+任一阶段失败自动反向 rename 回原位。
 
-- 0:全部 marker resigned 或已是 v1.0
-- 1:部分需 C 简码 confirm / 阶段事务失败
-- 2:CI 模式拒绝(env CI=true)
+## 退出码
 
-## C 简码迁移协议(完整流程)
+- `0`:全部成功 / 无 legacy 产物
+- `1`:STASH/VERIFY 失败(已回滚)/ stash 损坏(hash mismatch / 过期)
 
-C 简码(clarification)不自动映射(沿 design §2.3.5):用户必须判断目标 severity:
+## v3 → v4 marker 升级路径
 
-1. 跑 `forge upgrade --resign-markers <changeId>` — 若含 C 简码,exit 1 + 写 pending file
-2. 跑 `forge ack confirm <changeId> <findingId> --target-severity WARNING|SUGGESTION`(或走 `/forge:ack-confirm` slash)
-3. 重跑 `forge upgrade --resign-markers <changeId>` 完成 resign
+v4 BREAKING:**已移除 `--resign-markers` flag**。v0.4 / v1.0 marker → v4 v2 marker 不再有 CLI 自动升级路径;v3 protocol(ack-log / verify_findings / process_evidence / 简码 S/C/L)在 v4 全部消亡。
 
-## sunset policy
+唯一升级路径(沿 `docs/migration/v3-to-v4.md`):
 
-`process_evidence_unavailable_legacy: true` 在 v2.0 sunset(沿 design §3.4.4.2):
-
-- v1.0 / v1.1:合法
-- v1.2:warning 加强
-- v2.0:拒签,`forge migrate <change-id>` 自动触发 process_evidence 补录
-
-## archive 行为(沿 plan-9j Task 3 / 4)
-
-archive.ts 步骤 3.4 在 evidence 校验之前先跑 legacy-exemption + version-retrograde fence:
-
-- legacy marker 缺 created_by_tool_version 字段或 `<1.0.0` → 走 legacy 路径(13 不变量精确豁免)
-- **`legacy=true ⊥ (created_by_tool_version >= 1.0.0 且 resigned_by_tool_version 缺失)`** 互斥(沿 §3.4.4.1 + v6 选项 C resigned-aware):原生 v1.0 marker 不允许 legacy 标记;resigned 后 marker(含 resigned_by_tool_version 字段)允许 legacy + version 共存
-- version retrograde(高版本 → 低版本)→ 拒签(沿 §3.4.4.3)
+1. 删除 active change 下的 `.verify-passed` / `.review-passed`(v1 marker)
+2. 删 stale 残留:`forge/changes/<id>/.evidence/pending-acks/` + `forge/.cache/archive-pause-<id>.json`
+3. 重跑 `/forge:verify` + `/forge:review`(产 v2 marker)
+4. 重跑 `/forge:archive`(v4 校验 v2 schema 通过)

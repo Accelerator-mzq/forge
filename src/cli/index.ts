@@ -11,15 +11,12 @@ import { buildArchiveCommand } from './commands/archive.js';
 import { buildLegacyBridgeCommand } from './commands/legacy-bridge.js';
 import { buildUpgradeCommand } from './commands/upgrade.js';
 import { buildMigrateCommand } from './commands/migrate.js';
-import { buildAckCommand } from './commands/ack.js';
-import { buildEvidenceCommand } from './commands/evidence.js';
 import { buildScopeCommand } from './commands/scope.js';
 import { buildFindingCommand } from './commands/finding.js';
 import { buildPreflightCommand } from './commands/preflight.js';
 import { buildStageExtensionsCommand } from './commands/stage-extensions.js';
 import { buildBacklogCommand } from './commands/backlog.js';
 import { buildMonitorCommand } from './commands/monitor.js';
-import { buildPauseCaptureCommand } from './commands/pause-capture.js';
 import { maybeRecordCliExit } from '../core/monitor/exit-handler.js';
 
 // 创建主命令
@@ -54,12 +51,6 @@ program.addCommand(buildUpgradeCommand());
 // 注册 migrate 子命令(v0.4 — 搬运 OpenSpec / superpowers 项目仓库)
 program.addCommand(buildMigrateCommand());
 
-// 注册 ack 子命令(plan-9a Task 3 — 两步 user 确认协议)
-program.addCommand(buildAckCommand());
-
-// 注册 evidence 子命令(plan-9a Task 5 — evidence helper 记录框架)
-program.addCommand(buildEvidenceCommand());
-
 // 注册 scope 子命令(plan-9b Task 5 — scope aggregator)
 program.addCommand(buildScopeCommand());
 
@@ -77,9 +68,6 @@ program.addCommand(buildBacklogCommand());
 
 // 注册 monitor 子命令组(plan-workflow-monitor)
 program.addCommand(buildMonitorCommand());
-
-// 注册 pause-capture 子命令(plan pause-fence Block C — Fluid Pause 锚点捕获)
-program.addCommand(buildPauseCaptureCommand());
 
 // workflow-monitor:唯一的 CLI 侧埋点(spec §4)。config 守卫确保关闭时零行为。
 process.on('exit', (code) => {

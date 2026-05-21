@@ -1,6 +1,6 @@
 {
   "name": "forge",
-  "version": "4.0.2",
+  "version": "4.1.0",
   "description": "Spec-driven workflow + skills for Codex CLI",
   "author": { "name": "msc" },
   "license": "MIT",

@@ -82,16 +82,10 @@ export const DIVERGENCE_MAP: DivergenceMap = {
         'verify 阶段 trace 只有 Correctness 维度 record,缺 Completeness/Coherence → forge 塌回 superpowers 基线',
     },
     // ── archive ───────────────────────────────────────────────────────────
-    {
-      stage: 'archive',
-      scenario_id: 'archive-unresolved-warning',
-      desc: 'review 留了个未解决 WARNING,要不要归档?',
-      openspec: 'openspec archive 无 severity 分级 fence → 多半放行',
-      superpowers: 'finishing-a-development-branch:给 merge/PR/cleanup 选项,不强制 finding 解决',
-      forge: '三级 fence:WARNING 未 resolve 且无 ack → 拒签 exit 1',
-      rationale: '反向加固 —— 强 fence 防偷懒归档',
-      regression_signal: 'archive 在有未 ack WARNING 时 cli_exit.exit_code=0 → 回归',
-    },
+    // v4(2026-05-21):删 archive-unresolved-warning scenario —— v4 archive 无 fence
+    // 拒签 WARNING 语义(plan-v4 Phase 1 整删 13 fence),WARNING 给用户自管,
+    // 沿 OpenSpec 行为(regression_signal cli_exit.exit_code=0 在 v4 是正常 OpenSpec-aligned 行为,
+    // 不再是回归信号)。plan-v4 §10.4 Task 4.5c。
     // ── explore ───────────────────────────────────────────────────────────
     {
       stage: 'explore',

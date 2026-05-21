@@ -79,8 +79,9 @@ describe('computeVerdict', () => {
     expect(v.items[0]?.stage).toBe('review');
   });
 
-  it('forge 专属阶段(upgrade/ack-confirm/codex-adversarial)有 CLI 事件但无 AI stage_enter → 不报 anomaly', () => {
-    for (const stage of ['upgrade', 'ack-confirm', 'codex-adversarial'] as const) {
+  it('forge 专属阶段(upgrade/codex-adversarial)有 CLI 事件但无 AI stage_enter → 不报 anomaly', () => {
+    // v4(2026-05-21):删 ack-confirm — 反加固两步 ack 协议消亡(plan-v4 Phase 1)
+    for (const stage of ['upgrade', 'codex-adversarial'] as const) {
       const v = computeVerdict([ev({ layer: 'cli', event: 'cli_exit', stage })]);
       expect(v.level, stage).toBe('ok');
     }

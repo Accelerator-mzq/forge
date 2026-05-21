@@ -9,7 +9,6 @@ export const MONITOR_STAGES = [
   'verify',
   'archive',
   'explore',
-  'ack-confirm',
   'upgrade',
   'codex-adversarial',
   'unknown',

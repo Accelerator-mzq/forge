@@ -1,4 +1,11 @@
 // src/core/monitor/artifact-observer.ts — 把 forge 常规产物反推成 CLI 层 trace 事件(spec §3 / §3.2)
+//
+// v4 简化(plan-v4 Phase 4 Task 4.5b):
+// - 删 observeAckLog —— v4 无 ack-log.jsonl
+// - 删 marker 中的 fence_observed —— v4 marker 无 verify_findings/review_outcomes,fence 语义消亡
+// - marker_observed data 简化 —— v4 marker 极简(VerifyMarker v2 / ReviewMarker v2),无 tasks_hash/content_hash
+// - 删 .verify-failed / .review-failed 监听 —— v4 verify/review 失败直接 abort,不写 failed marker
+// - archive 部分 fence_observed 字段对齐 v4 archive_summary v2(verified_by/reviewed_by/spec_updates_applied/handoff_to_backlog)
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse as parseYAML } from 'yaml';
@@ -7,12 +14,10 @@ import { validateMarkerSchema } from '../validate/marker-schema.js';
 import { validateArchiveSummarySchema } from '../validate/archive-summary-schema.js';
 import type { TraceEvent, MonitorStage } from './types.js';
 
-/** marker 文件名 → 监控阶段(以 Step 1 确认的实际文件名为准) */
+/** marker 文件名 → 监控阶段(v4:只有 verify-passed / review-passed,无 failed marker) */
 const MARKER_FILES: Record<string, MonitorStage> = {
   '.verify-passed': 'verify',
-  '.verify-failed': 'verify',
   '.review-passed': 'review',
-  '.review-failed': 'review',
 };
 
 function mkEvent(
@@ -23,7 +28,7 @@ function mkEvent(
   ts?: string,
 ): TraceEvent {
   return {
-    // 优先用产物自带时间戳;缺失才回退观察时刻 —— 报告时间线才不乱序(Codex 计划审查第 4 轮 检查点 3)
+    // 优先用产物自带时间戳;缺失才回退观察时刻 —— 报告时间线才不乱序
     ts: ts ?? new Date().toISOString(),
     schema: 'forge-monitor-trace/v1',
     change_id: changeId,
@@ -34,7 +39,7 @@ function mkEvent(
   };
 }
 
-/** 扫一个目录里的 4 个 marker 文件,产出 marker_observed / record_error 事件 */
+/** 扫一个目录里的 marker 文件,产出 marker_observed / record_error 事件(v4:仅 marker_observed,无 fence_observed) */
 function observeMarkers(dir: string, relBase: string, changeId: string): TraceEvent[] {
   const events: TraceEvent[] = [];
   for (const [fileName, stage] of Object.entries(MARKER_FILES)) {
@@ -43,21 +48,15 @@ function observeMarkers(dir: string, relBase: string, changeId: string): TraceEv
     const relPath = join(relBase, fileName);
     try {
       const marker = parseMarker(readFileSync(markerPath, 'utf8'));
-      // marker 是 union 类型;失败类 marker 无 hash 字段,转 record 安全取值
       const obj = marker as unknown as Record<string, unknown>;
       const validation = validateMarkerSchema(marker, markerPath);
-      // 事件 ts 取 marker 自带时间戳(verify→verified_at / review→reviewed_at / failed→failed_at);
-      // 报告「阶段时间线」按真实时序排序才有意义(Codex 计划审查第 4 轮 检查点 3)。
-      // 用 typeof runtime guard 而非 as 断言 —— schema-invalid marker 的时间戳字段可能不是 string,
-      // as 会让非 string 值漏进 TraceEvent.ts,致 Task 11 排序 localeCompare 崩溃(第 5 轮 Finding 1)
+      // 事件 ts 取 marker 自带时间戳(verify→verified_at / review→reviewed_at)
       const markerTs =
         typeof obj.verified_at === 'string'
           ? obj.verified_at
           : typeof obj.reviewed_at === 'string'
             ? obj.reviewed_at
-            : typeof obj.failed_at === 'string'
-              ? obj.failed_at
-              : undefined;
+            : undefined;
       events.push(
         mkEvent(
           changeId,
@@ -66,35 +65,9 @@ function observeMarkers(dir: string, relBase: string, changeId: string): TraceEv
           {
             marker_schema: marker.schema,
             path: relPath,
-            hashes: { tasks_hash: obj.tasks_hash, content_hash: obj.content_hash },
             ok: validation.valid, // spec §3.2:ok = marker schema 校验是否通过
-            observed_at: new Date().toISOString(), // observer 实际跑的时刻,与 ts 区分
+            observed_at: new Date().toISOString(),
           },
-          markerTs,
-        ),
-      );
-      // I-2(spec §3.2):verify/review fence_observed —— 从 marker findings 抽未决项。
-      // findings 数组字段名按 marker 类型不同:verify(pass/fail)用 verify_findings;
-      // review-passed 用 review_outcomes;review-failed 用 unresolved_outcomes。
-      // 一个 marker 至多含其一,逐个探测取首个数组。
-      let rawFindings: Record<string, unknown>[] = [];
-      for (const key of ['verify_findings', 'review_outcomes', 'unresolved_outcomes']) {
-        if (Array.isArray(obj[key])) {
-          rawFindings = obj[key] as Record<string, unknown>[];
-          break;
-        }
-      }
-      const blockedFindings = rawFindings
-        .filter((f) => f.resolved === false)
-        .map((f, i) => ({ id: f.id ?? i, severity: f.severity ?? null, dimension: f.dimension }));
-      // 'S' 是 review_outcomes 的 CRITICAL 简码(verify_findings 不用简码)
-      const fenceOk = !blockedFindings.some((b) => b.severity === 'CRITICAL' || b.severity === 'S');
-      events.push(
-        mkEvent(
-          changeId,
-          stage,
-          'fence_observed',
-          { level: stage, ok: fenceOk, blocked_findings: blockedFindings, path: relPath },
           markerTs,
         ),
       );
@@ -102,43 +75,6 @@ function observeMarkers(dir: string, relBase: string, changeId: string): TraceEv
       events.push(
         mkEvent(changeId, stage, 'record_error', { path: relPath, error: (err as Error).message }),
       );
-    }
-  }
-  return events;
-}
-
-/** 读一个 change 目录的 .evidence/ack-log.jsonl,对每条 ack entry 产 ack_observed 事件(spec §3.2) */
-function observeAckLog(dir: string, changeId: string): TraceEvent[] {
-  const events: TraceEvent[] = [];
-  const logPath = join(dir, '.evidence', 'ack-log.jsonl');
-  if (!existsSync(logPath)) return events;
-  let lines: string[];
-  try {
-    lines = readFileSync(logPath, 'utf8').split(/\r?\n/);
-  } catch {
-    return events; // 读失败 → 跳过,never-throw
-  }
-  for (const line of lines) {
-    if (!line.trim()) continue;
-    try {
-      const entry = JSON.parse(line) as Record<string, unknown>;
-      if (entry.kind !== 'ack') continue; // 只记 ack entry,跳过 evidence-helper
-      events.push(
-        mkEvent(
-          changeId,
-          'ack-confirm',
-          'ack_observed',
-          {
-            action: entry.action ?? null,
-            finding_id: entry.finding_id ?? null,
-            severity: entry.target_severity ?? null,
-            user: entry.user ?? null,
-          },
-          typeof entry.timestamp === 'string' ? entry.timestamp : undefined,
-        ),
-      );
-    } catch {
-      /* 坏 JSON 行跳过 */
     }
   }
   return events;
@@ -153,16 +89,13 @@ function observeAckLog(dir: string, changeId: string): TraceEvent[] {
 export function observeArtifacts(projectRoot: string, changeId: string): TraceEvent[] {
   const events: TraceEvent[] = [];
 
-  // 1. active change 目录的 marker + ack-log
+  // 1. active change 目录的 marker
   const activeDir = join(projectRoot, 'forge', 'changes', changeId);
   if (existsSync(activeDir)) {
     events.push(...observeMarkers(activeDir, join('forge', 'changes', changeId), changeId));
-    events.push(...observeAckLog(activeDir, changeId));
   }
 
   // 2. archive 目录 —— archive 成功后 change 移到 forge/changes/archive/<YYYY-MM-DD>-<changeId>/
-  //    (transaction.ts:56 给目录名加 archiveDate 前缀;monitor 不知 archiveDate,按正则反解;
-  //     Codex 计划审查第 2 轮 F-2 / 新-1 / 新-3)
   const archiveRoot = join(projectRoot, 'forge', 'changes', 'archive');
   if (existsSync(archiveRoot)) {
     try {
@@ -175,32 +108,37 @@ export function observeArtifacts(projectRoot: string, changeId: string): TraceEv
         const archiveDir = join(archiveRoot, entry.name);
         const archiveRel = join('forge', 'changes', 'archive', entry.name);
         events.push(...observeMarkers(archiveDir, archiveRel, changeId));
-        events.push(...observeAckLog(archiveDir, changeId));
 
-        // archive_summary.yaml —— 三级 fence 的 archive 侧裁决产物(spec §3.2)
+        // archive_summary.yaml —— archive 阶段产物(v4 v2:无 fence 拒签语义,纯 audit)
         const summaryPath = join(archiveDir, 'archive_summary.yaml');
         if (!existsSync(summaryPath)) continue;
         const summaryRel = join(archiveRel, 'archive_summary.yaml');
         try {
           const summary = parseYAML(readFileSync(summaryPath, 'utf8')) as unknown;
-          // Codex 计划审查第 2 轮 新-2:用完整 schema 校验定 ok,而非浅守卫 looksLikeArchiveSummary
           const validation = validateArchiveSummarySchema(summary, summaryPath);
           const s = (summary ?? {}) as Record<string, unknown>;
+          // v4 archive_summary v2 字段(沿 src/core/schemas/archive-summary.ts)
+          const specUpdates = Array.isArray(s.spec_updates_applied)
+            ? (s.spec_updates_applied as unknown[]).length
+            : 0;
+          const handoff = Array.isArray(s.handoff_to_backlog)
+            ? (s.handoff_to_backlog as unknown[]).length
+            : 0;
           events.push(
             mkEvent(
               changeId,
               'archive',
-              'fence_observed',
+              'archive_summary_observed',
               {
-                level: 'archive',
-                ok: validation.valid,
                 path: summaryRel,
-                verify_passed: s.verify_passed,
-                review_passed: s.review_passed,
-                process_evidence_summary: s.process_evidence_summary,
+                ok: validation.valid,
+                verified_by: s.verified_by,
+                reviewed_by: s.reviewed_by,
+                spec_updates_applied_count: specUpdates,
+                handoff_to_backlog_count: handoff,
                 observed_at: new Date().toISOString(),
               },
-              typeof s.archived_at === 'string' ? s.archived_at : undefined, // ts 取 archived_at,typeof guard(第 5 轮 Finding 1)
+              typeof s.archived_at === 'string' ? s.archived_at : undefined,
             ),
           );
         } catch (err) {

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-Forge 是一个多 harness AI 工作流 plugin —— 融合 OpenSpec 的产物驱动工作流与 superpowers 的行为塑造 skill,**核心增量是「反向加固协议」:防止 AI 在 spec / verify / archive 阶段偷懒**。它有双重分发形态:既作为 Claude Code plugin 分发,也作为 npm 包(`@accelerator-mzq/forge`,bin `forge`)提供 16 个 CLI 子命令。
+Forge 是一个多 harness AI 工作流 plugin —— 融合 OpenSpec 的产物驱动工作流与 superpowers 的行为塑造 skill。v4(2026-05-21)起设计哲学是 **OpenSpec 简洁对齐**(v3.x「反向加固协议」已砍 —— 维护成本 > 收益,WARNING/suggestion 给用户自管,详 [`docs/migration/v3-to-v4.md`](docs/migration/v3-to-v4.md) + `CHANGELOG.md` v4 BREAKING)。它有双重分发形态:既作为 Claude Code plugin 分发,也作为 npm 包(`@accelerator-mzq/forge`,bin `forge`)提供 14 个 CLI 子命令。
 
 ## 常用命令
 
@@ -59,22 +59,22 @@ forge 同时是:(a) Claude Code plugin —— `.claude-plugin/`(`plugin.json` + 
 
 ### 三层结构
 
-- **`src/cli/`** —— CLI 入口 `index.ts` + `commands/` 下 16 个子命令(commander 注册)。
-- **`src/core/`** —— 工作流协议核心,约 24 个子域目录。
-- **`commands/` 与 `skills/`(仓库根)** —— plugin 形态的 10 个 slash 命令 `.md` 与 16 个 skill。**这是 plugin 的实际行为载体**,TS core 给 CLI helper 与验证逻辑撑腰。
+- **`src/cli/`** —— CLI 入口 `index.ts` + `commands/` 下 14 个子命令(commander 注册;v4 删 `ack` / `evidence` / `pause-capture`)。
+- **`src/core/`** —— 工作流协议核心(v4 反加固砍后整删 14 个 archive 子模块,详 CHANGELOG v4)。
+- **`commands/` 与 `skills/`(仓库根)** —— plugin 形态的 9 个 slash 命令 `.md`(v4 删 `/forge:ack-confirm`)与 17 个 skill。**这是 plugin 的实际行为载体**,TS core 给 CLI helper 与验证逻辑撑腰。
 
-### 主流程 6 步 + marker 链
+### 主流程 6 步 + marker
 
-工作流:`brainstorm → propose → apply → review → verify → archive`。每步产一个强校验 marker(`src/core/markers/`),marker 里带 `tasks_hash` / `content_hash` / `git.diff_hash`;后续阶段读 marker 校验产物未漂移。**理解任一阶段都要同时看三处:`src/core/` 的逻辑、`commands/<stage>.md` 的协议、对应 `skills/*/SKILL.md` 的行为约束** —— 三者协同,单看一处不完整。
+工作流:`brainstorm → propose → apply → review → verify → archive`。verify / review 两步各产一个 marker(`src/core/markers/`,v2 极简 schema:`schema` / `verified_at` 或 `reviewed_at` / `verified_by` 或 `reviewed_by` / 可选 `pause_decisions` / 可选 `created_by_tool_version`)。v3.x 时代的 `tasks_hash` / `content_hash` / `git.diff_hash` 完整性校验链 v4 已砍,marker 退化为审计性质;verify/review 失败不写 failed marker,直接 abort 让 user 修复后重跑。**理解任一阶段都要同时看三处:`src/core/` 的逻辑、`commands/<stage>.md` 的协议、对应 `skills/*/SKILL.md` 的行为约束** —— 三者协同,单看一处不完整。
 
-### 反向加固协议(forge 区别于上游的核心)
+### v4 设计转向(从反向加固变 OpenSpec 对齐)
 
-防 AI 偷懒的机制,散落在 core / commands / skills:
+v3.x「反向加固协议」(13 fence、三级 severity、ack 两步协议、process-evidence freeze、ack-log 完整性链、`verify_findings` / `review_outcomes` marker 字段、transaction 五阶段 atomic、resign-markers 升级等)v4 整套砍掉(~5500 行净删,详 [CHANGELOG v4 BREAKING](CHANGELOG.md))。**当前 v4 留存的"协议骨架"**:
 
-- **三级 severity**(`src/core/schemas/severity.ts`):CRITICAL automated 类问题(测试 fail / hash mismatch)不可经 ack 降级,JCS SHA256 `finding_hash` 兜底重算拒签。
-- **ack 两步协议**(`src/cli/commands/ack.ts`):WARNING 必须走 `forge ack propose` + `/forge:ack-confirm` 两步,AI 不能自 ack。
-- **三维 verify**(`skills/verifying-three-dimensions/`):Completeness + Correctness + Coherence,取代「测试 pass」二值判定。
-- **三级 archive fence**(`src/core/archive/three-level-fence.ts`):critical 硬墙 / warning 两步 ack / suggestion soft。
+- **三维 verify**(`skills/verifying-three-dimensions/`):Completeness + Correctness + Coherence — 仍是 verify 阶段的行为约束 skill,但失败不再写 `.verify-failed` marker,直接 abort。
+- **Fluid Pause**(`apply` 阶段):subagent 报 BLOCKED/DONE_WITH_CONCERNS/DESIGN_ISSUE_FOUND 时,主代理 `AskUserQuestion` 4 选项后写 `PauseDecisionSimple`(5 字段 + 自由 notes,无 fence 校验)进 marker `pause_decisions[]` —— 仅审计。
+- **archive_summary v2 + spec deltas apply**(`src/core/archive/`):archive 阶段读 verify/review marker → 校验 v2 schema → apply `spec_updates_applied[]`(create/replace/delete operation)→ 写 `handoff_to_backlog[]`(来自 `pause_decisions` chosen_option=3 + 未解决 `scope_entries`)。沿 OpenSpec applyDeltas 风格,无 fence 拒签。
+- **WARNING/suggestion 用户自管**:v3.x 的 ack 两步协议(`forge ack propose` + `/forge:ack-confirm`)消亡,WARNING/SUGGESTION 给 user 看 prose 自己判断;CRITICAL findings 仍存在(`forge validate` exit 1)但只走 `finding-hash` 幂等去重,不再有 ack 降级链。
 
 ### Stage Extensions(v1.2)
 

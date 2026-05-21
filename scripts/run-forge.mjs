@@ -12,7 +12,10 @@
 import { spawn } from 'node:child_process';
 
 // forge npm 包版本范围;改版本号时需与 package.json / .claude-plugin/plugin.json 手动同步
-const REQUIRED_RANGE = '^4.0.0';
+// 注:不用 `^4.0.0` 因 Windows 下 spawn shell:true 让 cmd.exe 把 `^` 当 escape char
+// 吃掉(turn into `4.0.0` 精确版本,永远拉不到 patch update)。用 `4.x` 等价 `>=4.0.0 <5.0.0`,
+// 字符全 cmd-safe(字母数字+点)。跨 major bump(4→5)时改为 `5.x`。
+const REQUIRED_RANGE = '4.x';
 
 const args = process.argv.slice(2);
 

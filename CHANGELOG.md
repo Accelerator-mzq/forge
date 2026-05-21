@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [4.0.2] - 2026-05-21
+
+### Fixed
+
+- **Windows wrapper 永远拉 4.0.0 — `scripts/run-forge.mjs` REQUIRED_RANGE `^4.0.0` → `4.x`**(critical)。ForgeUE 项目实测发现:v4.0.1 通过 plugin marketplace 升级后,文件层改动(SKILL.md / forge.js bootstrap / docs / `forge/config.yaml` 示例)全部生效,但通过 wrapper 调的 CLI 永远是 v4.0.0 — wrapper `spawn(npx.cmd, [...], { shell: true })` 在 Windows 下走 cmd.exe,**cmd.exe 把 `^` 当 escape char 吃掉**,`@accelerator-mzq/forge@^4.0.0` 被解析为精确版本 `4.0.0` 而非 semver range,npx 永远拉 4.0.0。
+
+  改 `REQUIRED_RANGE = '4.x'`(等价 `>=4.0.0 <5.0.0`,字符全 cmd-safe 字母数字 + 点)解决。Linux/macOS 不受影响(无 cmd.exe 解析层)。
+
+  跨 major bump(4→5)时改 `5.x`。
+
+### Known(未在本 release 修)
+
+- **`spawn shell: true` 在 Windows 下的根本问题**:`run-forge.mjs:28` 仍然要 `shell: process.platform === 'win32'`(Node 21+ CVE-2024-27980 修复后,spawn `.cmd` 文件必须 `shell: true`)。本 PR 仅救 `^` escape 一个具体症状,**根因 cmd.exe 干扰 args 尚未根治**。其余两个同根 bug 在 v4.0.1 已通过 workaround 旁路(`--json-file` / config user-focus + preflight 检测),根治需重写 wrapper 走 lazy npm cache resolve + spawn `node + dist/cli/index.js`(无 .cmd 中间层),`scripts/build-bundled-plugin.mjs` 已有 pattern 参考。留 follow-up。
+
 ## [4.0.1] - 2026-05-21
 
 ### Added

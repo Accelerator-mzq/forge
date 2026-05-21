@@ -82,10 +82,22 @@ export const DIVERGENCE_MAP: DivergenceMap = {
         'verify 阶段 trace 只有 Correctness 维度 record,缺 Completeness/Coherence → forge 塌回 superpowers 基线',
     },
     // ── archive ───────────────────────────────────────────────────────────
-    // v4(2026-05-21):删 archive-unresolved-warning scenario —— v4 archive 无 fence
-    // 拒签 WARNING 语义(plan-v4 Phase 1 整删 13 fence),WARNING 给用户自管,
-    // 沿 OpenSpec 行为(regression_signal cli_exit.exit_code=0 在 v4 是正常 OpenSpec-aligned 行为,
-    // 不再是回归信号)。plan-v4 §10.4 Task 4.5c。
+    // v4(2026-05-21):原 archive-unresolved-warning scenario 已删(plan-v4 Phase 1 整删
+    // 13 fence,WARNING 给用户自管,沿 OpenSpec 行为)。新写 v4-aligned 场景:
+    {
+      stage: 'archive',
+      scenario_id: 'archive-spec-deltas-application',
+      desc: 'archive 时 change/specs/ 含 spec deltas,要怎样写入 forge/specs/?',
+      openspec:
+        'openspec archive 用 specs/apply 写 capability 文件,delta 风格(`## ADDED Requirements` 等行级块)',
+      superpowers: 'superpowers 无 specs 体系,archive ≈ git merge / cleanup,无 specs 同步语义',
+      forge:
+        'forge archive 6 步用 readDeltas + applyDeltas(operation-driven,create/replace/delete 整文件),并在 archive_summary v2 的 spec_updates_applied 字段记录;archive 末尾自动 generateBacklog 同步 forge/backlog/',
+      rationale:
+        'forge 独有亮点 —— spec deltas 体系 + 自动 backlog 同步,把 archive 从"挪文件"提升为"产物链入库"',
+      regression_signal:
+        'archive 阶段 trace 无 archive_summary_observed 事件 / spec_updates_applied_count=0 但 change/specs/ 有真实改动 / forge/backlog/ 未被更新 → forge 塌回 OpenSpec 弱 spec-sync 或 superpowers 无 spec 基线',
+    },
     // ── explore ───────────────────────────────────────────────────────────
     {
       stage: 'explore',

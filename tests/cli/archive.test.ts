@@ -54,8 +54,7 @@ function setupValidChange(
   mkdirSync(join(changeDir, 'specs'), { recursive: true });
 
   // 四件套(完整 markdown 段位)
-  const proposalContent =
-    '# Add Login\n\n## Why\n用户需要登录.\n\n## What\nOAuth2 流程.\n';
+  const proposalContent = '# Add Login\n\n## Why\n用户需要登录.\n\n## What\nOAuth2 流程.\n';
   const designContent =
     '# Design\n\n## Architecture\nJWT token + refresh.\n\n## Out of Scope\nSSO.\n';
   const tasksContent = incomplete

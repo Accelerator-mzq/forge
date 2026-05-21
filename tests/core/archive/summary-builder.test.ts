@@ -8,7 +8,7 @@
 //   - scope_entries:forge-oos / forge-future-work active 进;forge-non-goals / 非 active 不进
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildArchiveSummary } from '../../../src/core/archive/summary-builder.js';

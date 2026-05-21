@@ -21,11 +21,9 @@ function writeVerifyMarker(changeId: string): void {
   mkdirSync(dir, { recursive: true });
   writeFileSync(
     join(dir, '.verify-passed'),
-    [
-      'schema: forge-verify/v2',
-      'verified_at: 2026-05-15T01:00:00Z',
-      'verified_by: ai-agent',
-    ].join('\n') + '\n',
+    ['schema: forge-verify/v2', 'verified_at: 2026-05-15T01:00:00Z', 'verified_by: ai-agent'].join(
+      '\n',
+    ) + '\n',
     'utf8',
   );
 }

@@ -43,30 +43,27 @@ describe('templates/commands', () => {
     expect(content).toContain('applied_commits');
   });
 
-  it('review 命令引用 forge:requesting-code-review + forge:receiving-code-review', async () => {
+  it('review 命令引用 forge:requesting-code-review + forge:receiving-code-review(v4 v2 marker)', async () => {
     const content = await loadCommand('review');
     expect(content).toContain('forge:requesting-code-review');
     expect(content).toContain('forge:receiving-code-review');
     expect(content).toContain('.review-passed');
-    expect(content).toContain('forge-review/v1');
-    expect(content).toContain('review_outcomes');
+    expect(content).toContain('forge-review/v2');
   });
 
-  it('verify 命令引用 forge:verification-before-completion 且含 verify-passed YAML schema', async () => {
+  it('verify 命令引用 forge:verification-before-completion + v4 v2 marker schema', async () => {
     const content = await loadCommand('verify');
     expect(content).toContain('forge:verification-before-completion');
     expect(content).toContain('.verify-passed');
-    expect(content).toContain('.verify-failed');
-    expect(content).toContain('forge-verify/v1');
-    expect(content).toContain('fake_completions');
-    expect(content).toContain('evidence');
+    expect(content).toContain('forge-verify/v2');
   });
 
-  it('archive 命令调 forge archive CLI 且引用 forge:finishing-a-development-branch', async () => {
+  it('archive 命令调 forge archive CLI + 引用 forge:finishing-a-development-branch(v4 删 --recover)', async () => {
     const content = await loadCommand('archive');
     expect(content).toContain('forge archive');
     expect(content).toContain('forge:finishing-a-development-branch');
     expect(content).toContain('--force');
-    expect(content).toContain('--recover');
+    // v4 删 --recover flag(plan-v4 Phase 1)+ verify/review 失败直接 abort 不写 failed marker
+    expect(content).not.toContain('--recover');
   });
 });

@@ -23,6 +23,14 @@
 
 ```yaml
 stage_extensions:
+  # 建议显式收紧 defaults(默认 timeout 900s/max_retries 1/max_rounds 10 过松,
+  # 实测易 15+ 分钟无输出 hang;详 docs/migration/setup-stage-extensions.md)
+  defaults:
+    timeout_sec: 600
+    zombie_threshold_sec: 180
+    max_retries: 1
+    convergence:
+      max_rounds: 1
   review:
     - name: codex-code-review
       enabled: true
@@ -37,7 +45,8 @@ stage_extensions:
       build_prompt: >
         node "${FORGE_HELPER_DIR}/codex-review-helper.mjs" build-prompt
         --output "${PROMPT_FILE}"
-        --target-label "${CHANGE_ID}"
+        --user-focus "聚焦 change ${CHANGE_ID} 实施结果的三维 verify (Completeness / Correctness / Coherence);评估 tests 与 spec 是否一致;不要 surface working tree 中未合并代码的问题。"
+        --target-label "${CHANGE_ID}-verify"
       command: >
         node "${FORGE_HELPER_DIR}/codex-review-helper.mjs" run
         --mode adversarial
@@ -47,6 +56,8 @@ stage_extensions:
 ```
 
 > **`code-review` 与 `adversarial` 的差别**:`code-review` 模式直接分析 git diff,无需 prompt 文件;`adversarial` 模式必须先用 `build_prompt` 命令生成 prompt 文件,再由 `command` 通过 `--prompt-file "${PROMPT_FILE}"` 传给 `run` —— helper 的 `run --mode adversarial` 强制要求 `--prompt-file`,缺了会直接报错退出。所以 adversarial entry 必须同时写 `build_prompt` 与 `command` 两个字段。
+
+> **`--user-focus` 与 `--target-label` 必传(adversarial 模式)**:不传时 helper 拼字面 `Focus: (none provided)` / `Target: current branch` 进 prompt,codex 会失焦扫整个 working tree(可能 surface 跟当前 change 无关的历史 finding)。**ForgeUE 实测**:propose stage 缺 user-focus → codex 报无关 module 的 lifecycle/orchestrator finding。强烈推荐 setup 后跑一次 `forge preflight stage-extensions-check` 验证配置完整性,或参考 [docs/migration/setup-stage-extensions.md](migration/setup-stage-extensions.md) 完整 checklist。
 
 保存后,下次跑 `/forge:review` 或 `/forge:verify` 时 AI 主代理自动检测并触发 codex review。
 

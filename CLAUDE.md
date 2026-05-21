@@ -43,9 +43,9 @@ Forge 是一个多 harness AI 工作流 plugin —— 融合 OpenSpec 的产物�
 
 CI 第二步就是 `pnpm format:check`(prettier),失败即短路。push 前务必本地跑过 `pnpm format:check`。
 
-### 3. release gate 不可改值绕过
+### 3. release gate 走 release-gate.mjs
 
-`pnpm test` 末尾调 `pnpm test:gate`(`scripts/check-release-gate.mjs`,soft 模式)—— 比较 `it.todo` 残留数与 `EXPECTED_TODO_COUNT_SOFT`。**release CI 用 `pnpm test:gate:release`(`--release`),强制 `it.todo` 数为 0 且忽略 EXPECTED 值** —— 不要靠改 `EXPECTED_TODO_COUNT_SOFT` 来「修」release gate。
+v4(2026-05-21)起 `pnpm test` 只跑 `vitest run`,不再后置 release-blocker `it.todo` 计数 reminder gate(`scripts/check-release-gate.mjs` + `tests/integration/release-blocker-attack-path.test.ts` 已随反加固协议一并删)。release 时机器纪律由 `pnpm release:gate`(`scripts/release-gate.mjs`,跑 7 步 typecheck/lint/format/build/vitest/pack/dry-install)统管,`prepublishOnly` hook 自动触发。
 
 ### 4. `dist/` 与 `dist-bundled/` 是构建产物
 

@@ -1,9 +1,0 @@
-schema: forge-review-failed/v1
-failed_at: 2026-05-04T16:00:00Z
-unresolved_outcomes:
-  - severity: S
-    accepted: true
-    resolved: false
-    task_ref: tasks.md#review-feedback-3
-appended_tasks:
-  - tasks.md#review-feedback-1
